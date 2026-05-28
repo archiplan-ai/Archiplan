@@ -15,3 +15,10 @@ User should see the progress of agent's work: new stress sessions, stressors, ho
 ## Hide technical terms from user-facing surfaces
 
 Translate terminology such as NKP, Epistemic/Epistatic, corridors, attractors, etc into something normal developer understands.
+
+## Human guidence
+
+Для e2e решения сейчас не хватает сопровождения. Возник баг или ты видишь визуальный баг, вообще не понятно как его описать системе. Хочется сказать ему, что в такой-то ноде, рекваерменте проблема. 
+
+Думаю. Скорее всего надо добавить пункт в реализацию, чтобы рантайм логи/ верстка HTML содержала id нод и рекваерментов
+[2:17 PM]А то вот у меня вылез баг, а я понятия не имею как ему адекватно нт объяснить в чем проблема, кроме спеки. Он начинает не то фиксить часто

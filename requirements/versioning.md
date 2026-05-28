@@ -27,3 +27,15 @@ Stress **sessions** are identified by opaque **string** ids in v2 (stable
 for origins and tooling). Version saves are the natural checkpoint between
 stress rounds: each round can produce a new version with the design changes
 that answered the breaking stressors.
+
+## Scope versioning (Versioning * Scopes)
+
+Each scope is versioned independently
+
+## Vertical versioning?
+
+Make whole system versioning vertacal => sub-scope change lead to version change
+
+Whole system version?
+
+--Нужна целостная логика версионирования, что такое версия одного взятого скоупа? Когда она меняется? Изменение внутреннего устройства нод меняет версию внешнего скоупа?

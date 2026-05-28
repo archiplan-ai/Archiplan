@@ -2,6 +2,10 @@
 
 Requirement is a unit of desirable shape of software, a claim the architecture must uphold.
 
+## Requirement kinds
+
+May be Functional or Non-Functional
+
 ## Unchecked requirements
 
 Some requirements may be acknowledged as a reaction to a stressor, but are not neccessary to be address in the current architecture. Such requirements must be uncked manually by the user, so Archiplan does not emit errors on unsatisfied requirements.
