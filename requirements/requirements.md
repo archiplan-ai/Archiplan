@@ -42,6 +42,8 @@ It's important to track where each requirement came from:
 - Subrequirement (derived from parent requirement)
 - Fused from Set(Requirement) (derived from intersection of requirements, see #Fusion)
 - Stressor/ Set(Stressor) (derived as a solution to [stressor(s)](stressors.md))
+- Derived from a [system context](sys-context.md) node (e.g. "must integrate with payment gateway X")
+- Derived from an [intent](intents.md)
 
 ## Capabilities
 

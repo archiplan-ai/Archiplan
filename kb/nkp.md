@@ -35,12 +35,12 @@ The analysis maps the architecture graph to a Kauffman NK fitness landscape, aug
 
 ### 2.5 Layer Ontology
 
-The architecture graph is partitioned into two **layers**, declared on each node type and edge type:
+The architecture graph is partitioned into two **layers**, carried by every node and edge type:
 
 - **Epistatic** — runtime/structural coupling: components, services, data paths, and the edges that carry fitness interactions. NKP (K̄, P̄, regime, corridors, hotspots, dependency matrix) applies **only** to this layer.
 - **Epistemic** — ontology, metadata, requirements, stressors, and other “about the spec” concepts. These nodes and edges do not participate in the NK fitness machinery; analyzing them with regime metrics is a category error.
 
-**Edge-type rule (cross-layer invariant):** for an edge type whose layer is **Epistatic**, every `from_type` and `to_type` in its catalog must be **Epistatic**. **Epistemic** edge types may reference any node types. Epistemic content may link *to* epistatic nodes (e.g. requirements targeting a service), but epistatic edge types cannot bridge into epistemic-only node types.
+**Edge-type rule (cross-layer invariant):** an **Epistatic** edge type connects **terms** — both of its endpoints are epistatic nodes. (Its `from_type`/`to_type` catalog names the **types** whose terms are admissible endpoints; those type names are themselves epistemic, but the endpoints they admit are epistatic terms.) **Epistemic** edge types may connect any nodes. So epistemic content may link *to* an epistatic term (e.g. a requirement targeting the `PaymentService` term, or a term's type-relationship to its `Service` type), but an epistatic edge can never bridge into an epistemic node such as a type, requirement, or stressor.
 
 **Property scope:** fitness contributions, regime classification, neutral corridors, coupling hotspots, and the N×N dependency matrix are **properties of the epistatic layer only**. They are unchanged by adding or removing epistemic nodes and edges (see acceptance criteria G3–G5).
 
@@ -52,7 +52,7 @@ The architecture graph is partitioned into two **layers**, declared on each node
 
 The NKP analyzer operates with **`layer = Epistatic`** by default. It accepts any subgraph of the architecture graph satisfying:
 
-- Every node in scope has an **Epistatic** node type (e.g. Component and its subtypes in a typical catalog).
+- Every node in scope is an **epistatic** node — a **term** (e.g. `EmailService`, `PaymentService`). Its **type** (e.g. `Service`, `Component`), being epistemic, is *not* itself in scope.
 - Every edge counted toward K_i is an **Epistatic** edge type whose endpoints are both Epistatic nodes (enforced at type-definition time for epistatic edges).
 - Optionally, **`only_edge_types`** restricts which epistatic edge type names contribute; if omitted, all epistatic edge types in the graph are included.
 - Epistemic nodes and edges are **not** part of the K-matrix or NKP metrics under default parameters.
@@ -277,7 +277,7 @@ All thresholds are user-overridable at invocation time:
 | `tau_B` | `0.3` | Boundary exposure threshold for SAFE_CORRIDOR |
 | `walk_samples` | `100` | Adaptive walk simulation count |
 | `cluster_k_max` | `8` | Max clusters in spectral decomposition |
-| `layer` | `Epistatic` | Which layer’s node/edge types participate in NKP; epistemic layer is not a fitness landscape |
+| `layer` | `Epistatic` | Which layer’s nodes and edge types participate in NKP; epistemic layer is not a fitness landscape |
 | `only_edge_types` | none (all epistatic edge types) | Optional list of epistatic edge type names to include in K and metrics; omit to use every epistatic edge type |
 
 ---
@@ -290,7 +290,7 @@ The analyzer requires the host system to expose:
 
 ```typescript
 interface GraphQueryAdapter {
-  // Return all nodes whose type is in the Epistatic layer (and optional scope)
+  // Return all epistatic nodes (terms) in the optional scope
   getEpistaticNodes(scope?: ScopeFilter): Node[];
 
   // Return epistatic edges between nodes, optionally filtered by only_edge_types

@@ -21,7 +21,7 @@ architecture.
 
 - **Add a stressor** with id, description, and a mandatory `--affects`
   list of **epistatic pressure surfaces**. An affect may name a **term**
-  or a **type**; type entries **expand** to the set of classifying terms
+  or a **type**; type entries **expand** to the set of terms it classifies
   when incidence and related analyses run (see
   [scoring/incidence.md](scoring/incidence.md)).
 - **Widen or narrow affects** with `affect-add` / `affect-remove`.
