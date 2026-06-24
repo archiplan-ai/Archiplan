@@ -1,6 +1,6 @@
 # Feature Spec: NKP Analysis
 **System**: Architecture Specification Engine  
-**Representation**: Typed-node / labeled-edge graph (two-primitive ontology)  
+**Representation**: Typed-node / labeled-edge graph 
 **Version**: 1.0  
 **Status**: Draft
 
@@ -24,7 +24,7 @@ The analysis maps the architecture graph to a Kauffman NK fitness landscape, aug
 |--------|---------|
 | G = (V, E) | Architecture graph; V = typed nodes, E = labeled directed edges |
 | N | \|V\| — number of component nodes in scope |
-| K_i | In-degree of node i restricted to **epistatic** edges in scope |
+| K_i | In-degree of node i |
 | K̄ | Mean K_i over all i ∈ V |
 | f_i(s_i, s_{N_i}) | Fitness contribution of node i given its state and states of its K_i neighbors N_i |
 | F(s) | Global fitness = (1/N) · Σ f_i — normalized sum of contributions |
@@ -33,32 +33,11 @@ The analysis maps the architecture graph to a Kauffman NK fitness landscape, aug
 | Neutral corridor | Maximal connected subgraph where all nodes have P_i above threshold τ_P |
 | Local optimum | State s* such that flipping any single node's state does not increase F(s*) |
 
-### 2.5 Layer Ontology
-
-The architecture graph is partitioned into two **layers**, carried by every node and edge type:
-
-- **Epistatic** — runtime/structural coupling: components, services, data paths, and the edges that carry fitness interactions. NKP (K̄, P̄, regime, corridors, hotspots, dependency matrix) applies **only** to this layer.
-- **Epistemic** — ontology, metadata, requirements, stressors, and other “about the spec” concepts. These nodes and edges do not participate in the NK fitness machinery; analyzing them with regime metrics is a category error.
-
-**Edge-type rule (cross-layer invariant):** an **Epistatic** edge type connects **terms** — both of its endpoints are epistatic nodes. (Its `from_type`/`to_type` catalog names the **types** whose terms are admissible endpoints; those type names are themselves epistemic, but the endpoints they admit are epistatic terms.) **Epistemic** edge types may connect any nodes. So epistemic content may link *to* an epistatic term (e.g. a requirement targeting the `PaymentService` term, or a term's type-relationship to its `Service` type), but an epistatic edge can never bridge into an epistemic node such as a type, requirement, or stressor.
-
-**Property scope:** fitness contributions, regime classification, neutral corridors, coupling hotspots, and the N×N dependency matrix are **properties of the epistatic layer only**. They are unchanged by adding or removing epistemic nodes and edges (see acceptance criteria G3–G5).
-
 ---
 
 ## 3. Input Contract
 
-### 3.1 Graph Preconditions
-
-The NKP analyzer operates with **`layer = Epistatic`** by default. It accepts any subgraph of the architecture graph satisfying:
-
-- Every node in scope is an **epistatic** node — a **term** (e.g. `EmailService`, `PaymentService`). Its **type** (e.g. `Service`, `Component`), being epistemic, is *not* itself in scope.
-- Every edge counted toward K_i is an **Epistatic** edge type whose endpoints are both Epistatic nodes (enforced at type-definition time for epistatic edges).
-- Optionally, **`only_edge_types`** restricts which epistatic edge type names contribute; if omitted, all epistatic edge types in the graph are included.
-- Epistemic nodes and edges are **not** part of the K-matrix or NKP metrics under default parameters.
-- The graph may be disconnected; analysis runs per weakly-connected component, then aggregates.
-
-### 3.2 Fitness Assignment
+### 3.1 Fitness Assignment
 
 Fitness contributions are assigned via one of three strategies, selectable by the user:
 
@@ -185,17 +164,6 @@ Algorithm:
       else label as PARTIALLY_NEUTRAL
 6. Report SAFE_CORRIDOR components as refactoring zones
 ```
-
-### 4.4 Epistemic Layer Health
-
-The epistemic layer is not an NK landscape. For coverage of requirements, subtype discipline, and stressor/requirement hygiene, use **`fractal query ontology`** (and subcommands). The implementation reports four metrics (see layering task 13):
-
-1. **Coverage** — fraction of epistatic nodes that have at least one incoming edge of the configured epistemic link types (default: all epistemic edge types).
-2. **Consistency** — orphan epistemic nodes, dangling `subtype_of` chains, and subtype cycles.
-3. **Provenance** — freestanding requirements, unresolved stressors, dangling `derive_req` links.
-4. **Density** — requirement load per epistatic node and a simple histogram (min / p50 / max).
-
-Use the full report via `fractal query ontology report`, or invoke `coverage`, `consistency`, `provenance`, and `density` individually.
 
 Output per corridor:
 - Node set (ids + names)
@@ -336,7 +304,6 @@ The report object is self-contained and renderable independently of the graph st
 - Coupled NK landscapes (multi-agent / co-evolutionary analysis between subsystems)
 - Continuous-valued node states (binary states only in v1.0)
 - Temporal fitness landscape evolution (landscape changes as architecture evolves)
-- Automatic application of refactoring suggestions (report only; no write-back to graph)
 - NKQ variant (discretized fitness values)
 
 ---
@@ -347,7 +314,3 @@ The report object is self-contained and renderable independently of the graph st
 2. Given a fully-connected graph (K̄ = N−1 = 9), report must classify regime as `CHAOTIC` and neutral corridor set must be empty (or emit `NO_NEUTRAL_NODES`).
 3. Given a graph with two clearly separable clusters (dense internal edges, zero inter-cluster edges), spectral decomposition must identify exactly 2 clusters.
 4. Adaptive walk mean step count must be monotonically non-decreasing as K̄ increases across a test sweep K̄ ∈ {0, 1, 2, 4, 8} on N=20 random graphs (averaged over 50 runs per K̄).
-5. `NKPReport` must serialize to valid JSON and satisfy the TypeScript schema without runtime errors for any valid input graph.
-6. **G3** — `build_k_matrix` with default parameters (`layer = Epistatic`, no `only_edge_types` restriction) yields the same matrix for two specs that differ only in epistemic nodes/edges.
-7. **G4** — Adding epistemic nodes or edges must not change K̄, P̄, regime, or `local_optima_log2` for the same epistatic subgraph as before.
-8. **G5** — On an epistatic-only graph, metrics must match whether `only_edge_types` is omitted or lists every epistatic edge type name explicitly.
