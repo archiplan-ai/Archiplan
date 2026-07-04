@@ -1,0 +1,7 @@
+[package]
+name = "modeling-lang"
+version = "0.1.0"
+edition = "2024"
+description = "Archiplan modeling language: a substrate to express arbitrary architectures as a free graph of nodes, ports and distinguished edges, with a statement API for building, mutating and querying models."
+
+[dependencies]
