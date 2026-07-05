@@ -311,16 +311,14 @@ pub(crate) fn subgraph(model: &Model, filter: &SubgraphFilter) -> (Vec<GraphNode
 }
 
 /// The model rendered as replayable statements, in creation order. Stdlib
-/// declarations are omitted: every model already has them.
+/// (preset) elements are omitted: a restore loads the same preset first.
 pub(crate) fn dump(model: &Model) -> Vec<Statement> {
     let mut items: Vec<(u64, Statement)> = Vec::new();
     for v in model.views.values() {
         items.push((v.id.raw(), model.view_statement(v)));
     }
     for r in model.rels.values() {
-        if !r.stdlib {
-            items.push((r.id.raw(), model.rel_statement(r)));
-        }
+        items.push((r.id.raw(), model.rel_statement(r)));
     }
     for c in model.conns.values() {
         items.push((c.id.raw(), model.conn_statement(c)));
@@ -331,6 +329,7 @@ pub(crate) fn dump(model: &Model) -> Vec<Statement> {
     for e in model.edges.values() {
         items.push((e.id.raw(), model.edge_statement(e)));
     }
+    items.retain(|(id, _)| !model.is_stdlib(*id));
     items.sort_by_key(|(id, _)| *id);
     items.into_iter().map(|(_, s)| s).collect()
 }
@@ -448,9 +447,10 @@ pub(crate) fn check(model: &Model, filter: Option<&BTreeSet<ViewId>>) -> Vec<Fin
         }
     }
 
-    // Views with no edges.
+    // Views with no edges. Stdlib (preset) views are substrate, not model
+    // intent, and are not reported.
     for v in model.views.values() {
-        if filter.is_some_and(|f| !f.contains(&v.id)) {
+        if model.is_stdlib(v.id.raw()) || filter.is_some_and(|f| !f.contains(&v.id)) {
             continue;
         }
         if !model.edges.values().any(|e| e.views.contains(&v.id)) {
@@ -460,10 +460,10 @@ pub(crate) fn check(model: &Model, filter: Option<&BTreeSet<ViewId>>) -> Vec<Fin
         }
     }
 
-    // Types with no instances. The stdlib is substrate, not model intent, so
-    // it is not reported.
+    // Types with no instances. The stdlib (preset) is substrate, not model
+    // intent, so it is not reported.
     for rt in model.rels.values() {
-        if rt.stdlib {
+        if model.is_stdlib(rt.id.raw()) {
             continue;
         }
         let used = model
@@ -478,6 +478,9 @@ pub(crate) fn check(model: &Model, filter: Option<&BTreeSet<ViewId>>) -> Vec<Fin
         }
     }
     for ct in model.conns.values() {
+        if model.is_stdlib(ct.id.raw()) {
+            continue;
+        }
         let used = model
             .edges
             .values()

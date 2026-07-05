@@ -10,7 +10,11 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::VecDeque;
 
+use serde_json::json;
+
+use crate::error::{ErrorCode, LangError};
 use crate::ids::{ConnId, EdgeId, NodeId, PortId, RelId, ViewId};
+use crate::nkp::{NkpConfig, NkpReport};
 use crate::result::Finding;
 use crate::statement::Statement;
 
@@ -67,7 +71,6 @@ pub(crate) struct RelType {
     pub directed: bool,
     pub src: Pattern,
     pub dst: Pattern,
-    pub stdlib: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -125,10 +128,14 @@ pub enum Layer {
 /// A model: the store behind a [`crate::Workspace`].
 ///
 /// Mutation goes through the statement API on `Workspace`; the model itself
-/// exposes read access — [`Model::dump`], [`Model::check`], [`Model::layer_of`].
+/// exposes read access — [`Model::dump`], [`Model::check`], [`Model::layer_of`],
+/// [`Model::nkp`].
 #[derive(Clone, Debug)]
 pub struct Model {
     next_id: u64,
+    /// Ids below this bound belong to the preset loaded as the stdlib.
+    stdlib_watermark: u64,
+    preset_name: String,
     pub(crate) nodes: BTreeMap<NodeId, Node>,
     pub(crate) root: BTreeMap<String, NodeId>,
     pub(crate) ports: BTreeMap<PortId, Port>,
@@ -143,9 +150,14 @@ pub struct Model {
 }
 
 impl Model {
-    pub(crate) fn new_with_stdlib() -> Self {
-        let mut m = Model {
+    /// A truly empty model: no stdlib yet. Only meaningful as the target of a
+    /// preset load ([`crate::Workspace::with_preset`]), which must
+    /// [`Model::seal_preset`] before the model is used.
+    pub(crate) fn empty() -> Self {
+        Model {
             next_id: 1,
+            stdlib_watermark: 0,
+            preset_name: String::new(),
             nodes: BTreeMap::new(),
             root: BTreeMap::new(),
             ports: BTreeMap::new(),
@@ -157,23 +169,49 @@ impl Model {
             conn_names: BTreeMap::new(),
             view_names: BTreeMap::new(),
             type_of: RelId(0),
+        }
+    }
+
+    /// Whether the id belongs to the stdlib (preset) region.
+    pub(crate) fn is_stdlib(&self, raw: u64) -> bool {
+        raw < self.stdlib_watermark
+    }
+
+    /// The name of the preset loaded as this model's stdlib.
+    pub fn preset_name(&self) -> &str {
+        &self.preset_name
+    }
+
+    /// Seal the preset region: everything created so far becomes stdlib.
+    /// Requires the preset to have defined the classifier relation `type_of`
+    /// with the exact stdlib shape `rel trans type_of := * -> *` — the layer
+    /// split and the `types` query filter key off it.
+    pub(crate) fn seal_preset(&mut self, name: &str) -> Result<(), LangError> {
+        let Some(&tid) = self.rel_names.get("type_of") else {
+            return Err(LangError::new(
+                ErrorCode::PresetInvalid,
+                format!("preset `{name}` does not define the classifier relation `type_of`"),
+            )
+            .with_hint(json!({ "stmt": "define", "rel": "type_of", "trans": true,
+                               "directed": true, "source": "*", "target": "*" })));
         };
-        let id = RelId(m.alloc());
-        m.rels.insert(
-            id,
-            RelType {
-                id,
-                name: "type_of".to_string(),
-                trans: true,
-                directed: true,
-                src: Pattern::Any,
-                dst: Pattern::Any,
-                stdlib: true,
-            },
-        );
-        m.rel_names.insert("type_of".to_string(), id);
-        m.type_of = id;
-        m
+        let rt = &self.rels[&tid];
+        let conforms = rt.trans && rt.directed && rt.src == Pattern::Any && rt.dst == Pattern::Any;
+        if !conforms {
+            return Err(LangError::new(
+                ErrorCode::PresetInvalid,
+                format!(
+                    "preset `{name}` defines `type_of` divergently; the classifier must conform to `rel trans type_of := * -> *`"
+                ),
+            )
+            .with_expected(json!({ "stmt": "define", "rel": "type_of", "trans": true,
+                                   "directed": true, "source": "*", "target": "*" }))
+            .with_actual(self.rel_statement(rt).to_value()));
+        }
+        self.type_of = tid;
+        self.preset_name = name.to_string();
+        self.stdlib_watermark = self.next_id;
+        Ok(())
     }
 
     pub(crate) fn alloc(&mut self) -> u64 {
@@ -369,5 +407,11 @@ impl Model {
     /// Model-completeness findings.
     pub fn check(&self) -> Vec<Finding> {
         crate::query::check(self, None)
+    }
+
+    /// NKP landscape analysis over the slice picked by `config`
+    /// (`requirements/scoring/nkp.md`).
+    pub fn nkp(&self, config: &NkpConfig) -> Result<NkpReport, LangError> {
+        crate::nkp::analyze(self, config)
     }
 }

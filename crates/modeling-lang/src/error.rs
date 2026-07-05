@@ -43,8 +43,12 @@ pub enum ErrorCode {
     AmbiguousDelegation,
     /// A connection joins nodes of different scopes.
     CrossScope,
-    /// Attempt to delete or divergently redefine a stdlib element.
+    /// Attempt to delete, rename, divergently redefine, or re-tag a stdlib
+    /// (preset) element.
     StdlibProtected,
+    /// A preset does not load: a non-creation statement, a rejected
+    /// statement, or a missing/divergent `type_of` classifier.
+    PresetInvalid,
     /// The request envelope is not valid or violates the contract.
     BadRequest,
     /// `expect_revision` does not match the model's current revision.
@@ -68,6 +72,7 @@ impl ErrorCode {
             ErrorCode::AmbiguousDelegation => "E_AMBIGUOUS_DELEGATION",
             ErrorCode::CrossScope => "E_CROSS_SCOPE",
             ErrorCode::StdlibProtected => "E_STDLIB_PROTECTED",
+            ErrorCode::PresetInvalid => "E_PRESET_INVALID",
             ErrorCode::BadRequest => "E_BAD_REQUEST",
             ErrorCode::StaleRevision => "E_STALE_REVISION",
         }

@@ -16,6 +16,7 @@ use crate::ids::{ConnId, EdgeId, NodeId, PortId, RelId, ViewId};
 use crate::model::{
     ConnType, Edge, EdgePayload, Model, Node, Pattern, Port, RelType, Side, ViewDef,
 };
+use crate::preset::Preset;
 use crate::query;
 use crate::result::{BatchError, Outcome, Request, Response};
 use crate::statement::{Definition, End, PatternExpr, Statement, parse_statement};
@@ -28,6 +29,7 @@ use crate::statement::{Definition, End, PatternExpr, Statement, parse_statement}
 pub struct Workspace {
     model: Model,
     revision: u64,
+    preset: Preset,
 }
 
 impl Default for Workspace {
@@ -46,19 +48,53 @@ fn is_ident(s: &str) -> bool {
 }
 
 impl Workspace {
-    /// A fresh workspace on an empty model with the standard library loaded.
+    /// A fresh workspace on an empty model with the standard library loaded —
+    /// the [`Preset::core`] preset, exactly the historical stdlib.
     pub fn new() -> Self {
-        Workspace {
-            model: Model::new_with_stdlib(),
-            revision: 0,
-        }
+        Self::with_preset(&Preset::core()).expect("the core preset loads")
     }
 
-    /// Rebuild a workspace by replaying `statements` (typically a dump) and
-    /// adopting the given revision.
-    pub fn restore(revision: u64, statements: &[Statement]) -> Result<Self, BatchError> {
-        let mut ws = Workspace::new();
-        ws.execute(statements)?;
+    /// A fresh workspace on an empty model with `preset` loaded as its
+    /// standard library. Preset statements run through the ordinary engine;
+    /// everything they create is sealed as stdlib: omitted from dumps,
+    /// protected from mutation, excluded from analyses.
+    pub fn with_preset(preset: &Preset) -> Result<Self, LangError> {
+        let mut ws = Workspace {
+            model: Model::empty(),
+            revision: 0,
+            preset: preset.clone(),
+        };
+        ws.execute(preset.statements()).map_err(|b| {
+            LangError::new(
+                ErrorCode::PresetInvalid,
+                format!(
+                    "preset `{}` statement {} rejected — {}: {}",
+                    preset.name(),
+                    b.index,
+                    b.error.code,
+                    b.error.message
+                ),
+            )
+            .with_subject(preset.statements()[b.index].to_value())
+        })?;
+        ws.model.seal_preset(preset.name())?;
+        ws.revision = 0;
+        Ok(ws)
+    }
+
+    /// Rebuild a workspace by loading `preset` and replaying `statements`
+    /// (typically a dump), adopting the given revision.
+    pub fn restore(
+        preset: &Preset,
+        revision: u64,
+        statements: &[Statement],
+    ) -> Result<Self, LangError> {
+        let mut ws = Self::with_preset(preset)?;
+        ws.execute(statements).map_err(|b| {
+            let mut e = b.error;
+            e.message = format!("statement {}: {}", b.index, e.message);
+            e
+        })?;
         ws.revision = revision;
         Ok(ws)
     }
@@ -66,6 +102,11 @@ impl Workspace {
     /// Read access to the model.
     pub fn model(&self) -> &Model {
         &self.model
+    }
+
+    /// The preset loaded as this workspace's standard library.
+    pub fn preset(&self) -> &Preset {
+        &self.preset
     }
 
     /// The current revision: increases whenever the model changes, untouched
@@ -252,6 +293,18 @@ impl Workspace {
             .ok_or_else(|| self.unknown("node", path))
     }
 
+    /// Reject mutation of a stdlib (preset) element.
+    fn guard_stdlib(&self, raw: u64, kind: &str, name: &str, verb: &str) -> Result<(), LangError> {
+        if self.model.is_stdlib(raw) {
+            Err(LangError::new(
+                ErrorCode::StdlibProtected,
+                format!("`{name}` is a stdlib {kind} and cannot be {verb}"),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
     fn resolve_pattern(&self, expr: &PatternExpr) -> Result<Pattern, LangError> {
         Ok(match expr {
             PatternExpr::Any => Pattern::Any,
@@ -392,6 +445,7 @@ impl Workspace {
         if children.is_empty() {
             return Ok(Outcome::Noop);
         }
+        self.guard_stdlib(id.raw(), "node", path, "redefined")?;
         let cascade = cascade::delete_many(&mut self.model, children);
         Ok(Outcome::Applied {
             cascade: Some(cascade),
@@ -441,7 +495,7 @@ impl Workspace {
             )
             .with_ref("rel", name, Some(id.raw()))
             .with_actual(self.model.rel_statement(existing).to_value());
-            if !existing.stdlib {
+            if !self.model.is_stdlib(id.raw()) {
                 let hint = Statement::Redefine(rel_def(name, trans, directed, source, target));
                 e = e.with_hint(hint.to_value());
             }
@@ -469,7 +523,6 @@ impl Workspace {
                 directed,
                 src,
                 dst,
-                stdlib: false,
             },
         );
         self.model.rel_names.insert(name.to_string(), id);
@@ -496,7 +549,7 @@ impl Workspace {
             if identical {
                 return Ok(Outcome::Noop);
             }
-            if existing.stdlib {
+            if self.model.is_stdlib(id.raw()) {
                 return Err(LangError::new(
                     ErrorCode::StdlibProtected,
                     format!("`{name}` is a stdlib relation and cannot be redefined divergently"),
@@ -603,6 +656,15 @@ impl Workspace {
             if identical {
                 return Ok(Outcome::Noop);
             }
+            if self.model.is_stdlib(id.raw()) {
+                return Err(LangError::new(
+                    ErrorCode::StdlibProtected,
+                    format!(
+                        "`{name}` is a stdlib connection type and cannot be redefined divergently"
+                    ),
+                )
+                .with_actual(self.model.conn_statement(existing).to_value()));
+            }
             let ct = self.model.conns.get_mut(&id).expect("conn exists");
             ct.directed = directed;
             ct.src = src;
@@ -661,14 +723,24 @@ impl Workspace {
         }
     }
 
-    fn extend_views(&mut self, eid: EdgeId, views: BTreeSet<ViewId>) -> Outcome {
+    /// Extend an existing edge's view set. Stdlib edges cannot be tagged:
+    /// dumps omit them, so tags on them would not survive a replay.
+    fn extend_views(&mut self, eid: EdgeId, views: BTreeSet<ViewId>) -> Result<Outcome, LangError> {
+        if !views.is_empty() && self.model.is_stdlib(eid.raw()) {
+            let stmt = self.model.edge_statement(&self.model.edges[&eid]);
+            return Err(LangError::new(
+                ErrorCode::StdlibProtected,
+                "a stdlib edge cannot be tagged into views; tags on it would not survive a dump replay",
+            )
+            .with_ref("edge", stmt.pseudo(), Some(eid.raw())));
+        }
         let e = self.model.edges.get_mut(&eid).expect("edge exists");
         let before = e.views.len();
         e.views.extend(views);
         if e.views.len() > before {
-            Outcome::applied()
+            Ok(Outcome::applied())
         } else {
-            Outcome::Noop
+            Ok(Outcome::Noop)
         }
     }
 
@@ -698,7 +770,7 @@ impl Workspace {
         let rt = self.model.rels[&rel_id].clone();
         self.check_ends_shape(&rt.name, rt.directed, &rt.src, &rt.dst, a, b)?;
         if let Some(eid) = self.model.find_rel_edge(rel_id, a, b) {
-            return Ok(self.extend_views(eid, view_ids));
+            return self.extend_views(eid, view_ids);
         }
         self.insert_edge(
             EdgePayload::Rel {
@@ -863,7 +935,7 @@ impl Workspace {
         if let (Some(pa), Some(pb)) = (pa, pb)
             && let Some(eid) = self.model.find_conn_edge(conn_id, pa, carrier_node, pb)
         {
-            return Ok(self.extend_views(eid, view_ids));
+            return self.extend_views(eid, view_ids);
         }
         let pa = match pa {
             Some(p) => {
@@ -998,6 +1070,7 @@ impl Workspace {
         if old == to {
             return Ok(Outcome::Noop);
         }
+        self.guard_stdlib(id.raw(), "node", node, "renamed")?;
         let parent = self.model.nodes[&id].parent;
         if let Some(&other) = self.model.children(parent).get(to) {
             return Err(LangError::new(
@@ -1035,16 +1108,20 @@ impl Workspace {
         view: Option<&str>,
     ) -> Result<Outcome, LangError> {
         let seed = if let Some(path) = node {
-            Seed::Node(self.resolve_abs(path)?)
+            let id = self.resolve_abs(path)?;
+            self.guard_stdlib(id.raw(), "node", path, "deleted")?;
+            Seed::Node(id)
         } else if let Some(e) = edge {
-            Seed::Edge(self.find_edge_stmt(e)?)
+            let id = self.find_edge_stmt(e)?;
+            self.guard_stdlib(id.raw(), "edge", &e.pseudo(), "deleted")?;
+            Seed::Edge(id)
         } else if let Some(name) = rel {
             let id = *self
                 .model
                 .rel_names
                 .get(name)
                 .ok_or_else(|| self.unknown("rel", name))?;
-            if self.model.rels[&id].stdlib {
+            if self.model.is_stdlib(id.raw()) {
                 return Err(LangError::new(
                     ErrorCode::StdlibProtected,
                     format!("`{name}` is a stdlib relation and cannot be deleted"),
@@ -1052,21 +1129,21 @@ impl Workspace {
             }
             Seed::Rel(id)
         } else if let Some(name) = conn {
-            Seed::Conn(
-                *self
-                    .model
-                    .conn_names
-                    .get(name)
-                    .ok_or_else(|| self.unknown("conn", name))?,
-            )
+            let id = *self
+                .model
+                .conn_names
+                .get(name)
+                .ok_or_else(|| self.unknown("conn", name))?;
+            self.guard_stdlib(id.raw(), "connection type", name, "deleted")?;
+            Seed::Conn(id)
         } else if let Some(name) = view {
-            Seed::View(
-                *self
-                    .model
-                    .view_names
-                    .get(name)
-                    .ok_or_else(|| self.unknown("view", name))?,
-            )
+            let id = *self
+                .model
+                .view_names
+                .get(name)
+                .ok_or_else(|| self.unknown("view", name))?;
+            self.guard_stdlib(id.raw(), "view", name, "deleted")?;
+            Seed::View(id)
         } else {
             // Exactly-one-target is enforced at parse time.
             return Err(LangError::new(
@@ -1082,6 +1159,7 @@ impl Workspace {
 
     fn do_untag(&mut self, edge: &Statement, views: &[String]) -> Result<Outcome, LangError> {
         let eid = self.find_edge_stmt(edge)?;
+        self.guard_stdlib(eid.raw(), "edge", &edge.pseudo(), "untagged")?;
         let view_ids = self.resolve_views(views)?;
         let e = self.model.edges.get_mut(&eid).expect("edge exists");
         let before = e.views.len();

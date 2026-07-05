@@ -6,7 +6,9 @@
 //! applications), views, the JSON statement API with its idempotent
 //! definitions and error contract, cascading deletion, and the read
 //! statements (the subgraph `query` and `check`) — plus the request/response
-//! envelope of `requirements/agent-interface.md`.
+//! envelope of `requirements/agent-interface.md`, ontology presets loaded as
+//! the standard library (`requirements/modeling-lang/ontology.md`), and NKP
+//! landscape analysis (`requirements/scoring/nkp.md`).
 //!
 //! # Quick start
 //!
@@ -56,8 +58,14 @@
 //! - Pattern matching (`(Service type_of *)`) follows the virtual transitive
 //!   closure of a `trans` relation; only declared edges are stored.
 //! - A node `redefine` whose scope is already empty is a no-op.
-//! - The stdlib `type_of` is excluded from dumps and from the "type without
-//!   instances" finding: it is substrate, not model intent.
+//! - The stdlib is a [`Preset`]: a creation-only statement batch loaded
+//!   before user statements ([`Workspace::with_preset`]). [`Workspace::new`]
+//!   loads [`Preset::core`] — exactly the historical stdlib, `type_of` only.
+//!   Every preset must define `type_of` conforming to
+//!   `rel trans type_of := * -> *`. Preset elements are excluded from dumps
+//!   and findings and are protected from mutation (`E_STDLIB_PROTECTED`);
+//!   users may reference them, attach edges to them, and augment their
+//!   scopes.
 //! - The revision increments once per model-changing request.
 //! - Names are `[A-Za-z_][A-Za-z0-9_]*`; paths join them with `.`.
 //!
@@ -91,6 +99,8 @@ mod engine;
 mod error;
 mod ids;
 mod model;
+mod nkp;
+mod preset;
 mod query;
 mod render;
 mod result;
@@ -99,6 +109,11 @@ mod statement;
 pub use engine::Workspace;
 pub use error::{ErrorCode, ErrorRef, LangError};
 pub use model::{Layer, Model};
+pub use nkp::{
+    CorridorAction, CorridorLabel, ExcludePattern, Hotspot, Neutrality, NkpConfig, NkpCorridor,
+    NkpMatrix, NkpMetrics, NkpReport, NkpScope, NkpScopeInfo, NkpWarning, Regime, Slot,
+};
+pub use preset::Preset;
 pub use result::{
     BatchError, Finding, GraphEdge, GraphNode, GraphPort, Outcome, Request, Response, ResponseError,
 };

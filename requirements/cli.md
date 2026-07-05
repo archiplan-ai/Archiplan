@@ -7,13 +7,26 @@ renders results for humans. It adds no vocabulary of its own.
 ## Commands
 
 ```
-archi exec [--dry-run] [--expect-revision <N>] [<batch.json> | -]
+archi exec [--dry-run] [--expect-revision <N>] [--preset <file>] [<batch.json> | -]
 ```
 
 Executes a batch (a JSON array of [statements](./modeling-lang/modeling-lang.md#statements)) from a file or stdin,
 atomically. `--dry-run` reports the full results — including delete/redefine cascades — and rolls everything back;
 `--expect-revision` is the optimistic-concurrency guard from the [agent interface](./agent-interface.md#revision).
 Reads ([queries](./modeling-lang/queries.md) and `check`) are statements like any other and run through `exec`.
+
+A new model pins its [ontology preset](./modeling-lang/ontology.md) at creation: `--preset <file>`, else an
+`ontology.json` next to the model file, else the built-in default ontology. The pin travels in the model file;
+`--preset` on an existing model is rejected.
+
+```
+archi nkp [--regime | --hotspots | --corridors] [--top | --scope <path>]
+          [--exclude '<src> <rel> <dst>']... [--only <edge-type>]...
+          [--tau-p <f>] [--tau-b <f>] [--neutrality degree|uniform] [--global-p <f>]
+```
+
+The [NKP landscape analysis](./scoring/nkp.md) over the model's epistatic slice. Output is JSON: the full report
+by default, or one facet via `--regime` / `--hotspots` / `--corridors`.
 
 ## Output
 

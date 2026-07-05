@@ -46,7 +46,8 @@ as statements.
 | E_NO_OUTER_PORT | an application delegates a port no connection attaches to |
 | E_AMBIGUOUS_DELEGATION | two qualified delegations on one port match the same carried node |
 | E_CROSS_SCOPE | a connection joins nodes of different scopes, or an application's inner node is not a direct child of the delegating node |
-| E_STDLIB_PROTECTED | attempt to delete or divergently redefine a stdlib element |
+| E_STDLIB_PROTECTED | attempt to delete, rename or divergently redefine a stdlib (preset) element, or to tag/untag a stdlib edge — tags on it would not survive a dump replay |
+| E_PRESET_INVALID | a preset does not load: a non-creation statement, a rejected statement, or a missing/divergent `type_of` classifier ([ontology](./ontology.md)) |
 
 Codes are append-only: new codes may appear; existing codes never change meaning.
 
