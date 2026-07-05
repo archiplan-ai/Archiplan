@@ -363,7 +363,7 @@ impl Model {
     /// The whole model rendered as replayable statements, in creation order.
     /// Creations render as `define`s, which are idempotent, so replays are safe.
     pub fn dump(&self) -> Vec<Statement> {
-        crate::query::dump(self, None)
+        crate::query::dump(self)
     }
 
     /// Model-completeness findings.

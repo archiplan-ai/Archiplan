@@ -2,9 +2,6 @@
 //!
 //! ```text
 //! archi exec [--dry-run] [--expect-revision <N>] [--model <file>] [--json] [<batch.json> | -]
-//! archi ports <Path> [--in <View,...>] [--model <file>] [--json]
-//! archi check [--in <View,...>] [--model <file>] [--json]
-//! archi dump [--in <View,...>] [--model <file>] [--json]
 //! ```
 //!
 //! The model persists as `{ "revision": N, "statements": [<dump>] }` in the
@@ -15,14 +12,13 @@ use std::fs;
 use std::io::Read;
 use std::process::ExitCode;
 
-use modeling_lang::{Outcome, Response, Statement, Workspace, parse_statement};
+use modeling_lang::{
+    EdgeKind, GraphEdge, Outcome, Response, Statement, Workspace, parse_statement,
+};
 use serde_json::{Value, json};
 
 const USAGE: &str = "usage:
-  archi exec [--dry-run] [--expect-revision <N>] [--model <file>] [--json] [<batch.json> | -]
-  archi ports <Path> [--in <View,...>] [--model <file>] [--json]
-  archi check [--in <View,...>] [--model <file>] [--json]
-  archi dump [--in <View,...>] [--model <file>] [--json]";
+  archi exec [--dry-run] [--expect-revision <N>] [--model <file>] [--json] [<batch.json> | -]";
 
 struct Args {
     verb: String,
@@ -31,7 +27,6 @@ struct Args {
     json: bool,
     dry_run: bool,
     expect_revision: Option<u64>,
-    in_views: Vec<String>,
 }
 
 fn usage_err(msg: &str) -> ExitCode {
@@ -47,7 +42,6 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         json: false,
         dry_run: false,
         expect_revision: None,
-        in_views: Vec::new(),
     };
     let mut it = argv.iter().peekable();
     let Some(verb) = it.next() else {
@@ -65,10 +59,6 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
                 let v = it.next().ok_or("--expect-revision needs a number")?;
                 args.expect_revision =
                     Some(v.parse().map_err(|_| "--expect-revision needs a number")?);
-            }
-            "--in" => {
-                let v = it.next().ok_or("--in needs a view list")?;
-                args.in_views = v.split(',').map(|s| s.trim().to_string()).collect();
             }
             other if other.starts_with("--") => return Err(format!("unknown flag `{other}`")),
             other => args.positional.push(other.to_string()),
@@ -135,6 +125,43 @@ fn pseudo_of_value(v: &Value) -> String {
     }
 }
 
+/// A graph edge as one human line, close to the spec's pseudo-syntax.
+fn edge_line(e: &GraphEdge) -> String {
+    let views = if e.views.is_empty() {
+        String::new()
+    } else {
+        format!(" in {}", e.views.join(", "))
+    };
+    let type_name = e.type_name.as_deref().unwrap_or("");
+    let source_port = e.source_port.as_deref().unwrap_or("");
+    let target_port = e.target_port.as_deref().unwrap_or("");
+    match e.kind {
+        EdgeKind::Relation => format!("{} {type_name} {}{views}", e.source, e.target),
+        EdgeKind::Connection => {
+            let carrier = e
+                .carrier
+                .as_ref()
+                .map(|c| format!("({c})"))
+                .unwrap_or_default();
+            format!(
+                "{}({source_port}) {type_name}{carrier} {}({target_port}){views}",
+                e.source, e.target
+            )
+        }
+        EdgeKind::Application => {
+            let route = e
+                .route
+                .as_ref()
+                .map(|r| format!("({r})"))
+                .unwrap_or_default();
+            format!(
+                "{}.{source_port}{route} = {}({target_port}){views}",
+                e.source, e.target
+            )
+        }
+    }
+}
+
 fn print_human(response: &Response, statements: &[Value]) {
     match (&response.results, &response.error) {
         (Some(results), _) => {
@@ -151,13 +178,21 @@ fn print_human(response: &Response, statements: &[Value]) {
                         }
                     }
                     Outcome::Noop => println!("noop      {pseudo}"),
-                    Outcome::Statements { statements } => {
+                    Outcome::Graph { nodes, edges } => {
                         println!("{pseudo}");
-                        if statements.is_empty() {
+                        if nodes.is_empty() && edges.is_empty() {
                             println!("  (empty)");
                         }
-                        for s in statements {
-                            println!("  {}", s.pseudo());
+                        for n in nodes {
+                            let types = if n.types.is_empty() {
+                                String::new()
+                            } else {
+                                format!(" : {}", n.types.join(", "))
+                            };
+                            println!("  node {}{types}", n.id);
+                        }
+                        for e in edges {
+                            println!("  edge {}", edge_line(e));
                         }
                     }
                     Outcome::Findings { findings } => {
@@ -220,23 +255,6 @@ fn main() -> ExitCode {
             Ok(b) => b,
             Err(e) => return usage_err(&e),
         },
-        "ports" => {
-            let Some(path) = args.positional.first() else {
-                return usage_err("ports needs a node path");
-            };
-            let mut stmt = json!({ "stmt": "ports", "node": path });
-            if !args.in_views.is_empty() {
-                stmt["in"] = json!(args.in_views);
-            }
-            vec![stmt]
-        }
-        "check" | "dump" => {
-            let mut stmt = json!({ "stmt": args.verb });
-            if !args.in_views.is_empty() {
-                stmt["in"] = json!(args.in_views);
-            }
-            vec![stmt]
-        }
         other => return usage_err(&format!("unknown command `{other}`")),
     };
 

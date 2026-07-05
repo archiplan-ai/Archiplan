@@ -60,27 +60,62 @@ fn worked_example_applies_and_bumps_revision_once() {
 }
 
 #[test]
-fn ports_query_matches_spec_output() {
+fn query_returns_the_slice_with_meta() {
     let mut ws = worked_example();
+    let (nodes, edges) = graph(&mut ws, json!({ "stmt": "query" }));
     assert_eq!(
-        pseudo(&mut ws, json!({ "stmt": "ports", "node": "Orders" })),
-        vec![
-            "Payments(send_confirmation) confirm(OrderId) Orders(handle_confirmation);",
-            "Orders.handle_confirmation = ConfirmationHandler(handle_confirmation);",
+        nodes.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+        [
+            "Functional",
+            "Data",
+            "Service",
+            "Payments",
+            "Orders",
+            "OrderId",
+            "Orders.ConfirmationHandler"
         ]
     );
+    // Nodes carry their classifiers and the ports the result's edges use.
+    let orders = serde_json::to_value(nodes.iter().find(|n| n.id == "Orders").unwrap()).unwrap();
+    assert_eq!(
+        orders,
+        json!({ "id": "Orders", "name": "Orders", "types": ["Service"],
+                "ports": [{ "name": "handle_confirmation", "conn": "confirm", "side": "target" }] })
+    );
+    // Edges carry kind, type and attachment meta; empty fields are omitted.
+    let vals: Vec<serde_json::Value> = edges
+        .iter()
+        .map(|e| serde_json::to_value(e).unwrap())
+        .collect();
+    assert!(vals.contains(
+        &json!({ "kind": "connection", "type": "confirm", "directed": true,
+            "source": "Payments", "source_port": "send_confirmation",
+            "target": "Orders", "target_port": "handle_confirmation",
+            "carrier": "OrderId" })
+    ));
+    assert!(vals.contains(&json!({ "kind": "application",
+            "source": "Orders", "source_port": "handle_confirmation",
+            "target": "Orders.ConfirmationHandler", "target_port": "handle_confirmation" })));
+    assert_eq!(edges.len(), 6, "4 relations, 1 connection, 1 application");
 }
 
 #[test]
-fn ports_of_inner_node_include_the_application() {
+fn query_filters_compose_on_the_worked_example() {
     let mut ws = worked_example();
+    // Top level only: the application into Orders' scope is folded away.
+    let (nodes, edges) = graph(&mut ws, json!({ "stmt": "query", "scopes": [] }));
+    assert_eq!(nodes.len(), 6);
+    assert_eq!(edges.len(), 5);
+    assert!(!nodes.iter().any(|n| n.id.contains('.')));
+    // Only Service instances: classifier edges to the (excluded) type node
+    // are cut; the connection between the instances survives.
+    let (nodes, edges) = graph(&mut ws, json!({ "stmt": "query", "types": ["Service"] }));
     assert_eq!(
-        pseudo(
-            &mut ws,
-            json!({ "stmt": "ports", "node": "Orders.ConfirmationHandler" })
-        ),
-        vec!["Orders.handle_confirmation = ConfirmationHandler(handle_confirmation);"]
+        nodes.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+        ["Payments", "Orders"]
     );
+    assert_eq!(edges.len(), 1);
+    assert_eq!(edges[0].type_name.as_deref(), Some("confirm"));
 }
 
 #[test]
@@ -103,7 +138,7 @@ fn layers_follow_type_of() {
 #[test]
 fn dump_round_trips_idempotently() {
     let mut ws = worked_example();
-    let dumped = statements(&mut ws, json!({ "stmt": "dump" }));
+    let dumped = ws.model().dump();
     let lines: Vec<String> = dumped.iter().map(Statement::pseudo).collect();
     assert!(lines.contains(&"def node Orders;".to_string()));
     assert!(lines.contains(&"def node Orders.ConfirmationHandler;".to_string()));
@@ -131,8 +166,8 @@ fn check_is_clean() {
 
 #[test]
 fn statement_objects_round_trip_through_serde() {
-    let mut ws = worked_example();
-    let dumped = statements(&mut ws, json!({ "stmt": "dump" }));
+    let ws = worked_example();
+    let dumped = ws.model().dump();
     for stmt in &dumped {
         let v = stmt.to_value();
         let back = modeling_lang::parse_statement(&v).expect("rendered statements parse");

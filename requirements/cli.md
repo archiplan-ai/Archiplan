@@ -13,14 +13,7 @@ archi exec [--dry-run] [--expect-revision <N>] [<batch.json> | -]
 Executes a batch (a JSON array of [statements](./modeling-lang/modeling-lang.md#statements)) from a file or stdin,
 atomically. `--dry-run` reports the full results — including delete/redefine cascades — and rolls everything back;
 `--expect-revision` is the optimistic-concurrency guard from the [agent interface](./agent-interface.md#revision).
-
-Read sugar, for not having to write JSON at the prompt — each wraps a single-statement batch:
-
-```
-archi ports <Path> [--in <View,...>]
-archi check [--in <View,...>]
-archi dump [--in <View,...>]
-```
+Reads ([queries](./modeling-lang/queries.md) and `check`) are statements like any other and run through `exec`.
 
 ## Output
 

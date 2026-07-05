@@ -7,7 +7,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::error::LangError;
-use crate::statement::{PatternExpr, Statement};
+use crate::statement::{EdgeKind, PatternExpr, Statement};
 
 /// The result of one statement, tagged by outcome.
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -23,16 +23,85 @@ pub enum Outcome {
     },
     /// The statement restates something identical that already exists.
     Noop,
-    /// Read output (`ports`, `dump`): statements that recreate the slice.
-    Statements {
-        /// The replayable statements.
-        statements: Vec<Statement>,
+    /// `query` output: the sliced subgraph as plain nodes and edges.
+    Graph {
+        /// The nodes of the slice, in creation order.
+        nodes: Vec<GraphNode>,
+        /// The edges of the slice, in creation order.
+        edges: Vec<GraphEdge>,
     },
     /// `check` output: model-completeness findings.
     Findings {
         /// The findings.
         findings: Vec<Finding>,
     },
+}
+
+/// One node of a query result. The result is a common node-link graph: edges
+/// reference nodes by `id`, which is the node's absolute path.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct GraphNode {
+    /// The node's absolute path — the stable string id edges reference.
+    pub id: String,
+    /// The node's own name (the last path segment).
+    pub name: String,
+    /// Absolute paths of the nodes classifying this one via `type_of`,
+    /// following the transitive closure; omitted when unclassified.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub types: Vec<String>,
+    /// The node's ports referenced by edges of this result; omitted when none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub ports: Vec<GraphPort>,
+}
+
+/// A port as it appears in query results.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct GraphPort {
+    /// The port name, unique on its node.
+    pub name: String,
+    /// The connection type the port is fixed to.
+    pub conn: String,
+    /// `source` or `target` for ports of directed connection types; omitted
+    /// for undirected ones.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub side: Option<&'static str>,
+}
+
+/// One edge of a query result. `source`/`target` are node ids (absolute
+/// paths); kind-specific fields are omitted where they do not apply.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct GraphEdge {
+    /// The edge kind: `relation`, `connection` or `application`.
+    pub kind: EdgeKind,
+    /// The rel/conn type name; applications are untyped.
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub type_name: Option<String>,
+    /// Whether the type is directed; omitted on applications, whose
+    /// orientation is the outer→inner mapping itself.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub directed: Option<bool>,
+    /// Source node id; the delegating (outer) node on applications.
+    pub source: String,
+    /// The port the edge attaches to on the source node; relations attach to
+    /// the node as a whole.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_port: Option<String>,
+    /// Target node id; the inner node on applications.
+    pub target: String,
+    /// The port the edge attaches to on the target node.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_port: Option<String>,
+    /// The carried node's id (ternary connections only). Metadata: the
+    /// carrier is not an attachment and need not be a node of the result.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub carrier: Option<String>,
+    /// The carried-node qualifier of a delegation, when present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub route: Option<PatternExpr>,
+    /// Names of the views the edge belongs to; for applications, the views of
+    /// the connection edges they route. Omitted when untagged.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub views: Vec<String>,
 }
 
 impl Outcome {

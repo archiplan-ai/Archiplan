@@ -1,16 +1,17 @@
-//! Read statements: `ports`, `check` and `dump`.
+//! Read statements: the subgraph `query` and `check`.
 //!
-//! Results are the statement objects that would recreate the sliced part of
-//! the model. Any read can be restricted to the edges of one or more views;
-//! applications are untagged plumbing and belong to the views of the
-//! connection edges they route.
+//! A query slices the model with composed filters — types, kinds, views,
+//! scopes — and returns the slice as plain nodes and edges
+//! (`requirements/modeling-lang/queries.md`). Views restrict to the edges of
+//! the named views; applications are untagged plumbing and belong to the
+//! views of the connection edges they route.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::ids::{EdgeId, NodeId, PortId, ViewId};
-use crate::model::{Edge, EdgePayload, Model};
-use crate::result::Finding;
-use crate::statement::Statement;
+use crate::model::{Edge, EdgePayload, Model, Side};
+use crate::result::{Finding, GraphEdge, GraphNode, GraphPort};
+use crate::statement::{EdgeKind, Statement};
 
 /// Where a connection edge attached to a delegated port ends up.
 pub(crate) enum Route {
@@ -86,114 +87,248 @@ fn edge_in_filter(model: &Model, e: &Edge, filter: Option<&BTreeSet<ViewId>>) ->
     }
 }
 
-/// Every statement that attaches to a port of the node: connection edges on
-/// its ports and applications delegating them (on either side).
-pub(crate) fn ports(
-    model: &Model,
-    node: NodeId,
-    filter: Option<&BTreeSet<ViewId>>,
-) -> Vec<Statement> {
-    let mut out = Vec::new();
-    for e in model.edges.values() {
-        let attaches = match &e.payload {
-            EdgePayload::Conn {
-                src_port, dst_port, ..
-            } => model.ports[src_port].node == node || model.ports[dst_port].node == node,
-            EdgePayload::App { outer, inner, .. } => {
-                model.ports[outer].node == node || model.ports[inner].node == node
+/// Resolved `query` filters. `None` never restricts; an empty list is the
+/// most restrictive filter of its category.
+pub(crate) struct SubgraphFilter {
+    pub types: Option<Vec<NodeId>>,
+    pub kinds: Option<BTreeSet<EdgeKind>>,
+    pub views: Option<BTreeSet<ViewId>>,
+    pub scopes: Option<Vec<NodeId>>,
+}
+
+fn kind_of(e: &Edge) -> EdgeKind {
+    match &e.payload {
+        EdgePayload::Rel { .. } => EdgeKind::Relation,
+        EdgePayload::Conn { .. } => EdgeKind::Connection,
+        EdgePayload::App { .. } => EdgeKind::Application,
+    }
+}
+
+/// The nodes an edge attaches to. The carrier is metadata, not an attachment:
+/// it does not decide whether the edge is part of a slice.
+fn attachments(model: &Model, e: &Edge) -> [NodeId; 2] {
+    match &e.payload {
+        EdgePayload::Rel { src, dst, .. } => [*src, *dst],
+        EdgePayload::Conn {
+            src_port, dst_port, ..
+        } => [model.ports[src_port].node, model.ports[dst_port].node],
+        EdgePayload::App { outer, inner, .. } => [model.ports[outer].node, model.ports[inner].node],
+    }
+}
+
+/// The scopes a `scopes` filter opens: for each named node, the chain from
+/// the root down to it plus its whole subtree. The top level is always open.
+fn opened_scopes(model: &Model, roots: &[NodeId]) -> BTreeSet<NodeId> {
+    let mut opened = BTreeSet::new();
+    for &root in roots {
+        opened.extend(model.scope_chain(root));
+        let mut stack = vec![root];
+        while let Some(n) = stack.pop() {
+            for &child in model.nodes[&n].children.values() {
+                if opened.insert(child) {
+                    stack.push(child);
+                }
             }
-            EdgePayload::Rel { .. } => false,
-        };
-        if attaches && edge_in_filter(model, e, filter) {
-            out.push(model.edge_statement(e));
+        }
+    }
+    opened
+}
+
+/// Every node classifying `node` via `type_of`, following the transitive
+/// closure over declared edges.
+fn classifiers(model: &Model, node: NodeId) -> BTreeSet<NodeId> {
+    let mut seen = BTreeSet::new();
+    let mut queue = VecDeque::from([node]);
+    while let Some(n) = queue.pop_front() {
+        for e in model.edges.values() {
+            if let EdgePayload::Rel { rel, src, dst } = &e.payload
+                && *rel == model.type_of
+                && *dst == n
+                && seen.insert(*src)
+            {
+                queue.push_back(*src);
+            }
+        }
+    }
+    seen
+}
+
+fn view_names(model: &Model, views: impl IntoIterator<Item = ViewId>) -> Vec<String> {
+    views
+        .into_iter()
+        .map(|v| model.views[&v].name.clone())
+        .collect()
+}
+
+fn graph_edge(model: &Model, e: &Edge) -> GraphEdge {
+    let [src, dst] = attachments(model, e);
+    let mut out = GraphEdge {
+        kind: kind_of(e),
+        type_name: None,
+        directed: None,
+        source: model.node_path(src),
+        source_port: None,
+        target: model.node_path(dst),
+        target_port: None,
+        carrier: None,
+        route: None,
+        views: view_names(model, e.views.iter().copied()),
+    };
+    match &e.payload {
+        EdgePayload::Rel { rel, .. } => {
+            let rt = &model.rels[rel];
+            out.type_name = Some(rt.name.clone());
+            out.directed = Some(rt.directed);
+        }
+        EdgePayload::Conn {
+            conn,
+            src_port,
+            carrier,
+            dst_port,
+        } => {
+            let ct = &model.conns[conn];
+            out.type_name = Some(ct.name.clone());
+            out.directed = Some(ct.directed);
+            out.source_port = Some(model.ports[src_port].name.clone());
+            out.target_port = Some(model.ports[dst_port].name.clone());
+            out.carrier = carrier.map(|c| model.node_path(c));
+        }
+        EdgePayload::App {
+            outer,
+            qualifier,
+            inner,
+        } => {
+            out.source_port = Some(model.ports[outer].name.clone());
+            out.target_port = Some(model.ports[inner].name.clone());
+            out.route = qualifier.as_ref().map(|q| model.pattern_expr(q));
+            out.views = view_names(model, app_views(model, e));
         }
     }
     out
 }
 
-/// The model (or a view slice of it) rendered as replayable statements, in
-/// creation order. Stdlib declarations are omitted: every model already has
-/// them.
-pub(crate) fn dump(model: &Model, filter: Option<&BTreeSet<ViewId>>) -> Vec<Statement> {
-    let mut items: Vec<(u64, Statement)> = Vec::new();
-
-    let included_edges: Vec<&Edge> = model
-        .edges
-        .values()
-        .filter(|e| edge_in_filter(model, e, filter))
+/// Slice the model with composed filters into plain nodes and edges, both in
+/// creation order.
+///
+/// - `types` keeps nodes classified by any listed type (transitively);
+/// - `kinds` keeps edges of the listed kinds;
+/// - `views` keeps edges of the listed views, and only nodes related to them
+///   (their attachments and carriers);
+/// - `scopes` keeps the top level plus the named scopes' chains and subtrees;
+/// - an edge needs all its attachments in the slice to survive.
+pub(crate) fn subgraph(model: &Model, filter: &SubgraphFilter) -> (Vec<GraphNode>, Vec<GraphEdge>) {
+    let opened = filter
+        .scopes
+        .as_deref()
+        .map(|roots| opened_scopes(model, roots));
+    let edge_pass = |e: &Edge| {
+        filter
+            .kinds
+            .as_ref()
+            .is_none_or(|ks| ks.contains(&kind_of(e)))
+            && edge_in_filter(model, e, filter.views.as_ref())
+    };
+    // A views filter admits nodes through its edges: attachments and carriers.
+    let related: Option<BTreeSet<NodeId>> = filter.views.as_ref().map(|_| {
+        model
+            .edges
+            .values()
+            .filter(|e| edge_pass(e))
+            .flat_map(|e| {
+                let mut nodes = attachments(model, e).to_vec();
+                if let EdgePayload::Conn {
+                    carrier: Some(c), ..
+                } = &e.payload
+                {
+                    nodes.push(*c);
+                }
+                nodes
+            })
+            .collect()
+    });
+    let node_pass = |n: NodeId| {
+        filter
+            .types
+            .as_ref()
+            .is_none_or(|ts| ts.iter().any(|t| model.rel_holds(model.type_of, *t, n)))
+            && opened.as_ref().is_none_or(|o| {
+                let chain = model.scope_chain(n);
+                chain[..chain.len() - 1].iter().all(|a| o.contains(a))
+            })
+            && related.as_ref().is_none_or(|r| r.contains(&n))
+    };
+    let included: BTreeSet<NodeId> = model
+        .nodes
+        .keys()
+        .copied()
+        .filter(|&n| node_pass(n))
         .collect();
 
-    match filter {
-        None => {
-            for v in model.views.values() {
-                items.push((v.id.raw(), model.view_statement(v)));
-            }
-            for r in model.rels.values() {
-                if !r.stdlib {
-                    items.push((r.id.raw(), model.rel_statement(r)));
-                }
-            }
-            for c in model.conns.values() {
-                items.push((c.id.raw(), model.conn_statement(c)));
-            }
-            for n in model.nodes.values() {
-                items.push((n.id.raw(), model.node_statement(n.id)));
-            }
+    let mut edges = Vec::new();
+    let mut port_refs: BTreeMap<NodeId, BTreeSet<PortId>> = BTreeMap::new();
+    for e in model.edges.values() {
+        if !edge_pass(e) || !attachments(model, e).iter().all(|n| included.contains(n)) {
+            continue;
         }
-        Some(f) => {
-            // Minimal closure that lets the slice parse: the filter views, the
-            // types of included edges, and the involved nodes with their
-            // ancestors. Classifier edges outside the slice are not pulled in,
-            // so replaying a slice can hit shape findings — inherent to slicing.
-            let mut nodes: BTreeSet<NodeId> = BTreeSet::new();
-            let include_node = |set: &mut BTreeSet<NodeId>, n: NodeId| {
-                for a in model.scope_chain(n) {
-                    set.insert(a);
-                }
-            };
-            for e in &included_edges {
-                match &e.payload {
-                    EdgePayload::Rel { src, dst, rel } => {
-                        include_node(&mut nodes, *src);
-                        include_node(&mut nodes, *dst);
-                        let rt = &model.rels[rel];
-                        if !rt.stdlib {
-                            items.push((rt.id.raw(), model.rel_statement(rt)));
-                        }
-                    }
-                    EdgePayload::Conn {
-                        src_port,
-                        carrier,
-                        dst_port,
-                        conn,
-                    } => {
-                        include_node(&mut nodes, model.ports[src_port].node);
-                        include_node(&mut nodes, model.ports[dst_port].node);
-                        if let Some(c) = carrier {
-                            include_node(&mut nodes, *c);
-                        }
-                        let ct = &model.conns[conn];
-                        items.push((ct.id.raw(), model.conn_statement(ct)));
-                    }
-                    EdgePayload::App { outer, inner, .. } => {
-                        include_node(&mut nodes, model.ports[outer].node);
-                        include_node(&mut nodes, model.ports[inner].node);
-                    }
-                }
-            }
-            for v in f {
-                let vd = &model.views[v];
-                items.push((vd.id.raw(), model.view_statement(vd)));
-            }
-            for n in nodes {
-                items.push((n.raw(), model.node_statement(n)));
-            }
-            items.sort_by_key(|(id, _)| *id);
-            items.dedup();
+        let ports = match &e.payload {
+            EdgePayload::Conn {
+                src_port, dst_port, ..
+            } => Some([*src_port, *dst_port]),
+            EdgePayload::App { outer, inner, .. } => Some([*outer, *inner]),
+            EdgePayload::Rel { .. } => None,
+        };
+        for p in ports.into_iter().flatten() {
+            port_refs.entry(model.ports[&p].node).or_default().insert(p);
         }
+        edges.push(graph_edge(model, e));
     }
 
-    for e in included_edges {
+    let nodes = included
+        .iter()
+        .map(|&n| GraphNode {
+            id: model.node_path(n),
+            name: model.nodes[&n].name.clone(),
+            types: classifiers(model, n)
+                .iter()
+                .map(|&t| model.node_path(t))
+                .collect(),
+            ports: port_refs
+                .get(&n)
+                .into_iter()
+                .flatten()
+                .map(|p| {
+                    let port = &model.ports[p];
+                    GraphPort {
+                        name: port.name.clone(),
+                        conn: model.conns[&port.conn].name.clone(),
+                        side: port.side.map(Side::describe),
+                    }
+                })
+                .collect(),
+        })
+        .collect();
+    (nodes, edges)
+}
+
+/// The model rendered as replayable statements, in creation order. Stdlib
+/// declarations are omitted: every model already has them.
+pub(crate) fn dump(model: &Model) -> Vec<Statement> {
+    let mut items: Vec<(u64, Statement)> = Vec::new();
+    for v in model.views.values() {
+        items.push((v.id.raw(), model.view_statement(v)));
+    }
+    for r in model.rels.values() {
+        if !r.stdlib {
+            items.push((r.id.raw(), model.rel_statement(r)));
+        }
+    }
+    for c in model.conns.values() {
+        items.push((c.id.raw(), model.conn_statement(c)));
+    }
+    for n in model.nodes.values() {
+        items.push((n.id.raw(), model.node_statement(n.id)));
+    }
+    for e in model.edges.values() {
         items.push((e.id.raw(), model.edge_statement(e)));
     }
     items.sort_by_key(|(id, _)| *id);

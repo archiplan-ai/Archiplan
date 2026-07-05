@@ -75,13 +75,14 @@ Tagged by outcome, mirroring the [result contract](./modeling-lang/errors.md#sta
 { "result": "applied" }
 { "result": "noop" }
 { "result": "applied", "cascade": [ { "stmt": "define", "node": "Orders.ConfirmationHandler" }, "..." ] }
-{ "result": "statements", "statements": [ "...statement objects..." ] }
+{ "result": "graph", "nodes": [ "...node objects..." ], "edges": [ "...edge objects..." ] }
 { "result": "findings", "findings": [ "...finding objects..." ] }
 ```
 
 - `cascade` appears on `delete` and node-`redefine` results: everything removed, rendered as replayable
   statement objects in creation order. With `dry_run` it is a preview of what *would* be removed.
-- `statements` carries read output (`ports`, `dump`) — statement objects that recreate the requested slice.
+- `graph` carries [query](./modeling-lang/queries.md) output — the requested slice as plain nodes and edges,
+  with meta (types, kinds, ports, views, scope nesting encoded in path ids) preserved.
 
 ### Error object
 
@@ -101,7 +102,7 @@ back.
   "refs": [ { "kind": "node", "path": "Invoice", "id": 17 } ],
   "expected": { "anchor": "Service", "rel": "type_of" },
   "actual": "Invoice",
-  "hint": { "stmt": "ports", "node": "Orders" }
+  "hint": { "stmt": "query", "scopes": ["Orders"] }
 }
 ```
 
@@ -128,7 +129,7 @@ changes and is untouched by noops, reads and dry runs. Granularity (per statemen
 implementation choice; only monotonicity and change-detection are contractual.
 
 `expect_revision` makes edits conditional: if the model moved since the agent last looked, the request is
-rejected with `E_STALE_REVISION` and the agent regrounds (`dump`, `ports`, `check`) before retrying.
+rejected with `E_STALE_REVISION` and the agent regrounds (`query`, `check`) before retrying.
 Concurrent editing semantics beyond this guard belong to [multiplayer](./multiplayer.md) and
 [versioning](./versioning.md).
 
@@ -153,7 +154,7 @@ Not enforced, but the intended way to use the interface:
   statements are idempotent, so anything already applied by an earlier batch just noops.
 - Preview destructive edits: `delete` or node-`redefine` with `dry_run` returns the full cascade without
   applying it.
-- Reground from the model (`dump`, `ports`, `check`) instead of trusting a stale context window; `check`
+- Reground from the model (`query`, `check`) instead of trusting a stale context window; `check`
   after substantial edits surfaces what drifted.
 - A cascade report is replayable: to undo an accidental delete, submit the cascade back as a batch.
   References that eroded meanwhile surface as findings, not errors.

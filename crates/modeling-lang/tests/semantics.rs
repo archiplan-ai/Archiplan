@@ -4,7 +4,7 @@
 mod common;
 
 use common::*;
-use modeling_lang::{ErrorCode, Finding, Outcome, PatternExpr, Statement, Workspace};
+use modeling_lang::{EdgeKind, ErrorCode, Finding, Outcome, PatternExpr, Statement, Workspace};
 use serde_json::{Value, json};
 
 fn routing_example() -> Workspace {
@@ -104,7 +104,7 @@ fn node_redefine_replaces_internals_keeping_external_wiring() {
     }
     // The external connection survived: the node, its port and the edge kept
     // their identity.
-    let lines = pseudo(&mut ws, json!({ "stmt": "ports", "node": "Orders" }));
+    let lines = dump_pseudo(&ws);
     assert!(lines.contains(&"Payments(send) confirm Orders(handle);".to_string()));
     assert!(lines.contains(&"Orders.handle = RefundHandler(handle);".to_string()));
     // Redefining an already-empty scope is a no-op.
@@ -230,8 +230,12 @@ fn views_extend_by_restatement_and_shrink_by_untag() {
         "restating without views is a noop"
     );
 
-    let dumped = pseudo(&mut ws, json!({ "stmt": "dump", "in": ["flow"] }));
-    assert!(dumped.contains(&"A dep B in flow, fault;".to_string()));
+    let sliced = edge_values(&mut ws, json!({ "stmt": "query", "views": ["flow"] }));
+    assert_eq!(
+        sliced,
+        vec![json!({ "kind": "relation", "type": "dep", "directed": true,
+                     "source": "A", "target": "B", "views": ["flow", "fault"] })]
+    );
 
     assert!(is_applied(&outcome(
         &mut ws,
@@ -242,13 +246,13 @@ fn views_extend_by_restatement_and_shrink_by_untag() {
         &mut ws,
         json!({ "stmt": "untag", "edge": edge, "views": ["flow"] })
     )));
-    // An untagged edge is invisible to filtered reads, present in full dumps.
+    // An untagged edge is invisible to filtered queries, present in full ones.
+    assert!(edge_values(&mut ws, json!({ "stmt": "query", "views": ["flow"] })).is_empty());
     assert!(
-        !pseudo(&mut ws, json!({ "stmt": "dump", "in": ["flow"] }))
+        edge_values(&mut ws, json!({ "stmt": "query" }))
             .iter()
-            .any(|l| l.contains("dep"))
+            .any(|e| e["type"] == "dep")
     );
-    assert!(pseudo(&mut ws, json!({ "stmt": "dump" })).contains(&"A dep B;".to_string()));
 }
 
 #[test]
@@ -264,9 +268,9 @@ fn deleting_a_view_only_drops_tags() {
         cascade(&mut ws, json!({ "stmt": "delete", "view": "flow" })),
         vec!["def view flow;"]
     );
-    assert!(pseudo(&mut ws, json!({ "stmt": "dump" })).contains(&"A dep B;".to_string()));
+    assert!(dump_pseudo(&ws).contains(&"A dep B;".to_string()));
     assert_eq!(
-        err_code(&mut ws, json!({ "stmt": "dump", "in": ["flow"] })),
+        err_code(&mut ws, json!({ "stmt": "query", "views": ["flow"] })),
         ErrorCode::UnknownName
     );
 }
@@ -284,24 +288,27 @@ fn applications_belong_to_the_views_of_the_edges_they_route() {
               "target": { "node": "Orders", "port": "events" }, "views": ["flow"] }
         ]),
     );
-    let lines = pseudo(
-        &mut ws,
-        json!({ "stmt": "ports", "node": "Orders", "in": ["flow"] }),
+    // The view admits its edges and the nodes related to them: attachments,
+    // the carried node, and the application routing the tagged edge.
+    assert_eq!(
+        node_ids(&mut ws, json!({ "stmt": "query", "views": ["flow"] })),
+        vec!["OrderCreated", "Shipping", "Orders", "Orders.OrderHandler"]
     );
     assert_eq!(
-        lines,
+        edge_values(&mut ws, json!({ "stmt": "query", "views": ["flow"] })),
         vec![
-            "Shipping(shipping_events) send(OrderCreated) Orders(events) in flow;",
-            "Orders.events(OrderCreated) = OrderHandler(handle);",
+            json!({ "kind": "connection", "type": "send", "directed": true,
+                    "source": "Shipping", "source_port": "shipping_events",
+                    "target": "Orders", "target_port": "events",
+                    "carrier": "OrderCreated", "views": ["flow"] }),
+            json!({ "kind": "application",
+                    "source": "Orders", "source_port": "events",
+                    "target": "Orders.OrderHandler", "target_port": "handle",
+                    "route": { "node": "OrderCreated" }, "views": ["flow"] }),
         ]
     );
-    assert!(
-        pseudo(
-            &mut ws,
-            json!({ "stmt": "ports", "node": "Orders", "in": ["other"] })
-        )
-        .is_empty()
-    );
+    let (nodes, edges) = graph(&mut ws, json!({ "stmt": "query", "views": ["other"] }));
+    assert!(nodes.is_empty() && edges.is_empty());
 }
 
 // ---- routing -------------------------------------------------------------
@@ -372,7 +379,12 @@ fn deleting_a_node_cascades_over_the_referencing_closure() {
     );
     // The last edge on Payments.send_confirmation went with the cascade, so
     // the port is gone and its name is free for a new type.
-    assert!(pseudo(&mut ws, json!({ "stmt": "ports", "node": "Payments" })).is_empty());
+    let (nodes, edges) = graph(&mut ws, json!({ "stmt": "query" }));
+    let payments = nodes.iter().find(|n| n.id == "Payments").expect("node");
+    assert!(payments.ports.is_empty());
+    assert!(edges.iter().all(
+        |e| e.kind == EdgeKind::Relation || (e.source != "Payments" && e.target != "Payments")
+    ));
     outcomes(
         &mut ws,
         json!([
@@ -478,9 +490,7 @@ fn deleting_a_classifier_edge_is_soft_drift_not_cascade() {
         vec!["Service type_of A;"]
     );
     // The nonconforming connection edge remains, surfaced as a finding.
-    assert!(
-        pseudo(&mut ws, json!({ "stmt": "dump" })).contains(&"A(out) calls B(recv);".to_string())
-    );
+    assert!(dump_pseudo(&ws).contains(&"A(out) calls B(recv);".to_string()));
     let f = findings(&mut ws, json!({ "stmt": "check" }));
     assert!(
         f.iter().any(|f| matches!(f, Finding::ShapeDrift { slot, actual, expected, .. }
@@ -533,7 +543,7 @@ fn deleting_a_node_named_by_a_route_takes_the_delegation() {
     assert!(c.contains(&"Orders.events(OrderCreated) = OrderHandler(handle);".to_string()));
     // The unrelated qualified delegation stays.
     assert!(
-        pseudo(&mut ws, json!({ "stmt": "dump" }))
+        dump_pseudo(&ws)
             .contains(&"Orders.events(PaymentFailed) = PaymentHandler(handle);".to_string())
     );
 }
@@ -561,7 +571,7 @@ fn rename_is_reference_safe() {
             { "stmt": "rename", "node": "Service", "to": "Kind" }
         ]),
     );
-    let dump = pseudo(&mut ws, json!({ "stmt": "dump" })).join("\n");
+    let dump = dump_pseudo(&ws).join("\n");
     assert!(dump.contains("PaySvc(send) confirm Orders(recv);"));
     assert!(dump.contains("def conn confirm := (Kind type_of *) -> (Kind type_of *);"));
     assert!(!dump.contains("Payments"));
@@ -618,6 +628,117 @@ fn non_transitive_relations_match_single_steps_only() {
     );
 }
 
+// ---- subgraph queries -------------------------------------------------------
+
+#[test]
+fn query_scopes_open_chains_and_subtrees() {
+    let mut ws = ws_with(json!([
+        { "stmt": "define", "node": "A" },
+        { "stmt": "define", "node": "A.B" },
+        { "stmt": "define", "node": "A.B.C" },
+        { "stmt": "define", "node": "D" },
+        { "stmt": "define", "node": "D.X" }
+    ]));
+    // An empty list opens nothing: the top level only. Absent = everything.
+    assert_eq!(
+        node_ids(&mut ws, json!({ "stmt": "query", "scopes": [] })),
+        vec!["A", "D"]
+    );
+    assert_eq!(
+        node_ids(&mut ws, json!({ "stmt": "query" })),
+        vec!["A", "A.B", "A.B.C", "D", "D.X"]
+    );
+    // An entry opens the chain from the root down to it plus its whole
+    // subtree; unrelated scopes stay closed.
+    assert_eq!(
+        node_ids(&mut ws, json!({ "stmt": "query", "scopes": ["A.B"] })),
+        vec!["A", "A.B", "A.B.C", "D"]
+    );
+}
+
+#[test]
+fn query_types_match_instances_transitively() {
+    let mut ws = ws_with(json!([
+        { "stmt": "define", "node": "Service" },
+        { "stmt": "define", "node": "RestService" },
+        { "stmt": "define", "node": "Payments" },
+        { "stmt": "define", "node": "Billing" },
+        { "stmt": "rel-edge", "rel": "type_of", "source": "Service", "target": "RestService" },
+        { "stmt": "rel-edge", "rel": "type_of", "source": "RestService", "target": "Payments" },
+        { "stmt": "define", "rel": "dep", "directed": true, "source": "*", "target": "*" },
+        { "stmt": "rel-edge", "rel": "dep", "source": "Payments", "target": "Billing" },
+        { "stmt": "rel-edge", "rel": "dep", "source": "RestService", "target": "Payments" }
+    ]));
+    // Instances only, through the transitive closure; the type node itself
+    // does not match.
+    let (nodes, _) = graph(&mut ws, json!({ "stmt": "query", "types": ["Service"] }));
+    let ids: Vec<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
+    assert_eq!(ids, ["RestService", "Payments"]);
+    // Node meta lists every classifier, transitively.
+    assert_eq!(nodes[0].types, ["Service"]);
+    assert_eq!(nodes[1].types, ["Service", "RestService"]);
+    // Edges survive only with both attachments in the slice: the dep edge to
+    // Billing and the classifier edge from Service are cut.
+    assert_eq!(
+        edge_values(&mut ws, json!({ "stmt": "query", "types": ["Service"] })),
+        vec![
+            json!({ "kind": "relation", "type": "type_of", "directed": true,
+                    "source": "RestService", "target": "Payments" }),
+            json!({ "kind": "relation", "type": "dep", "directed": true,
+                    "source": "RestService", "target": "Payments" }),
+        ]
+    );
+}
+
+#[test]
+fn query_kinds_filter_edges_and_compose_with_scopes() {
+    let mut ws = routing_example();
+    let (_, apps) = graph(
+        &mut ws,
+        json!({ "stmt": "query", "kinds": ["application"] }),
+    );
+    assert_eq!(apps.len(), 2);
+    assert!(apps.iter().all(|e| e.kind == EdgeKind::Application));
+    let (_, most) = graph(
+        &mut ws,
+        json!({ "stmt": "query", "kinds": ["connection", "relation"] }),
+    );
+    assert_eq!(most.len(), 5);
+    // Composition: an application's inner node is hidden at the top level, so
+    // no application survives a top-level-only scope filter.
+    let (nodes, edges) = graph(
+        &mut ws,
+        json!({ "stmt": "query", "kinds": ["application"], "scopes": [] }),
+    );
+    assert!(edges.is_empty());
+    assert!(nodes.iter().all(|n| !n.id.contains('.')));
+}
+
+#[test]
+fn query_filters_are_validated() {
+    let mut ws = ws_with(json!([{ "stmt": "define", "node": "A" }]));
+    assert_eq!(
+        err_code(&mut ws, json!({ "stmt": "query", "types": ["Nope"] })),
+        ErrorCode::UnknownName
+    );
+    assert_eq!(
+        err_code(&mut ws, json!({ "stmt": "query", "scopes": ["Nope"] })),
+        ErrorCode::UnknownName
+    );
+    assert_eq!(
+        err_code(&mut ws, json!({ "stmt": "query", "views": ["nope"] })),
+        ErrorCode::UnknownName
+    );
+    assert_eq!(
+        err_code(&mut ws, json!({ "stmt": "query", "kinds": ["nope"] })),
+        ErrorCode::Parse
+    );
+    assert_eq!(
+        err_code(&mut ws, json!({ "stmt": "query", "node": "A" })),
+        ErrorCode::Parse
+    );
+}
+
 // ---- findings ------------------------------------------------------------------
 
 #[test]
@@ -667,4 +788,17 @@ fn outcome_and_finding_json_shapes_match_the_spec() {
         v["results"][1]["cascade"][0],
         json!({ "stmt": "define", "node": "A" })
     );
+
+    // The graph result: nodes and edges, empty meta omitted.
+    let r = ws.handle(&json!({ "statements": [
+        { "stmt": "define", "node": "B" },
+        { "stmt": "query" }
+    ]}));
+    let v: Value = serde_json::to_value(&r).unwrap();
+    assert_eq!(v["results"][1]["result"], "graph");
+    assert_eq!(
+        v["results"][1]["nodes"],
+        json!([{ "id": "B", "name": "B" }])
+    );
+    assert_eq!(v["results"][1]["edges"], json!([]));
 }

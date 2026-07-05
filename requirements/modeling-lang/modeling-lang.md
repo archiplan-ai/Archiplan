@@ -302,7 +302,7 @@ different body, or a rel/conn kind clash — it fails with E_REDECLARED and repo
   "replace the internals" in one transaction — external wiring intact. An already-empty scope is a no-op.
 - **rel / conn** — replaces the type's definition (transitivity, direction, shape). Existing edges are not
   re-checked eagerly: conformance is soft, and edges that no longer fit — including carrier arity mismatches —
-  surface as [findings](./queries.md), not errors.
+  surface as [findings](./errors.md#errors-vs-findings), not errors.
 - **view** — has no definition body; `redefine` does not apply (E_PARSE).
 
 Edge statements (`rel-edge`, `conn-edge`, `app`) take no verb: an edge's identity is structural, stating it *is*
@@ -400,18 +400,21 @@ untag Payments fails_via Orders in fault_prop;
 **Reads** (see [queries](./queries.md)):
 
 ```
-ports Orders in data_flow;
+query types (Service) kinds (connection) scopes (Orders) in (data_flow);
 check;
-dump;
 ```
 
 ```json
-{ "stmt": "ports", "node": "Orders", "in": ["data_flow"] }
+{ "stmt": "query", "types": ["Service"], "kinds": ["connection"],
+  "scopes": ["Orders"], "views": ["data_flow"] }
 { "stmt": "check" }
-{ "stmt": "dump" }
 ```
 
-`in` optionally restricts any read to the edges of the named views.
+`query` slices the model with composed filters — each optional, absent meaning unrestricted: `types` keeps the
+instances of the listed types (via the transitive `type_of` closure), `kinds` keeps edges of the listed kinds,
+`views` keeps edges of the listed views plus the nodes related to them, `scopes` opens the named scopes (an empty
+list is the top level only). The result is the slice as plain nodes and edges. `check` reports model-completeness
+[findings](./errors.md#errors-vs-findings); `in` optionally restricts it to the edges of the named views.
 
 ### Deletion semantics
 
@@ -427,7 +430,7 @@ Two integrity regimes govern what cascades and what merely drifts:
 - **Shape conformance is soft.** Shapes are checked when an edge is created. A later edit that erodes conformance —
   e.g. deleting the classifier edge `Service type_of Payments` while `calls` edges on `Payments` rely on
   `(Service type_of *)` — succeeds; the nonconforming edges remain and are surfaced as
-  [findings](./queries.md), not errors.
+  [findings](./errors.md#errors-vs-findings), not errors.
 
 A port lives as long as some connection or application attaches to it; cascading away the last attached edge removes
 the port and frees its name (a fresh first use may bind a new type or side). A delegated port left with no attached

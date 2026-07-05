@@ -127,7 +127,7 @@ impl Workspace {
             )
             .with_expected(json!(expected))
             .with_actual(json!(self.revision))
-            .with_hint(json!({ "stmt": "dump" }));
+            .with_hint(json!({ "stmt": "query" }));
             return Response::fail(self.revision, None, e);
         }
         if req.dry_run {
@@ -184,23 +184,31 @@ impl Workspace {
                 view.as_deref(),
             ),
             Statement::Untag { edge, views } => self.do_untag(edge, views),
-            Statement::Ports { node, in_views } => {
-                let n = self.resolve_abs(node)?;
-                let filter = self.view_filter(in_views)?;
-                Ok(Outcome::Statements {
-                    statements: query::ports(&self.model, n, filter.as_ref()),
-                })
+            Statement::Query {
+                types,
+                kinds,
+                views,
+                scopes,
+            } => {
+                let resolve_all = |paths: &[String]| -> Result<Vec<NodeId>, LangError> {
+                    paths.iter().map(|p| self.resolve_abs(p)).collect()
+                };
+                let filter = query::SubgraphFilter {
+                    types: types.as_deref().map(resolve_all).transpose()?,
+                    kinds: kinds.as_ref().map(|ks| ks.iter().copied().collect()),
+                    views: views
+                        .as_deref()
+                        .map(|vs| self.resolve_views(vs))
+                        .transpose()?,
+                    scopes: scopes.as_deref().map(resolve_all).transpose()?,
+                };
+                let (nodes, edges) = query::subgraph(&self.model, &filter);
+                Ok(Outcome::Graph { nodes, edges })
             }
             Statement::Check { in_views } => {
                 let filter = self.view_filter(in_views)?;
                 Ok(Outcome::Findings {
                     findings: query::check(&self.model, filter.as_ref()),
-                })
-            }
-            Statement::Dump { in_views } => {
-                let filter = self.view_filter(in_views)?;
-                Ok(Outcome::Statements {
-                    statements: query::dump(&self.model, filter.as_ref()),
                 })
             }
         }
@@ -234,7 +242,7 @@ impl Workspace {
     fn unknown(&self, kind: &'static str, what: &str) -> LangError {
         LangError::new(ErrorCode::UnknownName, format!("unknown {kind} `{what}`"))
             .with_ref(kind, what, None)
-            .with_hint(json!({ "stmt": "dump" }))
+            .with_hint(json!({ "stmt": "query" }))
     }
 
     fn resolve_abs(&self, path: &str) -> Result<NodeId, LangError> {
@@ -729,7 +737,7 @@ impl Workspace {
             .with_ref("port", self.model.port_path(pid), Some(pid.raw()))
             .with_expected(Value::String(self.model.conns[&p.conn].name.clone()))
             .with_actual(Value::String(self.model.conns[&conn].name.clone()))
-            .with_hint(json!({ "stmt": "ports", "node": self.model.node_path(node) })));
+            .with_hint(json!({ "stmt": "query", "scopes": [self.model.node_path(node)] })));
         }
         if let (Some(want), Some(have)) = (side, p.side)
             && want != have
@@ -745,7 +753,7 @@ impl Workspace {
             .with_ref("port", self.model.port_path(pid), Some(pid.raw()))
             .with_expected(Value::String(have.describe().into()))
             .with_actual(Value::String(want.describe().into()))
-            .with_hint(json!({ "stmt": "ports", "node": self.model.node_path(node) })));
+            .with_hint(json!({ "stmt": "query", "scopes": [self.model.node_path(node)] })));
         }
         Ok(Some(pid))
     }
@@ -909,7 +917,7 @@ impl Workspace {
                 format!("no connection attaches a port `{port}` to {node_path}"),
             )
             .with_ref("port", format!("{node_path}.{port}"), None)
-            .with_hint(json!({ "stmt": "ports", "node": node_path })));
+            .with_hint(json!({ "stmt": "query", "scopes": [node_path] })));
         };
         let qualifier = route.map(|r| self.resolve_pattern(r)).transpose()?;
         let inner_node = self
@@ -956,7 +964,7 @@ impl Workspace {
                 )
                 .with_ref("edge", other_stmt.to_string(), Some(other.id.raw()))
                 .with_actual(other_stmt)
-                .with_hint(json!({ "stmt": "ports", "node": node_path }));
+                .with_hint(json!({ "stmt": "query", "scopes": [node_path.clone()] }));
                 if let Some(w) = witness {
                     e = e.with_ref("node", self.model.node_path(*w), Some(w.raw()));
                 }
@@ -1094,7 +1102,7 @@ impl Workspace {
         let no_such_edge = || {
             LangError::new(ErrorCode::UnknownName, "no such edge")
                 .with_ref("edge", edge.pseudo(), None)
-                .with_hint(json!({ "stmt": "dump" }))
+                .with_hint(json!({ "stmt": "query" }))
         };
         match edge {
             Statement::RelEdge {

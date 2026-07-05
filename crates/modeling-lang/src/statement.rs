@@ -244,6 +244,14 @@ impl PatternExpr {
     }
 }
 
+impl fmt::Display for PatternExpr {
+    /// The pattern in the spec's pseudo-syntax, without parentheses:
+    /// `*`, `OrderId`, `Service type_of *`.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.pseudo_bare())
+    }
+}
+
 impl Serialize for PatternExpr {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         match self {
@@ -310,6 +318,29 @@ pub struct End {
     pub port: String,
 }
 
+/// The kind of an edge: the relation/connection/application trichotomy of
+/// `requirements/modeling-lang/modeling-lang.md#kinds`. Used as a `query`
+/// filter and as edge metadata in query results.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[allow(missing_docs)]
+pub enum EdgeKind {
+    Relation,
+    Connection,
+    Application,
+}
+
+impl EdgeKind {
+    /// The kind's lowercase name, as written in statements.
+    pub fn name(self) -> &'static str {
+        match self {
+            EdgeKind::Relation => "relation",
+            EdgeKind::Connection => "connection",
+            EdgeKind::Application => "application",
+        }
+    }
+}
+
 /// One statement of the language. See
 /// `requirements/modeling-lang/modeling-lang.md#statements`.
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
@@ -365,16 +396,21 @@ pub enum Statement {
         edge: Box<Statement>,
         views: Vec<String>,
     },
-    Ports {
-        node: String,
-        #[serde(default, rename = "in", skip_serializing_if = "Vec::is_empty")]
-        in_views: Vec<String>,
+    /// Subgraph query (`requirements/modeling-lang/queries.md`): composable
+    /// filters, each optional; an absent filter does not restrict. An empty
+    /// list is the most restrictive filter (matches nothing), not an absent
+    /// one — `"scopes": []` means "the top level only".
+    Query {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        types: Option<Vec<String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kinds: Option<Vec<EdgeKind>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        views: Option<Vec<String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scopes: Option<Vec<String>>,
     },
     Check {
-        #[serde(default, rename = "in", skip_serializing_if = "Vec::is_empty")]
-        in_views: Vec<String>,
-    },
-    Dump {
         #[serde(default, rename = "in", skip_serializing_if = "Vec::is_empty")]
         in_views: Vec<String>,
     },
@@ -391,9 +427,8 @@ fn allowed_keys(kind: &str) -> Option<&'static [&'static str]> {
         "rename" => &["stmt", "node", "to"],
         "delete" => &["stmt", "node", "edge", "rel", "conn", "view"],
         "untag" => &["stmt", "edge", "views"],
-        "ports" => &["stmt", "node", "in"],
+        "query" => &["stmt", "types", "kinds", "views", "scopes"],
         "check" => &["stmt", "in"],
-        "dump" => &["stmt", "in"],
         _ => return None,
     })
 }
@@ -600,11 +635,30 @@ impl Statement {
             Statement::Untag { edge, views } => {
                 format!("untag {}{};", edge.pseudo_bare(), views_suffix(views))
             }
-            Statement::Ports { node, in_views } => {
-                format!("ports {node}{};", views_suffix(in_views))
+            Statement::Query {
+                types,
+                kinds,
+                views,
+                scopes,
+            } => {
+                let seg = |kw: &str, items: Option<Vec<String>>| match items {
+                    Some(items) => format!(" {kw} ({})", items.join(", ")),
+                    None => String::new(),
+                };
+                format!(
+                    "query{}{}{}{};",
+                    seg("types", types.clone()),
+                    seg(
+                        "kinds",
+                        kinds
+                            .as_ref()
+                            .map(|ks| ks.iter().map(|k| k.name().to_string()).collect())
+                    ),
+                    seg("scopes", scopes.clone()),
+                    seg("in", views.clone()),
+                )
             }
             Statement::Check { in_views } => format!("check{};", views_suffix(in_views)),
-            Statement::Dump { in_views } => format!("dump{};", views_suffix(in_views)),
         }
     }
 }

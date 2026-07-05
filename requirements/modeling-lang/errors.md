@@ -14,7 +14,7 @@ Every statement in a batch yields exactly one of:
 - **error** — the statement was rejected; the model is untouched.
 
 A batch is atomic: any error rolls the whole batch back and reports the failing statement's index alongside the
-error. Read statements yield their result payload (statements or findings) in place.
+error. Read statements yield their result payload (a graph or findings) in place.
 
 `delete` results — and node `redefine` results — additionally carry the cascade set: everything removed, rendered
 as statements.
@@ -28,7 +28,7 @@ as statements.
 | subject | the offending statement, as submitted |
 | refs | paths/ids of the elements involved |
 | expected / actual | the violated constraint, where applicable (pattern vs node, type vs type) |
-| hint | suggested next step, phrased as a runnable statement (e.g. `ports Orders`) |
+| hint | suggested next step, phrased as a runnable statement (e.g. a `query` scoped to the involved node) |
 
 ## Catalog
 

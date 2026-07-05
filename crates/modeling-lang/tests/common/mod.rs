@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 
-use modeling_lang::{ErrorCode, Finding, LangError, Outcome, Statement, Workspace};
+use modeling_lang::{
+    ErrorCode, Finding, GraphEdge, GraphNode, LangError, Outcome, Statement, Workspace,
+};
 use serde_json::Value;
 
 pub fn ws_with(batch: Value) -> Workspace {
@@ -33,15 +35,30 @@ pub fn err_code(ws: &mut Workspace, stmt: Value) -> ErrorCode {
     err(ws, Value::Array(vec![stmt])).1.code
 }
 
-pub fn statements(ws: &mut Workspace, stmt: Value) -> Vec<Statement> {
+pub fn graph(ws: &mut Workspace, stmt: Value) -> (Vec<GraphNode>, Vec<GraphEdge>) {
     match outcome(ws, stmt) {
-        Outcome::Statements { statements } => statements,
-        o => panic!("expected statements, got {o:?}"),
+        Outcome::Graph { nodes, edges } => (nodes, edges),
+        o => panic!("expected a graph, got {o:?}"),
     }
 }
 
-pub fn pseudo(ws: &mut Workspace, stmt: Value) -> Vec<String> {
-    statements(ws, stmt).iter().map(Statement::pseudo).collect()
+/// Node ids of a query result, in result (creation) order.
+pub fn node_ids(ws: &mut Workspace, stmt: Value) -> Vec<String> {
+    graph(ws, stmt).0.into_iter().map(|n| n.id).collect()
+}
+
+/// Edges of a query result as JSON values, for shape-exact assertions.
+pub fn edge_values(ws: &mut Workspace, stmt: Value) -> Vec<Value> {
+    graph(ws, stmt)
+        .1
+        .iter()
+        .map(|e| serde_json::to_value(e).expect("edges serialize"))
+        .collect()
+}
+
+/// The model rendered as pseudo-syntax lines, for state assertions.
+pub fn dump_pseudo(ws: &Workspace) -> Vec<String> {
+    ws.model().dump().iter().map(Statement::pseudo).collect()
 }
 
 pub fn findings(ws: &mut Workspace, stmt: Value) -> Vec<Finding> {

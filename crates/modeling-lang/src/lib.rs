@@ -5,8 +5,8 @@
 //! ports and nested scopes) and distinguished edges (relations, connections,
 //! applications), views, the JSON statement API with its idempotent
 //! definitions and error contract, cascading deletion, and the read
-//! statements (`ports`, `check`, `dump`) — plus the request/response envelope
-//! of `requirements/agent-interface.md`.
+//! statements (the subgraph `query` and `check`) — plus the request/response
+//! envelope of `requirements/agent-interface.md`.
 //!
 //! # Quick start
 //!
@@ -60,6 +60,24 @@
 //!   instances" finding: it is substrate, not model intent.
 //! - The revision increments once per model-changing request.
 //! - Names are `[A-Za-z_][A-Za-z0-9_]*`; paths join them with `.`.
+//!
+//! For the subgraph `query` (`requirements/modeling-lang/queries.md`):
+//!
+//! - Each filter is optional and absent means unrestricted; present filters
+//!   compose by intersection. An empty list is the most restrictive filter of
+//!   its category (`"scopes": []` is "the top level only"), not an absent one.
+//! - `types` keeps the *instances* of the listed types — nodes classified via
+//!   the transitive `type_of` closure; the type node itself does not match.
+//! - `scopes` names the scopes to open: each entry opens the chain from the
+//!   root down to it plus its whole subtree; the top level is always open. A
+//!   node is included only when every scope containing it is open.
+//! - `views` keeps the edges of the listed views and only the nodes related
+//!   to them — their attachments and carried nodes.
+//! - An edge survives only if all its attachments survive the node filters;
+//!   the carrier is edge metadata and neither anchors nor blocks inclusion.
+//! - Results are a common node-link JSON graph: node ids are absolute paths,
+//!   nodes and edges come in creation order, node `types` list all transitive
+//!   classifiers, node `ports` list the ports referenced by result edges.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -81,5 +99,7 @@ mod statement;
 pub use engine::Workspace;
 pub use error::{ErrorCode, ErrorRef, LangError};
 pub use model::{Layer, Model};
-pub use result::{BatchError, Finding, Outcome, Request, Response, ResponseError};
-pub use statement::{Definition, End, PatternExpr, Statement, parse_statement};
+pub use result::{
+    BatchError, Finding, GraphEdge, GraphNode, GraphPort, Outcome, Request, Response, ResponseError,
+};
+pub use statement::{Definition, EdgeKind, End, PatternExpr, Statement, parse_statement};
