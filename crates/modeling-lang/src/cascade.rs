@@ -1,12 +1,13 @@
 //! Cascading deletion: reference integrity is hard.
 //!
-//! `delete` removes the seed element together with the full closure of
-//! elements that reference it: scopes recursively, edges ending on or carrying
-//! a doomed node, type declarations whose patterns name a doomed node or
-//! relation (and, transitively, those types' edges and ports), and delegations
-//! qualified by a doomed element. Shape conformance is deliberately *not* part
-//! of the closure — deleting a classifier edge leaves dependent edges in place
-//! and drifting, surfaced later as findings.
+//! `delete` — and a node `redefine`, which seeds the cascade with the node's
+//! children — removes the seed elements together with the full closure of
+//! elements that reference them: scopes recursively, edges ending on or
+//! carrying a doomed node, type declarations whose patterns name a doomed
+//! node or relation (and, transitively, those types' edges and ports), and
+//! delegations qualified by a doomed element. Shape conformance is
+//! deliberately *not* part of the closure — deleting a classifier edge leaves
+//! dependent edges in place and drifting, surfaced later as findings.
 //!
 //! The removed set is rendered as statements, in creation (id) order, before
 //! anything is removed.
@@ -15,6 +16,7 @@ use std::collections::BTreeSet;
 
 use crate::ids::{ConnId, EdgeId, NodeId, RelId, ViewId};
 use crate::model::{EdgePayload, Model, Pattern};
+use crate::statement::Statement;
 
 pub(crate) enum Seed {
     Node(NodeId),
@@ -41,23 +43,25 @@ fn pattern_refs_doomed(p: &Pattern, d: &Doomed) -> bool {
     }
 }
 
-fn closure(model: &Model, seed: Seed) -> Doomed {
+fn closure(model: &Model, seeds: Vec<Seed>) -> Doomed {
     let mut d = Doomed::default();
-    match seed {
-        Seed::Node(n) => {
-            d.nodes.insert(n);
-        }
-        Seed::Edge(e) => {
-            d.edges.insert(e);
-        }
-        Seed::Rel(r) => {
-            d.rels.insert(r);
-        }
-        Seed::Conn(c) => {
-            d.conns.insert(c);
-        }
-        Seed::View(v) => {
-            d.views.insert(v);
+    for seed in seeds {
+        match seed {
+            Seed::Node(n) => {
+                d.nodes.insert(n);
+            }
+            Seed::Edge(e) => {
+                d.edges.insert(e);
+            }
+            Seed::Rel(r) => {
+                d.rels.insert(r);
+            }
+            Seed::Conn(c) => {
+                d.conns.insert(c);
+            }
+            Seed::View(v) => {
+                d.views.insert(v);
+            }
         }
     }
     loop {
@@ -142,27 +146,27 @@ fn closure(model: &Model, seed: Seed) -> Doomed {
     }
 }
 
-/// Compute the closure, render it, remove it, then sweep unattached ports.
-/// Returns the cascade report: everything removed, rendered as statements in
-/// creation order.
-pub(crate) fn delete(model: &mut Model, seed: Seed) -> Vec<String> {
-    let d = closure(model, seed);
+/// Compute the closure of the seeds, render it, remove it, then sweep
+/// unattached ports. Returns the cascade report: everything removed, rendered
+/// as statements in creation order.
+pub(crate) fn delete_many(model: &mut Model, seeds: Vec<Seed>) -> Vec<Statement> {
+    let d = closure(model, seeds);
 
-    let mut rendered: Vec<(u64, String)> = Vec::new();
+    let mut rendered: Vec<(u64, Statement)> = Vec::new();
     for v in &d.views {
-        rendered.push((v.raw(), model.render_view_decl(&model.views[v])));
+        rendered.push((v.raw(), model.view_statement(&model.views[v])));
     }
     for r in &d.rels {
-        rendered.push((r.raw(), model.render_rel_decl(&model.rels[r])));
+        rendered.push((r.raw(), model.rel_statement(&model.rels[r])));
     }
     for c in &d.conns {
-        rendered.push((c.raw(), model.render_conn_decl(&model.conns[c])));
+        rendered.push((c.raw(), model.conn_statement(&model.conns[c])));
     }
     for n in &d.nodes {
-        rendered.push((n.raw(), model.render_node_stmt(*n)));
+        rendered.push((n.raw(), model.node_statement(*n)));
     }
     for e in &d.edges {
-        rendered.push((e.raw(), model.render_edge(&model.edges[e])));
+        rendered.push((e.raw(), model.edge_statement(&model.edges[e])));
     }
     rendered.sort_by_key(|(id, _)| *id);
 
@@ -224,4 +228,8 @@ pub(crate) fn delete(model: &mut Model, seed: Seed) -> Vec<String> {
     }
 
     rendered.into_iter().map(|(_, s)| s).collect()
+}
+
+pub(crate) fn delete(model: &mut Model, seed: Seed) -> Vec<Statement> {
+    delete_many(model, vec![seed])
 }

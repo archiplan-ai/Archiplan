@@ -3,72 +3,63 @@
 //!
 //! Implements `requirements/modeling-lang/` — the free graph of nodes (with
 //! ports and nested scopes) and distinguished edges (relations, connections,
-//! applications), views, the statement API with its error contract, cascading
-//! deletion, and the query operations (`ports`, `check`, `dump`).
+//! applications), views, the JSON statement API with its idempotent
+//! definitions and error contract, cascading deletion, and the read
+//! statements (`ports`, `check`, `dump`) — plus the request/response envelope
+//! of `requirements/agent-interface.md`.
 //!
 //! # Quick start
 //!
 //! ```
-//! use modeling_lang::Session;
+//! use modeling_lang::Workspace;
+//! use serde_json::json;
 //!
-//! let mut session = Session::new();
-//! session
-//!     .execute(
-//!         r#"
-//!         node Service;
-//!         node Payments;
-//!         node Orders;
-//!         Service type_of Payments;
-//!         Service type_of Orders;
-//!
-//!         node OrderId;
-//!         conn confirm := (Service type_of *) (OrderId)-> (Service type_of *);
-//!         Payments(send_confirmation) confirm(OrderId) Orders(handle_confirmation);
-//!
-//!         node Orders {
-//!             node ConfirmationHandler;
-//!             handle_confirmation = ConfirmationHandler(handle_confirmation);
-//!         }
-//!         "#,
-//!     )
-//!     .expect("batch applies");
-//!
-//! let results = session.execute("ports Orders").expect("query runs");
+//! let mut ws = Workspace::new();
+//! let response = ws.handle(&json!({
+//!     "statements": [
+//!         { "stmt": "define", "node": "Service" },
+//!         { "stmt": "define", "node": "Payments" },
+//!         { "stmt": "rel-edge", "rel": "type_of", "source": "Service", "target": "Payments" },
+//!         { "stmt": "check" }
+//!     ]
+//! }));
+//! assert_eq!(response.status, "ok");
+//! assert_eq!(response.revision, 1);
 //! ```
 //!
 //! # Semantics
 //!
-//! - Every element has an opaque, immutable **id** and a scoped **name**;
-//!   everything stored (edge ends, pattern anchors, delegations) binds to ids,
-//!   so `rename` is reference-safe by construction. Edges carry no name: an
-//!   edge is addressed structurally, by restating it.
-//! - Statements are atomic. [`Session::execute`] applies a batch atomically;
-//!   [`Session::execute_interactive`] applies statements one at a time. Every
-//!   statement applies, no-ops (identical restatement), or fails with a
-//!   structured [`LangError`] that leaves the model untouched.
+//! - A statement is a JSON object discriminated by `stmt`; JSON is the only
+//!   parsed syntax. The compact pseudo-syntax (`def node Payments;`) is
+//!   render-only: [`Statement::pseudo`] produces it for human output.
+//! - There is no ambient scope: every reference is an absolute path, creation
+//!   statements carry the full path of what they create, applications name
+//!   their delegating node explicitly. Augmentation is just a statement whose
+//!   path lands inside an existing node.
+//! - Named elements are created by `define` and replaced by `redefine`; the
+//!   [`Definition`] names its subject (`node`, `view`, `rel`, `conn`) and
+//!   parameters. Both are idempotent: `define` creates or no-ops on an
+//!   identical restatement (a divergent one is rejected); `redefine` requires
+//!   existence and no-ops when nothing changes (a node redefine empties its
+//!   scope as a reported cascade, a type redefine replaces the shape and lets
+//!   nonconforming edges drift into findings).
+//! - Batches are atomic; every statement applies, no-ops, or fails with a
+//!   structured [`LangError`], and a failure rolls the whole batch back.
 //! - `delete` cascades over the full referencing closure and reports
-//!   everything removed, rendered as statements. Shape conformance is soft:
+//!   everything removed as replayable statements. Shape conformance is soft:
 //!   edits that erode it succeed and surface later as [`Finding`]s via `check`.
 //!
 //! # Implementation decisions
 //!
 //! Where the requirement leaves room, this implementation chooses:
 //!
-//! - **`E_CROSS_SCOPE`** is appended to the error catalog (the catalog is
-//!   append-only): connections must join nodes of the same scope — crossing a
-//!   boundary is what applications are for — and an application's inner node
-//!   must be a direct child of the delegating node. Relations are free to
-//!   relate nodes anywhere: the epistemic layer classifies terms in any scope.
 //! - Pattern matching (`(Service type_of *)`) follows the virtual transitive
-//!   closure of a `trans` relation. Only declared edges are stored; the
-//!   closure is computed on demand.
-//! - A `dump [in views]` query is provided as the whole-model (or view-sliced)
-//!   render; results replay from the root scope in creation order.
-//! - The stdlib `type_of` is excluded from the "type without instances"
-//!   finding: it is substrate, not model intent.
-//! - Reserved words (`node`, `view`, `rel`, `conn`, `trans`, `open`, `rename`,
-//!   `delete`, `untag`, `in`, `ports`, `check`, `dump`) cannot be used as
-//!   names.
+//!   closure of a `trans` relation; only declared edges are stored.
+//! - A node `redefine` whose scope is already empty is a no-op.
+//! - The stdlib `type_of` is excluded from dumps and from the "type without
+//!   instances" finding: it is substrate, not model intent.
+//! - The revision increments once per model-changing request.
+//! - Names are `[A-Za-z_][A-Za-z0-9_]*`; paths join them with `.`.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -77,19 +68,18 @@
 // size is irrelevant; boxing it would push the cost onto every consumer match.
 #![allow(clippy::result_large_err)]
 
-mod ast;
 mod cascade;
+mod engine;
 mod error;
 mod ids;
-mod lexer;
 mod model;
-mod parser;
 mod query;
 mod render;
 mod result;
-mod session;
+mod statement;
 
+pub use engine::Workspace;
 pub use error::{ErrorCode, ErrorRef, LangError};
 pub use model::{Layer, Model};
-pub use result::{BatchError, Finding, InteractiveResult, Outcome, StatementResult};
-pub use session::Session;
+pub use result::{BatchError, Finding, Outcome, Request, Response, ResponseError};
+pub use statement::{Definition, End, PatternExpr, Statement, parse_statement};

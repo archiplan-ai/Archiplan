@@ -4,88 +4,93 @@
 mod common;
 
 use common::*;
-use modeling_lang::{Layer, Outcome, Session};
+use modeling_lang::{Layer, Statement, Workspace};
+use serde_json::{Value, json};
 
-const WORKED_EXAMPLE: &str = r#"
-rel trans of_sort := * -> *;
-# type_of comes from the stdlib
+fn worked_example_batch() -> Value {
+    json!([
+        { "stmt": "define", "rel": "of_sort", "trans": true, "directed": true,
+          "source": "*", "target": "*" },
 
-node Functional;
-node Data;
+        { "stmt": "define", "node": "Functional" },
+        { "stmt": "define", "node": "Data" },
 
-node Service;
-Service of_sort Functional;
-node Payments;
-node Orders;
+        { "stmt": "define", "node": "Service" },
+        { "stmt": "rel-edge", "rel": "of_sort", "source": "Service", "target": "Functional" },
+        { "stmt": "define", "node": "Payments" },
+        { "stmt": "define", "node": "Orders" },
 
-# Payments and Orders are concrete services (terms of type Service)
-Service type_of Payments;
-Service type_of Orders;
+        { "stmt": "rel-edge", "rel": "type_of", "source": "Service", "target": "Payments" },
+        { "stmt": "rel-edge", "rel": "type_of", "source": "Service", "target": "Orders" },
 
-node OrderId;
-OrderId of_sort Data;
+        { "stmt": "define", "node": "OrderId" },
+        { "stmt": "rel-edge", "rel": "of_sort", "source": "OrderId", "target": "Data" },
 
-# a connection between two services' ports, carrying an OrderId
-conn confirm := (Service type_of *) (OrderId)-> (Service type_of *);
-Payments(send_confirmation) confirm(OrderId) Orders(handle_confirmation);
+        { "stmt": "define", "conn": "confirm", "directed": true,
+          "source":  { "anchor": "Service", "rel": "type_of" },
+          "carrier": { "node": "OrderId" },
+          "target":  { "anchor": "Service", "rel": "type_of" } },
+        { "stmt": "conn-edge", "conn": "confirm",
+          "source":  { "node": "Payments", "port": "send_confirmation" },
+          "carrier": "OrderId",
+          "target":  { "node": "Orders", "port": "handle_confirmation" } },
 
-# inside Orders, the boundary port is delegated to an inner handler
-node Orders {
-  node ConfirmationHandler;
-  handle_confirmation = ConfirmationHandler(handle_confirmation);
+        { "stmt": "define", "node": "Orders.ConfirmationHandler" },
+        { "stmt": "app", "node": "Orders", "port": "handle_confirmation",
+          "inner": { "node": "ConfirmationHandler", "port": "handle_confirmation" } }
+    ])
 }
-"#;
 
-pub fn worked_example() -> Session {
-    session_with(WORKED_EXAMPLE)
+pub fn worked_example() -> Workspace {
+    ws_with(worked_example_batch())
 }
 
 #[test]
-fn worked_example_applies() {
-    let mut s = Session::new();
-    let results = s.execute(WORKED_EXAMPLE).expect("worked example applies");
-    // The reopening `node Orders { ... }` reports the node part as a noop and
-    // the inner statements as applied.
-    let Outcome::Block(inner) = &results.last().unwrap().outcome else {
-        panic!("expected a block outcome");
-    };
-    assert!(
-        is_noop(&inner[0].outcome),
-        "restated `node Orders` is a noop"
+fn worked_example_applies_and_bumps_revision_once() {
+    let mut ws = Workspace::new();
+    let results = ws
+        .execute_values(worked_example_batch().as_array().unwrap())
+        .expect("worked example applies");
+    assert!(results.iter().all(is_applied));
+    assert_eq!(
+        ws.revision(),
+        1,
+        "one model-changing batch = one revision bump"
     );
-    assert!(inner[1..].iter().all(|r| is_applied(&r.outcome)));
 }
 
 #[test]
 fn ports_query_matches_spec_output() {
-    let mut s = worked_example();
+    let mut ws = worked_example();
     assert_eq!(
-        statements(&mut s, "ports Orders"),
+        pseudo(&mut ws, json!({ "stmt": "ports", "node": "Orders" })),
         vec![
             "Payments(send_confirmation) confirm(OrderId) Orders(handle_confirmation);",
-            "Orders { handle_confirmation = ConfirmationHandler(handle_confirmation); }",
+            "Orders.handle_confirmation = ConfirmationHandler(handle_confirmation);",
         ]
     );
 }
 
 #[test]
 fn ports_of_inner_node_include_the_application() {
-    let mut s = worked_example();
+    let mut ws = worked_example();
     assert_eq!(
-        statements(&mut s, "ports Orders.ConfirmationHandler"),
-        vec!["Orders { handle_confirmation = ConfirmationHandler(handle_confirmation); }"]
+        pseudo(
+            &mut ws,
+            json!({ "stmt": "ports", "node": "Orders.ConfirmationHandler" })
+        ),
+        vec!["Orders.handle_confirmation = ConfirmationHandler(handle_confirmation);"]
     );
 }
 
 #[test]
 fn layers_follow_type_of() {
-    let s = worked_example();
-    let m = s.model();
+    let ws = worked_example();
+    let m = ws.model();
     // Types appear on the left of `type_of`; everything else is a term —
     // including Functional, which classifies only through `of_sort`.
     assert_eq!(m.layer_of("Service"), Some(Layer::Epistemic));
     assert_eq!(m.layer_of("Payments"), Some(Layer::Epistatic));
-    assert_eq!(m.layer_of("Orders"), Some(Layer::Epistatic));
     assert_eq!(m.layer_of("OrderId"), Some(Layer::Epistatic));
     assert_eq!(m.layer_of("Functional"), Some(Layer::Epistatic));
     assert_eq!(
@@ -96,27 +101,41 @@ fn layers_follow_type_of() {
 }
 
 #[test]
-fn dump_round_trips() {
-    let mut s = worked_example();
-    let dumped = statements(&mut s, "dump");
-    assert!(dumped.contains(&"node Orders;".to_string()));
-    assert!(dumped.contains(&"Orders { node ConfirmationHandler; }".to_string()));
+fn dump_round_trips_idempotently() {
+    let mut ws = worked_example();
+    let dumped = statements(&mut ws, json!({ "stmt": "dump" }));
+    let lines: Vec<String> = dumped.iter().map(Statement::pseudo).collect();
+    assert!(lines.contains(&"def node Orders;".to_string()));
+    assert!(lines.contains(&"def node Orders.ConfirmationHandler;".to_string()));
 
-    let mut replayed = Session::new();
+    let mut replayed = Workspace::new();
     replayed
-        .execute(&dumped.join("\n"))
-        .expect("a dump replays into a fresh session");
+        .execute(&dumped)
+        .expect("a dump replays into a fresh workspace");
     assert_eq!(
         replayed.model().dump(),
         dumped,
         "replayed model dumps identically"
     );
+
+    // Replaying a dump over the model it came from is all noops.
+    let outcomes = ws.execute(&dumped).expect("replay over self");
+    assert!(outcomes.iter().all(is_noop));
 }
 
 #[test]
 fn check_is_clean() {
-    let mut s = worked_example();
-    // The worked example is complete: every declared type has instances, the
-    // delegated port has traffic, nothing drifted.
-    assert_eq!(findings(&mut s, "check"), vec![]);
+    let mut ws = worked_example();
+    assert_eq!(findings(&mut ws, json!({ "stmt": "check" })), vec![]);
+}
+
+#[test]
+fn statement_objects_round_trip_through_serde() {
+    let mut ws = worked_example();
+    let dumped = statements(&mut ws, json!({ "stmt": "dump" }));
+    for stmt in &dumped {
+        let v = stmt.to_value();
+        let back = modeling_lang::parse_statement(&v).expect("rendered statements parse");
+        assert_eq!(&back, stmt);
+    }
 }

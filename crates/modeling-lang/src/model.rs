@@ -3,7 +3,8 @@
 //! Names are handles; identity lives in ids. All references between stored
 //! elements — edge ends, carriers, pattern anchors, delegations — are ids, so
 //! renames are reference-safe by construction and deletion can compute the
-//! exact referencing closure.
+//! exact referencing closure. All name resolution is absolute: paths descend
+//! from the root, there is no ambient scope.
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -11,6 +12,7 @@ use std::collections::VecDeque;
 
 use crate::ids::{ConnId, EdgeId, NodeId, PortId, RelId, ViewId};
 use crate::result::Finding;
+use crate::statement::Statement;
 
 /// Which side of a directed connection type a port is fixed to.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -120,9 +122,9 @@ pub enum Layer {
     Epistatic,
 }
 
-/// A model: the store behind a [`crate::Session`].
+/// A model: the store behind a [`crate::Workspace`].
 ///
-/// Mutation goes through the statement API on `Session`; the model itself
+/// Mutation goes through the statement API on `Workspace`; the model itself
 /// exposes read access — [`Model::dump`], [`Model::check`], [`Model::layer_of`].
 #[derive(Clone, Debug)]
 pub struct Model {
@@ -187,29 +189,8 @@ impl Model {
         }
     }
 
-    /// Lexical resolution: the first segment is looked up in the innermost
-    /// scope and outward through enclosing scopes to the root, the remaining
-    /// segments descend through children.
-    pub(crate) fn resolve_path(&self, scope: &[NodeId], segs: &[String]) -> Option<NodeId> {
-        let first = &segs[0];
-        let mut cur = None;
-        for s in scope.iter().rev() {
-            if let Some(&c) = self.nodes[s].children.get(first) {
-                cur = Some(c);
-                break;
-            }
-        }
-        if cur.is_none() {
-            cur = self.root.get(first).copied();
-        }
-        let mut node = cur?;
-        for seg in &segs[1..] {
-            node = *self.nodes[&node].children.get(seg)?;
-        }
-        Some(node)
-    }
-
-    /// Descend-only resolution from a base scope; never walks outward.
+    /// Absolute resolution: descend from the given base (root when `None`)
+    /// through child scopes. The only resolution rule in the language.
     pub(crate) fn resolve_in(&self, base: Option<NodeId>, segs: &[String]) -> Option<NodeId> {
         let mut node = *self.children(base).get(&segs[0])?;
         for seg in &segs[1..] {
@@ -380,7 +361,8 @@ impl Model {
     }
 
     /// The whole model rendered as replayable statements, in creation order.
-    pub fn dump(&self) -> Vec<String> {
+    /// Creations render as `define`s, which are idempotent, so replays are safe.
+    pub fn dump(&self) -> Vec<Statement> {
         crate::query::dump(self, None)
     }
 

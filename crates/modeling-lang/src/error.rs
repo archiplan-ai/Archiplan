@@ -2,24 +2,30 @@
 //!
 //! Every rejected statement produces a [`LangError`] with a stable [`ErrorCode`],
 //! the offending statement as submitted, the elements involved, the violated
-//! constraint where applicable, and a suggested next step. Codes are append-only.
+//! constraint where applicable, and a suggested next step phrased as a runnable
+//! statement. Codes are append-only.
 
 use std::fmt;
 
-/// Stable error codes from the catalog in `requirements/modeling-lang/errors.md`.
-///
-/// `CrossScope` is appended by this implementation (the catalog is append-only):
-/// it rejects a connection whose ends do not share a parent scope, and an
-/// application whose inner node is not a direct child of the delegating node.
+use serde::Serialize;
+use serde_json::Value;
+
+/// Stable error codes from the catalog in `requirements/modeling-lang/errors.md`,
+/// plus the protocol-level codes of `requirements/agent-interface.md`
+/// (`BadRequest`, `StaleRevision`) which concern the envelope rather than a
+/// statement.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ErrorCode {
-    /// The statement does not parse; position and expected tokens included.
+    /// The statement is not a well-formed statement object: unknown `stmt`,
+    /// missing or ill-typed field, malformed path.
     Parse,
-    /// A referenced node / type / view / path does not resolve in scope.
+    /// A referenced node / type / view / path does not resolve — including
+    /// `redefine` of an element that does not exist.
     UnknownName,
-    /// Node creation or rename collides with a sibling's name.
+    /// A rename collides with a sibling's name.
     DupName,
-    /// A rel / conn / view is redeclared with a different definition.
+    /// A `define` differs from the existing definition of the name —
+    /// including a rel / conn kind mismatch.
     Redeclared,
     /// An end or carrier fails the type's pattern at edge creation.
     ShapeViolation,
@@ -35,11 +41,14 @@ pub enum ErrorCode {
     NoOuterPort,
     /// Two qualified delegations on one port match the same carried node.
     AmbiguousDelegation,
-    /// Attempt to delete or divergently redeclare a stdlib element.
-    StdlibProtected,
-    /// A connection crosses a scope boundary, or an application's inner node is
-    /// not a direct child of the delegating node.
+    /// A connection joins nodes of different scopes.
     CrossScope,
+    /// Attempt to delete or divergently redefine a stdlib element.
+    StdlibProtected,
+    /// The request envelope is not valid or violates the contract.
+    BadRequest,
+    /// `expect_revision` does not match the model's current revision.
+    StaleRevision,
 }
 
 impl ErrorCode {
@@ -57,8 +66,10 @@ impl ErrorCode {
             ErrorCode::PortSideConflict => "E_PORT_SIDE_CONFLICT",
             ErrorCode::NoOuterPort => "E_NO_OUTER_PORT",
             ErrorCode::AmbiguousDelegation => "E_AMBIGUOUS_DELEGATION",
-            ErrorCode::StdlibProtected => "E_STDLIB_PROTECTED",
             ErrorCode::CrossScope => "E_CROSS_SCOPE",
+            ErrorCode::StdlibProtected => "E_STDLIB_PROTECTED",
+            ErrorCode::BadRequest => "E_BAD_REQUEST",
+            ErrorCode::StaleRevision => "E_STALE_REVISION",
         }
     }
 }
@@ -69,35 +80,48 @@ impl fmt::Display for ErrorCode {
     }
 }
 
+impl Serialize for ErrorCode {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
 /// A reference to an element involved in an error.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ErrorRef {
     /// What the reference points at: `"node"`, `"rel"`, `"conn"`, `"view"`,
-    /// `"port"`, `"edge"`, `"slot"` or `"path"`.
+    /// `"port"`, `"edge"` or `"slot"`.
     pub kind: &'static str,
-    /// Rendered path or name of the element, as addressable from the root scope.
+    /// Rendered absolute path or name of the element.
     pub path: String,
     /// The element's stable id, when it exists in the store.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<u64>,
 }
 
-/// A rejected statement. The model is untouched.
-#[derive(Clone, Debug)]
+/// A rejected statement or request. The model is untouched.
+#[derive(Clone, Debug, Serialize)]
 pub struct LangError {
     /// Stable identifier from the catalog.
     pub code: ErrorCode,
     /// Human-readable one-liner.
     pub message: String,
     /// The offending statement, as submitted.
-    pub subject: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subject: Option<Value>,
     /// Paths/ids of the elements involved.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub refs: Vec<ErrorRef>,
-    /// The violated constraint, where applicable: what was required.
-    pub expected: Option<String>,
+    /// The violated constraint, where applicable: what was required
+    /// (a pattern object, a type name, ...).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected: Option<Value>,
     /// The violated constraint, where applicable: what was found.
-    pub actual: Option<String>,
-    /// Suggested next step, phrased as a runnable statement or query.
-    pub hint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actual: Option<Value>,
+    /// Suggested next step, phrased as a runnable statement object.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<Value>,
 }
 
 impl LangError {
@@ -105,12 +129,17 @@ impl LangError {
         LangError {
             code,
             message: message.into(),
-            subject: String::new(),
+            subject: None,
             refs: Vec::new(),
             expected: None,
             actual: None,
             hint: None,
         }
+    }
+
+    pub(crate) fn with_subject(mut self, subject: Value) -> Self {
+        self.subject = Some(subject);
+        self
     }
 
     pub(crate) fn with_ref(
@@ -127,18 +156,18 @@ impl LangError {
         self
     }
 
-    pub(crate) fn with_expected(mut self, e: impl Into<String>) -> Self {
-        self.expected = Some(e.into());
+    pub(crate) fn with_expected(mut self, e: Value) -> Self {
+        self.expected = Some(e);
         self
     }
 
-    pub(crate) fn with_actual(mut self, a: impl Into<String>) -> Self {
-        self.actual = Some(a.into());
+    pub(crate) fn with_actual(mut self, a: Value) -> Self {
+        self.actual = Some(a);
         self
     }
 
-    pub(crate) fn with_hint(mut self, h: impl Into<String>) -> Self {
-        self.hint = Some(h.into());
+    pub(crate) fn with_hint(mut self, h: Value) -> Self {
+        self.hint = Some(h);
         self
     }
 }
@@ -146,17 +175,11 @@ impl LangError {
 impl fmt::Display for LangError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}: {}", self.code, self.message)?;
-        if !self.subject.is_empty() {
-            write!(f, " (subject: {})", self.subject)?;
-        }
         if let Some(e) = &self.expected {
-            write!(f, " expected: {e};")?;
+            write!(f, "; expected {e}")?;
         }
         if let Some(a) = &self.actual {
-            write!(f, " actual: {a};")?;
-        }
-        if let Some(h) = &self.hint {
-            write!(f, " hint: {h}")?;
+            write!(f, "; actual {a}")?;
         }
         Ok(())
     }

@@ -1,104 +1,55 @@
-//! Statement results: applied / noop / error, cascade reports, query output
-//! and check findings.
+//! Statement results, findings, and the request/response envelope of the
+//! agent interface (`requirements/agent-interface.md`).
 
 use std::fmt;
 
-use crate::error::LangError;
+use serde::Serialize;
+use serde_json::Value;
 
-/// The result of one successfully processed statement.
-#[derive(Clone, Debug)]
+use crate::error::LangError;
+use crate::statement::{PatternExpr, Statement};
+
+/// The result of one statement, tagged by outcome.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "result", rename_all = "snake_case")]
 pub enum Outcome {
-    /// The model changed.
-    Applied,
+    /// The model changed. `cascade` appears on `delete` and node-`redefine`
+    /// results: everything removed, rendered as replayable statements in
+    /// creation order.
+    Applied {
+        /// Removed elements, rendered as statements; `None` for plain writes.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cascade: Option<Vec<Statement>>,
+    },
     /// The statement restates something identical that already exists.
     Noop,
-    /// A `delete` succeeded; `cascade` lists everything removed, rendered as
-    /// statements in creation order.
-    Deleted {
-        /// Every removed element, rendered as the statement that created it.
-        cascade: Vec<String>,
+    /// Read output (`ports`, `dump`): statements that recreate the slice.
+    Statements {
+        /// The replayable statements.
+        statements: Vec<Statement>,
     },
-    /// A query result: statements that recreate the requested slice.
-    Statements(Vec<String>),
-    /// A `check` result: model-completeness findings.
-    Findings(Vec<Finding>),
-    /// A braced statement (`X { ... }` or `node X { ... }`); carries the results
-    /// of the inner statements. For `node X { ... }` the first entry reports the
-    /// `node X` part itself.
-    Block(Vec<StatementResult>),
+    /// `check` output: model-completeness findings.
+    Findings {
+        /// The findings.
+        findings: Vec<Finding>,
+    },
 }
 
 impl Outcome {
-    /// Whether this outcome (or, for blocks, any inner outcome) changed the model.
+    pub(crate) fn applied() -> Self {
+        Outcome::Applied { cascade: None }
+    }
+
+    /// Whether this outcome changed the model.
     pub fn changed_model(&self) -> bool {
-        match self {
-            Outcome::Applied | Outcome::Deleted { .. } => true,
-            Outcome::Noop | Outcome::Statements(_) | Outcome::Findings(_) => false,
-            Outcome::Block(inner) => inner.iter().any(|r| r.outcome.changed_model()),
-        }
+        matches!(self, Outcome::Applied { .. })
     }
-}
-
-impl fmt::Display for Outcome {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Outcome::Applied => f.write_str("applied"),
-            Outcome::Noop => f.write_str("noop"),
-            Outcome::Deleted { cascade } => {
-                f.write_str("deleted:")?;
-                for s in cascade {
-                    write!(f, "\n  {s}")?;
-                }
-                Ok(())
-            }
-            Outcome::Statements(lines) => {
-                if lines.is_empty() {
-                    return f.write_str("(empty)");
-                }
-                for (i, s) in lines.iter().enumerate() {
-                    if i > 0 {
-                        f.write_str("\n")?;
-                    }
-                    f.write_str(s)?;
-                }
-                Ok(())
-            }
-            Outcome::Findings(findings) => {
-                if findings.is_empty() {
-                    return f.write_str("no findings");
-                }
-                for (i, fi) in findings.iter().enumerate() {
-                    if i > 0 {
-                        f.write_str("\n")?;
-                    }
-                    write!(f, "{fi}")?;
-                }
-                Ok(())
-            }
-            Outcome::Block(inner) => {
-                if inner.iter().any(|r| r.outcome.changed_model()) {
-                    f.write_str("applied")
-                } else {
-                    f.write_str("noop")
-                }
-            }
-        }
-    }
-}
-
-/// One statement paired with its outcome.
-#[derive(Clone, Debug)]
-pub struct StatementResult {
-    /// The statement source text, as submitted.
-    pub source: String,
-    /// What happened.
-    pub outcome: Outcome,
 }
 
 /// A batch failed: the whole batch was rolled back.
 #[derive(Clone, Debug)]
 pub struct BatchError {
-    /// Index of the failing top-level statement within the batch.
+    /// Index of the failing statement within the batch.
     pub index: usize,
     /// Why it failed.
     pub error: LangError,
@@ -112,35 +63,29 @@ impl fmt::Display for BatchError {
 
 impl std::error::Error for BatchError {}
 
-/// The result of one interactively applied statement.
-#[derive(Clone, Debug)]
-pub struct InteractiveResult {
-    /// The statement source text, as submitted.
-    pub source: String,
-    /// Outcome, or the error that rejected this one statement.
-    pub result: Result<Outcome, LangError>,
-}
-
 /// A model-completeness finding: a state that is legal mid-construction but
 /// suspect. Findings are surfaced by `check`, never by rejecting writes.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// Kinds are append-only, like error codes.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Finding {
-    /// An edge whose shape conformance drifted after a classifier edge was removed.
+    /// An edge whose shape conformance drifted after a classifier edge was
+    /// removed or a type was redefined.
     ShapeDrift {
-        /// The nonconforming edge, rendered as a statement.
-        statement: String,
+        /// The nonconforming edge, as a statement.
+        statement: Statement,
         /// Which slot drifted: `source`, `target` or `carrier`.
         slot: String,
         /// The pattern the slot must match.
-        expected: String,
-        /// The node that no longer matches.
+        expected: PatternExpr,
+        /// The node that no longer matches (absolute path).
         actual: String,
     },
     /// Carried traffic on a delegated port that matches no delegation.
     UnroutedTraffic {
-        /// The unroutable connection edge, rendered as a statement.
-        statement: String,
-        /// The delegated port the edge attaches to.
+        /// The unroutable connection edge, as a statement.
+        statement: Statement,
+        /// The delegated port, as `path.port`.
         port: String,
     },
     /// A delegated port with no attached connections.
@@ -156,7 +101,7 @@ pub enum Finding {
     /// A type with no instances.
     TypeWithoutInstances {
         /// `"rel"` or `"conn"`.
-        kind: &'static str,
+        type_kind: &'static str,
         /// The type name.
         name: String,
     },
@@ -168,27 +113,88 @@ impl fmt::Display for Finding {
             Finding::ShapeDrift {
                 statement,
                 slot,
-                expected,
                 actual,
+                ..
             } => {
                 write!(
                     f,
-                    "shape drift: {statement} — {slot} {actual} no longer matches {expected}"
+                    "shape drift: {} — {slot} {actual} no longer matches",
+                    statement.pseudo()
                 )
             }
             Finding::UnroutedTraffic { statement, port } => {
                 write!(
                     f,
-                    "unrouted traffic: {statement} — no delegation on {port} matches"
+                    "unrouted traffic: {} — no delegation on {port} matches",
+                    statement.pseudo()
                 )
             }
             Finding::DelegatedPortWithoutConnections { port } => {
                 write!(f, "delegated port without connections: {port}")
             }
             Finding::EmptyView { view } => write!(f, "empty view: {view}"),
-            Finding::TypeWithoutInstances { kind, name } => {
-                write!(f, "type without instances: {kind} {name}")
+            Finding::TypeWithoutInstances { type_kind, name } => {
+                write!(f, "type without instances: {type_kind} {name}")
             }
+        }
+    }
+}
+
+/// A parsed request envelope: one batch against one model.
+#[derive(Clone, Debug)]
+pub struct Request {
+    /// The batch: raw statement values, parsed per statement so a schema
+    /// error reports the failing index.
+    pub statements: Vec<Value>,
+    /// Optimistic-concurrency guard.
+    pub expect_revision: Option<u64>,
+    /// Execute, report full results, then roll everything back.
+    pub dry_run: bool,
+}
+
+/// The response envelope.
+#[derive(Clone, Debug, Serialize)]
+pub struct Response {
+    /// `ok` or `error`.
+    pub status: &'static str,
+    /// The model revision after the request.
+    pub revision: u64,
+    /// One entry per statement, in batch order (when `status` is `ok`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub results: Option<Vec<Outcome>>,
+    /// The failure (when `status` is `error`); the whole batch was rolled back.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<ResponseError>,
+}
+
+/// The error member of a response: the statement error plus the failing
+/// statement's index; protocol errors carry no index.
+#[derive(Clone, Debug, Serialize)]
+pub struct ResponseError {
+    /// Index of the failing statement, absent for protocol errors.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index: Option<usize>,
+    /// The error itself, flattened into this object.
+    #[serde(flatten)]
+    pub error: LangError,
+}
+
+impl Response {
+    pub(crate) fn ok(revision: u64, results: Vec<Outcome>) -> Self {
+        Response {
+            status: "ok",
+            revision,
+            results: Some(results),
+            error: None,
+        }
+    }
+
+    pub(crate) fn fail(revision: u64, index: Option<usize>, error: LangError) -> Self {
+        Response {
+            status: "error",
+            revision,
+            results: None,
+            error: Some(ResponseError { index, error }),
         }
     }
 }

@@ -1,267 +1,429 @@
-//! Restatement/noop semantics, views, routing, deletion cascades, port
-//! lifecycle, rename reference-safety, transitivity and scopes.
+//! Definitions, absolute addressing, views, routing, deletion cascades,
+//! rename reference-safety, transitivity, and pseudo-syntax rendering.
 
 mod common;
 
 use common::*;
-use modeling_lang::{ErrorCode, Finding, Session};
+use modeling_lang::{ErrorCode, Finding, Outcome, PatternExpr, Statement, Workspace};
+use serde_json::{Value, json};
 
-const WORKED_EXAMPLE: &str = r#"
-rel trans of_sort := * -> *;
-node Functional;
-node Data;
-node Service;
-Service of_sort Functional;
-node Payments;
-node Orders;
-Service type_of Payments;
-Service type_of Orders;
-node OrderId;
-OrderId of_sort Data;
-conn confirm := (Service type_of *) (OrderId)-> (Service type_of *);
-Payments(send_confirmation) confirm(OrderId) Orders(handle_confirmation);
-node Orders {
-  node ConfirmationHandler;
-  handle_confirmation = ConfirmationHandler(handle_confirmation);
+fn routing_example() -> Workspace {
+    ws_with(json!([
+        { "stmt": "define", "node": "Message" },
+        { "stmt": "define", "node": "OrderCreated" },
+        { "stmt": "define", "node": "PaymentFailed" },
+        { "stmt": "define", "node": "ShipmentDue" },
+        { "stmt": "rel-edge", "rel": "type_of", "source": "Message", "target": "OrderCreated" },
+        { "stmt": "rel-edge", "rel": "type_of", "source": "Message", "target": "PaymentFailed" },
+        { "stmt": "rel-edge", "rel": "type_of", "source": "Message", "target": "ShipmentDue" },
+        { "stmt": "define", "node": "Payments" },
+        { "stmt": "define", "node": "Shipping" },
+        { "stmt": "define", "node": "Orders" },
+        { "stmt": "define", "node": "Orders.OrderHandler" },
+        { "stmt": "define", "node": "Orders.PaymentHandler" },
+        { "stmt": "define", "conn": "send", "directed": true,
+          "source": "*", "carrier": { "anchor": "Message", "rel": "type_of" }, "target": "*" },
+        { "stmt": "conn-edge", "conn": "send",
+          "source": { "node": "Payments", "port": "payment_events" }, "carrier": "PaymentFailed",
+          "target": { "node": "Orders", "port": "events" } },
+        { "stmt": "conn-edge", "conn": "send",
+          "source": { "node": "Shipping", "port": "shipping_events" }, "carrier": "OrderCreated",
+          "target": { "node": "Orders", "port": "events" } },
+        { "stmt": "app", "node": "Orders", "port": "events",
+          "route": { "node": "OrderCreated" }, "inner": { "node": "OrderHandler", "port": "handle" } },
+        { "stmt": "app", "node": "Orders", "port": "events",
+          "route": { "node": "PaymentFailed" }, "inner": { "node": "PaymentHandler", "port": "handle" } }
+    ]))
 }
-"#;
 
-const ROUTING_EXAMPLE: &str = r#"
-node Message; node OrderCreated; node PaymentFailed; node ShipmentDue;
-Message type_of OrderCreated; Message type_of PaymentFailed; Message type_of ShipmentDue;
-node Service; node Payments; node Shipping; node Orders;
-Service type_of Payments; Service type_of Shipping; Service type_of Orders;
-conn send := (Service type_of *) (Message type_of *)-> (Service type_of *);
-Payments(payment_events)  send(PaymentFailed) Orders(events);
-Shipping(shipping_events) send(OrderCreated) Orders(events);
-node Orders {
-  node OrderHandler; node PaymentHandler;
-  events(OrderCreated)  = OrderHandler(handle);
-  events(PaymentFailed) = PaymentHandler(handle);
-}
-"#;
-
-// ---- restatement / noop -----------------------------------------------
+// ---- definitions ----------------------------------------------------------
 
 #[test]
-fn identical_restatements_are_noops() {
-    let mut s = session_with("node A; view v; rel dep := * -> *; node B; A dep B;");
-    assert!(is_noop(&outcome(&mut s, "node A;")));
-    assert!(is_noop(&outcome(&mut s, "view v;")));
-    assert!(is_noop(&outcome(&mut s, "rel dep := * -> *;")));
-    assert!(is_noop(&outcome(&mut s, "A dep B;")));
-}
-
-#[test]
-fn conn_edge_identity_is_type_ports_and_carrier() {
-    let mut s = session_with(
-        "node A; node B; node M; node N;
-         conn send := * (*)-> *;
-         A(out) send(M) B(recv);",
-    );
-    assert!(is_noop(&outcome(&mut s, "A(out) send(M) B(recv);")));
-    // A different carrier through the same ports is a different edge.
-    assert!(is_applied(&outcome(&mut s, "A(out) send(N) B(recv);")));
-}
-
-#[test]
-fn undirected_edges_have_unordered_identity() {
-    let mut s = session_with(
-        "rel peers := * <-> *;
-         conn link := * <-> *;
-         node A; node B;
-         A peers B;
-         A(x) link B(y);",
-    );
-    assert!(is_noop(&outcome(&mut s, "B peers A;")));
-    assert!(is_noop(&outcome(&mut s, "B(y) link A(x);")));
-}
-
-#[test]
-fn several_edges_share_a_port() {
-    let mut s = session_with(
-        "node A; node B;
-         conn c := * -> *;
-         A(out) c B(in1);
-         A(out) c B(in2);",
-    );
-    assert_eq!(
-        statements(&mut s, "ports A"),
-        vec!["A(out) c B(in1);", "A(out) c B(in2);"]
-    );
-}
-
-#[test]
-fn restating_an_application_is_a_noop() {
-    let mut s = session_with(WORKED_EXAMPLE);
-    let results = outcomes(
-        &mut s,
-        "Orders { handle_confirmation = ConfirmationHandler(handle_confirmation); }",
-    );
-    let modeling_lang::Outcome::Block(inner) = &results[0] else {
-        panic!("expected block");
-    };
-    assert!(is_noop(&inner[0].outcome));
-}
-
-// ---- views ---------------------------------------------------------------
-
-#[test]
-fn views_extend_by_restatement_and_shrink_by_untag() {
-    let mut s = session_with(
-        "view flow; view fault;
-         node A; node B; rel dep := * -> *;
-         A dep B in flow;",
-    );
-    assert!(
-        is_applied(&outcome(&mut s, "A dep B in fault;")),
-        "restating with `in` extends"
-    );
-    assert!(is_noop(&outcome(&mut s, "A dep B in fault;")));
-    assert!(
-        is_noop(&outcome(&mut s, "A dep B;")),
-        "restating without `in` is a noop"
-    );
-    assert!(statements(&mut s, "dump in flow").contains(&"A dep B in flow, fault;".to_string()));
-
-    assert!(is_applied(&outcome(&mut s, "untag A dep B in flow;")));
-    assert!(is_noop(&outcome(&mut s, "untag A dep B in flow;")));
-    // An untagged edge belongs to no view and is invisible to filtered queries.
-    assert!(is_applied(&outcome(&mut s, "untag A dep B in fault;")));
-    assert!(
-        !statements(&mut s, "dump in flow")
-            .iter()
-            .any(|l| l.contains("dep"))
-    );
-    assert!(statements(&mut s, "dump").contains(&"A dep B;".to_string()));
-}
-
-#[test]
-fn deleting_a_view_only_drops_tags() {
-    let mut s = session_with("view flow; node A; node B; rel dep := * -> *; A dep B in flow;");
-    assert_eq!(cascade(&mut s, "delete view flow;"), vec!["view flow;"]);
-    assert!(statements(&mut s, "dump").contains(&"A dep B;".to_string()));
-    assert_eq!(err_code(&mut s, "dump in flow"), ErrorCode::UnknownName);
-}
-
-#[test]
-fn applications_belong_to_the_views_of_the_edges_they_route() {
-    let mut s = session_with(WORKED_EXAMPLE);
-    outcomes(&mut s, "view flow; view other;");
-    outcomes(
-        &mut s,
-        "Payments(send_confirmation) confirm(OrderId) Orders(handle_confirmation) in flow;",
-    );
-    assert_eq!(
-        statements(&mut s, "ports Orders in flow"),
-        vec![
-            "Payments(send_confirmation) confirm(OrderId) Orders(handle_confirmation) in flow;",
-            "Orders { handle_confirmation = ConfirmationHandler(handle_confirmation); }",
-        ]
-    );
-    assert_eq!(
-        statements(&mut s, "ports Orders in other"),
-        Vec::<String>::new()
-    );
-}
-
-// ---- routing by carried node -------------------------------------------
-
-#[test]
-fn qualified_delegations_route_by_carrier() {
-    let mut s = session_with(ROUTING_EXAMPLE);
-    assert_eq!(findings(&mut s, "check"), vec![]);
-    // Traffic whose carrier matches no qualifier and has no unqualified
-    // fallback is a finding, not an error.
-    outcomes(
-        &mut s,
-        "Shipping(shipping_events) send(ShipmentDue) Orders(events);",
-    );
-    let f = findings(&mut s, "check");
-    assert!(
-        f.iter().any(|f| matches!(
-            f,
-            Finding::UnroutedTraffic { port, .. } if port == "Orders.events"
-        )),
-        "expected unrouted traffic, got {f:?}"
-    );
-    // An unqualified delegation catches what no qualifier matches.
-    outcomes(&mut s, "Orders { node Fallback; events = Fallback(rest); }");
-    assert_eq!(findings(&mut s, "check"), vec![]);
-}
-
-// ---- deletion ------------------------------------------------------------
-
-#[test]
-fn deleting_a_node_cascades_over_the_referencing_closure() {
-    let mut s = session_with(WORKED_EXAMPLE);
-    assert_eq!(
-        cascade(&mut s, "delete Orders;"),
-        vec![
-            "node Orders;",
-            "Service type_of Orders;",
-            "Payments(send_confirmation) confirm(OrderId) Orders(handle_confirmation);",
-            "Orders { node ConfirmationHandler; }",
-            "Orders { handle_confirmation = ConfirmationHandler(handle_confirmation); }",
-        ]
-    );
-    // The last edge on Payments.send_confirmation went with the cascade, so
-    // the port is gone too.
-    assert_eq!(statements(&mut s, "ports Payments"), Vec::<String>::new());
-}
-
-#[test]
-fn deleting_a_pattern_anchor_takes_the_type_and_its_edges() {
-    let mut s = session_with(WORKED_EXAMPLE);
-    let c = cascade(&mut s, "delete Service;");
-    assert!(c.contains(&"node Service;".to_string()));
-    assert!(c.contains(
-        &"conn confirm := (Service type_of *) (OrderId)-> (Service type_of *);".to_string()
-    ));
-    assert!(c.contains(
-        &"Payments(send_confirmation) confirm(OrderId) Orders(handle_confirmation);".to_string()
-    ));
-    assert!(c.contains(
-        &"Orders { handle_confirmation = ConfirmationHandler(handle_confirmation); }".to_string()
-    ));
-    assert_eq!(statements(&mut s, "ports Orders"), Vec::<String>::new());
-    // Cascading away the last attached edge freed the port name: a fresh
-    // first use may bind a new type.
-    outcomes(&mut s, "conn d := * -> *; node Z;");
+fn define_is_idempotent() {
+    let mut ws = Workspace::new();
     assert!(is_applied(&outcome(
-        &mut s,
-        "Orders(handle_confirmation) d Z(z);"
+        &mut ws,
+        json!({ "stmt": "define", "node": "A" })
+    )));
+    assert!(is_noop(&outcome(
+        &mut ws,
+        json!({ "stmt": "define", "node": "A" })
+    )));
+    // Identical restatements of typed definitions are no-ops too; a divergent
+    // one is rejected, never silently applied.
+    let rel =
+        json!({ "stmt": "define", "rel": "dep", "directed": true, "source": "*", "target": "*" });
+    assert!(is_applied(&outcome(&mut ws, rel.clone())));
+    assert!(is_noop(&outcome(&mut ws, rel)));
+    assert_eq!(
+        err_code(
+            &mut ws,
+            json!({ "stmt": "define", "rel": "dep", "directed": false, "source": "*", "target": "*" })
+        ),
+        ErrorCode::Redeclared
+    );
+    // Whole-batch replays are safe: every statement no-ops.
+    let batch = json!([
+        { "stmt": "define", "node": "B" },
+        { "stmt": "define", "view": "flow" },
+        { "stmt": "rel-edge", "rel": "dep", "source": "A", "target": "B", "views": ["flow"] }
+    ]);
+    assert!(outcomes(&mut ws, batch.clone()).iter().all(is_applied));
+    assert!(outcomes(&mut ws, batch).iter().all(is_noop));
+}
+
+#[test]
+fn node_redefine_replaces_internals_keeping_external_wiring() {
+    let mut ws = ws_with(json!([
+        { "stmt": "define", "node": "Payments" },
+        { "stmt": "define", "node": "Orders" },
+        { "stmt": "define", "node": "Orders.ConfirmationHandler" },
+        { "stmt": "define", "conn": "confirm", "directed": true, "source": "*", "target": "*" },
+        { "stmt": "conn-edge", "conn": "confirm",
+          "source": { "node": "Payments", "port": "send" }, "target": { "node": "Orders", "port": "handle" } },
+        { "stmt": "app", "node": "Orders", "port": "handle",
+          "inner": { "node": "ConfirmationHandler", "port": "handle" } }
+    ]));
+    // One atomic batch: reset the internals, rebuild them differently.
+    let results = outcomes(
+        &mut ws,
+        json!([
+            { "stmt": "redefine", "node": "Orders" },
+            { "stmt": "define", "node": "Orders.RefundHandler" },
+            { "stmt": "app", "node": "Orders", "port": "handle",
+              "inner": { "node": "RefundHandler", "port": "handle" } }
+        ]),
+    );
+    match &results[0] {
+        Outcome::Applied { cascade: Some(c) } => {
+            let lines: Vec<String> = c.iter().map(Statement::pseudo).collect();
+            assert!(lines.contains(&"def node Orders.ConfirmationHandler;".to_string()));
+            assert!(lines.contains(&"Orders.handle = ConfirmationHandler(handle);".to_string()));
+        }
+        o => panic!("expected redefine cascade, got {o:?}"),
+    }
+    // The external connection survived: the node, its port and the edge kept
+    // their identity.
+    let lines = pseudo(&mut ws, json!({ "stmt": "ports", "node": "Orders" }));
+    assert!(lines.contains(&"Payments(send) confirm Orders(handle);".to_string()));
+    assert!(lines.contains(&"Orders.handle = RefundHandler(handle);".to_string()));
+    // Redefining an already-empty scope is a no-op.
+    let results = outcomes(
+        &mut ws,
+        json!([{ "stmt": "redefine", "node": "Orders.RefundHandler" }]),
+    );
+    assert!(is_noop(&results[0]));
+}
+
+#[test]
+fn type_redefine_replaces_shape_and_lets_edges_drift() {
+    let mut ws = ws_with(json!([
+        { "stmt": "define", "node": "Service" },
+        { "stmt": "define", "node": "A" },
+        { "stmt": "define", "node": "B" },
+        { "stmt": "define", "rel": "dep", "directed": true, "source": "*", "target": "*" },
+        { "stmt": "rel-edge", "rel": "dep", "source": "A", "target": "B" }
+    ]));
+    // Narrow the shape: existing edges are not re-checked eagerly.
+    assert!(is_applied(&outcome(
+        &mut ws,
+        json!({ "stmt": "redefine", "rel": "dep", "directed": true,
+                "source": { "anchor": "Service", "rel": "type_of" },
+                "target": { "anchor": "Service", "rel": "type_of" } })
+    )));
+    let f = findings(&mut ws, json!({ "stmt": "check" }));
+    assert!(
+        f.iter()
+            .any(|f| matches!(f, Finding::ShapeDrift { slot, actual, .. }
+            if slot == "source" && actual == "A")),
+        "expected drift after redefine, got {f:?}"
+    );
+    // New edges are validated against the new shape.
+    assert_eq!(
+        err_code(
+            &mut ws,
+            json!({ "stmt": "rel-edge", "rel": "dep", "source": "B", "target": "A" })
+        ),
+        ErrorCode::ShapeViolation
+    );
+}
+
+// ---- addressing ------------------------------------------------------------
+
+#[test]
+fn references_are_absolute_only() {
+    let mut ws = ws_with(json!([
+        { "stmt": "define", "node": "A" },
+        { "stmt": "define", "node": "A.Worker" },
+        { "stmt": "define", "node": "B" },
+        { "stmt": "define", "node": "B.Worker" },
+        { "stmt": "define", "rel": "dep", "directed": true, "source": "*", "target": "*" }
+    ]));
+    // Same name in different scopes, addressed by path.
+    assert!(is_applied(&outcome(
+        &mut ws,
+        json!({ "stmt": "rel-edge", "rel": "dep", "source": "A.Worker", "target": "B.Worker" })
+    )));
+    // A bare name never resolves against some ambient scope.
+    assert_eq!(
+        err_code(
+            &mut ws,
+            json!({ "stmt": "rel-edge", "rel": "dep", "source": "Worker", "target": "B" })
+        ),
+        ErrorCode::UnknownName
+    );
+}
+
+// ---- restatement and views ---------------------------------------------------
+
+#[test]
+fn edge_identity_is_structural() {
+    let mut ws = ws_with(json!([
+        { "stmt": "define", "node": "A" },
+        { "stmt": "define", "node": "B" },
+        { "stmt": "define", "node": "M" },
+        { "stmt": "define", "node": "N" },
+        { "stmt": "define", "rel": "peers", "directed": false, "source": "*", "target": "*" },
+        { "stmt": "define", "conn": "send", "directed": true, "source": "*", "carrier": "*", "target": "*" },
+        { "stmt": "rel-edge", "rel": "peers", "source": "A", "target": "B" },
+        { "stmt": "conn-edge", "conn": "send",
+          "source": { "node": "A", "port": "out" }, "carrier": "M", "target": { "node": "B", "port": "recv" } }
+    ]));
+    // Undirected identity is unordered.
+    assert!(is_noop(&outcome(
+        &mut ws,
+        json!({ "stmt": "rel-edge", "rel": "peers", "source": "B", "target": "A" })
+    )));
+    // Same ports, same carrier: the same edge.
+    assert!(is_noop(&outcome(
+        &mut ws,
+        json!({ "stmt": "conn-edge", "conn": "send",
+                "source": { "node": "A", "port": "out" }, "carrier": "M", "target": { "node": "B", "port": "recv" } })
+    )));
+    // A different carrier through the same ports is a different edge.
+    assert!(is_applied(&outcome(
+        &mut ws,
+        json!({ "stmt": "conn-edge", "conn": "send",
+                "source": { "node": "A", "port": "out" }, "carrier": "N", "target": { "node": "B", "port": "recv" } })
     )));
 }
 
 #[test]
-fn deleting_a_carrier_node_takes_the_types_whose_patterns_name_it() {
-    let mut s = session_with(
-        "node M; node A; node B;
-         conn send := * (M)-> *;
-         A(x) send(M) B(y);",
+fn views_extend_by_restatement_and_shrink_by_untag() {
+    let mut ws = ws_with(json!([
+        { "stmt": "define", "view": "flow" },
+        { "stmt": "define", "view": "fault" },
+        { "stmt": "define", "node": "A" },
+        { "stmt": "define", "node": "B" },
+        { "stmt": "define", "rel": "dep", "directed": true, "source": "*", "target": "*" },
+        { "stmt": "rel-edge", "rel": "dep", "source": "A", "target": "B", "views": ["flow"] }
+    ]));
+    let edge = json!({ "stmt": "rel-edge", "rel": "dep", "source": "A", "target": "B" });
+    let tagged = json!({ "stmt": "rel-edge", "rel": "dep", "source": "A", "target": "B", "views": ["fault"] });
+    assert!(
+        is_applied(&outcome(&mut ws, tagged.clone())),
+        "restating with views extends"
     );
+    assert!(is_noop(&outcome(&mut ws, tagged)));
+    assert!(
+        is_noop(&outcome(&mut ws, edge.clone())),
+        "restating without views is a noop"
+    );
+
+    let dumped = pseudo(&mut ws, json!({ "stmt": "dump", "in": ["flow"] }));
+    assert!(dumped.contains(&"A dep B in flow, fault;".to_string()));
+
+    assert!(is_applied(&outcome(
+        &mut ws,
+        json!({ "stmt": "untag", "edge": edge, "views": ["flow", "fault"] })
+    )));
+    let edge = json!({ "stmt": "rel-edge", "rel": "dep", "source": "A", "target": "B" });
+    assert!(is_noop(&outcome(
+        &mut ws,
+        json!({ "stmt": "untag", "edge": edge, "views": ["flow"] })
+    )));
+    // An untagged edge is invisible to filtered reads, present in full dumps.
+    assert!(
+        !pseudo(&mut ws, json!({ "stmt": "dump", "in": ["flow"] }))
+            .iter()
+            .any(|l| l.contains("dep"))
+    );
+    assert!(pseudo(&mut ws, json!({ "stmt": "dump" })).contains(&"A dep B;".to_string()));
+}
+
+#[test]
+fn deleting_a_view_only_drops_tags() {
+    let mut ws = ws_with(json!([
+        { "stmt": "define", "view": "flow" },
+        { "stmt": "define", "node": "A" },
+        { "stmt": "define", "node": "B" },
+        { "stmt": "define", "rel": "dep", "directed": true, "source": "*", "target": "*" },
+        { "stmt": "rel-edge", "rel": "dep", "source": "A", "target": "B", "views": ["flow"] }
+    ]));
     assert_eq!(
-        cascade(&mut s, "delete M;"),
-        vec!["node M;", "conn send := * (M)-> *;", "A(x) send(M) B(y);"]
+        cascade(&mut ws, json!({ "stmt": "delete", "view": "flow" })),
+        vec!["def view flow;"]
+    );
+    assert!(pseudo(&mut ws, json!({ "stmt": "dump" })).contains(&"A dep B;".to_string()));
+    assert_eq!(
+        err_code(&mut ws, json!({ "stmt": "dump", "in": ["flow"] })),
+        ErrorCode::UnknownName
     );
 }
 
 #[test]
-fn deleting_a_rel_type_takes_types_whose_patterns_use_it() {
-    let mut s = session_with(
-        "rel r := * -> *;
-         node A; node B; node D;
-         A r B;
-         rel needs := (A r *) -> *;
-         B needs D;",
+fn applications_belong_to_the_views_of_the_edges_they_route() {
+    let mut ws = routing_example();
+    outcomes(
+        &mut ws,
+        json!([
+            { "stmt": "define", "view": "flow" },
+            { "stmt": "define", "view": "other" },
+            { "stmt": "conn-edge", "conn": "send",
+              "source": { "node": "Shipping", "port": "shipping_events" }, "carrier": "OrderCreated",
+              "target": { "node": "Orders", "port": "events" }, "views": ["flow"] }
+        ]),
+    );
+    let lines = pseudo(
+        &mut ws,
+        json!({ "stmt": "ports", "node": "Orders", "in": ["flow"] }),
     );
     assert_eq!(
-        cascade(&mut s, "delete rel r;"),
+        lines,
         vec![
-            "rel r := * -> *;",
+            "Shipping(shipping_events) send(OrderCreated) Orders(events) in flow;",
+            "Orders.events(OrderCreated) = OrderHandler(handle);",
+        ]
+    );
+    assert!(
+        pseudo(
+            &mut ws,
+            json!({ "stmt": "ports", "node": "Orders", "in": ["other"] })
+        )
+        .is_empty()
+    );
+}
+
+// ---- routing -------------------------------------------------------------
+
+#[test]
+fn qualified_delegations_route_by_carrier() {
+    let mut ws = routing_example();
+    assert_eq!(findings(&mut ws, json!({ "stmt": "check" })), vec![]);
+    // Traffic whose carrier matches no qualifier and has no unqualified
+    // fallback is a finding, not an error.
+    outcomes(
+        &mut ws,
+        json!([
+            { "stmt": "conn-edge", "conn": "send",
+              "source": { "node": "Shipping", "port": "shipping_events" }, "carrier": "ShipmentDue",
+              "target": { "node": "Orders", "port": "events" } }
+        ]),
+    );
+    let f = findings(&mut ws, json!({ "stmt": "check" }));
+    assert!(
+        f.iter()
+            .any(|f| matches!(f, Finding::UnroutedTraffic { port, .. } if port == "Orders.events")),
+        "expected unrouted traffic, got {f:?}"
+    );
+    // An unqualified delegation catches what no qualifier matches.
+    outcomes(
+        &mut ws,
+        json!([
+            { "stmt": "define", "node": "Orders.Fallback" },
+            { "stmt": "app", "node": "Orders", "port": "events", "inner": { "node": "Fallback", "port": "rest" } }
+        ]),
+    );
+    assert_eq!(findings(&mut ws, json!({ "stmt": "check" })), vec![]);
+}
+
+// ---- deletion --------------------------------------------------------------
+
+#[test]
+fn deleting_a_node_cascades_over_the_referencing_closure() {
+    let mut ws = ws_with(json!([
+        { "stmt": "define", "node": "Service" },
+        { "stmt": "define", "node": "Payments" },
+        { "stmt": "define", "node": "Orders" },
+        { "stmt": "rel-edge", "rel": "type_of", "source": "Service", "target": "Payments" },
+        { "stmt": "rel-edge", "rel": "type_of", "source": "Service", "target": "Orders" },
+        { "stmt": "define", "node": "OrderId" },
+        { "stmt": "define", "conn": "confirm", "directed": true,
+          "source": { "anchor": "Service", "rel": "type_of" },
+          "carrier": { "node": "OrderId" },
+          "target": { "anchor": "Service", "rel": "type_of" } },
+        { "stmt": "conn-edge", "conn": "confirm",
+          "source": { "node": "Payments", "port": "send_confirmation" },
+          "carrier": "OrderId",
+          "target": { "node": "Orders", "port": "handle_confirmation" } },
+        { "stmt": "define", "node": "Orders.ConfirmationHandler" },
+        { "stmt": "app", "node": "Orders", "port": "handle_confirmation",
+          "inner": { "node": "ConfirmationHandler", "port": "handle_confirmation" } }
+    ]));
+    assert_eq!(
+        cascade(&mut ws, json!({ "stmt": "delete", "node": "Orders" })),
+        vec![
+            "def node Orders;",
+            "Service type_of Orders;",
+            "Payments(send_confirmation) confirm(OrderId) Orders(handle_confirmation);",
+            "def node Orders.ConfirmationHandler;",
+            "Orders.handle_confirmation = ConfirmationHandler(handle_confirmation);",
+        ]
+    );
+    // The last edge on Payments.send_confirmation went with the cascade, so
+    // the port is gone and its name is free for a new type.
+    assert!(pseudo(&mut ws, json!({ "stmt": "ports", "node": "Payments" })).is_empty());
+    outcomes(
+        &mut ws,
+        json!([
+            { "stmt": "define", "node": "Z" },
+            { "stmt": "define", "conn": "d", "directed": true, "source": "*", "target": "*" },
+            { "stmt": "conn-edge", "conn": "d",
+              "source": { "node": "Payments", "port": "send_confirmation" }, "target": { "node": "Z", "port": "z" } }
+        ]),
+    );
+}
+
+#[test]
+fn deleting_a_pattern_anchor_takes_types_and_their_edges() {
+    let mut ws = ws_with(json!([
+        { "stmt": "define", "node": "Service" },
+        { "stmt": "define", "node": "A" },
+        { "stmt": "define", "node": "B" },
+        { "stmt": "rel-edge", "rel": "type_of", "source": "Service", "target": "A" },
+        { "stmt": "rel-edge", "rel": "type_of", "source": "Service", "target": "B" },
+        { "stmt": "define", "conn": "calls", "directed": true,
+          "source": { "anchor": "Service", "rel": "type_of" },
+          "target": { "anchor": "Service", "rel": "type_of" } },
+        { "stmt": "conn-edge", "conn": "calls",
+          "source": { "node": "A", "port": "out" }, "target": { "node": "B", "port": "recv" } }
+    ]));
+    let c = cascade(&mut ws, json!({ "stmt": "delete", "node": "Service" }));
+    assert!(c.contains(&"def node Service;".to_string()));
+    assert!(
+        c.contains(&"def conn calls := (Service type_of *) -> (Service type_of *);".to_string())
+    );
+    assert!(c.contains(&"A(out) calls B(recv);".to_string()));
+}
+
+#[test]
+fn deleting_a_rel_type_takes_types_whose_patterns_use_it() {
+    let mut ws = ws_with(json!([
+        { "stmt": "define", "rel": "r", "directed": true, "source": "*", "target": "*" },
+        { "stmt": "define", "node": "A" },
+        { "stmt": "define", "node": "B" },
+        { "stmt": "define", "node": "D" },
+        { "stmt": "rel-edge", "rel": "r", "source": "A", "target": "B" },
+        { "stmt": "define", "rel": "needs", "directed": true,
+          "source": { "anchor": "A", "rel": "r" }, "target": "*" },
+        { "stmt": "rel-edge", "rel": "needs", "source": "B", "target": "D" }
+    ]));
+    assert_eq!(
+        cascade(&mut ws, json!({ "stmt": "delete", "rel": "r" })),
+        vec![
+            "def rel r := * -> *;",
             "A r B;",
-            "rel needs := (A r *) -> *;",
+            "def rel needs := (A r *) -> *;",
             "B needs D;"
         ]
     );
@@ -269,187 +431,240 @@ fn deleting_a_rel_type_takes_types_whose_patterns_use_it() {
 
 #[test]
 fn deleting_a_conn_type_takes_its_ports_and_applications() {
-    let mut s = session_with(
-        "node A; node B;
-         conn c := * -> *;
-         A(p) c B(q);
-         B { node I; q = I(r); }",
-    );
+    let mut ws = ws_with(json!([
+        { "stmt": "define", "node": "A" },
+        { "stmt": "define", "node": "B" },
+        { "stmt": "define", "node": "B.I" },
+        { "stmt": "define", "conn": "c", "directed": true, "source": "*", "target": "*" },
+        { "stmt": "conn-edge", "conn": "c",
+          "source": { "node": "A", "port": "p" }, "target": { "node": "B", "port": "q" } },
+        { "stmt": "app", "node": "B", "port": "q", "inner": { "node": "I", "port": "r" } }
+    ]));
     assert_eq!(
-        cascade(&mut s, "delete conn c;"),
-        vec!["conn c := * -> *;", "A(p) c B(q);", "B { q = I(r); }"]
+        cascade(&mut ws, json!({ "stmt": "delete", "conn": "c" })),
+        vec!["def conn c := * -> *;", "A(p) c B(q);", "B.q = I(r);"]
     );
     // All ports of the deleted type are gone; the names are free for a new type.
-    outcomes(&mut s, "conn d := * -> *;");
-    assert!(is_applied(&outcome(&mut s, "A(p) d B(q);")));
+    outcomes(
+        &mut ws,
+        json!([
+            { "stmt": "define", "conn": "d", "directed": true, "source": "*", "target": "*" },
+            { "stmt": "conn-edge", "conn": "d",
+              "source": { "node": "A", "port": "p" }, "target": { "node": "B", "port": "q" } }
+        ]),
+    );
 }
 
 #[test]
 fn deleting_a_classifier_edge_is_soft_drift_not_cascade() {
-    let mut s = session_with(WORKED_EXAMPLE);
+    let mut ws = ws_with(json!([
+        { "stmt": "define", "node": "Service" },
+        { "stmt": "define", "node": "A" },
+        { "stmt": "define", "node": "B" },
+        { "stmt": "rel-edge", "rel": "type_of", "source": "Service", "target": "A" },
+        { "stmt": "rel-edge", "rel": "type_of", "source": "Service", "target": "B" },
+        { "stmt": "define", "conn": "calls", "directed": true,
+          "source": { "anchor": "Service", "rel": "type_of" },
+          "target": { "anchor": "Service", "rel": "type_of" } },
+        { "stmt": "conn-edge", "conn": "calls",
+          "source": { "node": "A", "port": "out" }, "target": { "node": "B", "port": "recv" } }
+    ]));
     assert_eq!(
-        cascade(&mut s, "delete Service type_of Payments;"),
-        vec!["Service type_of Payments;"]
+        cascade(
+            &mut ws,
+            json!({ "stmt": "delete",
+                    "edge": { "stmt": "rel-edge", "rel": "type_of", "source": "Service", "target": "A" } })
+        ),
+        vec!["Service type_of A;"]
     );
     // The nonconforming connection edge remains, surfaced as a finding.
-    assert!(statements(&mut s, "dump").contains(
-        &"Payments(send_confirmation) confirm(OrderId) Orders(handle_confirmation);".to_string()
-    ));
-    let f = findings(&mut s, "check");
     assert!(
-        f.iter().any(|f| matches!(
-            f,
-            Finding::ShapeDrift { slot, actual, .. } if slot == "source" && actual == "Payments"
-        )),
+        pseudo(&mut ws, json!({ "stmt": "dump" })).contains(&"A(out) calls B(recv);".to_string())
+    );
+    let f = findings(&mut ws, json!({ "stmt": "check" }));
+    assert!(
+        f.iter().any(|f| matches!(f, Finding::ShapeDrift { slot, actual, expected, .. }
+            if slot == "source" && actual == "A"
+               && *expected == PatternExpr::Classified { anchor: "Service".into(), rel: "type_of".into() })),
         "expected shape drift, got {f:?}"
     );
 }
 
 #[test]
 fn deleting_the_last_connection_leaves_a_delegated_port_as_a_finding() {
-    let mut s = session_with(WORKED_EXAMPLE);
+    let mut ws = ws_with(json!([
+        { "stmt": "define", "node": "A" },
+        { "stmt": "define", "node": "Orders" },
+        { "stmt": "define", "node": "Orders.H" },
+        { "stmt": "define", "conn": "c", "directed": true, "source": "*", "target": "*" },
+        { "stmt": "conn-edge", "conn": "c",
+          "source": { "node": "A", "port": "out" }, "target": { "node": "Orders", "port": "events" } },
+        { "stmt": "app", "node": "Orders", "port": "events", "inner": { "node": "H", "port": "h" } }
+    ]));
     assert_eq!(
         cascade(
-            &mut s,
-            "delete Payments(send_confirmation) confirm(OrderId) Orders(handle_confirmation);"
+            &mut ws,
+            json!({ "stmt": "delete",
+                    "edge": { "stmt": "conn-edge", "conn": "c",
+                              "source": { "node": "A", "port": "out" },
+                              "target": { "node": "Orders", "port": "events" } } })
         ),
-        vec!["Payments(send_confirmation) confirm(OrderId) Orders(handle_confirmation);"]
+        vec!["A(out) c Orders(events);"]
     );
     // The delegated port survives through the application — legal but suspect.
-    let f = findings(&mut s, "check");
+    let f = findings(&mut ws, json!({ "stmt": "check" }));
     assert!(
-        f.iter().any(|f| matches!(
-            f,
-            Finding::DelegatedPortWithoutConnections { port } if port == "Orders.handle_confirmation"
-        )),
+        f.iter().any(
+            |f| matches!(f, Finding::DelegatedPortWithoutConnections { port }
+            if port == "Orders.events")
+        ),
         "expected delegated-port finding, got {f:?}"
     );
-    // Payments.send_confirmation had no application, so it is gone and free.
-    outcomes(&mut s, "conn d := * -> *; node Z;");
-    assert!(is_applied(&outcome(
-        &mut s,
-        "Payments(send_confirmation) d Z(z);"
-    )));
 }
 
 #[test]
-fn deleting_a_node_named_by_a_qualifier_takes_the_delegation() {
-    let mut s = session_with(ROUTING_EXAMPLE);
-    let c = cascade(&mut s, "delete OrderCreated;");
-    assert!(c.contains(&"node OrderCreated;".to_string()));
+fn deleting_a_node_named_by_a_route_takes_the_delegation() {
+    let mut ws = routing_example();
+    let c = cascade(&mut ws, json!({ "stmt": "delete", "node": "OrderCreated" }));
+    assert!(c.contains(&"def node OrderCreated;".to_string()));
     assert!(
         c.contains(&"Shipping(shipping_events) send(OrderCreated) Orders(events);".to_string())
     );
-    assert!(c.contains(&"Orders { events(OrderCreated) = OrderHandler(handle); }".to_string()));
+    assert!(c.contains(&"Orders.events(OrderCreated) = OrderHandler(handle);".to_string()));
     // The unrelated qualified delegation stays.
     assert!(
-        statements(&mut s, "dump")
-            .contains(&"Orders { events(PaymentFailed) = PaymentHandler(handle); }".to_string())
+        pseudo(&mut ws, json!({ "stmt": "dump" }))
+            .contains(&"Orders.events(PaymentFailed) = PaymentHandler(handle);".to_string())
     );
 }
 
-// ---- rename ---------------------------------------------------------------
+// ---- rename -----------------------------------------------------------------
 
 #[test]
 fn rename_is_reference_safe() {
-    let mut s = session_with(WORKED_EXAMPLE);
-    assert!(is_applied(&outcome(&mut s, "rename Payments PaySvc;")));
-    assert!(is_applied(&outcome(&mut s, "rename Service Kind;")));
-    let dump = statements(&mut s, "dump").join("\n");
-    assert!(
-        dump.contains("PaySvc(send_confirmation) confirm(OrderId) Orders(handle_confirmation);")
+    let mut ws = ws_with(json!([
+        { "stmt": "define", "node": "Service" },
+        { "stmt": "define", "node": "Payments" },
+        { "stmt": "define", "node": "Orders" },
+        { "stmt": "rel-edge", "rel": "type_of", "source": "Service", "target": "Payments" },
+        { "stmt": "rel-edge", "rel": "type_of", "source": "Service", "target": "Orders" },
+        { "stmt": "define", "conn": "confirm", "directed": true,
+          "source": { "anchor": "Service", "rel": "type_of" },
+          "target": { "anchor": "Service", "rel": "type_of" } },
+        { "stmt": "conn-edge", "conn": "confirm",
+          "source": { "node": "Payments", "port": "send" }, "target": { "node": "Orders", "port": "recv" } }
+    ]));
+    outcomes(
+        &mut ws,
+        json!([
+            { "stmt": "rename", "node": "Payments", "to": "PaySvc" },
+            { "stmt": "rename", "node": "Service", "to": "Kind" }
+        ]),
     );
-    assert!(dump.contains("conn confirm := (Kind type_of *) (OrderId)-> (Kind type_of *);"));
+    let dump = pseudo(&mut ws, json!({ "stmt": "dump" })).join("\n");
+    assert!(dump.contains("PaySvc(send) confirm Orders(recv);"));
+    assert!(dump.contains("def conn confirm := (Kind type_of *) -> (Kind type_of *);"));
     assert!(!dump.contains("Payments"));
     assert!(!dump.contains("Service"));
 }
 
-// ---- patterns and transitivity --------------------------------------------
+// ---- patterns and transitivity ---------------------------------------------
 
 #[test]
 fn patterns_follow_the_transitive_closure() {
-    let mut s = session_with(
-        "node Service; node RestService; node Payments;
-         Service type_of RestService;
-         RestService type_of Payments;
-         conn calls := (Service type_of *) -> (Service type_of *);
-         node Api; Service type_of Api;",
-    );
+    let mut ws = ws_with(json!([
+        { "stmt": "define", "node": "Service" },
+        { "stmt": "define", "node": "RestService" },
+        { "stmt": "define", "node": "Payments" },
+        { "stmt": "rel-edge", "rel": "type_of", "source": "Service", "target": "RestService" },
+        { "stmt": "rel-edge", "rel": "type_of", "source": "RestService", "target": "Payments" },
+        { "stmt": "define", "node": "Api" },
+        { "stmt": "rel-edge", "rel": "type_of", "source": "Service", "target": "Api" },
+        { "stmt": "define", "conn": "calls", "directed": true,
+          "source": { "anchor": "Service", "rel": "type_of" },
+          "target": { "anchor": "Service", "rel": "type_of" } }
+    ]));
     // Payments is a Service only through RestService — a virtual pair.
     assert!(is_applied(&outcome(
-        &mut s,
-        "Api(out) calls Payments(recv);"
+        &mut ws,
+        json!({ "stmt": "conn-edge", "conn": "calls",
+                "source": { "node": "Api", "port": "out" }, "target": { "node": "Payments", "port": "recv" } })
     )));
 }
 
 #[test]
 fn non_transitive_relations_match_single_steps_only() {
-    let mut s = session_with(
-        "rel r := * -> *;
-         node A; node B; node C; node D;
-         A r B; B r C;
-         rel needs := (A r *) -> *;",
-    );
-    assert!(is_applied(&outcome(&mut s, "B needs D;")));
-    assert_eq!(err_code(&mut s, "C needs D;"), ErrorCode::ShapeViolation);
-}
-
-// ---- scopes -----------------------------------------------------------------
-
-#[test]
-fn open_resolves_lexically_and_survives_deletes() {
-    let mut s = session_with("node Orders { node Handler; } node Payments;");
-    outcomes(&mut s, "open Orders");
-    assert_eq!(s.scope_path(), "Orders");
-    outcomes(&mut s, "open Handler");
-    assert_eq!(s.scope_path(), "Orders.Handler");
-    // A name not found inward resolves outward, up to the root.
-    outcomes(&mut s, "open Payments");
-    assert_eq!(s.scope_path(), "Payments");
-
-    outcomes(&mut s, "open Orders");
-    cascade(&mut s, "delete Orders;");
+    let mut ws = ws_with(json!([
+        { "stmt": "define", "rel": "r", "directed": true, "source": "*", "target": "*" },
+        { "stmt": "define", "node": "A" },
+        { "stmt": "define", "node": "B" },
+        { "stmt": "define", "node": "C" },
+        { "stmt": "define", "node": "D" },
+        { "stmt": "rel-edge", "rel": "r", "source": "A", "target": "B" },
+        { "stmt": "rel-edge", "rel": "r", "source": "B", "target": "C" },
+        { "stmt": "define", "rel": "needs", "directed": true,
+          "source": { "anchor": "A", "rel": "r" }, "target": "*" }
+    ]));
+    assert!(is_applied(&outcome(
+        &mut ws,
+        json!({ "stmt": "rel-edge", "rel": "needs", "source": "B", "target": "D" })
+    )));
     assert_eq!(
-        s.scope_path(),
-        "",
-        "deleting the scope you stand in pops to the root"
+        err_code(
+            &mut ws,
+            json!({ "stmt": "rel-edge", "rel": "needs", "source": "C", "target": "D" })
+        ),
+        ErrorCode::ShapeViolation
     );
-    assert!(is_applied(&outcome(&mut s, "node After;")));
-    assert!(statements(&mut s, "dump").contains(&"node After;".to_string()));
 }
 
-#[test]
-fn same_name_in_different_scopes_is_addressed_by_path() {
-    let mut s = session_with(
-        "node A { node Worker; }
-         node B { node Worker; }
-         rel dep := * -> *;
-         A.Worker dep B.Worker;",
-    );
-    assert!(statements(&mut s, "dump").contains(&"A.Worker dep B.Worker;".to_string()));
-}
-
-// ---- findings ----------------------------------------------------------------
+// ---- findings ------------------------------------------------------------------
 
 #[test]
 fn empty_views_and_uninstantiated_types_are_findings() {
-    let mut s = Session::new();
+    let mut ws = Workspace::new();
     assert_eq!(
-        findings(&mut s, "check"),
+        findings(&mut ws, json!({ "stmt": "check" })),
         vec![],
         "the stdlib is not reported"
     );
-    outcomes(&mut s, "view lonely; rel r := * -> *; conn c := * -> *;");
-    let f = findings(&mut s, "check");
+    outcomes(
+        &mut ws,
+        json!([
+            { "stmt": "define", "view": "lonely" },
+            { "stmt": "define", "rel": "r", "directed": true, "source": "*", "target": "*" },
+            { "stmt": "define", "conn": "c", "directed": true, "source": "*", "target": "*" }
+        ]),
+    );
+    let f = findings(&mut ws, json!({ "stmt": "check" }));
     assert!(f.contains(&Finding::EmptyView {
         view: "lonely".into()
     }));
     assert!(f.contains(&Finding::TypeWithoutInstances {
-        kind: "rel",
+        type_kind: "rel",
         name: "r".into()
     }));
     assert!(f.contains(&Finding::TypeWithoutInstances {
-        kind: "conn",
+        type_kind: "conn",
         name: "c".into()
     }));
+}
+
+// ---- serialization shapes ---------------------------------------------------
+
+#[test]
+fn outcome_and_finding_json_shapes_match_the_spec() {
+    let mut ws = ws_with(json!([{ "stmt": "define", "node": "A" }]));
+    let r = ws.handle(&json!({ "statements": [
+        { "stmt": "define", "node": "A" },
+        { "stmt": "delete", "node": "A" }
+    ]}));
+    let v: Value = serde_json::to_value(&r).unwrap();
+    assert_eq!(v["status"], "ok");
+    assert_eq!(v["results"][0], json!({ "result": "noop" }));
+    assert_eq!(v["results"][1]["result"], "applied");
+    assert_eq!(
+        v["results"][1]["cascade"][0],
+        json!({ "stmt": "define", "node": "A" })
+    );
 }

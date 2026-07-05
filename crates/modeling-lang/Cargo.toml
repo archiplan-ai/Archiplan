@@ -1,7 +1,10 @@
 [package]
 name = "modeling-lang"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
-description = "Archiplan modeling language: a substrate to express arbitrary architectures as a free graph of nodes, ports and distinguished edges, with a statement API for building, mutating and querying models."
+description = "Archiplan modeling language: a free graph of nodes, ports and distinguished edges, edited through atomic batches of idempotent JSON statements, and queried back as replayable statements."
 
 [dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_path_to_error = "0.1"

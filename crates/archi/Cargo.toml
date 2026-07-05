@@ -1,0 +1,9 @@
+[package]
+name = "archi"
+version = "0.1.0"
+edition = "2024"
+description = "Thin CLI runner for Archiplan modeling-language statement batches."
+
+[dependencies]
+modeling-lang = { path = "../modeling-lang" }
+serde_json = "1"
