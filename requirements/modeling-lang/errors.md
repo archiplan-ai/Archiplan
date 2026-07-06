@@ -38,9 +38,9 @@ as statements.
 | E_UNKNOWN_NAME | a referenced node / type / view / path does not resolve — including `redefine` of an element that does not exist; `kind` says which |
 | E_DUP_NAME | a `rename` collides with a sibling's name |
 | E_REDECLARED | a `define` differs from the existing definition of the name — including a rel / conn kind mismatch; the existing definition is included |
-| E_SHAPE_VIOLATION | an end or carrier fails the type's pattern at edge creation; slot, pattern and node included |
-| E_CARRIER_REQUIRED | a ternary connection is instantiated without a carrier |
-| E_CARRIER_FORBIDDEN | a binary connection is instantiated with a carrier |
+| E_SHAPE_VIOLATION | an end or carried node fails the type's pattern at edge creation; slot (`source`, `target`, `carrier`, `rev_carrier`), pattern and node included |
+| E_CARRIER_REQUIRED | a lane with a carried slot is instantiated without naming its carried node; the lane is named |
+| E_CARRIER_FORBIDDEN | a carried node is named on a lane without a carried slot; the lane is named |
 | E_PORT_TYPE_CONFLICT | a port is reused with a different connection type than its first use fixed |
 | E_PORT_SIDE_CONFLICT | a port of a directed type is reused on the opposite side |
 | E_NO_OUTER_PORT | an application delegates a port no connection attaches to |
@@ -51,9 +51,14 @@ as statements.
 
 Codes are append-only: new codes may appear; existing codes never change meaning.
 
+The [source format](./source-format.md#errors) adds compile-time codes — `E_PROJECT`, `E_UNKNOWN_MODULE`,
+`E_NOT_VISIBLE`, `E_UNDECLARED_PORT`, `E_DEF_CYCLE` — and localizes every statement-level code above to
+`file:line:col` via the compiler's span table.
+
 ## Errors vs findings
 
 Errors reject writes. States that are legal mid-construction but suspect — an edge whose conformance drifted after a
 classifier edge was removed or a type was redefined, carried traffic matching no delegation, a delegated port with no
-attached connections, a view with no edges, a type with no instances — are **findings**: surfaced by check/query
-operations ([queries](./queries.md)), never by rejecting writes.
+attached connections, a declared port with no attachments at all (`unused_port`), a view with no edges, a type with
+no instances — are **findings**: surfaced by check/query operations ([queries](./queries.md)), never by rejecting
+writes.

@@ -1,0 +1,8 @@
+import messages
+
+// request/response: the forward lane carries LoginForm, the reverse lane
+// carries AuthResponse back
+def conn login := * ->LoginForm, <-AuthResponse *
+
+// one-way, payload constrained by classification
+def conn store := * ->(Data type_of *) *

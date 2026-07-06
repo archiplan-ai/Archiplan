@@ -201,9 +201,17 @@ impl Workspace {
                 conn,
                 source,
                 carrier,
+                rev_carrier,
                 target,
                 views,
-            } => self.do_conn_edge(conn, source, carrier.as_deref(), target, views),
+            } => self.do_conn_edge(
+                conn,
+                source,
+                carrier.as_deref(),
+                rev_carrier.as_deref(),
+                target,
+                views,
+            ),
             Statement::App {
                 node,
                 port,
@@ -345,7 +353,7 @@ impl Workspace {
 
     fn do_define(&mut self, def: &Definition) -> Result<Outcome, LangError> {
         match def {
-            Definition::Node { path } => self.define_node(path),
+            Definition::Node { path, ports } => self.define_node(path, ports.as_deref()),
             Definition::View { name } => self.define_view(name),
             Definition::Rel {
                 name,
@@ -359,14 +367,22 @@ impl Workspace {
                 directed,
                 source,
                 carrier,
+                rev_carrier,
                 target,
-            } => self.define_conn(name, *directed, source, carrier.as_ref(), target),
+            } => self.define_conn(
+                name,
+                *directed,
+                source,
+                carrier.as_ref(),
+                rev_carrier.as_ref(),
+                target,
+            ),
         }
     }
 
     fn do_redefine(&mut self, def: &Definition) -> Result<Outcome, LangError> {
         match def {
-            Definition::Node { path } => self.redefine_node(path),
+            Definition::Node { path, ports } => self.redefine_node(path, ports.as_deref()),
             // Rejected at parse time.
             Definition::View { .. } => Err(LangError::new(
                 ErrorCode::Parse,
@@ -384,13 +400,26 @@ impl Workspace {
                 directed,
                 source,
                 carrier,
+                rev_carrier,
                 target,
-            } => self.redefine_conn(name, *directed, source, carrier.as_ref(), target),
+            } => self.redefine_conn(
+                name,
+                *directed,
+                source,
+                carrier.as_ref(),
+                rev_carrier.as_ref(),
+                target,
+            ),
         }
     }
 
-    fn define_node(&mut self, path: &str) -> Result<Outcome, LangError> {
+    fn define_node(&mut self, path: &str, ports: Option<&[String]>) -> Result<Outcome, LangError> {
         let segs = self.parse_path(path)?;
+        if let Some(ps) = ports {
+            for p in ps {
+                self.check_ident(p, "port name")?;
+            }
+        }
         let (name, prefix) = segs.split_last().expect("paths are non-empty");
         let parent = if prefix.is_empty() {
             None
@@ -400,8 +429,31 @@ impl Workspace {
                     .with_ref("path", path, None)
             })?)
         };
-        if self.model.children(parent).contains_key(name) {
-            return Ok(Outcome::Noop);
+        if let Some(&id) = self.model.children(parent).get(name) {
+            // An omitted `ports` field makes no claim; a present one must
+            // restate the declared set exactly.
+            let Some(claim) = ports else {
+                return Ok(Outcome::Noop);
+            };
+            let declared = self.model.declared_ports(id);
+            let mut claim_sorted: Vec<String> = claim.to_vec();
+            claim_sorted.sort();
+            if claim_sorted == declared {
+                return Ok(Outcome::Noop);
+            }
+            return Err(LangError::new(
+                ErrorCode::Redeclared,
+                format!("node `{path}` is already defined with different ports"),
+            )
+            .with_ref("node", path, Some(id.raw()))
+            .with_actual(self.model.node_statement(id).to_value())
+            .with_hint(
+                Statement::Redefine(Definition::Node {
+                    path: path.to_string(),
+                    ports: Some(claim.to_vec()),
+                })
+                .to_value(),
+            ));
         }
         let id = NodeId(self.model.alloc());
         self.model.nodes.insert(
@@ -427,25 +479,94 @@ impl Workspace {
                 self.model.root.insert(name.clone(), id);
             }
         }
+        for p in ports.unwrap_or_default() {
+            self.create_port(id, p, None, None, true);
+        }
         Ok(Outcome::applied())
     }
 
-    /// Redefinition keeps the node's identity, ports and attached edges and
-    /// empties its scope as a reported cascade; an already-empty scope is a
-    /// no-op.
-    fn redefine_node(&mut self, path: &str) -> Result<Outcome, LangError> {
+    /// Redefinition keeps the node's identity and attached edges, empties its
+    /// scope as a reported cascade, and — when `ports` is present — replaces
+    /// the declared port set (a removed-but-attached port demotes to
+    /// use-created; a removed unattached one is swept). A redefinition that
+    /// changes nothing is a no-op.
+    fn redefine_node(
+        &mut self,
+        path: &str,
+        ports: Option<&[String]>,
+    ) -> Result<Outcome, LangError> {
         let id = self
             .resolve_abs(path)
             .map_err(|e| e.with_hint(json!({ "stmt": "define", "node": path })))?;
+        if let Some(ps) = ports {
+            for p in ps {
+                self.check_ident(p, "port name")?;
+            }
+        }
         let children: Vec<Seed> = self.model.nodes[&id]
             .children
             .values()
             .map(|c| Seed::Node(*c))
             .collect();
-        if children.is_empty() {
+        let ports_change = ports.is_some_and(|claim| {
+            let mut sorted: Vec<String> = claim.to_vec();
+            sorted.sort();
+            sorted != self.model.declared_ports(id)
+        });
+        if children.is_empty() && !ports_change {
             return Ok(Outcome::Noop);
         }
         self.guard_stdlib(id.raw(), "node", path, "redefined")?;
+        if ports_change {
+            let claim: BTreeSet<String> = ports
+                .expect("change implies claim")
+                .iter()
+                .cloned()
+                .collect();
+            let existing: Vec<(PortId, String)> = self.model.nodes[&id]
+                .ports
+                .iter()
+                .map(|(name, pid)| (*pid, name.clone()))
+                .collect();
+            for (pid, name) in existing {
+                let declared = self.model.ports[&pid].declared;
+                if claim.contains(&name) {
+                    if !declared {
+                        // Promote a use-created port into the declared set.
+                        self.model
+                            .ports
+                            .get_mut(&pid)
+                            .expect("port exists")
+                            .declared = true;
+                    }
+                } else if declared {
+                    if self.model.port_attached(pid) {
+                        // Still wired: demote to use-created, swept on detach.
+                        self.model
+                            .ports
+                            .get_mut(&pid)
+                            .expect("port exists")
+                            .declared = false;
+                    } else {
+                        self.model.ports.remove(&pid);
+                        self.model
+                            .nodes
+                            .get_mut(&id)
+                            .expect("node exists")
+                            .ports
+                            .remove(&name);
+                    }
+                }
+            }
+            for p in ports.expect("change implies claim") {
+                if !self.model.nodes[&id].ports.contains_key(p) {
+                    self.create_port(id, p, None, None, true);
+                }
+            }
+        }
+        if children.is_empty() {
+            return Ok(Outcome::applied());
+        }
         let cascade = cascade::delete_many(&mut self.model, children);
         Ok(Outcome::Applied {
             cascade: Some(cascade),
@@ -580,23 +701,43 @@ impl Workspace {
         ))
     }
 
+    /// An undirected type has no lanes to tell apart; a reverse carrier is
+    /// meaningful only where direction (initiation) orients the lanes.
+    fn check_rev_lane(
+        &self,
+        directed: bool,
+        rev_carrier: Option<&PatternExpr>,
+    ) -> Result<(), LangError> {
+        if !directed && rev_carrier.is_some() {
+            return Err(LangError::new(
+                ErrorCode::Parse,
+                "an undirected connection type has no lanes; `rev_carrier` requires `directed`",
+            ));
+        }
+        Ok(())
+    }
+
     fn define_conn(
         &mut self,
         name: &str,
         directed: bool,
         source: &PatternExpr,
         carrier: Option<&PatternExpr>,
+        rev_carrier: Option<&PatternExpr>,
         target: &PatternExpr,
     ) -> Result<Outcome, LangError> {
         self.check_ident(name, "connection type name")?;
+        self.check_rev_lane(directed, rev_carrier)?;
         let src = self.resolve_pattern(source)?;
         let carrier_pat = carrier.map(|c| self.resolve_pattern(c)).transpose()?;
+        let rev_carrier_pat = rev_carrier.map(|c| self.resolve_pattern(c)).transpose()?;
         let dst = self.resolve_pattern(target)?;
         if let Some(&id) = self.model.conn_names.get(name) {
             let existing = &self.model.conns[&id];
             let identical = existing.directed == directed
                 && existing.src == src
                 && existing.carrier == carrier_pat
+                && existing.rev_carrier == rev_carrier_pat
                 && existing.dst == dst;
             if identical {
                 return Ok(Outcome::Noop);
@@ -608,7 +749,15 @@ impl Workspace {
             .with_ref("conn", name, Some(id.raw()))
             .with_actual(self.model.conn_statement(existing).to_value())
             .with_hint(
-                Statement::Redefine(conn_def(name, directed, source, carrier, target)).to_value(),
+                Statement::Redefine(conn_def(
+                    name,
+                    directed,
+                    source,
+                    carrier,
+                    rev_carrier,
+                    target,
+                ))
+                .to_value(),
             ));
         }
         if let Some(&rid) = self.model.rel_names.get(name) {
@@ -628,6 +777,7 @@ impl Workspace {
                 directed,
                 src,
                 carrier: carrier_pat,
+                rev_carrier: rev_carrier_pat,
                 dst,
             },
         );
@@ -641,17 +791,21 @@ impl Workspace {
         directed: bool,
         source: &PatternExpr,
         carrier: Option<&PatternExpr>,
+        rev_carrier: Option<&PatternExpr>,
         target: &PatternExpr,
     ) -> Result<Outcome, LangError> {
         self.check_ident(name, "connection type name")?;
+        self.check_rev_lane(directed, rev_carrier)?;
         let src = self.resolve_pattern(source)?;
         let carrier_pat = carrier.map(|c| self.resolve_pattern(c)).transpose()?;
+        let rev_carrier_pat = rev_carrier.map(|c| self.resolve_pattern(c)).transpose()?;
         let dst = self.resolve_pattern(target)?;
         if let Some(&id) = self.model.conn_names.get(name) {
             let existing = &self.model.conns[&id];
             let identical = existing.directed == directed
                 && existing.src == src
                 && existing.carrier == carrier_pat
+                && existing.rev_carrier == rev_carrier_pat
                 && existing.dst == dst;
             if identical {
                 return Ok(Outcome::Noop);
@@ -669,6 +823,7 @@ impl Workspace {
             ct.directed = directed;
             ct.src = src;
             ct.carrier = carrier_pat;
+            ct.rev_carrier = rev_carrier_pat;
             ct.dst = dst;
             return Ok(Outcome::applied());
         }
@@ -681,7 +836,15 @@ impl Workspace {
             .with_actual(self.model.rel_statement(&self.model.rels[&rid]).to_value()));
         }
         Err(self.unknown("conn", name).with_hint(
-            Statement::Define(conn_def(name, directed, source, carrier, target)).to_value(),
+            Statement::Define(conn_def(
+                name,
+                directed,
+                source,
+                carrier,
+                rev_carrier,
+                target,
+            ))
+            .to_value(),
         ))
     }
 
@@ -784,8 +947,9 @@ impl Workspace {
     }
 
     /// Look up a port by name on a node, enforcing that its connection type
-    /// and side, fixed at first use, agree with this use. `Ok(None)` means the
-    /// port does not exist yet.
+    /// and side, fixed at its first use, agree with this use. `Ok(None)` means
+    /// the port does not exist yet; a declared, never-used port has no type or
+    /// side yet and agrees with anything.
     fn lookup_port(
         &self,
         node: NodeId,
@@ -797,17 +961,19 @@ impl Workspace {
             return Ok(None);
         };
         let p = &self.model.ports[&pid];
-        if p.conn != conn {
+        if let Some(have) = p.conn
+            && have != conn
+        {
             return Err(LangError::new(
                 ErrorCode::PortTypeConflict,
                 format!(
                     "port {} is fixed to connection type `{}` by its first use",
                     self.model.port_path(pid),
-                    self.model.conns[&p.conn].name
+                    self.model.conns[&have].name
                 ),
             )
             .with_ref("port", self.model.port_path(pid), Some(pid.raw()))
-            .with_expected(Value::String(self.model.conns[&p.conn].name.clone()))
+            .with_expected(Value::String(self.model.conns[&have].name.clone()))
             .with_actual(Value::String(self.model.conns[&conn].name.clone()))
             .with_hint(json!({ "stmt": "query", "scopes": [self.model.node_path(node)] })));
         }
@@ -834,8 +1000,9 @@ impl Workspace {
         &mut self,
         node: NodeId,
         name: &str,
-        conn: ConnId,
+        conn: Option<ConnId>,
         side: Option<Side>,
+        declared: bool,
     ) -> PortId {
         let id = PortId(self.model.alloc());
         self.model.ports.insert(
@@ -846,6 +1013,7 @@ impl Workspace {
                 name: name.to_string(),
                 conn,
                 side,
+                declared,
             },
         );
         self.model
@@ -857,22 +1025,68 @@ impl Workspace {
         id
     }
 
-    /// A port created under an undirected definition has no side; if the type
-    /// was later redefined as directed, the next use fixes the side.
-    fn fix_port_side(&mut self, pid: PortId, side: Option<Side>) {
-        if let Some(want) = side {
-            let p = self.model.ports.get_mut(&pid).expect("port exists");
-            if p.side.is_none() {
-                p.side = Some(want);
-            }
+    /// Fix what this use pins down and the port has not fixed yet: the
+    /// connection type of a declared, never-used port; the side of a port
+    /// created under an undirected definition later redefined as directed.
+    fn fix_port_use(&mut self, pid: PortId, conn: ConnId, side: Option<Side>) {
+        let p = self.model.ports.get_mut(&pid).expect("port exists");
+        if p.conn.is_none() {
+            p.conn = Some(conn);
+        }
+        if p.side.is_none() {
+            p.side = side;
         }
     }
 
+    /// Check one lane of a connection edge against its type: a lane with a
+    /// carried slot requires a named carrier matching the slot's pattern; a
+    /// lane without one rejects a named carrier.
+    fn check_lane_carrier(
+        &self,
+        ty: &str,
+        slot: &'static str,
+        lane: Option<&Pattern>,
+        named: Option<&str>,
+    ) -> Result<Option<NodeId>, LangError> {
+        let way = if slot == "carrier" {
+            "forward"
+        } else {
+            "reverse"
+        };
+        match (lane, named) {
+            (Some(cp), None) => Err(LangError::new(
+                ErrorCode::CarrierRequired,
+                format!(
+                    "`{ty}` carries a node on its {way} lane: every instantiation names `{slot}`"
+                ),
+            )
+            .with_ref("slot", slot, None)
+            .with_expected(
+                serde_json::to_value(self.model.pattern_expr(cp)).expect("patterns serialize"),
+            )),
+            (None, Some(_)) => Err(LangError::new(
+                ErrorCode::CarrierForbidden,
+                format!("`{ty}` has no {way} carried slot: it never names `{slot}`"),
+            )
+            .with_ref("slot", slot, None)),
+            (Some(cp), Some(cpath)) => {
+                let c = self.resolve_abs(cpath)?;
+                if !self.model.matches(cp, c) {
+                    return Err(self.shape_error(ty, slot, cp, c));
+                }
+                Ok(Some(c))
+            }
+            (None, None) => Ok(None),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn do_conn_edge(
         &mut self,
         conn: &str,
         source: &End,
         carrier: Option<&str>,
+        rev_carrier: Option<&str>,
         target: &End,
         views: &[String],
     ) -> Result<Outcome, LangError> {
@@ -890,31 +1104,14 @@ impl Workspace {
         let view_ids = self.resolve_views(views)?;
         let ct = self.model.conns[&conn_id].clone();
 
-        let carrier_node = match (&ct.carrier, carrier) {
-            (Some(cp), None) => {
-                return Err(LangError::new(
-                    ErrorCode::CarrierRequired,
-                    format!("`{conn}` is ternary: every instantiation names a carried node"),
-                )
-                .with_expected(
-                    serde_json::to_value(self.model.pattern_expr(cp)).expect("patterns serialize"),
-                ));
-            }
-            (None, Some(_)) => {
-                return Err(LangError::new(
-                    ErrorCode::CarrierForbidden,
-                    format!("`{conn}` is binary: it never names a carrier"),
-                ));
-            }
-            (Some(cp), Some(cpath)) => {
-                let c = self.resolve_abs(cpath)?;
-                if !self.model.matches(cp, c) {
-                    return Err(self.shape_error(&ct.name, "carrier", cp, c));
-                }
-                Some(c)
-            }
-            (None, None) => None,
-        };
+        let carrier_node =
+            self.check_lane_carrier(&ct.name, "carrier", ct.carrier.as_ref(), carrier)?;
+        let rev_carrier_node = self.check_lane_carrier(
+            &ct.name,
+            "rev_carrier",
+            ct.rev_carrier.as_ref(),
+            rev_carrier,
+        )?;
 
         if self.model.nodes[&a].parent != self.model.nodes[&b].parent {
             return Err(LangError::new(
@@ -933,29 +1130,32 @@ impl Workspace {
         let pb = self.lookup_port(b, &target.port, conn_id, side_b)?;
 
         if let (Some(pa), Some(pb)) = (pa, pb)
-            && let Some(eid) = self.model.find_conn_edge(conn_id, pa, carrier_node, pb)
+            && let Some(eid) =
+                self.model
+                    .find_conn_edge(conn_id, pa, carrier_node, rev_carrier_node, pb)
         {
             return self.extend_views(eid, view_ids);
         }
         let pa = match pa {
             Some(p) => {
-                self.fix_port_side(p, side_a);
+                self.fix_port_use(p, conn_id, side_a);
                 p
             }
-            None => self.create_port(a, &source.port, conn_id, side_a),
+            None => self.create_port(a, &source.port, Some(conn_id), side_a, false),
         };
         let pb = match pb {
             Some(p) => {
-                self.fix_port_side(p, side_b);
+                self.fix_port_use(p, conn_id, side_b);
                 p
             }
-            None => self.create_port(b, &target.port, conn_id, side_b),
+            None => self.create_port(b, &target.port, Some(conn_id), side_b, false),
         };
         self.insert_edge(
             EdgePayload::Conn {
                 conn: conn_id,
                 src_port: pa,
                 carrier: carrier_node,
+                rev_carrier: rev_carrier_node,
                 dst_port: pb,
             },
             view_ids,
@@ -991,6 +1191,18 @@ impl Workspace {
             .with_ref("port", format!("{node_path}.{port}"), None)
             .with_hint(json!({ "stmt": "query", "scopes": [node_path] })));
         };
+        // A declared port may exist unattached; delegation still needs an
+        // attached use to inherit a connection type from.
+        if !self.model.port_attached(outer_pid) {
+            return Err(LangError::new(
+                ErrorCode::NoOuterPort,
+                format!(
+                    "port `{port}` is declared on {node_path} but no connection attaches to it yet"
+                ),
+            )
+            .with_ref("port", format!("{node_path}.{port}"), Some(outer_pid.raw()))
+            .with_hint(json!({ "stmt": "query", "scopes": [node_path] })));
+        }
         let qualifier = route.map(|r| self.resolve_pattern(r)).transpose()?;
         let inner_node = self
             .model
@@ -999,7 +1211,8 @@ impl Workspace {
             .copied()
             .ok_or_else(|| self.unknown("node", &format!("{node_path}.{}", inner.node)))?;
         let outer = self.model.ports[&outer_pid].clone();
-        let existing_inner = self.lookup_port(inner_node, &inner.port, outer.conn, outer.side)?;
+        let outer_conn = outer.conn.expect("attached ports are typed");
+        let existing_inner = self.lookup_port(inner_node, &inner.port, outer_conn, outer.side)?;
         if let Some(ip) = existing_inner
             && self
                 .model
@@ -1045,10 +1258,10 @@ impl Workspace {
         }
         let ip = match existing_inner {
             Some(p) => {
-                self.fix_port_side(p, outer.side);
+                self.fix_port_use(p, outer_conn, outer.side);
                 p
             }
-            None => self.create_port(inner_node, &inner.port, outer.conn, outer.side),
+            None => self.create_port(inner_node, &inner.port, Some(outer_conn), outer.side, false),
         };
         self.insert_edge(
             EdgePayload::App {
@@ -1202,6 +1415,7 @@ impl Workspace {
                 conn,
                 source,
                 carrier,
+                rev_carrier,
                 target,
                 ..
             } => {
@@ -1231,8 +1445,12 @@ impl Workspace {
                         )
                     })?;
                 let carrier_node = carrier.as_ref().map(|p| self.resolve_abs(p)).transpose()?;
+                let rev_carrier_node = rev_carrier
+                    .as_ref()
+                    .map(|p| self.resolve_abs(p))
+                    .transpose()?;
                 self.model
-                    .find_conn_edge(c, pa, carrier_node, pb)
+                    .find_conn_edge(c, pa, carrier_node, rev_carrier_node, pb)
                     .ok_or_else(no_such_edge)
             }
             Statement::App {
@@ -1302,6 +1520,7 @@ fn conn_def(
     directed: bool,
     source: &PatternExpr,
     carrier: Option<&PatternExpr>,
+    rev_carrier: Option<&PatternExpr>,
     target: &PatternExpr,
 ) -> Definition {
     Definition::Conn {
@@ -1309,6 +1528,7 @@ fn conn_def(
         directed,
         source: source.clone(),
         carrier: carrier.cloned(),
+        rev_carrier: rev_carrier.cloned(),
         target: target.clone(),
     }
 }

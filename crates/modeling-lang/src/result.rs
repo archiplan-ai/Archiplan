@@ -91,10 +91,13 @@ pub struct GraphEdge {
     /// The port the edge attaches to on the target node.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_port: Option<String>,
-    /// The carried node's id (ternary connections only). Metadata: the
-    /// carrier is not an attachment and need not be a node of the result.
+    /// The forward-lane carried node's id. Metadata: the carrier is not an
+    /// attachment and need not be a node of the result.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub carrier: Option<String>,
+    /// The reverse-lane carried node's id (request/response connections).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rev_carrier: Option<String>,
     /// The carried-node qualifier of a delegation, when present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub route: Option<PatternExpr>,
@@ -162,6 +165,11 @@ pub enum Finding {
         /// The port, as `path.port`.
         port: String,
     },
+    /// A declared port with no attached connections or applications.
+    UnusedPort {
+        /// The port, as `path.port`.
+        port: String,
+    },
     /// A view with no edges.
     EmptyView {
         /// The view name.
@@ -200,6 +208,9 @@ impl fmt::Display for Finding {
             }
             Finding::DelegatedPortWithoutConnections { port } => {
                 write!(f, "delegated port without connections: {port}")
+            }
+            Finding::UnusedPort { port } => {
+                write!(f, "declared port without attachments: {port}")
             }
             Finding::EmptyView { view } => write!(f, "empty view: {view}"),
             Finding::TypeWithoutInstances { type_kind, name } => {

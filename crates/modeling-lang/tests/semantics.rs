@@ -97,16 +97,16 @@ fn node_redefine_replaces_internals_keeping_external_wiring() {
     match &results[0] {
         Outcome::Applied { cascade: Some(c) } => {
             let lines: Vec<String> = c.iter().map(Statement::pseudo).collect();
-            assert!(lines.contains(&"def node Orders.ConfirmationHandler;".to_string()));
-            assert!(lines.contains(&"Orders.handle = ConfirmationHandler(handle);".to_string()));
+            assert!(lines.contains(&"def node Orders.ConfirmationHandler".to_string()));
+            assert!(lines.contains(&"Orders.handle = ConfirmationHandler.handle".to_string()));
         }
         o => panic!("expected redefine cascade, got {o:?}"),
     }
     // The external connection survived: the node, its port and the edge kept
     // their identity.
     let lines = dump_pseudo(&ws);
-    assert!(lines.contains(&"Payments(send) confirm Orders(handle);".to_string()));
-    assert!(lines.contains(&"Orders.handle = RefundHandler(handle);".to_string()));
+    assert!(lines.contains(&"Payments.send confirm Orders.handle".to_string()));
+    assert!(lines.contains(&"Orders.handle = RefundHandler.handle".to_string()));
     // Redefining an already-empty scope is a no-op.
     let results = outcomes(
         &mut ws,
@@ -266,9 +266,9 @@ fn deleting_a_view_only_drops_tags() {
     ]));
     assert_eq!(
         cascade(&mut ws, json!({ "stmt": "delete", "view": "flow" })),
-        vec!["def view flow;"]
+        vec!["def view flow"]
     );
-    assert!(dump_pseudo(&ws).contains(&"A dep B;".to_string()));
+    assert!(dump_pseudo(&ws).contains(&"A dep B".to_string()));
     assert_eq!(
         err_code(&mut ws, json!({ "stmt": "query", "views": ["flow"] })),
         ErrorCode::UnknownName
@@ -370,11 +370,11 @@ fn deleting_a_node_cascades_over_the_referencing_closure() {
     assert_eq!(
         cascade(&mut ws, json!({ "stmt": "delete", "node": "Orders" })),
         vec![
-            "def node Orders;",
-            "Service type_of Orders;",
-            "Payments(send_confirmation) confirm(OrderId) Orders(handle_confirmation);",
-            "def node Orders.ConfirmationHandler;",
-            "Orders.handle_confirmation = ConfirmationHandler(handle_confirmation);",
+            "def node Orders",
+            "Service type_of Orders",
+            "Payments.send_confirmation confirm(OrderId) Orders.handle_confirmation",
+            "def node Orders.ConfirmationHandler",
+            "Orders.handle_confirmation = ConfirmationHandler.handle_confirmation",
         ]
     );
     // The last edge on Payments.send_confirmation went with the cascade, so
@@ -411,11 +411,11 @@ fn deleting_a_pattern_anchor_takes_types_and_their_edges() {
           "source": { "node": "A", "port": "out" }, "target": { "node": "B", "port": "recv" } }
     ]));
     let c = cascade(&mut ws, json!({ "stmt": "delete", "node": "Service" }));
-    assert!(c.contains(&"def node Service;".to_string()));
+    assert!(c.contains(&"def node Service".to_string()));
     assert!(
-        c.contains(&"def conn calls := (Service type_of *) -> (Service type_of *);".to_string())
+        c.contains(&"def conn calls := (Service type_of *) -> (Service type_of *)".to_string())
     );
-    assert!(c.contains(&"A(out) calls B(recv);".to_string()));
+    assert!(c.contains(&"A.out calls B.recv".to_string()));
 }
 
 #[test]
@@ -433,10 +433,10 @@ fn deleting_a_rel_type_takes_types_whose_patterns_use_it() {
     assert_eq!(
         cascade(&mut ws, json!({ "stmt": "delete", "rel": "r" })),
         vec![
-            "def rel r := * -> *;",
-            "A r B;",
-            "def rel needs := (A r *) -> *;",
-            "B needs D;"
+            "def rel r := * -> *",
+            "A r B",
+            "def rel needs := (A r *) -> *",
+            "B needs D"
         ]
     );
 }
@@ -454,7 +454,7 @@ fn deleting_a_conn_type_takes_its_ports_and_applications() {
     ]));
     assert_eq!(
         cascade(&mut ws, json!({ "stmt": "delete", "conn": "c" })),
-        vec!["def conn c := * -> *;", "A(p) c B(q);", "B.q = I(r);"]
+        vec!["def conn c := * -> *", "A.p c B.q", "B.q = I.r"]
     );
     // All ports of the deleted type are gone; the names are free for a new type.
     outcomes(
@@ -487,10 +487,10 @@ fn deleting_a_classifier_edge_is_soft_drift_not_cascade() {
             json!({ "stmt": "delete",
                     "edge": { "stmt": "rel-edge", "rel": "type_of", "source": "Service", "target": "A" } })
         ),
-        vec!["Service type_of A;"]
+        vec!["Service type_of A"]
     );
     // The nonconforming connection edge remains, surfaced as a finding.
-    assert!(dump_pseudo(&ws).contains(&"A(out) calls B(recv);".to_string()));
+    assert!(dump_pseudo(&ws).contains(&"A.out calls B.recv".to_string()));
     let f = findings(&mut ws, json!({ "stmt": "check" }));
     assert!(
         f.iter().any(|f| matches!(f, Finding::ShapeDrift { slot, actual, expected, .. }
@@ -519,7 +519,7 @@ fn deleting_the_last_connection_leaves_a_delegated_port_as_a_finding() {
                               "source": { "node": "A", "port": "out" },
                               "target": { "node": "Orders", "port": "events" } } })
         ),
-        vec!["A(out) c Orders(events);"]
+        vec!["A.out c Orders.events"]
     );
     // The delegated port survives through the application — legal but suspect.
     let f = findings(&mut ws, json!({ "stmt": "check" }));
@@ -536,15 +536,13 @@ fn deleting_the_last_connection_leaves_a_delegated_port_as_a_finding() {
 fn deleting_a_node_named_by_a_route_takes_the_delegation() {
     let mut ws = routing_example();
     let c = cascade(&mut ws, json!({ "stmt": "delete", "node": "OrderCreated" }));
-    assert!(c.contains(&"def node OrderCreated;".to_string()));
-    assert!(
-        c.contains(&"Shipping(shipping_events) send(OrderCreated) Orders(events);".to_string())
-    );
-    assert!(c.contains(&"Orders.events(OrderCreated) = OrderHandler(handle);".to_string()));
+    assert!(c.contains(&"def node OrderCreated".to_string()));
+    assert!(c.contains(&"Shipping.shipping_events send(OrderCreated) Orders.events".to_string()));
+    assert!(c.contains(&"Orders.events(OrderCreated) = OrderHandler.handle".to_string()));
     // The unrelated qualified delegation stays.
     assert!(
         dump_pseudo(&ws)
-            .contains(&"Orders.events(PaymentFailed) = PaymentHandler(handle);".to_string())
+            .contains(&"Orders.events(PaymentFailed) = PaymentHandler.handle".to_string())
     );
 }
 
@@ -572,8 +570,8 @@ fn rename_is_reference_safe() {
         ]),
     );
     let dump = dump_pseudo(&ws).join("\n");
-    assert!(dump.contains("PaySvc(send) confirm Orders(recv);"));
-    assert!(dump.contains("def conn confirm := (Kind type_of *) -> (Kind type_of *);"));
+    assert!(dump.contains("PaySvc.send confirm Orders.recv"));
+    assert!(dump.contains("def conn confirm := (Kind type_of *) -> (Kind type_of *)"));
     assert!(!dump.contains("Payments"));
     assert!(!dump.contains("Service"));
 }

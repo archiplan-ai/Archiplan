@@ -85,12 +85,14 @@ fn closure(model: &Model, seeds: Vec<Seed>) -> Doomed {
                     conn,
                     src_port,
                     carrier,
+                    rev_carrier,
                     dst_port,
                 } => {
                     d.conns.contains(conn)
                         || d.nodes.contains(&model.ports[src_port].node)
                         || d.nodes.contains(&model.ports[dst_port].node)
                         || carrier.is_some_and(|c| d.nodes.contains(&c))
+                        || rev_carrier.is_some_and(|c| d.nodes.contains(&c))
                 }
                 EdgePayload::App {
                     outer,
@@ -101,8 +103,8 @@ fn closure(model: &Model, seeds: Vec<Seed>) -> Doomed {
                     let ip = &model.ports[inner];
                     d.nodes.contains(&op.node)
                         || d.nodes.contains(&ip.node)
-                        || d.conns.contains(&op.conn)
-                        || d.conns.contains(&ip.conn)
+                        || op.conn.is_some_and(|c| d.conns.contains(&c))
+                        || ip.conn.is_some_and(|c| d.conns.contains(&c))
                         || qualifier
                             .as_ref()
                             .is_some_and(|q| pattern_refs_doomed(q, &d))
@@ -132,6 +134,10 @@ fn closure(model: &Model, seeds: Vec<Seed>) -> Doomed {
                 || pattern_refs_doomed(&ct.dst, &d)
                 || ct
                     .carrier
+                    .as_ref()
+                    .is_some_and(|c| pattern_refs_doomed(c, &d))
+                || ct
+                    .rev_carrier
                     .as_ref()
                     .is_some_and(|c| pattern_refs_doomed(c, &d));
             if hit {
@@ -212,18 +218,27 @@ pub(crate) fn delete_many(model: &mut Model, seeds: Vec<Seed>) -> Vec<Statement>
         }
     }
 
-    // A port lives as long as some connection or application attaches to it;
-    // cascading away the last attached edge removes the port and frees its name.
+    // A use-created port lives as long as some connection or application
+    // attaches to it; cascading away the last attached edge removes the port
+    // and frees its name. Declared ports outlive their edges — but a doomed
+    // connection type releases its binding on them (reference integrity),
+    // returning them to the never-used state.
     let orphaned: Vec<_> = model
         .ports
         .values()
-        .filter(|p| !model.port_attached(p.id))
+        .filter(|p| !p.declared && !model.port_attached(p.id))
         .map(|p| (p.id, p.node, p.name.clone()))
         .collect();
     for (pid, node, name) in orphaned {
         model.ports.remove(&pid);
         if let Some(n) = model.nodes.get_mut(&node) {
             n.ports.remove(&name);
+        }
+    }
+    for p in model.ports.values_mut() {
+        if p.conn.is_some_and(|c| d.conns.contains(&c)) {
+            p.conn = None;
+            p.side = None;
         }
     }
 

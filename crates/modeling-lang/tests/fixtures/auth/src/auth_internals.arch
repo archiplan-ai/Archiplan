@@ -1,0 +1,15 @@
+// The inner structure, in a different file than the interface.
+import auth
+import conns
+import messages
+
+open AuthService:
+  def node Storage:
+    port save_cred_hash
+    port purge_cred
+  def node LoginHandler:
+    port handle
+    port persist
+
+  LoginHandler.persist store(->CredHash) Storage.save_cred_hash
+  handle_login = LoginHandler.handle // boundary port realized by an inner port

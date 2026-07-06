@@ -1,0 +1,7 @@
+def node LoginForm
+def node AuthResponse
+def node CredHash
+
+Data type_of LoginForm // Data and Service come from the default preset
+Data type_of AuthResponse
+Data type_of CredHash

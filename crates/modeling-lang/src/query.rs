@@ -171,6 +171,7 @@ fn graph_edge(model: &Model, e: &Edge) -> GraphEdge {
         target: model.node_path(dst),
         target_port: None,
         carrier: None,
+        rev_carrier: None,
         route: None,
         views: view_names(model, e.views.iter().copied()),
     };
@@ -184,6 +185,7 @@ fn graph_edge(model: &Model, e: &Edge) -> GraphEdge {
             conn,
             src_port,
             carrier,
+            rev_carrier,
             dst_port,
         } => {
             let ct = &model.conns[conn];
@@ -192,6 +194,7 @@ fn graph_edge(model: &Model, e: &Edge) -> GraphEdge {
             out.source_port = Some(model.ports[src_port].name.clone());
             out.target_port = Some(model.ports[dst_port].name.clone());
             out.carrier = carrier.map(|c| model.node_path(c));
+            out.rev_carrier = rev_carrier.map(|c| model.node_path(c));
         }
         EdgePayload::App {
             outer,
@@ -237,10 +240,12 @@ pub(crate) fn subgraph(model: &Model, filter: &SubgraphFilter) -> (Vec<GraphNode
             .flat_map(|e| {
                 let mut nodes = attachments(model, e).to_vec();
                 if let EdgePayload::Conn {
-                    carrier: Some(c), ..
+                    carrier,
+                    rev_carrier,
+                    ..
                 } = &e.payload
                 {
-                    nodes.push(*c);
+                    nodes.extend(carrier.iter().chain(rev_carrier.iter()).copied());
                 }
                 nodes
             })
@@ -298,9 +303,10 @@ pub(crate) fn subgraph(model: &Model, filter: &SubgraphFilter) -> (Vec<GraphNode
                 .flatten()
                 .map(|p| {
                     let port = &model.ports[p];
+                    let conn = port.conn.expect("edge-referenced ports are typed");
                     GraphPort {
                         name: port.name.clone(),
-                        conn: model.conns[&port.conn].name.clone(),
+                        conn: model.conns[&conn].name.clone(),
                         side: port.side.map(Side::describe),
                     }
                 })
@@ -368,6 +374,7 @@ pub(crate) fn check(model: &Model, filter: Option<&BTreeSet<ViewId>>) -> Vec<Fin
                 conn,
                 src_port,
                 carrier,
+                rev_carrier,
                 dst_port,
             } => {
                 let ct = &model.conns[conn];
@@ -388,28 +395,33 @@ pub(crate) fn check(model: &Model, filter: Option<&BTreeSet<ViewId>>) -> Vec<Fin
                         actual: model.node_path(node),
                     });
                 }
-                match (&ct.carrier, carrier) {
-                    (Some(cp), Some(c)) => {
-                        if !model.matches(cp, *c) {
+                for (lane, actual, slot) in [
+                    (&ct.carrier, carrier, "carrier"),
+                    (&ct.rev_carrier, rev_carrier, "rev_carrier"),
+                ] {
+                    match (lane, actual) {
+                        (Some(cp), Some(c)) => {
+                            if !model.matches(cp, *c) {
+                                out.push(Finding::ShapeDrift {
+                                    statement: model.edge_statement(e),
+                                    slot: slot.to_string(),
+                                    expected: model.pattern_expr(cp),
+                                    actual: model.node_path(*c),
+                                });
+                            }
+                        }
+                        // Arity drift after a type redefine: report against the
+                        // slot that no longer matches the edge's structure.
+                        (Some(cp), None) => {
                             out.push(Finding::ShapeDrift {
                                 statement: model.edge_statement(e),
-                                slot: "carrier".to_string(),
+                                slot: slot.to_string(),
                                 expected: model.pattern_expr(cp),
-                                actual: model.node_path(*c),
+                                actual: "(none)".to_string(),
                             });
                         }
+                        _ => {}
                     }
-                    // Arity drift after a type redefine: report against the
-                    // slot that no longer matches the edge's structure.
-                    (Some(cp), None) => {
-                        out.push(Finding::ShapeDrift {
-                            statement: model.edge_statement(e),
-                            slot: "carrier".to_string(),
-                            expected: model.pattern_expr(cp),
-                            actual: "(none)".to_string(),
-                        });
-                    }
-                    _ => {}
                 }
             }
             EdgePayload::App { .. } => {}
@@ -442,6 +454,16 @@ pub(crate) fn check(model: &Model, filter: Option<&BTreeSet<ViewId>>) -> Vec<Fin
             && model.conn_edges_on_port(p.id).next().is_none()
         {
             out.push(Finding::DelegatedPortWithoutConnections {
+                port: model.port_path(p.id),
+            });
+        }
+    }
+
+    // Declared ports nothing attaches to: legal interface-first construction,
+    // suspect once the model is meant to be complete.
+    for p in model.ports.values() {
+        if p.declared && !model.port_attached(p.id) {
+            out.push(Finding::UnusedPort {
                 port: model.port_path(p.id),
             });
         }

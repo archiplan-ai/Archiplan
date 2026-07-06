@@ -1,0 +1,183 @@
+//! Project layout: the `archi.toml` manifest, module discovery and preset
+//! selection.
+//!
+//! A project is a directory with an `archi.toml` at its root and `.arch`
+//! modules under the source directory (default `src/`). One file is one
+//! module; its module path is the dotted relative path — `src/auth/service.arch`
+//! is `auth.service`. Discovery is a sorted walk, so module order — and with
+//! it every downstream ordering — is independent of filesystem iteration.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use serde::Deserialize;
+
+use crate::preset::Preset;
+
+use super::span::Diagnostic;
+
+/// The parsed `archi.toml`.
+#[derive(Clone, Debug)]
+pub(crate) struct Manifest {
+    /// Required by the manifest format; not consumed by the compiler yet.
+    #[allow(dead_code)]
+    pub name: String,
+    /// Source directory, relative to the project root.
+    pub src: String,
+    /// Preset selection: `core`, `default`, or a relative path to a JSON
+    /// preset file.
+    pub preset: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ManifestFile {
+    project: ProjectSection,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProjectSection {
+    name: String,
+    src: Option<String>,
+    preset: Option<String>,
+}
+
+fn project_err(message: impl Into<String>) -> Diagnostic {
+    Diagnostic::project("E_PROJECT", message)
+}
+
+/// Locate a project root: `dir` itself or the nearest ancestor holding an
+/// `archi.toml`.
+pub(crate) fn find_root(dir: &Path) -> Option<PathBuf> {
+    let mut cur = Some(dir);
+    while let Some(d) = cur {
+        if d.join("archi.toml").is_file() {
+            return Some(d.to_path_buf());
+        }
+        cur = d.parent();
+    }
+    None
+}
+
+/// Read and validate `archi.toml` at the project root.
+pub(crate) fn read_manifest(root: &Path) -> Result<Manifest, Diagnostic> {
+    let path = root.join("archi.toml");
+    let text = fs::read_to_string(&path)
+        .map_err(|e| project_err(format!("cannot read {}: {e}", path.display())))?;
+    let parsed: ManifestFile =
+        toml::from_str(&text).map_err(|e| project_err(format!("{}: {e}", path.display())))?;
+    Ok(Manifest {
+        name: parsed.project.name,
+        src: parsed.project.src.unwrap_or_else(|| "src".to_string()),
+        preset: parsed
+            .project
+            .preset
+            .unwrap_or_else(|| "default".to_string()),
+    })
+}
+
+/// Resolve the manifest's preset choice to a loaded [`Preset`].
+pub(crate) fn resolve_preset(root: &Path, manifest: &Manifest) -> Result<Preset, Diagnostic> {
+    match manifest.preset.as_str() {
+        "core" => Ok(Preset::core()),
+        "default" => Ok(Preset::default_ontology()),
+        path => {
+            let full = root.join(path);
+            let text = fs::read_to_string(&full)
+                .map_err(|e| project_err(format!("cannot read preset {}: {e}", full.display())))?;
+            let value: serde_json::Value = serde_json::from_str(&text)
+                .map_err(|e| project_err(format!("preset {}: {e}", full.display())))?;
+            let name = full
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "preset".to_string());
+            Preset::from_value(&name, &value)
+                .map_err(|e| project_err(format!("preset {}: {e}", full.display())))
+        }
+    }
+}
+
+/// One discovered module: its dotted path, display path and text.
+#[derive(Clone, Debug)]
+pub(crate) struct ModuleSource {
+    /// Dotted module path (`auth.service`).
+    pub module: String,
+    /// Display path relative to the project root (`src/auth/service.arch`).
+    pub rel_path: String,
+    pub text: String,
+}
+
+fn is_module_ident(s: &str) -> bool {
+    let mut chars = s.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// Discover every `.arch` module under the source directory, in sorted order.
+pub(crate) fn discover_modules(root: &Path, src: &str) -> Result<Vec<ModuleSource>, Diagnostic> {
+    let src_dir = root.join(src);
+    if !src_dir.is_dir() {
+        return Err(project_err(format!(
+            "source directory {} does not exist",
+            src_dir.display()
+        )));
+    }
+    let mut out = Vec::new();
+    walk(root, &src_dir, &mut Vec::new(), &mut out)?;
+    out.sort_by(|a, b| a.module.cmp(&b.module));
+    Ok(out)
+}
+
+fn walk(
+    root: &Path,
+    dir: &Path,
+    prefix: &mut Vec<String>,
+    out: &mut Vec<ModuleSource>,
+) -> Result<(), Diagnostic> {
+    let mut entries: Vec<_> = fs::read_dir(dir)
+        .map_err(|e| project_err(format!("cannot read {}: {e}", dir.display())))?
+        .collect::<Result<_, _>>()
+        .map_err(|e| project_err(format!("cannot read {}: {e}", dir.display())))?;
+    entries.sort_by_key(|e| e.file_name());
+    for entry in entries {
+        let path = entry.path();
+        let file_name = entry.file_name().to_string_lossy().into_owned();
+        if file_name.starts_with('.') {
+            continue;
+        }
+        if path.is_dir() {
+            if !is_module_ident(&file_name) {
+                return Err(project_err(format!(
+                    "directory `{file_name}` is not a valid module segment ({})",
+                    path.display()
+                )));
+            }
+            prefix.push(file_name);
+            walk(root, &path, prefix, out)?;
+            prefix.pop();
+        } else if let Some(stem) = file_name.strip_suffix(".arch") {
+            if !is_module_ident(stem) {
+                return Err(project_err(format!(
+                    "file `{file_name}` is not a valid module name ({})",
+                    path.display()
+                )));
+            }
+            let mut segs = prefix.clone();
+            segs.push(stem.to_string());
+            let text = fs::read_to_string(&path)
+                .map_err(|e| project_err(format!("cannot read {}: {e}", path.display())))?;
+            let rel_path = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .into_owned();
+            out.push(ModuleSource {
+                module: segs.join("."),
+                rel_path,
+                text,
+            });
+        }
+    }
+    Ok(())
+}

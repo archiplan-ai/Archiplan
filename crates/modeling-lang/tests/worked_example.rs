@@ -140,8 +140,8 @@ fn dump_round_trips_idempotently() {
     let mut ws = worked_example();
     let dumped = ws.model().dump();
     let lines: Vec<String> = dumped.iter().map(Statement::pseudo).collect();
-    assert!(lines.contains(&"def node Orders;".to_string()));
-    assert!(lines.contains(&"def node Orders.ConfirmationHandler;".to_string()));
+    assert!(lines.contains(&"def node Orders".to_string()));
+    assert!(lines.contains(&"def node Orders.ConfirmationHandler".to_string()));
 
     let mut replayed = Workspace::new();
     replayed

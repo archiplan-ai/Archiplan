@@ -8,3 +8,4 @@ description = "Archiplan modeling language: a free graph of nodes, ports and dis
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_path_to_error = "0.1"
+toml = "0.8"

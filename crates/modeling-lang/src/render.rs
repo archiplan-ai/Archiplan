@@ -23,8 +23,10 @@ impl Model {
     }
 
     pub(crate) fn node_statement(&self, node: NodeId) -> Statement {
+        let declared = self.declared_ports(node);
         Statement::Define(Definition::Node {
             path: self.node_path(node),
+            ports: (!declared.is_empty()).then_some(declared),
         })
     }
 
@@ -50,6 +52,7 @@ impl Model {
             directed: ct.directed,
             source: self.pattern_expr(&ct.src),
             carrier: ct.carrier.as_ref().map(|c| self.pattern_expr(c)),
+            rev_carrier: ct.rev_carrier.as_ref().map(|c| self.pattern_expr(c)),
             target: self.pattern_expr(&ct.dst),
         })
     }
@@ -70,6 +73,7 @@ impl Model {
                 conn,
                 src_port,
                 carrier,
+                rev_carrier,
                 dst_port,
             } => {
                 let sp = &self.ports[src_port];
@@ -81,6 +85,7 @@ impl Model {
                         port: sp.name.clone(),
                     },
                     carrier: carrier.map(|c| self.node_path(c)),
+                    rev_carrier: rev_carrier.map(|c| self.node_path(c)),
                     target: End {
                         node: self.node_path(dp.node),
                         port: dp.name.clone(),

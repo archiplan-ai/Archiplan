@@ -182,7 +182,7 @@ fn user_content_round_trips_on_a_preset() {
     // The dump holds user statements only, referencing preset nodes by path.
     let dumped = ws.model().dump();
     let lines: Vec<String> = dumped.iter().map(Statement::pseudo).collect();
-    assert_eq!(lines, ["def node Payments;", "Service type_of Payments;"]);
+    assert_eq!(lines, ["def node Payments", "Service type_of Payments"]);
 
     // Restoring with the same preset replays identically.
     let replayed = Workspace::restore(&Preset::default_ontology(), ws.revision(), &dumped)

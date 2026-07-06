@@ -1,8 +1,10 @@
 //! Statements: JSON objects discriminated by their `stmt` field.
 //!
-//! JSON is the language's concrete syntax. The compact pseudo-syntax
-//! (`def node Payments;`, `Service type_of Payments;`) is render-only —
-//! [`Statement::pseudo`] produces it for human eyes; nothing parses it.
+//! JSON is the statement API's concrete syntax. [`Statement::pseudo`]
+//! renders a statement in the `.arch` surface syntax
+//! (`def node Payments`, `Service type_of Payments`) — creation statements
+//! render as valid source text, so dumps and cascade reports paste back
+//! into modules; mutations and reads render display-only.
 
 use std::fmt;
 
@@ -19,8 +21,14 @@ use crate::error::{ErrorCode, LangError};
 #[derive(Clone, PartialEq, Debug)]
 #[allow(missing_docs)]
 pub enum Definition {
-    /// `"node": <path>` — the prefix names the (existing) container.
-    Node { path: String },
+    /// `"node": <path>` — the prefix names the (existing) container — plus
+    /// `ports` (optional): the node's declared ports. An omitted `ports`
+    /// field makes no claim about the port set; a present one is compared
+    /// exactly against the node's declared ports.
+    Node {
+        path: String,
+        ports: Option<Vec<String>>,
+    },
     /// `"view": <name>` — a view has no definition body.
     View { name: String },
     /// `"rel": <name>` plus `trans` (optional), `directed`, `source`, `target`.
@@ -31,23 +39,36 @@ pub enum Definition {
         source: PatternExpr,
         target: PatternExpr,
     },
-    /// `"conn": <name>` plus `directed`, `source`, `carrier` (ternary types
-    /// only), `target`.
+    /// `"conn": <name>` plus `directed`, `source`, `carrier` (forward-lane
+    /// carried slot), `rev_carrier` (reverse-lane carried slot, directed
+    /// types only), `target`.
     Conn {
         name: String,
         directed: bool,
         source: PatternExpr,
         carrier: Option<PatternExpr>,
+        rev_carrier: Option<PatternExpr>,
         target: PatternExpr,
     },
 }
 
 impl Definition {
-    /// Pseudo-syntax without the leading verb or trailing `;`:
-    /// `node Payments`, `rel trans of_sort := * -> *`.
+    /// Surface syntax without the leading verb: `node Payments`,
+    /// `rel trans of_sort := * -> *`. A node with declared ports renders as
+    /// its block form, across lines.
     fn pseudo(&self) -> String {
         match self {
-            Definition::Node { path } => format!("node {path}"),
+            Definition::Node { path, ports } => match ports {
+                None => format!("node {path}"),
+                Some(ps) => {
+                    let mut out = format!("node {path}:");
+                    for p in ps {
+                        out.push_str("\n  port ");
+                        out.push_str(p);
+                    }
+                    out
+                }
+            },
             Definition::View { name } => format!("view {name}"),
             Definition::Rel {
                 name,
@@ -69,15 +90,19 @@ impl Definition {
                 directed,
                 source,
                 carrier,
+                rev_carrier,
                 target,
             } => {
-                let arrow = if *directed { "->" } else { "<->" };
-                let carrier = match carrier {
-                    Some(c) => c.pseudo_slot(),
-                    None => String::new(),
-                };
+                let mut lanes = String::from(if *directed { "->" } else { "<->" });
+                if let Some(c) = carrier {
+                    lanes.push_str(&c.pseudo_slot());
+                }
+                if let Some(rc) = rev_carrier {
+                    lanes.push_str(", <-");
+                    lanes.push_str(&rc.pseudo_slot());
+                }
                 format!(
-                    "conn {name} := {} {carrier}{arrow} {}",
+                    "conn {name} := {} {lanes} {}",
                     source.pseudo_slot(),
                     target.pseudo_slot()
                 )
@@ -90,7 +115,12 @@ impl Serialize for Definition {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let mut m = s.serialize_map(None)?;
         match self {
-            Definition::Node { path } => m.serialize_entry("node", path)?,
+            Definition::Node { path, ports } => {
+                m.serialize_entry("node", path)?;
+                if let Some(ps) = ports {
+                    m.serialize_entry("ports", ps)?;
+                }
+            }
             Definition::View { name } => m.serialize_entry("view", name)?,
             Definition::Rel {
                 name,
@@ -112,6 +142,7 @@ impl Serialize for Definition {
                 directed,
                 source,
                 carrier,
+                rev_carrier,
                 target,
             } => {
                 m.serialize_entry("conn", name)?;
@@ -119,6 +150,9 @@ impl Serialize for Definition {
                 m.serialize_entry("source", source)?;
                 if let Some(c) = carrier {
                     m.serialize_entry("carrier", c)?;
+                }
+                if let Some(rc) = rev_carrier {
+                    m.serialize_entry("rev_carrier", rc)?;
                 }
                 m.serialize_entry("target", target)?;
             }
@@ -133,6 +167,7 @@ impl<'de> Deserialize<'de> for Definition {
         #[serde(deny_unknown_fields)]
         struct NodeBody {
             node: String,
+            ports: Option<Vec<String>>,
         }
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
@@ -156,6 +191,7 @@ impl<'de> Deserialize<'de> for Definition {
             directed: bool,
             source: PatternExpr,
             carrier: Option<PatternExpr>,
+            rev_carrier: Option<PatternExpr>,
             target: PatternExpr,
         }
 
@@ -171,7 +207,10 @@ impl<'de> Deserialize<'de> for Definition {
         match subjects.as_slice() {
             ["node"] => {
                 let b: NodeBody = serde_json::from_value(v).map_err(de)?;
-                Ok(Definition::Node { path: b.node })
+                Ok(Definition::Node {
+                    path: b.node,
+                    ports: b.ports,
+                })
             }
             ["view"] => {
                 let b: ViewBody = serde_json::from_value(v).map_err(de)?;
@@ -194,6 +233,7 @@ impl<'de> Deserialize<'de> for Definition {
                     directed: b.directed,
                     source: b.source,
                     carrier: b.carrier,
+                    rev_carrier: b.rev_carrier,
                     target: b.target,
                 })
             }
@@ -225,7 +265,7 @@ pub enum PatternExpr {
 }
 
 impl PatternExpr {
-    /// Pseudo-syntax without surrounding parentheses: `*`, `OrderId`,
+    /// The pattern in an already-delimited position: `*`, `OrderId`,
     /// `Service type_of *`.
     fn pseudo_bare(&self) -> String {
         match self {
@@ -235,11 +275,12 @@ impl PatternExpr {
         }
     }
 
-    /// Pseudo-syntax as a shape slot: `*`, `(OrderId)`, `(Service type_of *)`.
+    /// The pattern as a shape slot: `*`, `OrderId`, `(Service type_of *)` —
+    /// parenthesized only where juxtaposition demands delimiting.
     fn pseudo_slot(&self) -> String {
         match self {
-            PatternExpr::Any => "*".to_string(),
-            _ => format!("({})", self.pseudo_bare()),
+            PatternExpr::Any | PatternExpr::Exact { .. } => self.pseudo_bare(),
+            PatternExpr::Classified { .. } => format!("({})", self.pseudo_bare()),
         }
     }
 }
@@ -365,6 +406,8 @@ pub enum Statement {
         source: End,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         carrier: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rev_carrier: Option<String>,
         target: End,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         views: Vec<String>,
@@ -422,7 +465,15 @@ pub enum Statement {
 fn allowed_keys(kind: &str) -> Option<&'static [&'static str]> {
     Some(match kind {
         "rel-edge" => &["stmt", "rel", "source", "target", "views"],
-        "conn-edge" => &["stmt", "conn", "source", "carrier", "target", "views"],
+        "conn-edge" => &[
+            "stmt",
+            "conn",
+            "source",
+            "carrier",
+            "rev_carrier",
+            "target",
+            "views",
+        ],
         "app" => &["stmt", "node", "port", "route", "inner"],
         "rename" => &["stmt", "node", "to"],
         "delete" => &["stmt", "node", "edge", "rel", "conn", "view"],
@@ -441,10 +492,18 @@ fn definition_keys(obj: &serde_json::Map<String, Value>) -> Option<&'static [&'s
         .filter(|k| obj.contains_key(*k))
         .collect();
     Some(match subjects.as_slice() {
-        ["node"] => &["stmt", "node"],
+        ["node"] => &["stmt", "node", "ports"],
         ["view"] => &["stmt", "view"],
         ["rel"] => &["stmt", "rel", "trans", "directed", "source", "target"],
-        ["conn"] => &["stmt", "conn", "directed", "source", "carrier", "target"],
+        ["conn"] => &[
+            "stmt",
+            "conn",
+            "directed",
+            "source",
+            "carrier",
+            "rev_carrier",
+            "target",
+        ],
         _ => return None,
     })
 }
@@ -538,6 +597,39 @@ pub fn parse_statement(value: &Value) -> Result<Statement, LangError> {
                 value,
             ));
         }
+        Statement::Define(Definition::Conn {
+            directed: false,
+            rev_carrier: Some(_),
+            ..
+        })
+        | Statement::Redefine(Definition::Conn {
+            directed: false,
+            rev_carrier: Some(_),
+            ..
+        }) => {
+            return Err(parse_err(
+                "an undirected connection type has no lanes; `rev_carrier` requires `directed`"
+                    .into(),
+                value,
+            ));
+        }
+        Statement::Define(Definition::Node {
+            ports: Some(ps), ..
+        })
+        | Statement::Redefine(Definition::Node {
+            ports: Some(ps), ..
+        }) => {
+            if let Some(dup) = ps
+                .iter()
+                .enumerate()
+                .find_map(|(i, p)| ps[..i].contains(p).then_some(p))
+            {
+                return Err(parse_err(
+                    format!("duplicate port `{dup}` in a node definition"),
+                    value,
+                ));
+            }
+        }
         _ => {}
     }
     Ok(stmt)
@@ -557,40 +649,38 @@ impl Statement {
         serde_json::to_value(self).expect("statements serialize")
     }
 
-    /// Pseudo-syntax without the trailing `;` — used to embed an edge
-    /// restatement inside `delete`/`untag` renderings.
-    fn pseudo_bare(&self) -> String {
-        let s = self.pseudo();
-        s.strip_suffix(';').unwrap_or(&s).to_string()
-    }
-
-    /// Render the statement in the spec's illustrative pseudo-syntax
-    /// (`def node Payments;`). Presentation only — nothing parses it.
+    /// Render the statement in the `.arch` surface syntax. Creation
+    /// statements — the ones dumps and cascades are made of — render as
+    /// valid source text, pasteable into a module; mutations and reads have
+    /// no surface form and render display-only.
     pub fn pseudo(&self) -> String {
         match self {
-            Statement::Define(d) => format!("def {};", d.pseudo()),
-            Statement::Redefine(d) => format!("redefine {};", d.pseudo()),
+            Statement::Define(d) => format!("def {}", d.pseudo()),
+            Statement::Redefine(d) => format!("redefine {}", d.pseudo()),
             Statement::RelEdge {
                 rel,
                 source,
                 target,
                 views,
             } => {
-                format!("{source} {rel} {target}{};", views_suffix(views))
+                format!("{source} {rel} {target}{}", views_suffix(views))
             }
             Statement::ConnEdge {
                 conn,
                 source,
                 carrier,
+                rev_carrier,
                 target,
                 views,
             } => {
-                let carrier = match carrier {
-                    Some(c) => format!("({c})"),
-                    None => String::new(),
+                let carriers = match (carrier, rev_carrier) {
+                    (Some(c), Some(rc)) => format!("(->{c}, <-{rc})"),
+                    (Some(c), None) => format!("({c})"),
+                    (None, Some(rc)) => format!("(<-{rc})"),
+                    (None, None) => String::new(),
                 };
                 format!(
-                    "{}({}) {conn}{carrier} {}({}){};",
+                    "{}.{} {conn}{carriers} {}.{}{}",
                     source.node,
                     source.port,
                     target.node,
@@ -608,9 +698,9 @@ impl Statement {
                     Some(r) => format!("({})", r.pseudo_bare()),
                     None => String::new(),
                 };
-                format!("{node}.{port}{route} = {}({});", inner.node, inner.port)
+                format!("{node}.{port}{route} = {}.{}", inner.node, inner.port)
             }
-            Statement::Rename { node, to } => format!("rename {node} {to};"),
+            Statement::Rename { node, to } => format!("rename {node} {to}"),
             Statement::Delete {
                 node,
                 edge,
@@ -619,21 +709,21 @@ impl Statement {
                 view,
             } => {
                 if let Some(n) = node {
-                    format!("delete {n};")
+                    format!("delete {n}")
                 } else if let Some(e) = edge {
-                    format!("delete {};", e.pseudo_bare())
+                    format!("delete {}", e.pseudo())
                 } else if let Some(r) = rel {
-                    format!("delete rel {r};")
+                    format!("delete rel {r}")
                 } else if let Some(c) = conn {
-                    format!("delete conn {c};")
+                    format!("delete conn {c}")
                 } else if let Some(v) = view {
-                    format!("delete view {v};")
+                    format!("delete view {v}")
                 } else {
-                    "delete;".to_string()
+                    "delete".to_string()
                 }
             }
             Statement::Untag { edge, views } => {
-                format!("untag {}{};", edge.pseudo_bare(), views_suffix(views))
+                format!("untag {}{}", edge.pseudo(), views_suffix(views))
             }
             Statement::Query {
                 types,
@@ -646,7 +736,7 @@ impl Statement {
                     None => String::new(),
                 };
                 format!(
-                    "query{}{}{}{};",
+                    "query{}{}{}{}",
                     seg("types", types.clone()),
                     seg(
                         "kinds",
@@ -658,7 +748,7 @@ impl Statement {
                     seg("in", views.clone()),
                 )
             }
-            Statement::Check { in_views } => format!("check{};", views_suffix(in_views)),
+            Statement::Check { in_views } => format!("check{}", views_suffix(in_views)),
         }
     }
 }

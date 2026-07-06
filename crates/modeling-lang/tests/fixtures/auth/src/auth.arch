@@ -1,0 +1,7 @@
+// The interface in one place: the node and its declared ports.
+def node AuthService:
+  port handle_login
+  port handle_get_token
+  port send_audit_log
+
+Service type_of AuthService

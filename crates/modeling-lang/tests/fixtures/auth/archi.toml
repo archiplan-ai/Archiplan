@@ -1,0 +1,3 @@
+[project]
+name = "auth"
+# src = "src" and preset = "default" are the defaults

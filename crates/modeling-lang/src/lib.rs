@@ -5,10 +5,12 @@
 //! ports and nested scopes) and distinguished edges (relations, connections,
 //! applications), views, the JSON statement API with its idempotent
 //! definitions and error contract, cascading deletion, and the read
-//! statements (the subgraph `query` and `check`) — plus the request/response
-//! envelope of `requirements/agent-interface.md`, ontology presets loaded as
-//! the standard library (`requirements/modeling-lang/ontology.md`), and NKP
-//! landscape analysis (`requirements/scoring/nkp.md`).
+//! statements (the subgraph `query` and `check`) — plus the `.arch` source
+//! format (`requirements/modeling-lang/source-format.md`), the
+//! request/response envelope of `requirements/agent-interface.md`, ontology
+//! presets loaded as the standard library
+//! (`requirements/modeling-lang/ontology.md`), and NKP landscape analysis
+//! (`requirements/scoring/nkp.md`).
 //!
 //! # Quick start
 //!
@@ -31,9 +33,11 @@
 //!
 //! # Semantics
 //!
-//! - A statement is a JSON object discriminated by `stmt`; JSON is the only
-//!   parsed syntax. The compact pseudo-syntax (`def node Payments;`) is
-//!   render-only: [`Statement::pseudo`] produces it for human output.
+//! - A statement is a JSON object discriminated by `stmt`. The `.arch`
+//!   source format ([`source`]) is the human syntax: a project of text files
+//!   compiled down to the same statements ([`source::compile_project`]).
+//!   [`Statement::pseudo`] renders statements back in it, so dumps and
+//!   cascades are pasteable source.
 //! - There is no ambient scope: every reference is an absolute path, creation
 //!   statements carry the full path of what they create, applications name
 //!   their delegating node explicitly. Augmentation is just a statement whose
@@ -104,6 +108,7 @@ mod preset;
 mod query;
 mod render;
 mod result;
+pub mod source;
 mod statement;
 
 pub use engine::Workspace;

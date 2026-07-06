@@ -1,0 +1,10 @@
+import auth
+import conns
+
+def view login_flow
+
+def node UI:
+  port login
+
+// both carriers inferred: the type's lanes are exact nodes
+UI.login login AuthService.handle_login in login_flow

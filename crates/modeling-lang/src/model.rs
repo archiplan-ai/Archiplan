@@ -45,13 +45,19 @@ pub(crate) struct Node {
 
 /// A named attachment point on a node. Its connection type and, for directed
 /// types, its side are fixed by its first use.
+///
+/// A **declared** port comes from its node's definition and exists before —
+/// and beyond — any edge: `conn` is `None` until a first use fixes it, and
+/// the port survives losing its last edge. A use-created port exists only
+/// while attached.
 #[derive(Clone, Debug)]
 pub(crate) struct Port {
     pub id: PortId,
     pub node: NodeId,
     pub name: String,
-    pub conn: ConnId,
+    pub conn: Option<ConnId>,
     pub side: Option<Side>,
+    pub declared: bool,
 }
 
 /// A resolved pattern. Anchors and relations are bound by id at declaration
@@ -79,7 +85,11 @@ pub(crate) struct ConnType {
     pub name: String,
     pub directed: bool,
     pub src: Pattern,
+    /// Forward-lane carried slot (source → target).
     pub carrier: Option<Pattern>,
+    /// Reverse-lane carried slot (target → source); directed types only —
+    /// direction means initiation, a reverse carrier is the response payload.
+    pub rev_carrier: Option<Pattern>,
     pub dst: Pattern,
 }
 
@@ -100,6 +110,7 @@ pub(crate) enum EdgePayload {
         conn: ConnId,
         src_port: PortId,
         carrier: Option<NodeId>,
+        rev_carrier: Option<NodeId>,
         dst_port: PortId,
     },
     App {
@@ -264,6 +275,18 @@ impl Model {
         format!("{}.{}", self.node_path(p.node), p.name)
     }
 
+    /// Names of the node's declared ports, in name order.
+    pub(crate) fn declared_ports(&self, node: NodeId) -> Vec<String> {
+        self.nodes[&node]
+            .ports
+            .values()
+            .filter_map(|pid| {
+                let p = &self.ports[pid];
+                p.declared.then(|| p.name.clone())
+            })
+            .collect()
+    }
+
     /// Whether `rel` holds from `from` to `to`, following the relation's
     /// direction and, for transitive relations, the virtual closure over
     /// declared edges.
@@ -348,6 +371,7 @@ impl Model {
         conn: ConnId,
         a: PortId,
         carrier: Option<NodeId>,
+        rev_carrier: Option<NodeId>,
         b: PortId,
     ) -> Option<EdgeId> {
         let directed = self.conns[&conn].directed;
@@ -356,11 +380,12 @@ impl Model {
                 conn: c,
                 src_port,
                 carrier: cr,
+                rev_carrier: rcr,
                 dst_port,
             } if *c == conn => {
                 let same = (*src_port == a && *dst_port == b)
                     || (!directed && *src_port == b && *dst_port == a);
-                (same && *cr == carrier).then_some(e.id)
+                (same && *cr == carrier && *rcr == rev_carrier).then_some(e.id)
             }
             _ => None,
         })

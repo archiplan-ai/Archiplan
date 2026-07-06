@@ -12,11 +12,16 @@ on its ports, or across its scope boundary (see [Kinds](#kinds)).
 
 ### Notation
 
-The concrete syntax of the language is **JSON**: every statement is a JSON object, defined in
-[Language API](#language-api). The compact notation used in examples throughout this spec —
-`def node Payments;`, `Service type_of Payments;` — is illustrative **pseudo-syntax** only: each line is 1:1
-shorthand for one statement object, used because JSON is hard to read in bulk. Nothing parses the pseudo-syntax;
-interfaces may render statements this way for humans.
+The language has two concrete syntaxes over one semantic core:
+
+- **JSON statements** — the machine API, defined in [Language API](#language-api): every statement is a JSON
+  object; batches are atomic. This is what agents and tools speak, and how statement-log models (`archi.json`)
+  persist.
+- **`.arch` source** — the human syntax, defined in [source-format.md](./source-format.md): a project of diffable
+  text files with modules, imports and lexical scopes, compiled down to the same statements. The source format is
+  declarative-only (no mutation vocabulary — edits are text edits); the compact notation used in examples
+  throughout this spec (`def node Payments`, `Service type_of Payments`) is exactly this surface syntax, and
+  dumps/cascades render in it.
 
 ### Identifiers
 
@@ -40,11 +45,21 @@ ends/ports, carrier). Restating an existing edge refers to that edge rather than
 A **port** is a named attachment point on a node. Ports are the only place a
 [connection](#connection) may land, and they form the node's interface to the rest of the graph.
 
-Ports are named by the user at the point of use: a connection (or application) end names its port at the node —
-`Payments(send_confirmation)` in pseudo-syntax, the `port` field of the end object in JSON — which creates the port
-on first use and reuses it afterwards. A port is referenced as `node.<port>` (`Payments.send_confirmation`). Every
-port belongs to exactly one connection type and, for directed types, one side (source or target), all fixed by its
-first use; a later use that disagrees is rejected.
+Ports come into existence two ways:
+
+- **Declared** — listed on the node's definition (`ports` field; `port` lines of a `def node` block in source).
+  A declared port is part of the interface: it exists before any edge and survives losing its last edge. The
+  [source format](./source-format.md) requires every used port to be declared; a declared port nothing attaches to
+  is the `unused_port` [finding](./errors.md#errors-vs-findings). A `define` restating a node compares `ports` as
+  a set when the field is present (divergence is E_REDECLARED) and makes no claim when absent; `redefine` with
+  `ports` replaces the declared set (a removed-but-attached port lives on as use-created).
+- **Use-created** — named at the point of use: a connection (or application) end names its port at the node — the
+  `port` field of the end object — which creates the port on first use and reuses it afterwards. A use-created
+  port lives only as long as something attaches to it.
+
+A port is referenced as `node.<port>` (`Payments.send_confirmation`). Every port belongs to at most one connection
+type and, for directed types, one side (source or target), fixed by its **first use** — a declared port is untyped
+until then; a later use that disagrees is rejected.
 
 ### Scope
 
@@ -65,14 +80,14 @@ A view must be declared before use. An edge statement joins its edge to one or m
 field):
 
 ```
-def view data_flow;
-def view fault_prop;
+def view data_flow
+def view fault_prop
 
-def rel fails_via := (Service type_of *) -> (Service type_of *);
+def rel fails_via := (Service type_of *) -> (Service type_of *)
 
-Payments(send_message) send(PaymentConfirmation) Orders(handle_message) in data_flow;
-Payments fails_via Orders in fault_prop;
-Orders fails_via Shipping in fault_prop, data_flow;
+Payments.send_message send(PaymentConfirmation) Orders.handle_message in data_flow
+Payments fails_via Orders in fault_prop
+Orders fails_via Shipping in fault_prop, data_flow
 ```
 
 - Tagging is per **edge**, not per type: edges of one type may live in different views, and one edge may belong to
@@ -102,17 +117,17 @@ A typed kind of edge between two nodes. Declared with a `rel` statement, composi
 [transitivity](#transitivity), [direction](#direction) and [shape](#shape):
 
 ```
-def rel trans type_of := * -> *;          # stdlib — pre-applied, shown for shape
-def rel has_sensitive_data := (Service type_of *) -> (Data type_of *);
+def rel trans type_of := * -> *          // stdlib — pre-applied, shown for shape
+def rel has_sensitive_data := (Service type_of *) -> (Data type_of *)
 ```
 
 Use it:
 
 ```
-def node Service;
-def node Payments;
+def node Service
+def node Payments
 
-Service type_of Payments;    # instantiate relation `type_of` between nodes Service and Payments
+Service type_of Payments    // instantiate relation `type_of` between nodes Service and Payments
 ```
 
 ##### Transitivity
@@ -133,19 +148,19 @@ Direction is required on every type declaration:
 #### Connection
 
 A typed kind of edge that connects nodes via concrete ports (in contrast to opaque [relation](#relation) edge).
-Declared with a `conn` statement. A connection edge attaches to each node through a [port](#ports) named at the
-point of use; the port is created on first use:
+Declared with a `conn` statement. A connection edge attaches to each node through a [port](#ports) — declared on
+the node or created at first use:
 
 ```
-def conn send := (Service type_of *) (Message type_of *)-> (Service type_of *);
-def conn confirm := (Service type_of *) -> (Service type_of *);
+def conn send := (Service type_of *) ->(Message type_of *) (Service type_of *)
+def conn confirm := (Service type_of *) -> (Service type_of *)
 
-Payments(send_confirmation) confirm Orders(handle_confirmation);
+Payments.send_confirmation confirm Orders.handle_confirmation
 
-def node PaymentConfirmation;
-Message type_of PaymentConfirmation;
+def node PaymentConfirmation
+Message type_of PaymentConfirmation
 
-Payments(send_message) send(PaymentConfirmation) Orders(handle_message);
+Payments.send_message send(PaymentConfirmation) Orders.handle_message
 ```
 
 Several edges may attach to the same port — naming an existing port reuses it, provided the connection type and side
@@ -156,24 +171,37 @@ match (see [Ports](#ports)).
 Shape restricts the set of nodes a connection of that type can connect. Each slot of a shape is a **pattern**:
 
 - `*` — matches any node
-- `(OrderId)` — matches exactly the node `OrderId`
+- `OrderId` — matches exactly the node `OrderId`
 - `(Service type_of *)` — matches any node `x` such that `Service type_of x`
 
 Pattern anchors are absolute paths, bound by id at declaration time.
 
-A. Binary shape `* <Direction> *`:
+A shape is `source LANES target`. Direction means **initiation**; carried slots ride on the lanes, one per
+direction:
+
+| shape | meaning | fields |
+|-------|---------|--------|
+| `* -> *` | directed, no payload | — |
+| `* ->P *` | directed, forward payload | `carrier` |
+| `* ->P, <-Q *` | request/response: `P` out, `Q` back | `carrier`, `rev_carrier` |
+| `* ->, <-Q *` | pull: initiation forward, payload back | `rev_carrier` |
+| `* <-> *` | undirected | — |
+| `* <->P *` | undirected, single payload | `carrier` |
+
 ```
-def conn calls := (Service type_of *) -> (Service type_of *);
+def conn calls := (Service type_of *) -> (Service type_of *)
+def conn send  := (Service type_of *) ->(Message type_of *) (Service type_of *)
+def conn login := * ->LoginForm, <-AuthResponse *
 ```
 
-B. Ternary shape `* (*)<Direction> *` — the middle node is *carried* by the connection edge:
-```
-def conn send := (Service type_of *) (Message type_of *)-> (Service type_of *);
-```
+A reverse carried slot requires a directed type (`<->` has no lanes to tell apart); port sides are unchanged — the
+source port stays `source` even when payload flows back.
 
-**Arity follows the shape.** A binary type takes no carried node; a ternary type **requires** one at every
-instantiation — `send(PaymentConfirmation)` — matched against the carried slot's pattern. A binary type rejects a
-carrier at instantiation.
+**Arity follows the lanes.** A lane with a carried slot **requires** a concrete carried node at every
+instantiation — `send(PaymentConfirmation)`, `login(->LoginForm, <-AuthResponse)` — matched against that slot's
+pattern; a lane without one rejects it. In source, a lane whose pattern is an exact node may be omitted at the edge
+and defaults to it ([source-format.md](./source-format.md#connection-edges)); the statement layer always names
+carriers explicitly.
 
 #### Application
 
@@ -183,9 +211,9 @@ statement names the delegating node explicitly (the outer port is written absolu
 the inner node is a **direct child** of it, so the inner end is written as a bare child name:
 
 ```
-def node Orders.ConfirmationHandler;
+def node Orders.ConfirmationHandler
 
-Orders.handle_confirmation = ConfirmationHandler(confirmations);   # outer boundary port realized by an inner port
+Orders.handle_confirmation = ConfirmationHandler.confirmations   // outer boundary port realized by an inner port
 ```
 
 The outer port must already exist (some connection attaches to it). The inner end follows the same rules as a
@@ -199,11 +227,11 @@ carrying different concrete nodes genuinely share one port, a delegation can be 
 [pattern](#shape) to route only the matching edges:
 
 ```
-Payments(payment_events)  send(PaymentFailed) Orders(events);
-Shipping(shipping_events) send(OrderCreated) Orders(events);
+Payments.payment_events  send(PaymentFailed) Orders.events
+Shipping.shipping_events send(OrderCreated) Orders.events
 
-Orders.events(OrderCreated)  = OrderHandler(handle);    # only edges carrying OrderCreated
-Orders.events(PaymentFailed) = PaymentHandler(handle);  # only edges carrying PaymentFailed
+Orders.events(OrderCreated)  = OrderHandler.handle    // only edges carrying OrderCreated
+Orders.events(PaymentFailed) = PaymentHandler.handle  // only edges carrying PaymentFailed
 ```
 
 Resolution: an edge is routed by the qualified delegation whose pattern matches its carried node; edges matched by no
@@ -215,31 +243,31 @@ are rejected as ambiguous.
 One atomic batch:
 
 ```
-def rel trans of_sort := * -> *;
-# type_of comes from the stdlib
+def rel trans of_sort := * -> *
+// type_of comes from the stdlib
 
-def node Functional;
-def node Data;
+def node Functional
+def node Data
 
-def node Service;
-Service of_sort Functional;
-def node Payments;
-def node Orders;
+def node Service
+Service of_sort Functional
+def node Payments
+def node Orders
 
-# Payments and Orders are concrete services (terms of type Service)
-Service type_of Payments;
-Service type_of Orders;
+// Payments and Orders are concrete services (terms of type Service)
+Service type_of Payments
+Service type_of Orders
 
-def node OrderId;
-OrderId of_sort Data;
+def node OrderId
+OrderId of_sort Data
 
-# a connection between two services' ports, carrying an OrderId
-def conn confirm := (Service type_of *) (OrderId)-> (Service type_of *);
-Payments(send_confirmation) confirm(OrderId) Orders(handle_confirmation);
+// a connection between two services' ports, carrying an OrderId
+def conn confirm := (Service type_of *) ->OrderId (Service type_of *)
+Payments.send_confirmation confirm(OrderId) Orders.handle_confirmation
 
-# inside Orders, the boundary port is delegated to an inner handler
-def node Orders.ConfirmationHandler;
-Orders.handle_confirmation = ConfirmationHandler(handle_confirmation);
+// inside Orders, the boundary port is delegated to an inner handler
+def node Orders.ConfirmationHandler
+Orders.handle_confirmation = ConfirmationHandler.handle_confirmation
 ```
 
 ## Standard Library
@@ -247,7 +275,7 @@ Orders.handle_confirmation = ConfirmationHandler(handle_confirmation);
 Pre-applied in every model:
 
 ```
-def rel trans type_of := * -> *;
+def rel trans type_of := * -> *
 ```
 
 Restating a stdlib definition identically is a no-op; deleting or divergently redefining it is rejected
@@ -316,18 +344,22 @@ when its precondition does not hold.
 
 ### Statements
 
-**Definitions** — pseudo-syntax, then the statement objects:
+**Definitions** — surface syntax, then the statement objects:
 
 ```
-def node Orders.RefundHandler;
-def view data_flow;
-def rel trans of_sort := * -> *;
-def conn send := (Service type_of *) (Message type_of *)-> (Service type_of *);
-redefine node Orders;
+def node Orders.RefundHandler
+def node AuthService:
+  port handle_login
+def view data_flow
+def rel trans of_sort := * -> *
+def conn send := (Service type_of *) ->(Message type_of *) (Service type_of *)
+def conn login := * ->LoginForm, <-AuthResponse *
+redefine node Orders
 ```
 
 ```json
 { "stmt": "define", "node": "Orders.RefundHandler" }
+{ "stmt": "define", "node": "AuthService", "ports": ["handle_login"] }
 { "stmt": "define", "view": "data_flow" }
 { "stmt": "define", "rel": "of_sort", "trans": true, "directed": true,
   "source": "*", "target": "*" }
@@ -335,20 +367,28 @@ redefine node Orders;
   "source":  { "anchor": "Service", "rel": "type_of" },
   "carrier": { "anchor": "Message", "rel": "type_of" },
   "target":  { "anchor": "Service", "rel": "type_of" } }
+{ "stmt": "define", "conn": "login", "directed": true,
+  "source": "*",
+  "carrier": { "node": "LoginForm" },
+  "rev_carrier": { "node": "AuthResponse" },
+  "target": "*" }
 { "stmt": "redefine", "node": "Orders" }
 ```
 
 `redefine` takes the same shape with `"stmt": "redefine"` (views excepted — no body to redefine). Arrows map to
-`directed`: `->` is `true`, `<->` is `false`. Patterns map as `*` ↔ `"*"`, `(OrderId)` ↔ `{ "node": "OrderId" }`,
-`(Service type_of *)` ↔ `{ "anchor": "Service", "rel": "type_of" }`. `trans` defaults to `false`; a `carrier` slot
-makes the type ternary.
+`directed`: `->` is `true`, `<->` is `false`. Patterns map as `*` ↔ `"*"`, `OrderId` ↔ `{ "node": "OrderId" }`,
+`(Service type_of *)` ↔ `{ "anchor": "Service", "rel": "type_of" }`. `trans` defaults to `false`. `carrier` is the
+forward lane's carried slot, `rev_carrier` the reverse lane's ([Shape](#shape)); `rev_carrier` requires
+`directed: true`. `ports` lists the node's [declared ports](#ports): absent means no claim, present compares as a
+set.
 
 **Edges:**
 
 ```
-Payments fails_via Orders in fault_prop;
-Payments(send_message) send(PaymentConfirmation) Orders(handle_message) in data_flow;
-Orders.events(OrderCreated) = OrderHandler(handle);
+Payments fails_via Orders in fault_prop
+Payments.send_message send(PaymentConfirmation) Orders.handle_message in data_flow
+UI.login login(->LoginForm, <-AuthResponse) AuthService.handle_login
+Orders.events(OrderCreated) = OrderHandler.handle
 ```
 
 ```json
@@ -359,22 +399,28 @@ Orders.events(OrderCreated) = OrderHandler(handle);
   "carrier": "PaymentConfirmation",
   "target":  { "node": "Orders", "port": "handle_message" },
   "views": ["data_flow"] }
+{ "stmt": "conn-edge", "conn": "login",
+  "source":  { "node": "UI", "port": "login" },
+  "carrier": "LoginForm",
+  "rev_carrier": "AuthResponse",
+  "target":  { "node": "AuthService", "port": "handle_login" } }
 { "stmt": "app", "node": "Orders", "port": "events",
   "route": { "node": "OrderCreated" },
   "inner": { "node": "OrderHandler", "port": "handle" } }
 ```
 
-`views` is optional (absent = untagged); `carrier` is required for ternary types, rejected for binary ones; `route`
-is the optional carried-node qualifier of a delegation.
+`views` is optional (absent = untagged); `carrier`/`rev_carrier` are each required exactly when the type's
+corresponding lane has a carried slot ([Shape](#shape)); `route` is the optional carried-node qualifier of a
+delegation, matched against the **forward** carrier.
 
-**Mutations:**
+**Mutations** (statement API only — a source project mutates by text edit):
 
 ```
-rename Payments PaymentsGateway;
-delete Orders;
-delete Payments fails_via Orders;
-delete rel fails_via;    delete conn send;    delete view fault_prop;
-untag Payments fails_via Orders in fault_prop;
+rename Payments PaymentsGateway
+delete Orders
+delete Payments fails_via Orders
+delete rel fails_via     delete conn send     delete view fault_prop
+untag Payments fails_via Orders in fault_prop
 ```
 
 ```json
@@ -400,8 +446,8 @@ untag Payments fails_via Orders in fault_prop;
 **Reads** (see [queries](./queries.md)):
 
 ```
-query types (Service) kinds (connection) scopes (Orders) in (data_flow);
-check;
+query types (Service) kinds (connection) scopes (Orders) in (data_flow)
+check
 ```
 
 ```json
@@ -432,9 +478,12 @@ Two integrity regimes govern what cascades and what merely drifts:
   `(Service type_of *)` — succeeds; the nonconforming edges remain and are surfaced as
   [findings](./errors.md#errors-vs-findings), not errors.
 
-A port lives as long as some connection or application attaches to it; cascading away the last attached edge removes
-the port and frees its name (a fresh first use may bind a new type or side). A delegated port left with no attached
-connections is legal but suspect — a finding, not an error.
+A **use-created** port lives as long as some connection or application attaches to it; cascading away the last
+attached edge removes the port and frees its name (a fresh first use may bind a new type or side). A **declared**
+port outlives its edges — it is part of the node's definition — but deleting the connection type it was fixed to
+releases the binding (reference integrity is hard), returning it to the never-used state. A delegated port left
+with no attached connections, and a declared port with no attachments at all, are legal but suspect — findings, not
+errors.
 
 The [stdlib](#standard-library) cannot be deleted (E_STDLIB_PROTECTED).
 
@@ -447,13 +496,16 @@ Invariants an implementation must enforce; each is checkable at statement time.
 - Every path prefix in a statement resolves to an existing node — augmentation presupposes its container.
 - Several connection edges may attach to one port at the same time, provided each matches the port's connection type
   and side.
-- A port's connection type and side are fixed by its first use and never change; a disagreeing use is rejected.
-- A ternary connection edge is always instantiated with a carrier, and the carrier matches the carried slot's
-  pattern; a binary connection edge never names a carrier.
-- An application's outer port exists before the application does (some connection attaches to it).
+- A port's connection type and side are fixed by its first use; a disagreeing use is rejected. The binding releases
+  only when the type itself is deleted (declared ports) or the port is removed with its last edge (use-created).
+- Each lane of a connection edge is instantiated with a carried node exactly when the type's lane has a carried
+  slot, and the node matches that slot's pattern; a reverse slot requires a directed type.
+- An application's outer port exists and has an attachment before the application does (a declared port with
+  nothing attached cannot delegate yet).
 - An application's inner node is a direct child of its delegating node.
 - Two qualified delegations on one port must not match the same carried node.
 - Every view named in a `views` or `in` field is declared.
 - No stored element references a deleted element — `delete` removes the full referencing closure.
-- A port exists iff at least one connection or application attaches to it.
+- A use-created port exists iff at least one connection or application attaches to it; a declared port exists from
+  its node's definition on.
 - A failed statement leaves the model unchanged; an identical restatement is a no-op, never a duplicate.

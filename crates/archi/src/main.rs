@@ -1,17 +1,24 @@
-//! `archi` — a thin runner for statement batches (`requirements/cli.md`)
-//! plus the NKP landscape analysis (`requirements/scoring/nkp.md`).
+//! `archi` — a thin runner for statement batches (`requirements/cli.md`),
+//! the `.arch` source-format compiler
+//! (`requirements/modeling-lang/source-format.md`) and the NKP landscape
+//! analysis (`requirements/scoring/nkp.md`).
 //!
 //! ```text
-//! archi exec [--dry-run] [--expect-revision <N>] [--model <file>] [--preset <file>] [--json] [<batch.json> | -]
-//! archi nkp  [--model <file>] [--regime | --hotspots | --corridors] [--top | --scope <path>]
-//!            [--exclude '<src> <rel> <dst>']... [--only <edge-type>]...
-//!            [--tau-p <f>] [--tau-b <f>] [--neutrality degree|uniform] [--global-p <f>]
+//! archi exec  [--dry-run] [--expect-revision <N>] [--model <file>] [--preset <file>] [--json] [<batch.json> | -]
+//! archi check [--project <dir> | --model <file>] [--json]
+//! archi build [--project <dir>] [--emit-batch <file|->]
+//! archi nkp   [--project <dir> | --model <file>] [--regime | --hotspots | --corridors] [--top | --scope <path>]
+//!             [--exclude '<src> <rel> <dst>']... [--only <edge-type>]...
+//!             [--tau-p <f>] [--tau-b <f>] [--neutrality degree|uniform] [--global-p <f>]
 //! ```
 //!
-//! The model persists as `{ "revision": N, "preset": { "name", "statements" },
-//! "statements": [<dump>] }` in the model file (default `archi.json`); how a
-//! model is located is provisional until the distribution requirements land.
-//! The preset is pinned at model creation: `--preset <file>`, else an
+//! `check`, `build` and `nkp` locate their model by precedence: `--project`,
+//! then `--model`, then the nearest `archi.toml` upward from the working
+//! directory, then `archi.json`. A project of `.arch` files is compiled fresh
+//! each run — the source is the model. `exec` speaks the JSON statement API
+//! against a model file (default `archi.json`) which persists as
+//! `{ "revision": N, "preset": { "name", "statements" }, "statements": [<dump>] }`;
+//! its preset is pinned at model creation: `--preset <file>`, else an
 //! `ontology.json` next to the model file, else the built-in default
 //! ontology. Files from before presets replay on the core preset.
 
@@ -20,22 +27,27 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use modeling_lang::source::{Compiled, compile_project, find_project_root};
 use modeling_lang::{
-    EdgeKind, ExcludePattern, GraphEdge, Neutrality, NkpConfig, NkpScope, Outcome, Preset,
+    EdgeKind, ExcludePattern, Finding, GraphEdge, Neutrality, NkpConfig, NkpScope, Outcome, Preset,
     Response, Statement, Workspace, parse_statement,
 };
 use serde_json::{Value, json};
 
 const USAGE: &str = "usage:
-  archi exec [--dry-run] [--expect-revision <N>] [--model <file>] [--preset <file>] [--json] [<batch.json> | -]
-  archi nkp  [--model <file>] [--regime | --hotspots | --corridors] [--top | --scope <path>]
-             [--exclude '<src> <rel> <dst>']... [--only <edge-type>]...
-             [--tau-p <f>] [--tau-b <f>] [--neutrality degree|uniform] [--global-p <f>]";
+  archi exec  [--dry-run] [--expect-revision <N>] [--model <file>] [--preset <file>] [--json] [<batch.json> | -]
+  archi check [--project <dir> | --model <file>] [--json]
+  archi build [--project <dir>] [--emit-batch <file|->]
+  archi nkp   [--project <dir> | --model <file>] [--regime | --hotspots | --corridors] [--top | --scope <path>]
+              [--exclude '<src> <rel> <dst>']... [--only <edge-type>]...
+              [--tau-p <f>] [--tau-b <f>] [--neutrality degree|uniform] [--global-p <f>]";
 
 struct Args {
     verb: String,
     positional: Vec<String>,
-    model_file: String,
+    model_file: Option<String>,
+    project: Option<String>,
+    emit_batch: Option<String>,
     json: bool,
     dry_run: bool,
     expect_revision: Option<u64>,
@@ -62,7 +74,9 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
     let mut args = Args {
         verb: String::new(),
         positional: Vec::new(),
-        model_file: "archi.json".to_string(),
+        model_file: None,
+        project: None,
+        emit_batch: None,
         json: false,
         dry_run: false,
         expect_revision: None,
@@ -100,7 +114,9 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--hotspots" => args.hotspots = true,
             "--corridors" => args.corridors = true,
             "--top" => args.top = true,
-            "--model" => args.model_file = value(&mut it, "--model")?,
+            "--model" => args.model_file = Some(value(&mut it, "--model")?),
+            "--project" => args.project = Some(value(&mut it, "--project")?),
+            "--emit-batch" => args.emit_batch = Some(value(&mut it, "--emit-batch")?),
             "--preset" => args.preset = Some(value(&mut it, "--preset")?),
             "--scope" => args.scope = Some(value(&mut it, "--scope")?),
             "--exclude" => args.exclude.push(value(&mut it, "--exclude")?),
@@ -121,6 +137,76 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         }
     }
     Ok(args)
+}
+
+/// Where `check`/`nkp` take their model from: a source project (compiled
+/// fresh) or a statement-log model file.
+enum ModelSource {
+    Project(PathBuf),
+    File(String),
+}
+
+/// Precedence: `--project`, `--model`, the nearest `archi.toml` upward from
+/// the working directory, `archi.json`.
+fn locate_model(args: &Args) -> ModelSource {
+    if let Some(p) = &args.project {
+        return ModelSource::Project(PathBuf::from(p));
+    }
+    if let Some(m) = &args.model_file {
+        return ModelSource::File(m.clone());
+    }
+    if let Ok(cwd) = std::env::current_dir()
+        && let Some(root) = find_project_root(&cwd)
+    {
+        return ModelSource::Project(root);
+    }
+    ModelSource::File("archi.json".to_string())
+}
+
+/// Compile a project, reporting diagnostics as `file:line:col: CODE: message`
+/// lines (or a structured JSON envelope with `--json`).
+fn compile_or_report(root: &Path, json_out: bool) -> Result<Compiled, ExitCode> {
+    match compile_project(root) {
+        Ok(c) => Ok(c),
+        Err(f) => {
+            if json_out {
+                let diags: Vec<Value> = f
+                    .diagnostics
+                    .iter()
+                    .map(|d| {
+                        let mut o = json!({ "code": d.code, "message": d.message });
+                        if let Some(s) = d.span {
+                            let (file, line, col) = f.map.location(s);
+                            o["file"] = json!(file);
+                            o["line"] = json!(line);
+                            o["col"] = json!(col);
+                        }
+                        o
+                    })
+                    .collect();
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &json!({ "status": "error", "diagnostics": diags })
+                    )
+                    .expect("serializes")
+                );
+            } else {
+                eprintln!("{}", f.render());
+            }
+            Err(ExitCode::from(1))
+        }
+    }
+}
+
+/// The workspace `check`/`nkp` analyze, from whichever model source applies.
+fn analysis_workspace(args: &Args) -> Result<Workspace, ExitCode> {
+    match locate_model(args) {
+        ModelSource::Project(root) => compile_or_report(&root, args.json).map(|c| c.workspace),
+        ModelSource::File(path) => {
+            load_workspace(&path, args.preset.as_deref()).map_err(|e| usage_err(&e))
+        }
+    }
 }
 
 /// The preset for a model file that does not exist yet: `--preset <file>`,
@@ -240,7 +326,7 @@ fn pseudo_of_value(v: &Value) -> String {
     }
 }
 
-/// A graph edge as one human line, close to the spec's pseudo-syntax.
+/// A graph edge as one human line, in the surface syntax.
 fn edge_line(e: &GraphEdge) -> String {
     let views = if e.views.is_empty() {
         String::new()
@@ -253,13 +339,14 @@ fn edge_line(e: &GraphEdge) -> String {
     match e.kind {
         EdgeKind::Relation => format!("{} {type_name} {}{views}", e.source, e.target),
         EdgeKind::Connection => {
-            let carrier = e
-                .carrier
-                .as_ref()
-                .map(|c| format!("({c})"))
-                .unwrap_or_default();
+            let carriers = match (&e.carrier, &e.rev_carrier) {
+                (Some(c), Some(rc)) => format!("(->{c}, <-{rc})"),
+                (Some(c), None) => format!("({c})"),
+                (None, Some(rc)) => format!("(<-{rc})"),
+                (None, None) => String::new(),
+            };
             format!(
-                "{}({source_port}) {type_name}{carrier} {}({target_port}){views}",
+                "{}.{source_port} {type_name}{carriers} {}.{target_port}{views}",
                 e.source, e.target
             )
         }
@@ -270,7 +357,7 @@ fn edge_line(e: &GraphEdge) -> String {
                 .map(|r| format!("({r})"))
                 .unwrap_or_default();
             format!(
-                "{}.{source_port}{route} = {}({target_port}){views}",
+                "{}.{source_port}{route} = {}.{target_port}{views}",
                 e.source, e.target
             )
         }
@@ -359,12 +446,21 @@ fn run(response: &Response, args: &Args, batch: &[Value]) -> ExitCode {
 }
 
 fn run_exec(args: &Args) -> ExitCode {
+    if args.project.is_some() {
+        return usage_err(
+            "`exec` speaks the JSON statement API against a model file; projects of .arch sources compile via `check`, `build` and `nkp`",
+        );
+    }
+    let model_file = args
+        .model_file
+        .clone()
+        .unwrap_or_else(|| "archi.json".to_string());
     let batch = match read_batch(args) {
         Ok(b) => b,
         Err(e) => return usage_err(&e),
     };
-    let existed = Path::new(&args.model_file).exists();
-    let mut ws = match load_workspace(&args.model_file, args.preset.as_deref()) {
+    let existed = Path::new(&model_file).exists();
+    let mut ws = match load_workspace(&model_file, args.preset.as_deref()) {
         Ok(ws) => ws,
         Err(e) => return usage_err(&e),
     };
@@ -384,12 +480,77 @@ fn run_exec(args: &Args) -> ExitCode {
     // pins the preset.
     if response.status == "ok"
         && (ws.revision() != before || (!existed && !args.dry_run))
-        && let Err(e) = save_workspace(&args.model_file, &ws)
+        && let Err(e) = save_workspace(&model_file, &ws)
     {
         eprintln!("archi: {e}");
         return ExitCode::from(2);
     }
     code
+}
+
+fn run_check(args: &Args) -> ExitCode {
+    let ws = match analysis_workspace(args) {
+        Ok(w) => w,
+        Err(code) => return code,
+    };
+    let findings: Vec<Finding> = ws.model().check();
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({ "status": "ok", "findings": findings }))
+                .expect("serializes")
+        );
+    } else if findings.is_empty() {
+        println!("no findings");
+    } else {
+        for f in &findings {
+            println!("{f}");
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+fn run_build(args: &Args) -> ExitCode {
+    let root = match &args.project {
+        Some(p) => PathBuf::from(p),
+        None => match std::env::current_dir()
+            .ok()
+            .and_then(|d| find_project_root(&d))
+        {
+            Some(r) => r,
+            None => {
+                return usage_err(
+                    "`build` needs a project: pass --project <dir> or run inside one (archi.toml)",
+                );
+            }
+        },
+    };
+    let compiled = match compile_or_report(&root, false) {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
+    let batch: Vec<Value> = compiled.batch.iter().map(Statement::to_value).collect();
+    match args.emit_batch.as_deref() {
+        None => println!(
+            "ok: {} statements compiled from {}",
+            batch.len(),
+            root.display()
+        ),
+        Some("-") => println!(
+            "{}",
+            serde_json::to_string_pretty(&batch).expect("serializes")
+        ),
+        Some(path) => {
+            if let Err(e) = fs::write(
+                path,
+                serde_json::to_string_pretty(&batch).expect("serializes"),
+            ) {
+                eprintln!("archi: cannot write `{path}`: {e}");
+                return ExitCode::from(2);
+            }
+        }
+    }
+    ExitCode::SUCCESS
 }
 
 fn run_nkp(args: &Args) -> ExitCode {
@@ -404,9 +565,9 @@ fn run_nkp(args: &Args) -> ExitCode {
     if args.top && args.scope.is_some() {
         return usage_err("--top and --scope are mutually exclusive");
     }
-    let ws = match load_workspace(&args.model_file, args.preset.as_deref()) {
+    let ws = match analysis_workspace(args) {
         Ok(ws) => ws,
-        Err(e) => return usage_err(&e),
+        Err(code) => return code,
     };
 
     let mut config = NkpConfig::default();
@@ -483,6 +644,8 @@ fn main() -> ExitCode {
     };
     match args.verb.as_str() {
         "exec" => run_exec(&args),
+        "check" => run_check(&args),
+        "build" => run_build(&args),
         "nkp" => run_nkp(&args),
         other => usage_err(&format!("unknown command `{other}`")),
     }
