@@ -8,8 +8,7 @@ architecture.
 ## Session lifecycle
 
 - **Start a session** — opens an active session against the current
-  version. All subsequent stressor commands attach to it. Sessions are
-  keyed by **string** ids in v2.
+  version. All subsequent stressor commands attach to it.
 - **Show** the active or a named session with its stressors and
   outcomes.
 - **List** every session ever run in this scope.
