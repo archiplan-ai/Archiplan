@@ -1,10 +1,10 @@
 //! Per-direction carriers on connection types: request/response (`->P, <-Q`),
-//! pull (`->, <-Q`), lane checks, edge identity, cascades, drift findings.
+//! pull (`->, <-Q`), lane checks, edge identity, and dump round-trips.
 
 mod common;
 
 use common::*;
-use modeling_lang::{ErrorCode, Finding, Workspace};
+use modeling_lang::{ErrorCode, Workspace};
 use serde_json::json;
 
 /// UI/Auth request-response fixture: `login` carries LoginForm forward and
@@ -176,58 +176,6 @@ fn rev_carrier_is_part_of_edge_identity() {
     assert!(is_noop(&outcome(&mut ws, edge("ResultA"))));
     let edges = edge_values(&mut ws, json!({ "stmt": "query", "kinds": ["connection"] }));
     assert_eq!(edges.len(), 2);
-    // Deletion addresses one edge structurally, rev carrier included.
-    let removed = cascade(
-        &mut ws,
-        json!({ "stmt": "delete", "edge": {
-            "stmt": "conn-edge", "conn": "rpc",
-            "source": { "node": "Client", "port": "call" },
-            "carrier": "Query", "rev_carrier": "ResultA",
-            "target": { "node": "Server", "port": "serve" } } }),
-    );
-    assert_eq!(removed.len(), 1);
-    let edges = edge_values(&mut ws, json!({ "stmt": "query", "kinds": ["connection"] }));
-    assert_eq!(edges.len(), 1);
-    assert_eq!(edges[0]["rev_carrier"], "ResultB");
-}
-
-#[test]
-fn deleting_a_rev_carried_node_cascades_over_the_edge() {
-    let mut ws = login_example();
-    let removed = cascade(&mut ws, json!({ "stmt": "delete", "node": "AuthResponse" }));
-    // The node, the conn type whose rev lane pattern names it, and the edge.
-    assert!(removed.iter().any(|s| s.contains("def node AuthResponse")));
-    assert!(removed.iter().any(|s| s.contains("conn login")));
-    assert!(removed.iter().any(|s| s.contains("UI.login")));
-    let edges = edge_values(&mut ws, json!({ "stmt": "query", "kinds": ["connection"] }));
-    assert!(edges.is_empty());
-}
-
-#[test]
-fn rev_lane_drift_is_a_finding() {
-    let mut ws = login_example();
-    // Loosen the lane so the edge stays, then point it somewhere the edge's
-    // rev carrier no longer matches.
-    outcomes(
-        &mut ws,
-        json!([
-            { "stmt": "define", "node": "Denial" },
-            { "stmt": "redefine", "conn": "login", "directed": true,
-              "source": "*",
-              "carrier": { "node": "LoginForm" },
-              "rev_carrier": { "node": "Denial" },
-              "target": "*" }
-        ]),
-    );
-    let fs = findings(&mut ws, json!({ "stmt": "check" }));
-    assert!(
-        fs.iter().any(|f| matches!(
-            f,
-            Finding::ShapeDrift { slot, actual, .. }
-                if slot == "rev_carrier" && actual == "AuthResponse"
-        )),
-        "expected rev_carrier drift, got {fs:?}"
-    );
 }
 
 #[test]

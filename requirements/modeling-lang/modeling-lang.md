@@ -15,13 +15,13 @@ on its ports, or across its scope boundary (see [Kinds](#kinds)).
 The language has two concrete syntaxes over one semantic core:
 
 - **JSON statements** — the machine API, defined in [Language API](#language-api): every statement is a JSON
-  object; batches are atomic. This is what agents and tools speak, and how statement-log models (`archi.json`)
-  persist.
+  object; batches are atomic. This is what source compiles down to and what agents read through — the language's
+  machine layer, not an editing surface.
 - **`.arch` source** — the human syntax, defined in [source-format.md](./source-format.md): a project of diffable
-  text files with modules, imports and lexical scopes, compiled down to the same statements. The source format is
-  declarative-only (no mutation vocabulary — edits are text edits); the compact notation used in examples
-  throughout this spec (`def node Payments`, `Service type_of Payments`) is exactly this surface syntax, and
-  dumps/cascades render in it.
+  text files with modules, imports and lexical scopes, compiled down to the same statements. The source is the
+  **only source of truth**: the language is declarative-only (no mutation vocabulary — edits are text edits and a
+  recompile); the compact notation used in examples throughout this spec (`def node Payments`,
+  `Service type_of Payments`) is exactly this surface syntax, and dumps render in it.
 
 ### Identifiers
 
@@ -34,9 +34,8 @@ Every element has a stable identity and a human-readable handle, with a fixed co
   same name may recur in different scopes. Every node reference in a statement is an **absolute path** from the
   root (`Orders.ConfirmationHandler`) — there is no relative or context-dependent resolution.
 
-`rename` rebinds a name and never touches the id, so renames are reference-safe by construction. Edges carry no
-user-facing name: an edge is addressed *structurally*, by restating it — its identity is the tuple (kind, type,
-ends/ports, carrier). Restating an existing edge refers to that edge rather than duplicating it.
+Edges carry no user-facing name: an edge is addressed *structurally*, by restating it — its identity is the tuple
+(kind, type, ends/ports, carrier). Restating an existing edge refers to that edge rather than duplicating it.
 
 ## Nodes
 
@@ -51,8 +50,7 @@ Ports come into existence two ways:
   A declared port is part of the interface: it exists before any edge and survives losing its last edge. The
   [source format](./source-format.md) requires every used port to be declared; a declared port nothing attaches to
   is the `unused_port` [finding](./errors.md#errors-vs-findings). A `define` restating a node compares `ports` as
-  a set when the field is present (divergence is E_REDECLARED) and makes no claim when absent; `redefine` with
-  `ports` replaces the declared set (a removed-but-attached port lives on as use-created).
+  a set when the field is present (divergence is E_REDECLARED) and makes no claim when absent.
 - **Use-created** — named at the point of use: a connection (or application) end names its port at the node — the
   `port` field of the end object — which creates the port on first use and reuses it afterwards. A use-created
   port lives only as long as something attaches to it.
@@ -92,8 +90,8 @@ Orders fails_via Shipping in fault_prop, data_flow
 
 - Tagging is per **edge**, not per type: edges of one type may live in different views, and one edge may belong to
   several views.
-- Views of an existing edge are extended by restating it with more views, and removed with the `untag` statement
-  (see [Language API](#language-api)).
+- Views of an existing edge are extended by restating it with more views; removing a tag is a source edit and a
+  recompile.
 - An untagged edge belongs to no view and is visible only to unfiltered queries.
 - Referencing an undeclared view is rejected.
 - Application edges are untagged plumbing: an application belongs to the views of the connection edges it routes.
@@ -278,19 +276,22 @@ Pre-applied in every model:
 def rel trans type_of := * -> *
 ```
 
-Restating a stdlib definition identically is a no-op; deleting or divergently redefining it is rejected
-(E_STDLIB_PROTECTED).
+Restating a stdlib definition identically is a no-op; a divergent definition is rejected (E_REDECLARED), and
+tagging a stdlib edge into views is rejected (E_STDLIB_PROTECTED) — tags on it would not survive a dump replay.
 
 ## Language API
 
 A statement is a **JSON object**, discriminated by its `stmt` field — this section defines the actual language; the
-pseudo-syntax elsewhere in this spec is shorthand for these objects. Statements cover the full operation set:
-definitions, mutations and reads.
+pseudo-syntax elsewhere in this spec is shorthand for these objects. Statements cover definitions, edges and reads.
+There is **no mutation vocabulary** — no rename, delete, untag or redefine: a model changes only by editing its
+`.arch` source and recompiling.
 
-A model is edited by submitting a **batch**: an ordered JSON array of statements. A batch is atomic: every statement
-either applies, is an identical-restatement no-op, or fails with a structured error that rolls the whole batch back
-and reports the failing statement's index — see [errors](./errors.md). Reads may appear in batches; their output is
-returned in the same per-statement results.
+A model is built by executing a **batch**: an ordered JSON array of statements — the
+[compiler's lowered output](./source-format.md#lowering-and-determinism), or reads submitted through the
+[agent interface](../agent-interface.md). A batch is atomic: every statement either applies, is an
+identical-restatement no-op, or fails with a structured error that rolls the whole batch back and reports the
+failing statement's index — see [errors](./errors.md). Reads may appear in batches; their output is returned in
+the same per-statement results.
 
 ### Addressing — no ambient scope
 
@@ -308,39 +309,27 @@ Nothing in a statement depends on context:
 
 ### Definitions
 
-Named elements (`node`, `view`, `rel`, `conn`) are brought into existence by a **`define`** statement and replaced
-by a **`redefine`** statement. The verb is the statement: `stmt` carries it, one **subject key** — `node`, `view`,
-`rel` or `conn` — says what is defined and names it (a path for nodes, a name for the rest), and the definition's
-parameters are sibling fields. Both verbs are **idempotent**: submitting the same statement twice leaves the same
-model, the second application reporting `noop`.
+Named elements (`node`, `view`, `rel`, `conn`) are brought into existence by a **`define`** statement. The verb is
+the statement: `stmt` carries it, one **subject key** — `node`, `view`, `rel` or `conn` — says what is defined and
+names it (a path for nodes, a name for the rest), and the definition's parameters are sibling fields. `define` is
+**idempotent**: submitting the same statement twice leaves the same model, the second application reporting `noop`.
 
 | statement | precondition | effect                                                                                                        |
 |-----------|--------------|-----------------------------------------------------------------------------------------------------------------|
 | define    | —            | creates the element; an identical restatement is a no-op; an existing *divergent* definition is E_REDECLARED    |
-| redefine  | must exist   | replaces the definition (below); a redefinition that changes nothing is a no-op; E_UNKNOWN_NAME if absent       |
 
 `define` never silently alters the model: when the submitted definition contradicts the existing one — same name,
-different body, or a rel/conn kind clash — it fails with E_REDECLARED and reports the existing definition.
-
-`redefine` by element:
-
-- **node** — keeps the node's id, name, ports and the edges attached to the node itself; **empties its scope**: the
-  inner nodes and everything referencing them are removed as one cascade, reported in the result like a delete.
-  Because batches are atomic, `redefine Orders` followed by fresh definitions inside `Orders` is a declarative
-  "replace the internals" in one transaction — external wiring intact. An already-empty scope is a no-op.
-- **rel / conn** — replaces the type's definition (transitivity, direction, shape). Existing edges are not
-  re-checked eagerly: conformance is soft, and edges that no longer fit — including carrier arity mismatches —
-  surface as [findings](./errors.md#errors-vs-findings), not errors.
-- **view** — has no definition body; `redefine` does not apply (E_PARSE).
+different body, or a rel/conn kind clash — it fails with E_REDECLARED and reports the existing definition. There is
+no re-definition verb: replacing what a name means is a **source edit** — change the `def` line and recompile.
 
 Edge statements (`rel-edge`, `conn-edge`, `app`) take no verb: an edge's identity is structural, stating it *is*
 addressing it — a no-op, a view extension, or a fresh edge, never a duplicate. Together with idempotent definitions
-this is what makes retries and whole-batch replays safe.
+this is what makes whole-batch replays safe — a recompile of unchanged source re-applies the same batch as all
+no-ops.
 
-The distinction the two verbs pin down: `define` is **definition** (make this exist — finding it already there,
-identical, is success), `redefine` is **re-definition** (replace what this name means), an addressed statement into
-an existing scope is **augmentation** (add to what exists). None can be mistaken for another, and each fails loudly
-when its precondition does not hold.
+The distinction that remains: `define` is **definition** (make this exist — finding it already there, identical, is
+success), and an addressed statement into an existing scope is **augmentation** (add to what exists). Neither can be
+mistaken for the other, and each fails loudly when its precondition does not hold.
 
 ### Statements
 
@@ -354,7 +343,6 @@ def view data_flow
 def rel trans of_sort := * -> *
 def conn send := (Service type_of *) ->(Message type_of *) (Service type_of *)
 def conn login := * ->LoginForm, <-AuthResponse *
-redefine node Orders
 ```
 
 ```json
@@ -372,11 +360,9 @@ redefine node Orders
   "carrier": { "node": "LoginForm" },
   "rev_carrier": { "node": "AuthResponse" },
   "target": "*" }
-{ "stmt": "redefine", "node": "Orders" }
 ```
 
-`redefine` takes the same shape with `"stmt": "redefine"` (views excepted — no body to redefine). Arrows map to
-`directed`: `->` is `true`, `<->` is `false`. Patterns map as `*` ↔ `"*"`, `OrderId` ↔ `{ "node": "OrderId" }`,
+Arrows map to `directed`: `->` is `true`, `<->` is `false`. Patterns map as `*` ↔ `"*"`, `OrderId` ↔ `{ "node": "OrderId" }`,
 `(Service type_of *)` ↔ `{ "anchor": "Service", "rel": "type_of" }`. `trans` defaults to `false`. `carrier` is the
 forward lane's carried slot, `rev_carrier` the reverse lane's ([Shape](#shape)); `rev_carrier` requires
 `directed: true`. `ports` lists the node's [declared ports](#ports): absent means no claim, present compares as a
@@ -413,35 +399,12 @@ Orders.events(OrderCreated) = OrderHandler.handle
 corresponding lane has a carried slot ([Shape](#shape)); `route` is the optional carried-node qualifier of a
 delegation, matched against the **forward** carrier.
 
-**Mutations** (statement API only — a source project mutates by text edit):
-
-```
-rename Payments PaymentsGateway
-delete Orders
-delete Payments fails_via Orders
-delete rel fails_via     delete conn send     delete view fault_prop
-untag Payments fails_via Orders in fault_prop
-```
-
-```json
-{ "stmt": "rename", "node": "Payments", "to": "PaymentsGateway" }
-{ "stmt": "delete", "node": "Orders" }
-{ "stmt": "delete", "edge": { "stmt": "rel-edge", "rel": "fails_via",
-                              "source": "Payments", "target": "Orders" } }
-{ "stmt": "delete", "rel": "fails_via" }
-{ "stmt": "untag", "edge": { "stmt": "rel-edge", "rel": "fails_via",
-                             "source": "Payments", "target": "Orders" },
-  "views": ["fault_prop"] }
-```
-
-- `rename` rebinds a node's name; its id and every reference to it are untouched. E_DUP_NAME if a sibling already
-  uses the name.
-- `delete` of a node removes it, its scope, and (recursively) everything that references any of it; of a type — the
-  type and all its edges; of a view — the view only, tagged edges just lose the tag.
-- An edge is addressed by **restating it**: the `edge` field is the edge's own statement object. A `views` field
-  inside the restatement is ignored for addressing — views are not part of edge identity.
-- Moving a node between scopes is deliberately absent: applications are scope-crossing by construction, so a move is
-  a delete + recreate under the new parent.
+**No mutations.** There is no rename, delete, untag or redefine statement — the language cannot alter or remove
+what exists, only create and read it. Every change to a model is a [source edit](./source-format.md) and a
+recompile: renaming is editing the `def` line, removal is deleting the lines, retagging is editing the `in`
+clause, and the git diff is the change record. Reference integrity therefore never has to be repaired
+incrementally — each compile builds the model whole from source, so a reference to something the source no longer
+defines is a compile error ([E_UNKNOWN_NAME](./errors.md#catalog)), not a dangling pointer.
 
 **Reads** (see [queries](./queries.md)):
 
@@ -462,42 +425,40 @@ instances of the listed types (via the transitive `type_of` closure), `kinds` ke
 list is the top level only). The result is the slice as plain nodes and edges. `check` reports model-completeness
 [findings](./errors.md#errors-vs-findings); `in` optionally restricts it to the edges of the named views.
 
-### Deletion semantics
+### Integrity
 
-`delete` always **cascades**: it removes the element together with the full closure of elements that reference it,
-and the result reports everything removed, rendered as statements — nothing disappears silently. A node `redefine`
-resets the node's scope through the same machinery and reports the same way.
+A model is built whole on every compile — there is nothing to delete in place, nothing to cascade, no persisted
+state to drift. Two integrity regimes govern how a compiled model relates to its source:
 
-Two integrity regimes govern what cascades and what merely drifts:
+- **Reference integrity is hard.** The store never holds a reference to an element the source does not define. A
+  statement naming a missing node, type or view is [E_UNKNOWN_NAME](./errors.md#catalog) at compile — so removing a
+  definition from source without removing what references it fails loudly. Removal is therefore total and manual:
+  drop the `def` line and every line that names it, and the diff records exactly what left.
+- **Shape conformance is checked at creation.** An edge is validated against its type's patterns when it is
+  created. The [deterministic lowering](./source-format.md#lowering-and-determinism) lands classifier edges before
+  the shapes that consult them, so a fresh compile checks every edge against fully-populated patterns: a shape that
+  no longer fits is a compile error at the offending source line, not a lingering nonconformance. (In-place edits
+  could once erode conformance and surface as drift findings; whole-compile rebuilds leave no room for that state.)
 
-- **Reference integrity is hard.** The store never holds a reference to a deleted element. Deleting a node takes
-  with it: edges ending on it or carrying it, applications delegating into it, type declarations whose patterns
-  name it (and, transitively, those types' edges), and its whole inner scope.
-- **Shape conformance is soft.** Shapes are checked when an edge is created. A later edit that erodes conformance —
-  e.g. deleting the classifier edge `Service type_of Payments` while `calls` edges on `Payments` rely on
-  `(Service type_of *)` — succeeds; the nonconforming edges remain and are surfaced as
-  [findings](./errors.md#errors-vs-findings), not errors.
+Port lifecycle follows the source, not a mutation history. A **use-created** port exists iff at least one
+connection or application in the source attaches to it — named at a point of use. A **declared** port exists from
+its node's definition on; a declared port nothing attaches to is the `unused_port`
+[finding](./errors.md#errors-vs-findings), not an error.
 
-A **use-created** port lives as long as some connection or application attaches to it; cascading away the last
-attached edge removes the port and frees its name (a fresh first use may bind a new type or side). A **declared**
-port outlives its edges — it is part of the node's definition — but deleting the connection type it was fixed to
-releases the binding (reference integrity is hard), returning it to the never-used state. A delegated port left
-with no attached connections, and a declared port with no attachments at all, are legal but suspect — findings, not
-errors.
-
-The [stdlib](#standard-library) cannot be deleted (E_STDLIB_PROTECTED).
+The [stdlib](#standard-library) cannot be tagged into views (E_STDLIB_PROTECTED); a divergent redefinition of a
+stdlib name is an ordinary E_REDECLARED.
 
 ## Cross-checks
 
 Invariants an implementation must enforce; each is checkable at statement time.
 
-- Definition verbs are honored: `define` never alters an existing element (an identical restatement is a no-op, a
-  divergent definition is rejected), `redefine` and `rename` never create one.
+- `define` never alters an existing element: an identical restatement is a no-op, a divergent definition is
+  rejected. There is no verb that replaces or removes one — that is a source edit.
 - Every path prefix in a statement resolves to an existing node — augmentation presupposes its container.
 - Several connection edges may attach to one port at the same time, provided each matches the port's connection type
   and side.
-- A port's connection type and side are fixed by its first use; a disagreeing use is rejected. The binding releases
-  only when the type itself is deleted (declared ports) or the port is removed with its last edge (use-created).
+- A port's connection type and side are fixed by its first use in the lowered batch; a disagreeing later use is
+  rejected. (Each compile is fresh, so the binding never has to be released.)
 - Each lane of a connection edge is instantiated with a carried node exactly when the type's lane has a carried
   slot, and the node matches that slot's pattern; a reverse slot requires a directed type.
 - An application's outer port exists and has an attachment before the application does (a declared port with
@@ -505,7 +466,7 @@ Invariants an implementation must enforce; each is checkable at statement time.
 - An application's inner node is a direct child of its delegating node.
 - Two qualified delegations on one port must not match the same carried node.
 - Every view named in a `views` or `in` field is declared.
-- No stored element references a deleted element — `delete` removes the full referencing closure.
+- No stored element references a missing one — a reference the source does not define is a compile error.
 - A use-created port exists iff at least one connection or application attaches to it; a declared port exists from
   its node's definition on.
 - A failed statement leaves the model unchanged; an identical restatement is a no-op, never a duplicate.

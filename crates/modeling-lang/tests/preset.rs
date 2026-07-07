@@ -14,7 +14,6 @@ fn ontology_ws() -> Workspace {
 #[test]
 fn default_ontology_loads_sealed_and_queryable() {
     let mut ws = ontology_ws();
-    assert_eq!(ws.revision(), 0, "a preset load is not a model change");
     assert_eq!(ws.model().preset_name(), "default");
     // Ontology nodes are queryable like any node...
     let ids = node_ids(&mut ws, json!({ "stmt": "query" }));
@@ -27,47 +26,34 @@ fn default_ontology_loads_sealed_and_queryable() {
 }
 
 #[test]
-fn preset_elements_are_protected() {
+fn preset_elements_are_sealed_but_extensible() {
     let mut ws = ontology_ws();
-    assert_eq!(
-        err_code(&mut ws, json!({ "stmt": "delete", "node": "Data" })),
-        ErrorCode::StdlibProtected
-    );
-    assert_eq!(
-        err_code(
-            &mut ws,
-            json!({ "stmt": "rename", "node": "Service", "to": "Svc" })
-        ),
-        ErrorCode::StdlibProtected
-    );
-    assert_eq!(
-        err_code(&mut ws, json!({ "stmt": "delete", "rel": "type_of" })),
-        ErrorCode::StdlibProtected
-    );
-    // Identical restatement of a preset element is still a safe no-op.
+    // Identical restatement of a preset element is a safe no-op.
     assert!(is_noop(&outcome(
         &mut ws,
         json!({ "stmt": "define", "node": "Data" })
     )));
-    // Users may augment a preset node's scope and manage their own additions...
+    // A divergent define of a preset name is an ordinary redeclaration.
+    assert_eq!(
+        err_code(
+            &mut ws,
+            json!({ "stmt": "define", "node": "Data", "ports": ["p"] })
+        ),
+        ErrorCode::Redeclared
+    );
+    // Users may augment a preset node's scope and attach edges to it.
     assert!(is_applied(&outcome(
         &mut ws,
         json!({ "stmt": "define", "node": "Data.Schema" })
     )));
-    // ...but redefining the preset node (which would cascade the
-    // augmentation away) is protected, while an addressed delete is not.
-    assert_eq!(
-        err_code(&mut ws, json!({ "stmt": "redefine", "node": "Data" })),
-        ErrorCode::StdlibProtected
-    );
     assert!(is_applied(&outcome(
         &mut ws,
-        json!({ "stmt": "delete", "node": "Data.Schema" })
+        json!({ "stmt": "rel-edge", "rel": "type_of", "source": "Data", "target": "Data.Schema" })
     )));
 }
 
 #[test]
-fn preset_edges_and_types_are_protected() {
+fn preset_edges_cannot_be_tagged() {
     // A preset with its own wiring: a sort taxonomy over the ontology.
     let preset = Preset::from_value(
         "sorted",
@@ -76,7 +62,6 @@ fn preset_edges_and_types_are_protected() {
               "source": "*", "target": "*" },
             { "stmt": "define", "rel": "of_sort", "trans": true, "directed": true,
               "source": "*", "target": "*" },
-            { "stmt": "define", "conn": "pipe", "directed": true, "source": "*", "target": "*" },
             { "stmt": "define", "node": "Functional" },
             { "stmt": "define", "node": "Service" },
             { "stmt": "rel-edge", "rel": "of_sort", "source": "Service", "target": "Functional" }
@@ -88,48 +73,12 @@ fn preset_edges_and_types_are_protected() {
 
     let edge = json!({ "stmt": "rel-edge", "rel": "of_sort",
                        "source": "Service", "target": "Functional" });
-    // Identical restatement: noop. Tagging into a view, untagging, deleting:
-    // protected — tags on a stdlib edge would not survive a dump replay.
+    // Identical restatement: noop. Tagging into a view: protected — tags on a
+    // stdlib edge would not survive a dump replay.
     assert!(is_noop(&outcome(&mut ws, edge.clone())));
-    let mut tagged = edge.clone();
+    let mut tagged = edge;
     tagged["views"] = json!(["v"]);
     assert_eq!(err_code(&mut ws, tagged), ErrorCode::StdlibProtected);
-    assert_eq!(
-        err_code(
-            &mut ws,
-            json!({ "stmt": "untag", "edge": edge, "views": ["v"] })
-        ),
-        ErrorCode::StdlibProtected
-    );
-    assert_eq!(
-        err_code(
-            &mut ws,
-            json!({ "stmt": "delete", "edge": { "stmt": "rel-edge", "rel": "of_sort",
-                                                "source": "Service", "target": "Functional" } })
-        ),
-        ErrorCode::StdlibProtected
-    );
-    // Preset rel/conn types cannot be redefined divergently or deleted.
-    assert_eq!(
-        err_code(
-            &mut ws,
-            json!({ "stmt": "redefine", "rel": "of_sort", "directed": false,
-                    "source": "*", "target": "*" })
-        ),
-        ErrorCode::StdlibProtected
-    );
-    assert_eq!(
-        err_code(
-            &mut ws,
-            json!({ "stmt": "redefine", "conn": "pipe", "directed": false,
-                    "source": "*", "target": "*" })
-        ),
-        ErrorCode::StdlibProtected
-    );
-    assert_eq!(
-        err_code(&mut ws, json!({ "stmt": "delete", "conn": "pipe" })),
-        ErrorCode::StdlibProtected
-    );
 }
 
 #[test]
@@ -185,11 +134,11 @@ fn user_content_round_trips_on_a_preset() {
     assert_eq!(lines, ["def node Payments", "Service type_of Payments"]);
 
     // Restoring with the same preset replays identically.
-    let replayed = Workspace::restore(&Preset::default_ontology(), ws.revision(), &dumped)
+    let replayed = Workspace::restore(&Preset::default_ontology(), &dumped)
         .expect("a dump replays on its preset");
     assert_eq!(replayed.model().dump(), dumped);
 
     // Restoring on the wrong preset fails loudly: the dump names `Service`.
-    let e = Workspace::restore(&Preset::core(), ws.revision(), &dumped).unwrap_err();
+    let e = Workspace::restore(&Preset::core(), &dumped).unwrap_err();
     assert_eq!(e.code, ErrorCode::UnknownName);
 }

@@ -73,6 +73,7 @@ File structure:
 - Name
 - Slug (auto-derived)
 - Body
+  - Text
   - System Context
 - Origin
 - Satisfy

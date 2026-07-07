@@ -4,7 +4,7 @@
 mod common;
 
 use common::*;
-use modeling_lang::{ErrorCode, Workspace};
+use modeling_lang::{ErrorCode, Preset, Workspace};
 use serde_json::json;
 
 #[test]
@@ -62,31 +62,13 @@ fn e_parse_schema_violations() {
         ),
         ErrorCode::Parse
     );
-    // `redefine` does not apply to views.
-    assert_eq!(
-        err_code(&mut ws, json!({ "stmt": "redefine", "view": "v" })),
-        ErrorCode::Parse
-    );
-    // `delete` takes exactly one target.
-    assert_eq!(
-        err_code(
-            &mut ws,
-            json!({ "stmt": "delete", "node": "A", "rel": "r" })
-        ),
-        ErrorCode::Parse
-    );
-    assert_eq!(
-        err_code(&mut ws, json!({ "stmt": "delete" })),
-        ErrorCode::Parse
-    );
-    // `edge` must restate an edge statement.
-    assert_eq!(
-        err_code(
-            &mut ws,
-            json!({ "stmt": "delete", "edge": { "stmt": "define", "node": "A" } })
-        ),
-        ErrorCode::Parse
-    );
+    // The mutation vocabulary does not exist: former verbs are unknown kinds.
+    for verb in ["rename", "delete", "untag", "redefine"] {
+        assert_eq!(
+            err_code(&mut ws, json!({ "stmt": verb })),
+            ErrorCode::Parse
+        );
+    }
     // The subject of a parse error is the statement as submitted.
     let (_, e) = err(&mut ws, json!([{ "stmt": "nope" }]));
     assert_eq!(e.subject, Some(json!({ "stmt": "nope" })));
@@ -148,40 +130,6 @@ fn e_unknown_name() {
         err_code(&mut ws, json!({ "stmt": "define", "node": "Ghost.Child" })),
         ErrorCode::UnknownName
     );
-    // `redefine` of an element that does not exist.
-    assert_eq!(
-        err_code(&mut ws, json!({ "stmt": "redefine", "node": "Ghost" })),
-        ErrorCode::UnknownName
-    );
-    // Deleting a missing node / restating a missing edge.
-    assert_eq!(
-        err_code(&mut ws, json!({ "stmt": "delete", "node": "Ghost" })),
-        ErrorCode::UnknownName
-    );
-    assert_eq!(
-        err_code(
-            &mut ws,
-            json!({ "stmt": "delete", "edge": { "stmt": "rel-edge", "rel": "type_of", "source": "A", "target": "B" } })
-        ),
-        ErrorCode::UnknownName
-    );
-}
-
-#[test]
-fn e_dup_name_on_rename() {
-    let mut ws = ws_with(json!([
-        { "stmt": "define", "node": "A" },
-        { "stmt": "define", "node": "B" }
-    ]));
-    assert_eq!(
-        err_code(&mut ws, json!({ "stmt": "rename", "node": "A", "to": "B" })),
-        ErrorCode::DupName
-    );
-    // Renaming to its own name is a no-op, not a collision.
-    assert!(is_noop(&outcome(
-        &mut ws,
-        json!({ "stmt": "rename", "node": "A", "to": "A" })
-    )));
 }
 
 #[test]
@@ -211,20 +159,12 @@ fn e_redeclared_on_divergent_define() {
     );
     assert_eq!(e.code, ErrorCode::Redeclared);
     assert!(e.actual.is_some(), "the existing definition is included");
-    assert!(e.hint.is_some(), "the matching redefine is suggested");
     // One namespace for edge types: a conn define under a rel's name diverges
-    // by kind — for `redefine` too, which never crosses kinds.
+    // by kind.
     assert_eq!(
         err_code(
             &mut ws,
             json!({ "stmt": "define", "conn": "r", "directed": true, "source": "*", "target": "*" })
-        ),
-        ErrorCode::Redeclared
-    );
-    assert_eq!(
-        err_code(
-            &mut ws,
-            json!({ "stmt": "redefine", "conn": "r", "directed": true, "source": "*", "target": "*" })
         ),
         ErrorCode::Redeclared
     );
@@ -428,41 +368,45 @@ fn e_cross_scope_connection() {
 }
 
 #[test]
-fn e_stdlib_protected() {
-    let mut ws = Workspace::new();
-    assert_eq!(
-        err_code(&mut ws, json!({ "stmt": "delete", "rel": "type_of" })),
-        ErrorCode::StdlibProtected
-    );
+fn e_stdlib_protected_on_tagging_a_preset_edge() {
+    // The one mutation-shaped thing left to protect: restating a preset edge
+    // with views would tag it, and tags on stdlib edges do not survive a dump
+    // replay.
+    let preset = Preset::from_value(
+        "wired",
+        &json!([
+            { "stmt": "define", "rel": "type_of", "trans": true, "directed": true,
+              "source": "*", "target": "*" },
+            { "stmt": "define", "node": "Service" },
+            { "stmt": "define", "node": "Core" },
+            { "stmt": "rel-edge", "rel": "type_of", "source": "Service", "target": "Core" }
+        ]),
+    )
+    .expect("the preset parses");
+    let mut ws = Workspace::with_preset(&preset).expect("the preset loads");
+    outcomes(&mut ws, json!([{ "stmt": "define", "view": "v" }]));
     assert_eq!(
         err_code(
             &mut ws,
-            json!({ "stmt": "redefine", "rel": "type_of", "trans": true, "directed": false,
-                    "source": "*", "target": "*" })
+            json!({ "stmt": "rel-edge", "rel": "type_of",
+                    "source": "Service", "target": "Core", "views": ["v"] })
         ),
         ErrorCode::StdlibProtected
     );
-    // Restating the stdlib definition identically is a safe no-op — as a
-    // define and as a redefine.
+    // Restating the stdlib definition identically is a safe no-op; a
+    // divergent define is an ordinary redeclaration error, without a hint.
     assert!(is_noop(&outcome(
         &mut ws,
         json!({ "stmt": "define", "rel": "type_of", "trans": true, "directed": true,
                 "source": "*", "target": "*" })
     )));
-    assert!(is_noop(&outcome(
-        &mut ws,
-        json!({ "stmt": "redefine", "rel": "type_of", "trans": true, "directed": true,
-                "source": "*", "target": "*" })
-    )));
-    // A divergent define is an ordinary redeclaration error, without a
-    // redefine hint: the redefine would be rejected too.
     let (_, e) = err(
         &mut ws,
         json!([{ "stmt": "define", "rel": "type_of", "trans": false, "directed": true,
                  "source": "*", "target": "*" }]),
     );
     assert_eq!(e.code, ErrorCode::Redeclared);
-    assert!(e.hint.is_none(), "no hint towards a protected redefine");
+    assert!(e.hint.is_none(), "no runnable fix exists: the stdlib is sealed");
 }
 
 #[test]
@@ -482,9 +426,8 @@ fn batches_are_atomic() {
         e.subject,
         Some(json!({ "stmt": "rel-edge", "rel": "nope", "source": "A", "target": "B" }))
     );
-    // The whole batch rolled back: A and B were never created; no revision.
+    // The whole batch rolled back: A and B were never created.
     assert!(ws.model().dump().is_empty());
-    assert_eq!(ws.revision(), 0);
 }
 
 #[test]
@@ -533,22 +476,16 @@ fn a_failed_statement_leaves_no_partial_state() {
 // ---- envelope ---------------------------------------------------------------
 
 #[test]
-fn envelope_ok_and_revision() {
-    let mut ws = Workspace::new();
+fn envelope_ok() {
+    let mut ws = ws_with(json!([{ "stmt": "define", "node": "A" }]));
     let r = ws.handle(&json!({
         "statements": [
-            { "stmt": "define", "node": "A" },
+            { "stmt": "query" },
             { "stmt": "check" }
         ]
     }));
     assert_eq!(r.status, "ok");
-    assert_eq!(r.revision, 1);
     assert_eq!(r.results.as_ref().map(Vec::len), Some(2));
-    // A noop-only request does not bump the revision.
-    let r = ws.handle(&json!({
-        "statements": [ { "stmt": "define", "node": "A" } ]
-    }));
-    assert_eq!(r.revision, 1);
 }
 
 #[test]
@@ -556,15 +493,14 @@ fn envelope_statement_error_carries_index() {
     let mut ws = Workspace::new();
     let r = ws.handle(&json!({
         "statements": [
-            { "stmt": "define", "node": "A" },
-            { "stmt": "rel-edge", "rel": "nope", "source": "A", "target": "A" }
+            { "stmt": "check" },
+            { "stmt": "query", "views": ["nope"] }
         ]
     }));
     assert_eq!(r.status, "error");
     let err = r.error.expect("error present");
     assert_eq!(err.index, Some(1));
     assert_eq!(err.error.code, ErrorCode::UnknownName);
-    assert_eq!(r.revision, 0, "the batch rolled back");
 }
 
 #[test]
@@ -576,30 +512,34 @@ fn envelope_protocol_errors() {
     assert_eq!(err.error.code, ErrorCode::BadRequest);
     assert_eq!(err.index, None);
 
+    // The editing-era request fields are gone from the contract.
     let r = ws.handle(&json!({ "statements": [], "expect_revision": 9 }));
-    assert_eq!(r.error.expect("stale").error.code, ErrorCode::StaleRevision);
+    assert_eq!(
+        r.error.expect("unknown field").error.code,
+        ErrorCode::BadRequest
+    );
 }
 
 #[test]
-fn envelope_dry_run_previews_without_applying() {
-    let mut ws = ws_with(json!([
-        { "stmt": "define", "node": "A" },
-        { "stmt": "define", "node": "A.Inner" }
-    ]));
-    let before = ws.revision();
+fn envelope_is_read_only() {
+    let mut ws = Workspace::new();
     let r = ws.handle(&json!({
-        "statements": [ { "stmt": "delete", "node": "A" } ],
-        "dry_run": true
+        "statements": [
+            { "stmt": "query" },
+            { "stmt": "define", "node": "A" }
+        ]
     }));
-    assert_eq!(r.status, "ok");
-    assert_eq!(r.revision, before);
-    let results = r.results.expect("results");
-    match &results[0] {
-        modeling_lang::Outcome::Applied { cascade: Some(c) } => {
-            assert_eq!(c.len(), 2, "the cascade preview covers A and A.Inner");
-        }
-        o => panic!("expected a cascade preview, got {o:?}"),
-    }
-    // Nothing was applied.
-    assert!(ws.model().layer_of("A").is_some());
+    assert_eq!(r.status, "error");
+    let err = r.error.expect("error present");
+    assert_eq!(err.error.code, ErrorCode::BadRequest);
+    assert_eq!(
+        err.index, None,
+        "a protocol violation, not a statement failure"
+    );
+    assert_eq!(
+        err.error.subject,
+        Some(json!({ "stmt": "define", "node": "A" }))
+    );
+    // Nothing was applied: the model is edited as source, not via the envelope.
+    assert!(ws.model().dump().is_empty());
 }

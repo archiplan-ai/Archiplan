@@ -3,9 +3,9 @@
 //! A preset is a named list of statements — relations, nodes and the edges
 //! wiring them — loaded into a fresh model before any user statements
 //! (`requirements/modeling-lang/ontology.md`). Everything a preset creates is
-//! stdlib: dumps omit it, mutations that would alter or remove it are
-//! rejected (`E_STDLIB_PROTECTED`), and analyses treat it as scaffolding
-//! rather than model content.
+//! stdlib: dumps omit it, tagging it into views is rejected
+//! (`E_STDLIB_PROTECTED`), and analyses treat it as scaffolding rather than
+//! model content.
 //!
 //! Every preset must define the classifier relation `type_of` with the exact
 //! stdlib shape `rel trans type_of := * -> *` — the layer split
@@ -21,7 +21,7 @@ use crate::statement::{Statement, parse_statement};
 /// A named statement batch loaded as the standard library of a model.
 ///
 /// Presets hold creation statements only — `define`, `rel-edge`, `conn-edge`,
-/// `app`. A preset defines what exists; it does not mutate or read.
+/// `app`. A preset defines what exists; reads do not belong in it.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Preset {
     name: String,
@@ -30,8 +30,7 @@ pub struct Preset {
 
 impl Preset {
     /// The core preset: exactly the historical stdlib — `type_of`, nothing
-    /// else. This is what [`crate::Workspace::new`] loads, and what models
-    /// saved before presets existed are restored with.
+    /// else. This is what [`crate::Workspace::new`] loads.
     pub fn core() -> Self {
         Self::from_value(
             "core",

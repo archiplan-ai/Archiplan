@@ -1,60 +1,58 @@
 # Agent Interface
 
-An interface allowing agents to interact with the full functionality of Archiplan in the most convenient
-format for an LLM. The [modeling language](./modeling-lang/modeling-lang.md) is already JSON — statements
-cover definitions, mutations and reads — so this interface is a thin **envelope**: a request carries a
-statement batch, a response carries the structured results the language already defines (outcomes, errors,
-findings, statements), plus a revision. There is no second vocabulary and no translation layer.
+An interface allowing agents to **read** an Archiplan model in the most convenient format for an LLM. The
+[modeling language](./modeling-lang/modeling-lang.md) is already JSON — its read statements (`query`, `check`)
+return the structured graph and findings the language defines — so this interface is a thin **envelope**: a
+request carries a batch of read statements, a response carries their results. There is no second vocabulary and no
+translation layer.
+
+Editing is out of scope here by construction: a model is stored as [`.arch` source](./modeling-lang/source-format.md),
+the only source of truth, and changes by text edit and recompile. The statement layer has no mutation vocabulary
+(no rename, delete, untag or redefine), and this envelope accepts only reads — a write statement is rejected as a
+protocol error. Agents that need to change a model edit the source files and run [`archi check`](./cli.md); this
+interface is how they ground themselves before and after.
 
 ## Principles
 
-- **Flexible spec editing** — the interface must not constrain the optimal design flow. Any statement the
-  language accepts is accepted here, in whatever order the agent's reasoning produces it; correctness is
-  guarded by atomicity, [idempotent definitions](./modeling-lang/modeling-lang.md#definitions) and the
-  error contract, not by workflow.
-- **One vocabulary** — requests carry the language's own statement objects; query results and cascade
-  reports come back as the same statement objects, replayable as-is.
+- **Read anything the language can read** — any read statement the language accepts is accepted here, in whatever
+  order the agent's reasoning produces it. The [subgraph query](./modeling-lang/queries.md) composes filters
+  (types, kinds, views, scopes); `check` reports [findings](./modeling-lang/errors.md#errors-vs-findings).
+- **One vocabulary** — query results come back as the language's own node and edge objects, and cascade-free:
+  every path is absolute, so a result is self-describing and its statements are replayable as source.
 - **Stateless by construction** — the language has [no ambient
-  scope](./modeling-lang/modeling-lang.md#addressing--no-ambient-scope): every statement is absolutely
-  addressed, so every request is self-contained. Two requests share nothing but the model.
-- **Safe retries** — inherited from the [error contract](./modeling-lang/errors.md): identical
-  restatements — definitions and edges alike — are noops, batches are atomic, failures leave the model
-  untouched. An agent may resubmit a whole corrected batch without diffing state first.
+  scope](./modeling-lang/modeling-lang.md#addressing--no-ambient-scope): every statement is absolutely addressed,
+  so every request is self-contained. Two requests share nothing but the model.
+- **Safe by construction** — reads never change the model, so retries, replays and concurrent requests are always
+  safe; there is no revision to guard and no partial state to roll back.
 
 ## Request
 
-One request is one batch against one model. How a request names its target model (connection, id, path) is
-transport-specific and out of scope here.
+One request is one batch of read statements against one model. How a request names its target model (connection,
+id, path) is transport-specific and out of scope here.
 
 ```json
 {
   "statements": [
-    { "stmt": "define", "node": "Orders.RefundHandler" },
-    { "stmt": "app", "node": "Orders", "port": "events",
-      "route": { "node": "RefundIssued" },
-      "inner": { "node": "RefundHandler", "port": "handle" } },
+    { "stmt": "query", "scopes": ["Orders"], "kinds": ["connection"] },
     { "stmt": "check" }
-  ],
-  "expect_revision": 41,
-  "dry_run": false
+  ]
 }
 ```
 
-| field           | meaning                                                                                  |
-|-----------------|-------------------------------------------------------------------------------------------|
-| statements      | the batch: an ordered array of [statement objects](./modeling-lang/modeling-lang.md#statements) |
-| expect_revision | optional optimistic-concurrency guard; the request is rejected if the model's revision differs |
-| dry_run         | optional; execute and report the full results — including cascades — then roll everything back |
+| field      | meaning                                                                                          |
+|------------|--------------------------------------------------------------------------------------------------|
+| statements | the batch: an ordered array of read [statement objects](./modeling-lang/modeling-lang.md#statements) (`query`, `check`) |
+
+A statement that is not a read is a [protocol error](#protocol-errors): the model is edited as source, not through
+this envelope.
 
 ## Response
 
 ```json
 {
   "status": "ok",
-  "revision": 42,
   "results": [
-    { "result": "applied" },
-    { "result": "applied" },
+    { "result": "graph", "nodes": [], "edges": [] },
     { "result": "findings", "findings": [] }
   ]
 }
@@ -63,105 +61,78 @@ transport-specific and out of scope here.
 | field    | meaning                                                                                    |
 |----------|-----------------------------------------------------------------------------------------------|
 | status   | `ok` or `error`                                                                              |
-| revision | the model revision after the request (see [Revision](#revision))                            |
 | results  | one entry per statement, in batch order (present when `status` is `ok`)                     |
 | error    | the failure, with the failing statement's `index`; the whole batch was rolled back          |
 
 ### Result objects
 
-Tagged by outcome, mirroring the [result contract](./modeling-lang/errors.md#statement-results):
+Tagged by outcome, mirroring the [result contract](./modeling-lang/errors.md#statement-results). A read batch
+yields graphs and findings:
 
 ```json
-{ "result": "applied" }
-{ "result": "noop" }
-{ "result": "applied", "cascade": [ { "stmt": "define", "node": "Orders.ConfirmationHandler" }, "..." ] }
 { "result": "graph", "nodes": [ "...node objects..." ], "edges": [ "...edge objects..." ] }
 { "result": "findings", "findings": [ "...finding objects..." ] }
 ```
 
-- `cascade` appears on `delete` and node-`redefine` results: everything removed, rendered as replayable
-  statement objects in creation order. With `dry_run` it is a preview of what *would* be removed.
-- `graph` carries [query](./modeling-lang/queries.md) output — the requested slice as plain nodes and edges,
-  with meta (types, kinds, ports, views, scope nesting encoded in path ids) preserved.
+- `graph` carries [query](./modeling-lang/queries.md) output — the requested slice as plain nodes and edges, with
+  meta (types, kinds, ports, views, scope nesting encoded in path ids) preserved.
+- `findings` carries `check` output.
 
 ### Error object
 
 The [error shape](./modeling-lang/errors.md#error-shape) verbatim, plus the failing statement's index. The
-`subject` is the statement object as submitted; `hint` is a runnable statement an agent can feed straight
-back.
+`subject` is the statement object as submitted; `hint` is a runnable statement an agent can feed straight back.
 
 ```json
 {
-  "index": 2,
-  "code": "E_SHAPE_VIOLATION",
-  "message": "source Invoice does not match the source pattern of `confirm`",
-  "subject": { "stmt": "conn-edge", "conn": "confirm",
-               "source": { "node": "Invoice", "port": "x" },
-               "carrier": "OrderId",
-               "target": { "node": "Orders", "port": "handle_confirmation" } },
-  "refs": [ { "kind": "node", "path": "Invoice", "id": 17 } ],
-  "expected": { "anchor": "Service", "rel": "type_of" },
-  "actual": "Invoice",
-  "hint": { "stmt": "query", "scopes": ["Orders"] }
+  "index": 0,
+  "code": "E_UNKNOWN_NAME",
+  "message": "unknown view `data_flow`",
+  "subject": { "stmt": "query", "views": ["data_flow"] },
+  "refs": [ { "kind": "view", "path": "data_flow" } ],
+  "hint": { "stmt": "query" }
 }
 ```
 
 ### Finding objects
 
-[Findings](./modeling-lang/errors.md#errors-vs-findings) are tagged by kind, with the fields each kind
-carries:
+[Findings](./modeling-lang/errors.md#errors-vs-findings) are tagged by kind, with the fields each kind carries:
 
 ```json
-{ "kind": "shape_drift", "statement": { "stmt": "conn-edge", "conn": "confirm", "...": "..." },
-  "slot": "source", "expected": { "anchor": "Service", "rel": "type_of" }, "actual": "Payments" }
 { "kind": "unrouted_traffic", "statement": { "stmt": "conn-edge", "...": "..." }, "port": "Orders.events" }
-{ "kind": "delegated_port_without_connections", "port": "Orders.handle_confirmation" }
+{ "kind": "unused_port", "port": "Orders.handle_confirmation" }
 { "kind": "empty_view", "view": "fault_prop" }
 { "kind": "type_without_instances", "type_kind": "conn", "name": "confirm" }
 ```
 
 Finding kinds are append-only, like error codes.
 
-## Revision
-
-The wrapper maintains a monotonically increasing revision per model. It increases whenever the model
-changes and is untouched by noops, reads and dry runs. Granularity (per statement vs per request) is an
-implementation choice; only monotonicity and change-detection are contractual.
-
-`expect_revision` makes edits conditional: if the model moved since the agent last looked, the request is
-rejected with `E_STALE_REVISION` and the agent regrounds (`query`, `check`) before retrying.
-Concurrent editing semantics beyond this guard belong to [multiplayer](./multiplayer.md) and
-[versioning](./versioning.md).
-
 ## Protocol errors
 
-Failures of the envelope rather than of a statement. Same object shape as statement errors, no `index`,
-codes append-only:
+Failures of the envelope rather than of a statement. Same object shape as statement errors, no `index`, codes
+append-only:
 
-| code             | raised when                                                     |
-|------------------|------------------------------------------------------------------|
-| E_BAD_REQUEST    | the request is not valid JSON or violates this contract          |
-| E_STALE_REVISION | `expect_revision` does not match the model's current revision    |
+| code          | raised when                                                                             |
+|---------------|-----------------------------------------------------------------------------------------|
+| E_BAD_REQUEST | the request is not valid JSON, violates this contract, or carries a non-read statement (the interface is read-only) |
 
 ## Conventions for agents
 
 Not enforced, but the intended way to use the interface:
 
-- `define` what should exist; `redefine` only to replace a node's internals or a type's shape. A definition
-  that contradicts the model fails loudly (E_REDECLARED) instead of silently diverging, so stale
-  assumptions surface early.
-- Submit a plan as one atomic batch. On error, fix the statement at `index` and resubmit the whole batch —
-  statements are idempotent, so anything already applied by an earlier batch just noops.
-- Preview destructive edits: `delete` or node-`redefine` with `dry_run` returns the full cascade without
-  applying it.
-- Reground from the model (`query`, `check`) instead of trusting a stale context window; `check`
-  after substantial edits surfaces what drifted.
-- A cascade report is replayable: to undo an accidental delete, submit the cascade back as a batch.
-  References that eroded meanwhile surface as findings, not errors.
+- **Read to ground, edit in source.** Reground from the model (`query`, `check`) instead of trusting a stale
+  context window; then make changes by editing the [`.arch` source](./modeling-lang/source-format.md) and
+  recompiling. `check` after an edit surfaces what the change left incomplete.
+- A query result is replayable source: every node and edge renders as an absolute-path statement, so a slice can
+  be pasted into a module and recompiled.
+- On a compile error, fix the offending `file:line:col` the diagnostic names and recompile — statements are
+  idempotent, so unchanged source re-applies as no-ops.
+- Scope a query before reading the whole model: `scopes`, `types`, `kinds` and `views` compose to the slice that
+  answers the question, which is cheaper to reason over than the full graph.
 
 ## Transport
 
-The contract is transport-agnostic: one JSON request, one JSON response. An MCP tool per model is the
-natural first fit; a plain HTTP endpoint serves the same contract. The [CLI](./cli.md) speaks the same
-envelope with `--json`. Authentication, addressing and distribution are covered by
-[saas](./distribution/saas.md) / [on-prem](./distribution/on-prem.md).
+The contract is transport-agnostic: one JSON request, one JSON response. An MCP tool per model is the natural first
+fit; a plain HTTP endpoint serves the same contract. The [CLI](./cli.md) speaks the same read contract with
+`--json`. Authentication, addressing and distribution are covered by [saas](./distribution/saas.md) /
+[on-prem](./distribution/on-prem.md).

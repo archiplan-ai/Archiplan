@@ -2,14 +2,16 @@
 
 Model definitions stored as **source code**: a project of `.arch` files that is diffable, modular and reviewable.
 The source *is* the model — tools compile the project fresh on every run; there is no build artifact to keep in
-sync. Mutation vocabulary (`rename`, `delete`, `untag`) does not exist in source: a mutation is a text edit and a
-recompile, and the diff is the change record.
+sync. Mutation vocabulary does not exist — not in source and not in the
+[statement layer](./modeling-lang.md#language-api): a mutation is a text edit and a recompile, and the diff is the
+change record.
 
 The surface language is **sugar over the statement layer**: every construct lowers to the absolute-path JSON
 statements of [modeling-lang.md](./modeling-lang.md), executed by the ordinary engine. The engine remains the single
 semantic authority — shapes, port discipline, scope rules are checked there; the compiler adds name resolution,
-modularity and source locations, and maps engine errors back to `file:line:col`. The JSON statement API and
-`archi.json` statement-log models remain for programmatic (agent) editing of scratch models.
+modularity and source locations, and maps engine errors back to `file:line:col`. The statement layer is the
+compiler's lowering target and the read surface for agents ([agent-interface](../agent-interface.md)), not an
+editing surface: the source tree is the only persistence and the only way to change a model.
 
 ## Project layout
 
@@ -275,10 +277,10 @@ Compile diagnostics carry `file:line:col` and a stable code. New codes, on top o
 
 ## Fidelity
 
-Dumps and cascade reports render in the surface syntax: creation statements are valid source, so a dump pastes back
-into a module and recompiles to the identical model. Two caveats, both inherent: a JSON-built model may use
-reserved words as names or rely on use-created (undeclared) ports — such models replay via JSON but do not
-round-trip through source; and `redefine`/mutations have no surface form (the source has no history, only state).
+Dumps render in the surface syntax: creation statements are valid source, so a dump pastes back into a module and
+recompiles to the identical model. One inherent caveat: a statement-built model may use reserved words as names or
+rely on use-created (undeclared) ports — such models replay via the statement layer but do not round-trip through
+source. Reads have no surface form: the source is state, not a transcript.
 
 ## Worked example
 

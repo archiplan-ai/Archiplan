@@ -3,8 +3,8 @@
 //! JSON is the statement API's concrete syntax. [`Statement::pseudo`]
 //! renders a statement in the `.arch` surface syntax
 //! (`def node Payments`, `Service type_of Payments`) — creation statements
-//! render as valid source text, so dumps and cascade reports paste back
-//! into modules; mutations and reads render display-only.
+//! render as valid source text, so dumps paste back into modules; reads
+//! render display-only.
 
 use std::fmt;
 
@@ -15,7 +15,7 @@ use serde_json::Value;
 
 use crate::error::{ErrorCode, LangError};
 
-/// What a `define` / `redefine` statement defines. The subject key — `node`,
+/// What a `define` statement defines. The subject key — `node`,
 /// `view`, `rel` or `conn` — names the element (a path for nodes, a name for
 /// everything else); the definition's parameters are sibling fields.
 #[derive(Clone, PartialEq, Debug)]
@@ -391,9 +391,6 @@ pub enum Statement {
     /// Idempotent creation: creates if absent, no-ops on an identical
     /// restatement, rejects a divergent existing definition.
     Define(Definition),
-    /// Replacement: the element must exist. A node redefine empties its
-    /// scope; a type redefine replaces the shape.
-    Redefine(Definition),
     RelEdge {
         rel: String,
         source: String,
@@ -419,26 +416,6 @@ pub enum Statement {
         route: Option<PatternExpr>,
         inner: End,
     },
-    Rename {
-        node: String,
-        to: String,
-    },
-    Delete {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        node: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        edge: Option<Box<Statement>>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        rel: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        conn: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        view: Option<String>,
-    },
-    Untag {
-        edge: Box<Statement>,
-        views: Vec<String>,
-    },
     /// Subgraph query (`requirements/modeling-lang/queries.md`): composable
     /// filters, each optional; an absent filter does not restrict. An empty
     /// list is the most restrictive filter (matches nothing), not an absent
@@ -461,7 +438,7 @@ pub enum Statement {
 
 /// Allowed fields per statement kind, used for strict schema validation
 /// (internally-tagged serde enums cannot deny unknown fields themselves).
-/// `define` / `redefine` are keyed by their subject in [`definition_keys`].
+/// `define` is keyed by its subject in [`definition_keys`].
 fn allowed_keys(kind: &str) -> Option<&'static [&'static str]> {
     Some(match kind {
         "rel-edge" => &["stmt", "rel", "source", "target", "views"],
@@ -475,16 +452,13 @@ fn allowed_keys(kind: &str) -> Option<&'static [&'static str]> {
             "views",
         ],
         "app" => &["stmt", "node", "port", "route", "inner"],
-        "rename" => &["stmt", "node", "to"],
-        "delete" => &["stmt", "node", "edge", "rel", "conn", "view"],
-        "untag" => &["stmt", "edge", "views"],
         "query" => &["stmt", "types", "kinds", "views", "scopes"],
         "check" => &["stmt", "in"],
         _ => return None,
     })
 }
 
-/// Allowed fields of a `define` / `redefine`, decided by the one subject key
+/// Allowed fields of a `define`, decided by the one subject key
 /// present; `None` when the subject is missing or ambiguous.
 fn definition_keys(obj: &serde_json::Map<String, Value>) -> Option<&'static [&'static str]> {
     let subjects: Vec<&str> = ["node", "view", "rel", "conn"]
@@ -521,7 +495,7 @@ fn validate_keys(value: &Value) -> Result<&str, LangError> {
         .and_then(Value::as_str)
         .ok_or_else(|| parse_err("missing or non-string `stmt` field".into(), value))?;
     let allowed = match kind {
-        "define" | "redefine" => definition_keys(obj).ok_or_else(|| {
+        "define" => definition_keys(obj).ok_or_else(|| {
             parse_err(
                 format!("`{kind}` names exactly one subject: `node`, `view`, `rel` or `conn`"),
                 value,
@@ -538,23 +512,12 @@ fn validate_keys(value: &Value) -> Result<&str, LangError> {
             ));
         }
     }
-    if let Some(edge) = obj.get("edge") {
-        let inner = validate_keys(edge)?;
-        if !matches!(inner, "rel-edge" | "conn-edge" | "app") {
-            return Err(parse_err(
-                format!("`edge` must restate an edge statement, got `{inner}`"),
-                value,
-            ));
-        }
-    }
     Ok(kind)
 }
 
 /// Parse one statement from a JSON value, with strict schema validation:
-/// unknown kinds and fields, ill-typed fields, an `edge` field that does not
-/// restate an edge, a `delete` without exactly one target, a `define` /
-/// `redefine` without exactly one subject, and `redefine` of a view are all
-/// `E_PARSE`.
+/// unknown kinds and fields, ill-typed fields, and a `define` without
+/// exactly one subject are all `E_PARSE`.
 pub fn parse_statement(value: &Value) -> Result<Statement, LangError> {
     validate_keys(value)?;
     let stmt: Statement = serde_path_to_error::deserialize(value).map_err(
@@ -569,40 +532,7 @@ pub fn parse_statement(value: &Value) -> Result<Statement, LangError> {
         },
     )?;
     match &stmt {
-        Statement::Delete {
-            node,
-            edge,
-            rel,
-            conn,
-            view,
-        } => {
-            let targets = [
-                node.is_some(),
-                edge.is_some(),
-                rel.is_some(),
-                conn.is_some(),
-                view.is_some(),
-            ];
-            if targets.iter().filter(|t| **t).count() != 1 {
-                return Err(parse_err(
-                    "`delete` takes exactly one target: `node`, `edge`, `rel`, `conn` or `view`"
-                        .into(),
-                    value,
-                ));
-            }
-        }
-        Statement::Redefine(Definition::View { .. }) => {
-            return Err(parse_err(
-                "a view has no definition body; `redefine` does not apply (`define` only)".into(),
-                value,
-            ));
-        }
         Statement::Define(Definition::Conn {
-            directed: false,
-            rev_carrier: Some(_),
-            ..
-        })
-        | Statement::Redefine(Definition::Conn {
             directed: false,
             rev_carrier: Some(_),
             ..
@@ -614,9 +544,6 @@ pub fn parse_statement(value: &Value) -> Result<Statement, LangError> {
             ));
         }
         Statement::Define(Definition::Node {
-            ports: Some(ps), ..
-        })
-        | Statement::Redefine(Definition::Node {
             ports: Some(ps), ..
         }) => {
             if let Some(dup) = ps
@@ -650,13 +577,12 @@ impl Statement {
     }
 
     /// Render the statement in the `.arch` surface syntax. Creation
-    /// statements — the ones dumps and cascades are made of — render as
-    /// valid source text, pasteable into a module; mutations and reads have
-    /// no surface form and render display-only.
+    /// statements — the ones dumps are made of — render as valid source
+    /// text, pasteable into a module; reads have no surface form and render
+    /// display-only.
     pub fn pseudo(&self) -> String {
         match self {
             Statement::Define(d) => format!("def {}", d.pseudo()),
-            Statement::Redefine(d) => format!("redefine {}", d.pseudo()),
             Statement::RelEdge {
                 rel,
                 source,
@@ -699,31 +625,6 @@ impl Statement {
                     None => String::new(),
                 };
                 format!("{node}.{port}{route} = {}.{}", inner.node, inner.port)
-            }
-            Statement::Rename { node, to } => format!("rename {node} {to}"),
-            Statement::Delete {
-                node,
-                edge,
-                rel,
-                conn,
-                view,
-            } => {
-                if let Some(n) = node {
-                    format!("delete {n}")
-                } else if let Some(e) = edge {
-                    format!("delete {}", e.pseudo())
-                } else if let Some(r) = rel {
-                    format!("delete rel {r}")
-                } else if let Some(c) = conn {
-                    format!("delete conn {c}")
-                } else if let Some(v) = view {
-                    format!("delete view {v}")
-                } else {
-                    "delete".to_string()
-                }
-            }
-            Statement::Untag { edge, views } => {
-                format!("untag {}{}", edge.pseudo(), views_suffix(views))
             }
             Statement::Query {
                 types,

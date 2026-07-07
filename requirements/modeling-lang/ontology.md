@@ -11,12 +11,13 @@ An ontology ships as a **preset**: a named JSON array of creation statements (`d
 - Every preset must define the classifier `rel trans type_of := * -> *` — by that exact shape, not just the name.
   [Layers](./layers.md) and the `types` query filter key off it. A preset that omits it or bends its shape is
   rejected (`E_PRESET_INVALID`).
-- Preset elements are **substrate**: dumps omit them, `check` does not report them, and mutating them —
-  delete, rename, divergent redefine, tagging a preset edge into views — is `E_STDLIB_PROTECTED`. Users may
-  reference them, attach edges to them, and augment their scopes.
-- A model **pins its preset at creation**: the model file records the preset (name + statements) and every
-  restore loads it before replaying the dump. The CLI resolves a new model's preset from `--preset <file>`,
-  else an `ontology.json` next to the model file, else the built-in default below.
+- Preset elements are **substrate**: dumps omit them, `check` does not report them, and tagging a preset edge
+  into views is `E_STDLIB_PROTECTED` (a `define` colliding divergently with a preset name is ordinary
+  `E_REDECLARED`). Users may reference them, attach edges to them, and augment their scopes.
+- A model **pins its preset in the project manifest** — `preset` in `archi.toml`: `"core"`, `"default"`, or a
+  relative path to a JSON preset file (see [source-format](./source-format.md#project-layout)). Every compile
+  loads it into the fresh workspace before the lowered batch replays; dumps omit preset elements and replay on
+  the same preset.
 - Analyses read the ontology through the preset: NKP's default class filter names preset members
   (see [scoring/nkp](../scoring/nkp.md)).
 

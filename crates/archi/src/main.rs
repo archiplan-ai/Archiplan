@@ -1,57 +1,43 @@
-//! `archi` — a thin runner for statement batches (`requirements/cli.md`),
-//! the `.arch` source-format compiler
-//! (`requirements/modeling-lang/source-format.md`) and the NKP landscape
-//! analysis (`requirements/scoring/nkp.md`).
+//! `archi` — a thin runner for the `.arch` source-format compiler
+//! (`requirements/cli.md`, `requirements/modeling-lang/source-format.md`) and
+//! the NKP landscape analysis (`requirements/scoring/nkp.md`).
 //!
 //! ```text
-//! archi exec  [--dry-run] [--expect-revision <N>] [--model <file>] [--preset <file>] [--json] [<batch.json> | -]
-//! archi check [--project <dir> | --model <file>] [--json]
+//! archi check [--project <dir>] [--json]
 //! archi build [--project <dir>] [--emit-batch <file|->]
-//! archi nkp   [--project <dir> | --model <file>] [--regime | --hotspots | --corridors] [--top | --scope <path>]
+//! archi nkp   [--project <dir>] [--regime | --hotspots | --corridors] [--top | --scope <path>]
 //!             [--exclude '<src> <rel> <dst>']... [--only <edge-type>]...
 //!             [--tau-p <f>] [--tau-b <f>] [--neutrality degree|uniform] [--global-p <f>]
 //! ```
 //!
-//! `check`, `build` and `nkp` locate their model by precedence: `--project`,
-//! then `--model`, then the nearest `archi.toml` upward from the working
-//! directory, then `archi.json`. A project of `.arch` files is compiled fresh
-//! each run — the source is the model. `exec` speaks the JSON statement API
-//! against a model file (default `archi.json`) which persists as
-//! `{ "revision": N, "preset": { "name", "statements" }, "statements": [<dump>] }`;
-//! its preset is pinned at model creation: `--preset <file>`, else an
-//! `ontology.json` next to the model file, else the built-in default
-//! ontology. Files from before presets replay on the core preset.
+//! Every verb locates its project by precedence: `--project`, then the
+//! nearest `archi.toml` upward from the working directory. A project of
+//! `.arch` files is compiled fresh each run — the source is the model, and
+//! the only source of truth: the CLI offers no JSON editing of the model;
+//! mutation is a text edit and a recompile.
 
 use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use modeling_lang::source::{Compiled, compile_project, find_project_root};
 use modeling_lang::{
-    EdgeKind, ExcludePattern, Finding, GraphEdge, Neutrality, NkpConfig, NkpScope, Outcome, Preset,
-    Response, Statement, Workspace, parse_statement,
+    ExcludePattern, Finding, Neutrality, NkpConfig, NkpScope, Statement, Workspace,
 };
 use serde_json::{Value, json};
 
 const USAGE: &str = "usage:
-  archi exec  [--dry-run] [--expect-revision <N>] [--model <file>] [--preset <file>] [--json] [<batch.json> | -]
-  archi check [--project <dir> | --model <file>] [--json]
+  archi check [--project <dir>] [--json]
   archi build [--project <dir>] [--emit-batch <file|->]
-  archi nkp   [--project <dir> | --model <file>] [--regime | --hotspots | --corridors] [--top | --scope <path>]
+  archi nkp   [--project <dir>] [--regime | --hotspots | --corridors] [--top | --scope <path>]
               [--exclude '<src> <rel> <dst>']... [--only <edge-type>]...
               [--tau-p <f>] [--tau-b <f>] [--neutrality degree|uniform] [--global-p <f>]";
 
 struct Args {
     verb: String,
-    positional: Vec<String>,
-    model_file: Option<String>,
     project: Option<String>,
     emit_batch: Option<String>,
     json: bool,
-    dry_run: bool,
-    expect_revision: Option<u64>,
-    preset: Option<String>,
     regime: bool,
     hotspots: bool,
     corridors: bool,
@@ -73,14 +59,9 @@ fn usage_err(msg: &str) -> ExitCode {
 fn parse_args(argv: &[String]) -> Result<Args, String> {
     let mut args = Args {
         verb: String::new(),
-        positional: Vec::new(),
-        model_file: None,
         project: None,
         emit_batch: None,
         json: false,
-        dry_run: false,
-        expect_revision: None,
-        preset: None,
         regime: false,
         hotspots: false,
         corridors: false,
@@ -109,15 +90,12 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
     while let Some(a) = it.next() {
         match a.as_str() {
             "--json" => args.json = true,
-            "--dry-run" => args.dry_run = true,
             "--regime" => args.regime = true,
             "--hotspots" => args.hotspots = true,
             "--corridors" => args.corridors = true,
             "--top" => args.top = true,
-            "--model" => args.model_file = Some(value(&mut it, "--model")?),
             "--project" => args.project = Some(value(&mut it, "--project")?),
             "--emit-batch" => args.emit_batch = Some(value(&mut it, "--emit-batch")?),
-            "--preset" => args.preset = Some(value(&mut it, "--preset")?),
             "--scope" => args.scope = Some(value(&mut it, "--scope")?),
             "--exclude" => args.exclude.push(value(&mut it, "--exclude")?),
             "--only" => args.only.push(value(&mut it, "--only")?),
@@ -127,40 +105,28 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--global-p" => {
                 args.global_p = Some(float(value(&mut it, "--global-p")?, "--global-p")?)
             }
-            "--expect-revision" => {
-                let v = value(&mut it, "--expect-revision")?;
-                args.expect_revision =
-                    Some(v.parse().map_err(|_| "--expect-revision needs a number")?);
-            }
             other if other.starts_with("--") => return Err(format!("unknown flag `{other}`")),
-            other => args.positional.push(other.to_string()),
+            other => return Err(format!("unexpected argument `{other}`")),
         }
     }
     Ok(args)
 }
 
-/// Where `check`/`nkp` take their model from: a source project (compiled
-/// fresh) or a statement-log model file.
-enum ModelSource {
-    Project(PathBuf),
-    File(String),
-}
-
-/// Precedence: `--project`, `--model`, the nearest `archi.toml` upward from
-/// the working directory, `archi.json`.
-fn locate_model(args: &Args) -> ModelSource {
+/// Locate the project: `--project <dir>`, then the nearest `archi.toml`
+/// upward from the working directory.
+fn locate_project(args: &Args) -> Result<PathBuf, String> {
     if let Some(p) = &args.project {
-        return ModelSource::Project(PathBuf::from(p));
+        return Ok(PathBuf::from(p));
     }
-    if let Some(m) = &args.model_file {
-        return ModelSource::File(m.clone());
-    }
-    if let Ok(cwd) = std::env::current_dir()
-        && let Some(root) = find_project_root(&cwd)
-    {
-        return ModelSource::Project(root);
-    }
-    ModelSource::File("archi.json".to_string())
+    std::env::current_dir()
+        .ok()
+        .and_then(|d| find_project_root(&d))
+        .ok_or_else(|| {
+            format!(
+                "`{}` needs a project: pass --project <dir> or run inside one (archi.toml)",
+                args.verb
+            )
+        })
 }
 
 /// Compile a project, reporting diagnostics as `file:line:col: CODE: message`
@@ -199,293 +165,10 @@ fn compile_or_report(root: &Path, json_out: bool) -> Result<Compiled, ExitCode> 
     }
 }
 
-/// The workspace `check`/`nkp` analyze, from whichever model source applies.
+/// The workspace `check`/`nkp` analyze: the located project, compiled fresh.
 fn analysis_workspace(args: &Args) -> Result<Workspace, ExitCode> {
-    match locate_model(args) {
-        ModelSource::Project(root) => compile_or_report(&root, args.json).map(|c| c.workspace),
-        ModelSource::File(path) => {
-            load_workspace(&path, args.preset.as_deref()).map_err(|e| usage_err(&e))
-        }
-    }
-}
-
-/// The preset for a model file that does not exist yet: `--preset <file>`,
-/// else an `ontology.json` next to the model file, else the built-in default
-/// ontology.
-fn new_model_preset(model_path: &str, flag: Option<&str>) -> Result<Preset, String> {
-    let file = match flag {
-        Some(f) => Some(PathBuf::from(f)),
-        None => {
-            let sibling = Path::new(model_path)
-                .parent()
-                .unwrap_or(Path::new(""))
-                .join("ontology.json");
-            sibling.exists().then_some(sibling)
-        }
-    };
-    let Some(file) = file else {
-        return Ok(Preset::default_ontology());
-    };
-    let raw = fs::read_to_string(&file)
-        .map_err(|e| format!("cannot read preset `{}`: {e}", file.display()))?;
-    let v: Value = serde_json::from_str(&raw)
-        .map_err(|e| format!("preset `{}` is not JSON: {e}", file.display()))?;
-    let name = file
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("preset");
-    Preset::from_value(name, &v).map_err(|e| format!("preset `{}`: {e}", file.display()))
-}
-
-fn load_workspace(path: &str, preset_flag: Option<&str>) -> Result<Workspace, String> {
-    let Ok(raw) = fs::read_to_string(path) else {
-        let preset = new_model_preset(path, preset_flag)?;
-        return Workspace::with_preset(&preset).map_err(|e| format!("preset does not load: {e}"));
-    };
-    if preset_flag.is_some() {
-        return Err(format!(
-            "`{path}` already exists; its preset was pinned at creation — `--preset` applies to new models only"
-        ));
-    }
-    let v: Value =
-        serde_json::from_str(&raw).map_err(|e| format!("model file `{path}` is not JSON: {e}"))?;
-    let revision = v
-        .get("revision")
-        .and_then(Value::as_u64)
-        .ok_or_else(|| format!("model file `{path}` has no numeric `revision`"))?;
-    let raw_stmts = v
-        .get("statements")
-        .and_then(Value::as_array)
-        .ok_or_else(|| format!("model file `{path}` has no `statements` array"))?;
-    let mut statements = Vec::with_capacity(raw_stmts.len());
-    for s in raw_stmts {
-        statements
-            .push(parse_statement(s).map_err(|e| format!("model file `{path}` is corrupt: {e}"))?);
-    }
-    // Files from before presets carry no pin and replay on the core preset.
-    let preset = match v.get("preset") {
-        None => Preset::core(),
-        Some(p) => {
-            let name = p
-                .get("name")
-                .and_then(Value::as_str)
-                .ok_or_else(|| format!("model file `{path}` preset has no `name`"))?;
-            let stmts = p
-                .get("statements")
-                .ok_or_else(|| format!("model file `{path}` preset has no `statements`"))?;
-            Preset::from_value(name, stmts)
-                .map_err(|e| format!("model file `{path}` preset does not load: {e}"))?
-        }
-    };
-    Workspace::restore(&preset, revision, &statements)
-        .map_err(|e| format!("model file `{path}` does not replay: {e}"))
-}
-
-fn save_workspace(path: &str, ws: &Workspace) -> Result<(), String> {
-    let dump: Vec<Value> = ws.model().dump().iter().map(Statement::to_value).collect();
-    let preset_stmts: Vec<Value> = ws
-        .preset()
-        .statements()
-        .iter()
-        .map(Statement::to_value)
-        .collect();
-    let out = json!({
-        "revision": ws.revision(),
-        "preset": { "name": ws.preset().name(), "statements": preset_stmts },
-        "statements": dump,
-    });
-    fs::write(
-        path,
-        serde_json::to_string_pretty(&out).expect("serializes"),
-    )
-    .map_err(|e| format!("cannot write `{path}`: {e}"))
-}
-
-fn read_batch(args: &Args) -> Result<Vec<Value>, String> {
-    let source = match args.positional.first().map(String::as_str) {
-        None | Some("-") => {
-            let mut buf = String::new();
-            std::io::stdin()
-                .read_to_string(&mut buf)
-                .map_err(|e| format!("cannot read stdin: {e}"))?;
-            buf
-        }
-        Some(file) => fs::read_to_string(file).map_err(|e| format!("cannot read `{file}`: {e}"))?,
-    };
-    let v: Value = serde_json::from_str(&source).map_err(|e| format!("batch is not JSON: {e}"))?;
-    match v {
-        Value::Array(items) => Ok(items),
-        _ => Err("a batch is a JSON array of statements".into()),
-    }
-}
-
-fn pseudo_of_value(v: &Value) -> String {
-    match parse_statement(v) {
-        Ok(s) => s.pseudo(),
-        Err(_) => v.to_string(),
-    }
-}
-
-/// A graph edge as one human line, in the surface syntax.
-fn edge_line(e: &GraphEdge) -> String {
-    let views = if e.views.is_empty() {
-        String::new()
-    } else {
-        format!(" in {}", e.views.join(", "))
-    };
-    let type_name = e.type_name.as_deref().unwrap_or("");
-    let source_port = e.source_port.as_deref().unwrap_or("");
-    let target_port = e.target_port.as_deref().unwrap_or("");
-    match e.kind {
-        EdgeKind::Relation => format!("{} {type_name} {}{views}", e.source, e.target),
-        EdgeKind::Connection => {
-            let carriers = match (&e.carrier, &e.rev_carrier) {
-                (Some(c), Some(rc)) => format!("(->{c}, <-{rc})"),
-                (Some(c), None) => format!("({c})"),
-                (None, Some(rc)) => format!("(<-{rc})"),
-                (None, None) => String::new(),
-            };
-            format!(
-                "{}.{source_port} {type_name}{carriers} {}.{target_port}{views}",
-                e.source, e.target
-            )
-        }
-        EdgeKind::Application => {
-            let route = e
-                .route
-                .as_ref()
-                .map(|r| format!("({r})"))
-                .unwrap_or_default();
-            format!(
-                "{}.{source_port}{route} = {}.{target_port}{views}",
-                e.source, e.target
-            )
-        }
-    }
-}
-
-fn print_human(response: &Response, statements: &[Value]) {
-    match (&response.results, &response.error) {
-        (Some(results), _) => {
-            for (i, outcome) in results.iter().enumerate() {
-                let pseudo = statements.get(i).map(pseudo_of_value).unwrap_or_default();
-                match outcome {
-                    Outcome::Applied { cascade } => {
-                        println!("applied   {pseudo}");
-                        if let Some(cascade) = cascade {
-                            println!("          cascade:");
-                            for s in cascade {
-                                println!("            {}", s.pseudo());
-                            }
-                        }
-                    }
-                    Outcome::Noop => println!("noop      {pseudo}"),
-                    Outcome::Graph { nodes, edges } => {
-                        println!("{pseudo}");
-                        if nodes.is_empty() && edges.is_empty() {
-                            println!("  (empty)");
-                        }
-                        for n in nodes {
-                            let types = if n.types.is_empty() {
-                                String::new()
-                            } else {
-                                format!(" : {}", n.types.join(", "))
-                            };
-                            println!("  node {}{types}", n.id);
-                        }
-                        for e in edges {
-                            println!("  edge {}", edge_line(e));
-                        }
-                    }
-                    Outcome::Findings { findings } => {
-                        println!("{pseudo}");
-                        if findings.is_empty() {
-                            println!("  no findings");
-                        }
-                        for f in findings {
-                            println!("  {f}");
-                        }
-                    }
-                }
-            }
-            println!("revision {}", response.revision);
-        }
-        (None, Some(err)) => {
-            match err.index {
-                Some(i) => eprintln!(
-                    "error at statement {i} — {}: {}",
-                    err.error.code, err.error.message
-                ),
-                None => eprintln!("error — {}: {}", err.error.code, err.error.message),
-            }
-            if let Some(subject) = &err.error.subject {
-                eprintln!("  subject: {}", pseudo_of_value(subject));
-            }
-            if let Some(hint) = &err.error.hint {
-                eprintln!("  hint:    {}", pseudo_of_value(hint));
-            }
-        }
-        _ => {}
-    }
-}
-
-fn run(response: &Response, args: &Args, batch: &[Value]) -> ExitCode {
-    if args.json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(response).expect("serializes")
-        );
-    } else {
-        print_human(response, batch);
-    }
-    if response.status == "ok" {
-        ExitCode::SUCCESS
-    } else {
-        ExitCode::from(1)
-    }
-}
-
-fn run_exec(args: &Args) -> ExitCode {
-    if args.project.is_some() {
-        return usage_err(
-            "`exec` speaks the JSON statement API against a model file; projects of .arch sources compile via `check`, `build` and `nkp`",
-        );
-    }
-    let model_file = args
-        .model_file
-        .clone()
-        .unwrap_or_else(|| "archi.json".to_string());
-    let batch = match read_batch(args) {
-        Ok(b) => b,
-        Err(e) => return usage_err(&e),
-    };
-    let existed = Path::new(&model_file).exists();
-    let mut ws = match load_workspace(&model_file, args.preset.as_deref()) {
-        Ok(ws) => ws,
-        Err(e) => return usage_err(&e),
-    };
-    let before = ws.revision();
-
-    let mut request = json!({ "statements": batch });
-    if args.dry_run {
-        request["dry_run"] = json!(true);
-    }
-    if let Some(n) = args.expect_revision {
-        request["expect_revision"] = json!(n);
-    }
-
-    let response = ws.handle(&request);
-    let code = run(&response, args, &batch);
-    // A fresh model file is written even for a no-op batch: creation is what
-    // pins the preset.
-    if response.status == "ok"
-        && (ws.revision() != before || (!existed && !args.dry_run))
-        && let Err(e) = save_workspace(&model_file, &ws)
-    {
-        eprintln!("archi: {e}");
-        return ExitCode::from(2);
-    }
-    code
+    let root = locate_project(args).map_err(|e| usage_err(&e))?;
+    compile_or_report(&root, args.json).map(|c| c.workspace)
 }
 
 fn run_check(args: &Args) -> ExitCode {
@@ -511,19 +194,9 @@ fn run_check(args: &Args) -> ExitCode {
 }
 
 fn run_build(args: &Args) -> ExitCode {
-    let root = match &args.project {
-        Some(p) => PathBuf::from(p),
-        None => match std::env::current_dir()
-            .ok()
-            .and_then(|d| find_project_root(&d))
-        {
-            Some(r) => r,
-            None => {
-                return usage_err(
-                    "`build` needs a project: pass --project <dir> or run inside one (archi.toml)",
-                );
-            }
-        },
+    let root = match locate_project(args) {
+        Ok(r) => r,
+        Err(e) => return usage_err(&e),
     };
     let compiled = match compile_or_report(&root, false) {
         Ok(c) => c,
@@ -643,7 +316,6 @@ fn main() -> ExitCode {
         Err(e) => return usage_err(&e),
     };
     match args.verb.as_str() {
-        "exec" => run_exec(&args),
         "check" => run_check(&args),
         "build" => run_build(&args),
         "nkp" => run_nkp(&args),

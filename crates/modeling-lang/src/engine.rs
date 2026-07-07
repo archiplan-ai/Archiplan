@@ -10,7 +10,6 @@ use std::collections::BTreeSet;
 
 use serde_json::{Value, json};
 
-use crate::cascade::{self, Seed};
 use crate::error::{ErrorCode, LangError};
 use crate::ids::{ConnId, EdgeId, NodeId, PortId, RelId, ViewId};
 use crate::model::{
@@ -21,14 +20,13 @@ use crate::query;
 use crate::result::{BatchError, Outcome, Request, Response};
 use crate::statement::{Definition, End, PatternExpr, Statement, parse_statement};
 
-/// A model plus the revision counter maintained for the agent interface.
+/// A model plus the preset loaded as its standard library.
 ///
 /// [`Workspace::execute`] runs a parsed batch; [`Workspace::handle`] speaks
-/// the request/response envelope of `requirements/agent-interface.md`.
+/// the read-only request/response envelope of `requirements/agent-interface.md`.
 #[derive(Clone, Debug)]
 pub struct Workspace {
     model: Model,
-    revision: u64,
     preset: Preset,
 }
 
@@ -56,12 +54,12 @@ impl Workspace {
 
     /// A fresh workspace on an empty model with `preset` loaded as its
     /// standard library. Preset statements run through the ordinary engine;
-    /// everything they create is sealed as stdlib: omitted from dumps,
-    /// protected from mutation, excluded from analyses.
+    /// everything they create is sealed as stdlib: omitted from dumps and
+    /// findings, excluded from analyses, and protected — tagging a stdlib
+    /// edge into views is rejected.
     pub fn with_preset(preset: &Preset) -> Result<Self, LangError> {
         let mut ws = Workspace {
             model: Model::empty(),
-            revision: 0,
             preset: preset.clone(),
         };
         ws.execute(preset.statements()).map_err(|b| {
@@ -78,24 +76,18 @@ impl Workspace {
             .with_subject(preset.statements()[b.index].to_value())
         })?;
         ws.model.seal_preset(preset.name())?;
-        ws.revision = 0;
         Ok(ws)
     }
 
     /// Rebuild a workspace by loading `preset` and replaying `statements`
-    /// (typically a dump), adopting the given revision.
-    pub fn restore(
-        preset: &Preset,
-        revision: u64,
-        statements: &[Statement],
-    ) -> Result<Self, LangError> {
+    /// (typically a dump).
+    pub fn restore(preset: &Preset, statements: &[Statement]) -> Result<Self, LangError> {
         let mut ws = Self::with_preset(preset)?;
         ws.execute(statements).map_err(|b| {
             let mut e = b.error;
             e.message = format!("statement {}: {}", b.index, e.message);
             e
         })?;
-        ws.revision = revision;
         Ok(ws)
     }
 
@@ -107,12 +99,6 @@ impl Workspace {
     /// The preset loaded as this workspace's standard library.
     pub fn preset(&self) -> &Preset {
         &self.preset
-    }
-
-    /// The current revision: increases whenever the model changes, untouched
-    /// by noops, reads and dry runs.
-    pub fn revision(&self) -> u64 {
-        self.revision
     }
 
     /// Execute a parsed batch atomically. On success returns one outcome per
@@ -132,9 +118,6 @@ impl Workspace {
                 }
             }
         }
-        if results.iter().any(Outcome::changed_model) {
-            self.revision += 1;
-        }
         Ok(results)
     }
 
@@ -151,37 +134,37 @@ impl Workspace {
         self.execute(&statements)
     }
 
-    /// Handle one request envelope: `{ "statements": [...], "expect_revision"?,
-    /// "dry_run"? }`. Envelope violations are protocol errors (`E_BAD_REQUEST`,
-    /// `E_STALE_REVISION`); statement failures carry the failing index.
+    /// Handle one read request envelope: `{ "statements": [...] }`. The
+    /// agent interface is read-only — a model is edited as `.arch` source —
+    /// so only `query` and `check` statements are accepted; anything else is
+    /// a protocol error (`E_BAD_REQUEST`). Statement failures carry the
+    /// failing index.
     pub fn handle(&mut self, request: &Value) -> Response {
         let req = match parse_request(request) {
             Ok(r) => r,
-            Err(e) => return Response::fail(self.revision, None, e),
+            Err(e) => return Response::fail(None, e),
         };
-        if let Some(expected) = req.expect_revision
-            && expected != self.revision
-        {
-            let e = LangError::new(
-                ErrorCode::StaleRevision,
-                format!("the model is at revision {}, not {expected}", self.revision),
-            )
-            .with_expected(json!(expected))
-            .with_actual(json!(self.revision))
-            .with_hint(json!({ "stmt": "query" }));
-            return Response::fail(self.revision, None, e);
+        let mut statements = Vec::with_capacity(req.statements.len());
+        for (index, v) in req.statements.iter().enumerate() {
+            match parse_statement(v) {
+                Ok(s) => statements.push(s),
+                Err(error) => return Response::fail(Some(index), error),
+            }
         }
-        if req.dry_run {
-            let mut probe = self.clone();
-            match probe.execute_values(&req.statements) {
-                Ok(results) => Response::ok(self.revision, results),
-                Err(b) => Response::fail(self.revision, Some(b.index), b.error),
-            }
-        } else {
-            match self.execute_values(&req.statements) {
-                Ok(results) => Response::ok(self.revision, results),
-                Err(b) => Response::fail(self.revision, Some(b.index), b.error),
-            }
+        if let Some(write) = statements
+            .iter()
+            .find(|s| !matches!(s, Statement::Query { .. } | Statement::Check { .. }))
+        {
+            let e = bad_request(
+                "the agent interface is read-only — a model is edited as `.arch` source; \
+                 only `query` and `check` statements are accepted",
+            )
+            .with_subject(write.to_value());
+            return Response::fail(None, e);
+        }
+        match self.execute(&statements) {
+            Ok(results) => Response::ok(results),
+            Err(b) => Response::fail(Some(b.index), b.error),
         }
     }
 
@@ -190,7 +173,6 @@ impl Workspace {
     fn apply(&mut self, stmt: &Statement) -> Result<Outcome, LangError> {
         match stmt {
             Statement::Define(def) => self.do_define(def),
-            Statement::Redefine(def) => self.do_redefine(def),
             Statement::RelEdge {
                 rel,
                 source,
@@ -218,21 +200,6 @@ impl Workspace {
                 route,
                 inner,
             } => self.do_app(node, port, route.as_ref(), inner),
-            Statement::Rename { node, to } => self.do_rename(node, to),
-            Statement::Delete {
-                node,
-                edge,
-                rel,
-                conn,
-                view,
-            } => self.do_delete(
-                node.as_deref(),
-                edge.as_deref(),
-                rel.as_deref(),
-                conn.as_deref(),
-                view.as_deref(),
-            ),
-            Statement::Untag { edge, views } => self.do_untag(edge, views),
             Statement::Query {
                 types,
                 kinds,
@@ -299,18 +266,6 @@ impl Workspace {
         self.model
             .resolve_in(None, &segs)
             .ok_or_else(|| self.unknown("node", path))
-    }
-
-    /// Reject mutation of a stdlib (preset) element.
-    fn guard_stdlib(&self, raw: u64, kind: &str, name: &str, verb: &str) -> Result<(), LangError> {
-        if self.model.is_stdlib(raw) {
-            Err(LangError::new(
-                ErrorCode::StdlibProtected,
-                format!("`{name}` is a stdlib {kind} and cannot be {verb}"),
-            ))
-        } else {
-            Ok(())
-        }
     }
 
     fn resolve_pattern(&self, expr: &PatternExpr) -> Result<Pattern, LangError> {
@@ -380,39 +335,6 @@ impl Workspace {
         }
     }
 
-    fn do_redefine(&mut self, def: &Definition) -> Result<Outcome, LangError> {
-        match def {
-            Definition::Node { path, ports } => self.redefine_node(path, ports.as_deref()),
-            // Rejected at parse time.
-            Definition::View { .. } => Err(LangError::new(
-                ErrorCode::Parse,
-                "a view has no definition body; `redefine` does not apply (`define` only)",
-            )),
-            Definition::Rel {
-                name,
-                trans,
-                directed,
-                source,
-                target,
-            } => self.redefine_rel(name, *trans, *directed, source, target),
-            Definition::Conn {
-                name,
-                directed,
-                source,
-                carrier,
-                rev_carrier,
-                target,
-            } => self.redefine_conn(
-                name,
-                *directed,
-                source,
-                carrier.as_ref(),
-                rev_carrier.as_ref(),
-                target,
-            ),
-        }
-    }
-
     fn define_node(&mut self, path: &str, ports: Option<&[String]>) -> Result<Outcome, LangError> {
         let segs = self.parse_path(path)?;
         if let Some(ps) = ports {
@@ -446,14 +368,7 @@ impl Workspace {
                 format!("node `{path}` is already defined with different ports"),
             )
             .with_ref("node", path, Some(id.raw()))
-            .with_actual(self.model.node_statement(id).to_value())
-            .with_hint(
-                Statement::Redefine(Definition::Node {
-                    path: path.to_string(),
-                    ports: Some(claim.to_vec()),
-                })
-                .to_value(),
-            ));
+            .with_actual(self.model.node_statement(id).to_value()));
         }
         let id = NodeId(self.model.alloc());
         self.model.nodes.insert(
@@ -482,95 +397,7 @@ impl Workspace {
         for p in ports.unwrap_or_default() {
             self.create_port(id, p, None, None, true);
         }
-        Ok(Outcome::applied())
-    }
-
-    /// Redefinition keeps the node's identity and attached edges, empties its
-    /// scope as a reported cascade, and — when `ports` is present — replaces
-    /// the declared port set (a removed-but-attached port demotes to
-    /// use-created; a removed unattached one is swept). A redefinition that
-    /// changes nothing is a no-op.
-    fn redefine_node(
-        &mut self,
-        path: &str,
-        ports: Option<&[String]>,
-    ) -> Result<Outcome, LangError> {
-        let id = self
-            .resolve_abs(path)
-            .map_err(|e| e.with_hint(json!({ "stmt": "define", "node": path })))?;
-        if let Some(ps) = ports {
-            for p in ps {
-                self.check_ident(p, "port name")?;
-            }
-        }
-        let children: Vec<Seed> = self.model.nodes[&id]
-            .children
-            .values()
-            .map(|c| Seed::Node(*c))
-            .collect();
-        let ports_change = ports.is_some_and(|claim| {
-            let mut sorted: Vec<String> = claim.to_vec();
-            sorted.sort();
-            sorted != self.model.declared_ports(id)
-        });
-        if children.is_empty() && !ports_change {
-            return Ok(Outcome::Noop);
-        }
-        self.guard_stdlib(id.raw(), "node", path, "redefined")?;
-        if ports_change {
-            let claim: BTreeSet<String> = ports
-                .expect("change implies claim")
-                .iter()
-                .cloned()
-                .collect();
-            let existing: Vec<(PortId, String)> = self.model.nodes[&id]
-                .ports
-                .iter()
-                .map(|(name, pid)| (*pid, name.clone()))
-                .collect();
-            for (pid, name) in existing {
-                let declared = self.model.ports[&pid].declared;
-                if claim.contains(&name) {
-                    if !declared {
-                        // Promote a use-created port into the declared set.
-                        self.model
-                            .ports
-                            .get_mut(&pid)
-                            .expect("port exists")
-                            .declared = true;
-                    }
-                } else if declared {
-                    if self.model.port_attached(pid) {
-                        // Still wired: demote to use-created, swept on detach.
-                        self.model
-                            .ports
-                            .get_mut(&pid)
-                            .expect("port exists")
-                            .declared = false;
-                    } else {
-                        self.model.ports.remove(&pid);
-                        self.model
-                            .nodes
-                            .get_mut(&id)
-                            .expect("node exists")
-                            .ports
-                            .remove(&name);
-                    }
-                }
-            }
-            for p in ports.expect("change implies claim") {
-                if !self.model.nodes[&id].ports.contains_key(p) {
-                    self.create_port(id, p, None, None, true);
-                }
-            }
-        }
-        if children.is_empty() {
-            return Ok(Outcome::applied());
-        }
-        let cascade = cascade::delete_many(&mut self.model, children);
-        Ok(Outcome::Applied {
-            cascade: Some(cascade),
-        })
+        Ok(Outcome::Applied)
     }
 
     fn define_view(&mut self, name: &str) -> Result<Outcome, LangError> {
@@ -587,7 +414,7 @@ impl Workspace {
             },
         );
         self.model.view_names.insert(name.to_string(), id);
-        Ok(Outcome::applied())
+        Ok(Outcome::Applied)
     }
 
     fn define_rel(
@@ -610,17 +437,12 @@ impl Workspace {
             if identical {
                 return Ok(Outcome::Noop);
             }
-            let mut e = LangError::new(
+            return Err(LangError::new(
                 ErrorCode::Redeclared,
                 format!("rel `{name}` is already defined differently"),
             )
             .with_ref("rel", name, Some(id.raw()))
-            .with_actual(self.model.rel_statement(existing).to_value());
-            if !self.model.is_stdlib(id.raw()) {
-                let hint = Statement::Redefine(rel_def(name, trans, directed, source, target));
-                e = e.with_hint(hint.to_value());
-            }
-            return Err(e);
+            .with_actual(self.model.rel_statement(existing).to_value()));
         }
         if let Some(&cid) = self.model.conn_names.get(name) {
             return Err(LangError::new(
@@ -647,58 +469,7 @@ impl Workspace {
             },
         );
         self.model.rel_names.insert(name.to_string(), id);
-        Ok(Outcome::applied())
-    }
-
-    fn redefine_rel(
-        &mut self,
-        name: &str,
-        trans: bool,
-        directed: bool,
-        source: &PatternExpr,
-        target: &PatternExpr,
-    ) -> Result<Outcome, LangError> {
-        self.check_ident(name, "relation type name")?;
-        let src = self.resolve_pattern(source)?;
-        let dst = self.resolve_pattern(target)?;
-        if let Some(&id) = self.model.rel_names.get(name) {
-            let existing = &self.model.rels[&id];
-            let identical = existing.trans == trans
-                && existing.directed == directed
-                && existing.src == src
-                && existing.dst == dst;
-            if identical {
-                return Ok(Outcome::Noop);
-            }
-            if self.model.is_stdlib(id.raw()) {
-                return Err(LangError::new(
-                    ErrorCode::StdlibProtected,
-                    format!("`{name}` is a stdlib relation and cannot be redefined divergently"),
-                )
-                .with_actual(self.model.rel_statement(existing).to_value()));
-            }
-            let rt = self.model.rels.get_mut(&id).expect("rel exists");
-            rt.trans = trans;
-            rt.directed = directed;
-            rt.src = src;
-            rt.dst = dst;
-            return Ok(Outcome::applied());
-        }
-        if let Some(&cid) = self.model.conn_names.get(name) {
-            return Err(LangError::new(
-                ErrorCode::Redeclared,
-                format!("`{name}` is defined as a connection type, not a relation"),
-            )
-            .with_ref("conn", name, Some(cid.raw()))
-            .with_actual(
-                self.model
-                    .conn_statement(&self.model.conns[&cid])
-                    .to_value(),
-            ));
-        }
-        Err(self.unknown("rel", name).with_hint(
-            Statement::Define(rel_def(name, trans, directed, source, target)).to_value(),
-        ))
+        Ok(Outcome::Applied)
     }
 
     /// An undirected type has no lanes to tell apart; a reverse carrier is
@@ -747,18 +518,7 @@ impl Workspace {
                 format!("conn `{name}` is already defined differently"),
             )
             .with_ref("conn", name, Some(id.raw()))
-            .with_actual(self.model.conn_statement(existing).to_value())
-            .with_hint(
-                Statement::Redefine(conn_def(
-                    name,
-                    directed,
-                    source,
-                    carrier,
-                    rev_carrier,
-                    target,
-                ))
-                .to_value(),
-            ));
+            .with_actual(self.model.conn_statement(existing).to_value()));
         }
         if let Some(&rid) = self.model.rel_names.get(name) {
             return Err(LangError::new(
@@ -782,70 +542,7 @@ impl Workspace {
             },
         );
         self.model.conn_names.insert(name.to_string(), id);
-        Ok(Outcome::applied())
-    }
-
-    fn redefine_conn(
-        &mut self,
-        name: &str,
-        directed: bool,
-        source: &PatternExpr,
-        carrier: Option<&PatternExpr>,
-        rev_carrier: Option<&PatternExpr>,
-        target: &PatternExpr,
-    ) -> Result<Outcome, LangError> {
-        self.check_ident(name, "connection type name")?;
-        self.check_rev_lane(directed, rev_carrier)?;
-        let src = self.resolve_pattern(source)?;
-        let carrier_pat = carrier.map(|c| self.resolve_pattern(c)).transpose()?;
-        let rev_carrier_pat = rev_carrier.map(|c| self.resolve_pattern(c)).transpose()?;
-        let dst = self.resolve_pattern(target)?;
-        if let Some(&id) = self.model.conn_names.get(name) {
-            let existing = &self.model.conns[&id];
-            let identical = existing.directed == directed
-                && existing.src == src
-                && existing.carrier == carrier_pat
-                && existing.rev_carrier == rev_carrier_pat
-                && existing.dst == dst;
-            if identical {
-                return Ok(Outcome::Noop);
-            }
-            if self.model.is_stdlib(id.raw()) {
-                return Err(LangError::new(
-                    ErrorCode::StdlibProtected,
-                    format!(
-                        "`{name}` is a stdlib connection type and cannot be redefined divergently"
-                    ),
-                )
-                .with_actual(self.model.conn_statement(existing).to_value()));
-            }
-            let ct = self.model.conns.get_mut(&id).expect("conn exists");
-            ct.directed = directed;
-            ct.src = src;
-            ct.carrier = carrier_pat;
-            ct.rev_carrier = rev_carrier_pat;
-            ct.dst = dst;
-            return Ok(Outcome::applied());
-        }
-        if let Some(&rid) = self.model.rel_names.get(name) {
-            return Err(LangError::new(
-                ErrorCode::Redeclared,
-                format!("`{name}` is defined as a relation type, not a connection"),
-            )
-            .with_ref("rel", name, Some(rid.raw()))
-            .with_actual(self.model.rel_statement(&self.model.rels[&rid]).to_value()));
-        }
-        Err(self.unknown("conn", name).with_hint(
-            Statement::Define(conn_def(
-                name,
-                directed,
-                source,
-                carrier,
-                rev_carrier,
-                target,
-            ))
-            .to_value(),
-        ))
+        Ok(Outcome::Applied)
     }
 
     // ---- edges -----------------------------------------------------------------
@@ -901,7 +598,7 @@ impl Workspace {
         let before = e.views.len();
         e.views.extend(views);
         if e.views.len() > before {
-            Ok(Outcome::applied())
+            Ok(Outcome::Applied)
         } else {
             Ok(Outcome::Noop)
         }
@@ -943,7 +640,7 @@ impl Workspace {
             },
             view_ids,
         );
-        Ok(Outcome::applied())
+        Ok(Outcome::Applied)
     }
 
     /// Look up a port by name on a node, enforcing that its connection type
@@ -1026,8 +723,7 @@ impl Workspace {
     }
 
     /// Fix what this use pins down and the port has not fixed yet: the
-    /// connection type of a declared, never-used port; the side of a port
-    /// created under an undirected definition later redefined as directed.
+    /// connection type and side of a declared, never-used port.
     fn fix_port_use(&mut self, pid: PortId, conn: ConnId, side: Option<Side>) {
         let p = self.model.ports.get_mut(&pid).expect("port exists");
         if p.conn.is_none() {
@@ -1160,7 +856,7 @@ impl Workspace {
             },
             view_ids,
         );
-        Ok(Outcome::applied())
+        Ok(Outcome::Applied)
     }
 
     fn do_app(
@@ -1271,265 +967,7 @@ impl Workspace {
             },
             BTreeSet::new(),
         );
-        Ok(Outcome::applied())
-    }
-
-    // ---- mutations -----------------------------------------------------------
-
-    fn do_rename(&mut self, node: &str, to: &str) -> Result<Outcome, LangError> {
-        let id = self.resolve_abs(node)?;
-        self.check_ident(to, "name")?;
-        let old = self.model.nodes[&id].name.clone();
-        if old == to {
-            return Ok(Outcome::Noop);
-        }
-        self.guard_stdlib(id.raw(), "node", node, "renamed")?;
-        let parent = self.model.nodes[&id].parent;
-        if let Some(&other) = self.model.children(parent).get(to) {
-            return Err(LangError::new(
-                ErrorCode::DupName,
-                format!("a sibling named `{to}` already exists"),
-            )
-            .with_ref("node", self.model.node_path(other), Some(other.raw())));
-        }
-        match parent {
-            Some(p) => {
-                let children = &mut self
-                    .model
-                    .nodes
-                    .get_mut(&p)
-                    .expect("parent exists")
-                    .children;
-                children.remove(&old);
-                children.insert(to.to_string(), id);
-            }
-            None => {
-                self.model.root.remove(&old);
-                self.model.root.insert(to.to_string(), id);
-            }
-        }
-        self.model.nodes.get_mut(&id).expect("node exists").name = to.to_string();
-        Ok(Outcome::applied())
-    }
-
-    fn do_delete(
-        &mut self,
-        node: Option<&str>,
-        edge: Option<&Statement>,
-        rel: Option<&str>,
-        conn: Option<&str>,
-        view: Option<&str>,
-    ) -> Result<Outcome, LangError> {
-        let seed = if let Some(path) = node {
-            let id = self.resolve_abs(path)?;
-            self.guard_stdlib(id.raw(), "node", path, "deleted")?;
-            Seed::Node(id)
-        } else if let Some(e) = edge {
-            let id = self.find_edge_stmt(e)?;
-            self.guard_stdlib(id.raw(), "edge", &e.pseudo(), "deleted")?;
-            Seed::Edge(id)
-        } else if let Some(name) = rel {
-            let id = *self
-                .model
-                .rel_names
-                .get(name)
-                .ok_or_else(|| self.unknown("rel", name))?;
-            if self.model.is_stdlib(id.raw()) {
-                return Err(LangError::new(
-                    ErrorCode::StdlibProtected,
-                    format!("`{name}` is a stdlib relation and cannot be deleted"),
-                ));
-            }
-            Seed::Rel(id)
-        } else if let Some(name) = conn {
-            let id = *self
-                .model
-                .conn_names
-                .get(name)
-                .ok_or_else(|| self.unknown("conn", name))?;
-            self.guard_stdlib(id.raw(), "connection type", name, "deleted")?;
-            Seed::Conn(id)
-        } else if let Some(name) = view {
-            let id = *self
-                .model
-                .view_names
-                .get(name)
-                .ok_or_else(|| self.unknown("view", name))?;
-            self.guard_stdlib(id.raw(), "view", name, "deleted")?;
-            Seed::View(id)
-        } else {
-            // Exactly-one-target is enforced at parse time.
-            return Err(LangError::new(
-                ErrorCode::Parse,
-                "`delete` takes exactly one target",
-            ));
-        };
-        let cascade = cascade::delete(&mut self.model, seed);
-        Ok(Outcome::Applied {
-            cascade: Some(cascade),
-        })
-    }
-
-    fn do_untag(&mut self, edge: &Statement, views: &[String]) -> Result<Outcome, LangError> {
-        let eid = self.find_edge_stmt(edge)?;
-        self.guard_stdlib(eid.raw(), "edge", &edge.pseudo(), "untagged")?;
-        let view_ids = self.resolve_views(views)?;
-        let e = self.model.edges.get_mut(&eid).expect("edge exists");
-        let before = e.views.len();
-        for v in &view_ids {
-            e.views.remove(v);
-        }
-        if e.views.len() < before {
-            Ok(Outcome::applied())
-        } else {
-            Ok(Outcome::Noop)
-        }
-    }
-
-    /// Resolve an edge addressed structurally, by restating it. A `views`
-    /// field inside the restatement is ignored — views are not part of edge
-    /// identity.
-    fn find_edge_stmt(&self, edge: &Statement) -> Result<EdgeId, LangError> {
-        let no_such_edge = || {
-            LangError::new(ErrorCode::UnknownName, "no such edge")
-                .with_ref("edge", edge.pseudo(), None)
-                .with_hint(json!({ "stmt": "query" }))
-        };
-        match edge {
-            Statement::RelEdge {
-                rel,
-                source,
-                target,
-                ..
-            } => {
-                let r = *self
-                    .model
-                    .rel_names
-                    .get(rel)
-                    .ok_or_else(|| self.unknown("rel", rel))?;
-                let a = self.resolve_abs(source)?;
-                let b = self.resolve_abs(target)?;
-                self.model.find_rel_edge(r, a, b).ok_or_else(no_such_edge)
-            }
-            Statement::ConnEdge {
-                conn,
-                source,
-                carrier,
-                rev_carrier,
-                target,
-                ..
-            } => {
-                let c = *self
-                    .model
-                    .conn_names
-                    .get(conn)
-                    .ok_or_else(|| self.unknown("conn", conn))?;
-                let a = self.resolve_abs(&source.node)?;
-                let b = self.resolve_abs(&target.node)?;
-                let pa = *self.model.nodes[&a]
-                    .ports
-                    .get(&source.port)
-                    .ok_or_else(|| {
-                        self.unknown(
-                            "port",
-                            &format!("{}.{}", self.model.node_path(a), source.port),
-                        )
-                    })?;
-                let pb = *self.model.nodes[&b]
-                    .ports
-                    .get(&target.port)
-                    .ok_or_else(|| {
-                        self.unknown(
-                            "port",
-                            &format!("{}.{}", self.model.node_path(b), target.port),
-                        )
-                    })?;
-                let carrier_node = carrier.as_ref().map(|p| self.resolve_abs(p)).transpose()?;
-                let rev_carrier_node = rev_carrier
-                    .as_ref()
-                    .map(|p| self.resolve_abs(p))
-                    .transpose()?;
-                self.model
-                    .find_conn_edge(c, pa, carrier_node, rev_carrier_node, pb)
-                    .ok_or_else(no_such_edge)
-            }
-            Statement::App {
-                node,
-                port,
-                route,
-                inner,
-            } => {
-                let n = self.resolve_abs(node)?;
-                let node_path = self.model.node_path(n);
-                let outer = *self.model.nodes[&n]
-                    .ports
-                    .get(port)
-                    .ok_or_else(|| self.unknown("port", &format!("{node_path}.{port}")))?;
-                let qualifier = route
-                    .as_ref()
-                    .map(|r| self.resolve_pattern(r))
-                    .transpose()?;
-                let inner_node = self
-                    .model
-                    .children(Some(n))
-                    .get(&inner.node)
-                    .copied()
-                    .ok_or_else(|| self.unknown("node", &format!("{node_path}.{}", inner.node)))?;
-                let ip = *self.model.nodes[&inner_node]
-                    .ports
-                    .get(&inner.port)
-                    .ok_or_else(|| {
-                        self.unknown(
-                            "port",
-                            &format!("{}.{}", self.model.node_path(inner_node), inner.port),
-                        )
-                    })?;
-                self.model
-                    .find_app_edge(outer, &qualifier, ip)
-                    .ok_or_else(no_such_edge)
-            }
-            // Non-edge kinds inside `edge` are rejected at parse time.
-            _ => Err(LangError::new(
-                ErrorCode::Parse,
-                "`edge` must restate an edge statement",
-            )),
-        }
-    }
-}
-
-/// An owned rel definition, for rendering runnable hints.
-fn rel_def(
-    name: &str,
-    trans: bool,
-    directed: bool,
-    source: &PatternExpr,
-    target: &PatternExpr,
-) -> Definition {
-    Definition::Rel {
-        name: name.to_string(),
-        trans,
-        directed,
-        source: source.clone(),
-        target: target.clone(),
-    }
-}
-
-/// An owned conn definition, for rendering runnable hints.
-fn conn_def(
-    name: &str,
-    directed: bool,
-    source: &PatternExpr,
-    carrier: Option<&PatternExpr>,
-    rev_carrier: Option<&PatternExpr>,
-    target: &PatternExpr,
-) -> Definition {
-    Definition::Conn {
-        name: name.to_string(),
-        directed,
-        source: source.clone(),
-        carrier: carrier.cloned(),
-        rev_carrier: rev_carrier.cloned(),
-        target: target.clone(),
+        Ok(Outcome::Applied)
     }
 }
 
@@ -1542,7 +980,7 @@ fn parse_request(value: &Value) -> Result<Request, LangError> {
         .as_object()
         .ok_or_else(|| bad_request("a request is a JSON object"))?;
     for key in obj.keys() {
-        if !matches!(key.as_str(), "statements" | "expect_revision" | "dry_run") {
+        if key.as_str() != "statements" {
             return Err(bad_request(format!("unknown request field `{key}`")));
         }
     }
@@ -1552,22 +990,5 @@ fn parse_request(value: &Value) -> Result<Request, LangError> {
         .as_array()
         .ok_or_else(|| bad_request("`statements` must be an array"))?
         .clone();
-    let expect_revision = match obj.get("expect_revision") {
-        None => None,
-        Some(v) => Some(
-            v.as_u64()
-                .ok_or_else(|| bad_request("`expect_revision` must be a non-negative integer"))?,
-        ),
-    };
-    let dry_run = match obj.get("dry_run") {
-        None => false,
-        Some(v) => v
-            .as_bool()
-            .ok_or_else(|| bad_request("`dry_run` must be a boolean"))?,
-    };
-    Ok(Request {
-        statements,
-        expect_revision,
-        dry_run,
-    })
+    Ok(Request { statements })
 }

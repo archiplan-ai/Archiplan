@@ -144,7 +144,7 @@ fn classifier_edges_land_before_shapes_that_consult_them() {
     )
     .map_err(|f| f.render())
     .expect("shape satisfied by later-written classifiers");
-    assert!(compiled.workspace.revision() >= 1);
+    assert!(!compiled.workspace.model().dump().is_empty());
 }
 
 #[test]

@@ -68,15 +68,8 @@ pub fn findings(ws: &mut Workspace, stmt: Value) -> Vec<Finding> {
     }
 }
 
-pub fn cascade(ws: &mut Workspace, stmt: Value) -> Vec<String> {
-    match outcome(ws, stmt) {
-        Outcome::Applied { cascade: Some(c) } => c.iter().map(Statement::pseudo).collect(),
-        o => panic!("expected a cascade, got {o:?}"),
-    }
-}
-
 pub fn is_applied(o: &Outcome) -> bool {
-    matches!(o, Outcome::Applied { .. })
+    matches!(o, Outcome::Applied)
 }
 
 pub fn is_noop(o: &Outcome) -> bool {

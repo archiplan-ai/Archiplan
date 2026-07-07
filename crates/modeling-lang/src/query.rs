@@ -346,88 +346,6 @@ pub(crate) fn dump(model: &Model) -> Vec<Statement> {
 pub(crate) fn check(model: &Model, filter: Option<&BTreeSet<ViewId>>) -> Vec<Finding> {
     let mut out = Vec::new();
 
-    // Shape conformance drift: re-check every edge against its type's patterns.
-    for e in model.edges.values() {
-        if !edge_in_filter(model, e, filter) {
-            continue;
-        }
-        match &e.payload {
-            EdgePayload::Rel { rel, src, dst } => {
-                let rt = &model.rels[rel];
-                let fits =
-                    |a: NodeId, b: NodeId| model.matches(&rt.src, a) && model.matches(&rt.dst, b);
-                if !(fits(*src, *dst) || (!rt.directed && fits(*dst, *src))) {
-                    let (slot, pat, node) = if !model.matches(&rt.src, *src) {
-                        ("source", &rt.src, *src)
-                    } else {
-                        ("target", &rt.dst, *dst)
-                    };
-                    out.push(Finding::ShapeDrift {
-                        statement: model.edge_statement(e),
-                        slot: slot.to_string(),
-                        expected: model.pattern_expr(pat),
-                        actual: model.node_path(node),
-                    });
-                }
-            }
-            EdgePayload::Conn {
-                conn,
-                src_port,
-                carrier,
-                rev_carrier,
-                dst_port,
-            } => {
-                let ct = &model.conns[conn];
-                let a = model.ports[src_port].node;
-                let b = model.ports[dst_port].node;
-                let fits =
-                    |x: NodeId, y: NodeId| model.matches(&ct.src, x) && model.matches(&ct.dst, y);
-                if !(fits(a, b) || (!ct.directed && fits(b, a))) {
-                    let (slot, pat, node) = if !model.matches(&ct.src, a) {
-                        ("source", &ct.src, a)
-                    } else {
-                        ("target", &ct.dst, b)
-                    };
-                    out.push(Finding::ShapeDrift {
-                        statement: model.edge_statement(e),
-                        slot: slot.to_string(),
-                        expected: model.pattern_expr(pat),
-                        actual: model.node_path(node),
-                    });
-                }
-                for (lane, actual, slot) in [
-                    (&ct.carrier, carrier, "carrier"),
-                    (&ct.rev_carrier, rev_carrier, "rev_carrier"),
-                ] {
-                    match (lane, actual) {
-                        (Some(cp), Some(c)) => {
-                            if !model.matches(cp, *c) {
-                                out.push(Finding::ShapeDrift {
-                                    statement: model.edge_statement(e),
-                                    slot: slot.to_string(),
-                                    expected: model.pattern_expr(cp),
-                                    actual: model.node_path(*c),
-                                });
-                            }
-                        }
-                        // Arity drift after a type redefine: report against the
-                        // slot that no longer matches the edge's structure.
-                        (Some(cp), None) => {
-                            out.push(Finding::ShapeDrift {
-                                statement: model.edge_statement(e),
-                                slot: slot.to_string(),
-                                expected: model.pattern_expr(cp),
-                                actual: "(none)".to_string(),
-                            });
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            EdgePayload::App { .. } => {}
-        }
-    }
-
     // Carried traffic that matches no delegation.
     for e in model.edges.values() {
         if !edge_in_filter(model, e, filter) {
@@ -440,22 +358,11 @@ pub(crate) fn check(model: &Model, filter: Option<&BTreeSet<ViewId>>) -> Vec<Fin
             for port in [*src_port, *dst_port] {
                 if matches!(route(model, e, port), Route::Unrouted) {
                     out.push(Finding::UnroutedTraffic {
-                        statement: model.edge_statement(e),
+                        statement: Box::new(model.edge_statement(e)),
                         port: model.port_path(port),
                     });
                 }
             }
-        }
-    }
-
-    // Delegated ports with no attached connections.
-    for p in model.ports.values() {
-        if model.apps_on_outer_port(p.id).next().is_some()
-            && model.conn_edges_on_port(p.id).next().is_none()
-        {
-            out.push(Finding::DelegatedPortWithoutConnections {
-                port: model.port_path(p.id),
-            });
         }
     }
 

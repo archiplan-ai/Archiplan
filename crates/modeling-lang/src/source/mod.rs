@@ -34,7 +34,7 @@ pub fn find_project_root(dir: &Path) -> Option<std::path::PathBuf> {
 pub struct Compiled {
     /// A fresh workspace holding the compiled model.
     pub workspace: Workspace,
-    /// The compiled statement batch, replayable through `archi exec`.
+    /// The compiled statement batch, in deterministic lowering order.
     pub batch: Vec<Statement>,
     /// The project's sources, for rendering later diagnostics.
     pub map: SourceMap,

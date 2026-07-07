@@ -4,9 +4,9 @@
 //! Implements `requirements/modeling-lang/` — the free graph of nodes (with
 //! ports and nested scopes) and distinguished edges (relations, connections,
 //! applications), views, the JSON statement API with its idempotent
-//! definitions and error contract, cascading deletion, and the read
-//! statements (the subgraph `query` and `check`) — plus the `.arch` source
-//! format (`requirements/modeling-lang/source-format.md`), the
+//! definitions and error contract, and the read statements (the subgraph
+//! `query` and `check`) — plus the `.arch` source format
+//! (`requirements/modeling-lang/source-format.md`), the read-only
 //! request/response envelope of `requirements/agent-interface.md`, ontology
 //! presets loaded as the standard library
 //! (`requirements/modeling-lang/ontology.md`), and NKP landscape analysis
@@ -19,16 +19,14 @@
 //! use serde_json::json;
 //!
 //! let mut ws = Workspace::new();
-//! let response = ws.handle(&json!({
-//!     "statements": [
-//!         { "stmt": "define", "node": "Service" },
-//!         { "stmt": "define", "node": "Payments" },
-//!         { "stmt": "rel-edge", "rel": "type_of", "source": "Service", "target": "Payments" },
-//!         { "stmt": "check" }
-//!     ]
-//! }));
+//! ws.execute_values(&[
+//!     json!({ "stmt": "define", "node": "Service" }),
+//!     json!({ "stmt": "define", "node": "Payments" }),
+//!     json!({ "stmt": "rel-edge", "rel": "type_of", "source": "Service", "target": "Payments" }),
+//! ])
+//! .expect("the batch applies");
+//! let response = ws.handle(&json!({ "statements": [{ "stmt": "check" }] }));
 //! assert_eq!(response.status, "ok");
-//! assert_eq!(response.revision, 1);
 //! ```
 //!
 //! # Semantics
@@ -36,24 +34,23 @@
 //! - A statement is a JSON object discriminated by `stmt`. The `.arch`
 //!   source format ([`source`]) is the human syntax: a project of text files
 //!   compiled down to the same statements ([`source::compile_project`]).
-//!   [`Statement::pseudo`] renders statements back in it, so dumps and
-//!   cascades are pasteable source.
+//!   [`Statement::pseudo`] renders statements back in it, so dumps are
+//!   pasteable source.
+//! - The language is construction and reads only — there is no mutation
+//!   vocabulary. A model changes by editing its `.arch` source and
+//!   recompiling; the source is the only source of truth. The statement API
+//!   is the compiler's lowering target and the read surface, not an editing
+//!   surface.
 //! - There is no ambient scope: every reference is an absolute path, creation
 //!   statements carry the full path of what they create, applications name
 //!   their delegating node explicitly. Augmentation is just a statement whose
 //!   path lands inside an existing node.
-//! - Named elements are created by `define` and replaced by `redefine`; the
-//!   [`Definition`] names its subject (`node`, `view`, `rel`, `conn`) and
-//!   parameters. Both are idempotent: `define` creates or no-ops on an
-//!   identical restatement (a divergent one is rejected); `redefine` requires
-//!   existence and no-ops when nothing changes (a node redefine empties its
-//!   scope as a reported cascade, a type redefine replaces the shape and lets
-//!   nonconforming edges drift into findings).
+//! - Named elements are created by `define`; the [`Definition`] names its
+//!   subject (`node`, `view`, `rel`, `conn`) and parameters. `define` is
+//!   idempotent: it creates or no-ops on an identical restatement; a
+//!   divergent one is rejected.
 //! - Batches are atomic; every statement applies, no-ops, or fails with a
 //!   structured [`LangError`], and a failure rolls the whole batch back.
-//! - `delete` cascades over the full referencing closure and reports
-//!   everything removed as replayable statements. Shape conformance is soft:
-//!   edits that erode it succeed and surface later as [`Finding`]s via `check`.
 //!
 //! # Implementation decisions
 //!
@@ -61,16 +58,14 @@
 //!
 //! - Pattern matching (`(Service type_of *)`) follows the virtual transitive
 //!   closure of a `trans` relation; only declared edges are stored.
-//! - A node `redefine` whose scope is already empty is a no-op.
 //! - The stdlib is a [`Preset`]: a creation-only statement batch loaded
 //!   before user statements ([`Workspace::with_preset`]). [`Workspace::new`]
 //!   loads [`Preset::core`] — exactly the historical stdlib, `type_of` only.
 //!   Every preset must define `type_of` conforming to
 //!   `rel trans type_of := * -> *`. Preset elements are excluded from dumps
-//!   and findings and are protected from mutation (`E_STDLIB_PROTECTED`);
-//!   users may reference them, attach edges to them, and augment their
-//!   scopes.
-//! - The revision increments once per model-changing request.
+//!   and findings; tagging a preset edge into views is rejected
+//!   (`E_STDLIB_PROTECTED`); users may reference them, attach edges to them,
+//!   and augment their scopes.
 //! - Names are `[A-Za-z_][A-Za-z0-9_]*`; paths join them with `.`.
 //!
 //! For the subgraph `query` (`requirements/modeling-lang/queries.md`):
@@ -98,7 +93,6 @@
 // size is irrelevant; boxing it would push the cost onto every consumer match.
 #![allow(clippy::result_large_err)]
 
-mod cascade;
 mod engine;
 mod error;
 mod ids;

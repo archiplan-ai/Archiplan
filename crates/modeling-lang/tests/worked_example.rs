@@ -46,17 +46,12 @@ pub fn worked_example() -> Workspace {
 }
 
 #[test]
-fn worked_example_applies_and_bumps_revision_once() {
+fn worked_example_applies() {
     let mut ws = Workspace::new();
     let results = ws
         .execute_values(worked_example_batch().as_array().unwrap())
         .expect("worked example applies");
     assert!(results.iter().all(is_applied));
-    assert_eq!(
-        ws.revision(),
-        1,
-        "one model-changing batch = one revision bump"
-    );
 }
 
 #[test]

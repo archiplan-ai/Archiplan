@@ -1,8 +1,8 @@
 //! Rendering stored elements back into the statements that recreate them.
 //!
 //! All node references render as absolute paths from the root; creations
-//! render as `define` statements, which are idempotent, so cascades and dumps
-//! replay safely.
+//! render as `define` statements, which are idempotent, so dumps replay
+//! safely.
 
 use crate::ids::NodeId;
 use crate::model::{ConnType, Edge, EdgePayload, Model, Pattern, RelType, ViewDef};

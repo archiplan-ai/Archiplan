@@ -11,19 +11,15 @@ use serde::Serialize;
 use serde_json::Value;
 
 /// Stable error codes from the catalog in `requirements/modeling-lang/errors.md`,
-/// plus the protocol-level codes of `requirements/agent-interface.md`
-/// (`BadRequest`, `StaleRevision`) which concern the envelope rather than a
-/// statement.
+/// plus the protocol-level code of `requirements/agent-interface.md`
+/// (`BadRequest`) which concerns the envelope rather than a statement.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ErrorCode {
     /// The statement is not a well-formed statement object: unknown `stmt`,
     /// missing or ill-typed field, malformed path.
     Parse,
-    /// A referenced node / type / view / path does not resolve — including
-    /// `redefine` of an element that does not exist.
+    /// A referenced node / type / view / path does not resolve.
     UnknownName,
-    /// A rename collides with a sibling's name.
-    DupName,
     /// A `define` differs from the existing definition of the name —
     /// including a rel / conn kind mismatch.
     Redeclared,
@@ -43,16 +39,14 @@ pub enum ErrorCode {
     AmbiguousDelegation,
     /// A connection joins nodes of different scopes.
     CrossScope,
-    /// Attempt to delete, rename, divergently redefine, or re-tag a stdlib
-    /// (preset) element.
+    /// Attempt to tag a stdlib (preset) edge into views.
     StdlibProtected,
-    /// A preset does not load: a non-creation statement, a rejected
-    /// statement, or a missing/divergent `type_of` classifier.
+    /// A preset does not load: a read statement, a rejected statement, or a
+    /// missing/divergent `type_of` classifier.
     PresetInvalid,
-    /// The request envelope is not valid or violates the contract.
+    /// The request envelope is not valid or violates the contract — including
+    /// a statement that is not a read (the agent interface is read-only).
     BadRequest,
-    /// `expect_revision` does not match the model's current revision.
-    StaleRevision,
 }
 
 impl ErrorCode {
@@ -61,7 +55,6 @@ impl ErrorCode {
         match self {
             ErrorCode::Parse => "E_PARSE",
             ErrorCode::UnknownName => "E_UNKNOWN_NAME",
-            ErrorCode::DupName => "E_DUP_NAME",
             ErrorCode::Redeclared => "E_REDECLARED",
             ErrorCode::ShapeViolation => "E_SHAPE_VIOLATION",
             ErrorCode::CarrierRequired => "E_CARRIER_REQUIRED",
@@ -74,7 +67,6 @@ impl ErrorCode {
             ErrorCode::StdlibProtected => "E_STDLIB_PROTECTED",
             ErrorCode::PresetInvalid => "E_PRESET_INVALID",
             ErrorCode::BadRequest => "E_BAD_REQUEST",
-            ErrorCode::StaleRevision => "E_STALE_REVISION",
         }
     }
 }
