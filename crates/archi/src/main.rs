@@ -1,7 +1,8 @@
 //! `archi` — a thin runner for the `.arch` source-format compiler
 //! (`requirements/cli.md`, `requirements/modeling-lang/source-format.md`),
-//! the NKP landscape analysis (`requirements/scoring/nkp.md`), the version
-//! archive (`requirements/versioning.md`) and the doc sources — intents,
+//! the NKP landscape analysis (`requirements/scoring/nkp.md`), the incidence
+//! analysis (`requirements/scoring/incidence.md`), the version archive
+//! (`requirements/versioning.md`) and the doc sources — intents,
 //! requirements, stress sessions (`requirements/requirements.md`,
 //! `requirements/stressing.md`), compiled and cross-checked by `check`.
 //!
@@ -11,6 +12,10 @@
 //! archi nkp   [--project <dir>] [--regime | --hotspots | --corridors] [--top | --scope <path>]
 //!             [--exclude '<src> <rel> <dst>']... [--only <edge-type>]...
 //!             [--tau-p <f>] [--tau-b <f>] [--neutrality degree|uniform] [--global-p <f>]
+//! archi incidence [--project <dir>] [--session <slug> | --since <id>] [--exclude-pending]
+//!             [--json | --matrix | --k-hyper | --findings] [--no-matrix]
+//!             [--kind <kind>]... [--min-severity info|warn|alert]
+//!             [--tau-j <f>] [--tau-d <f>] [--depth <n>] [--path-limit <n>]
 //! archi version save -m <note> | list | show <id> | diff <a> <b> | current
 //!             [--project <dir>]
 //! ```
@@ -22,6 +27,7 @@
 //! mutation is a text edit and a recompile.
 
 mod docs;
+mod incidence;
 mod versions;
 
 use std::fs;
@@ -30,7 +36,8 @@ use std::process::ExitCode;
 
 use modeling_lang::source::{Compiled, compile_project, find_project_root};
 use modeling_lang::{
-    ExcludePattern, Finding, Neutrality, NkpConfig, NkpScope, Statement, Workspace,
+    ExcludePattern, Finding, IncidenceConfig, Model, Neutrality, NkpConfig, NkpScope, Severity,
+    Statement, Workspace,
 };
 use serde_json::{Value, json};
 
@@ -40,6 +47,10 @@ const USAGE: &str = "usage:
   archi nkp   [--project <dir>] [--regime | --hotspots | --corridors] [--top | --scope <path>]
               [--exclude '<src> <rel> <dst>']... [--only <edge-type>]...
               [--tau-p <f>] [--tau-b <f>] [--neutrality degree|uniform] [--global-p <f>]
+  archi incidence [--project <dir>] [--session <slug> | --since <id>] [--exclude-pending]
+              [--json | --matrix | --k-hyper | --findings] [--no-matrix]
+              [--kind <kind>]... [--min-severity info|warn|alert]
+              [--tau-j <f>] [--tau-d <f>] [--depth <n>] [--path-limit <n>]
   archi version save -m <note> [--project <dir>]
   archi version list [--project <dir>]
   archi version show <id> [--project <dir>]
@@ -62,6 +73,19 @@ struct Args {
     tau_b: Option<f64>,
     neutrality: Option<String>,
     global_p: Option<f64>,
+    session: Option<String>,
+    since: Option<String>,
+    exclude_pending: bool,
+    no_matrix: bool,
+    matrix: bool,
+    k_hyper: bool,
+    findings: bool,
+    kind: Vec<String>,
+    min_severity: Option<String>,
+    tau_j: Option<f64>,
+    tau_d: Option<f64>,
+    depth: Option<usize>,
+    path_limit: Option<usize>,
     message: Option<String>,
     positional: Vec<String>,
 }
@@ -88,6 +112,19 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         tau_b: None,
         neutrality: None,
         global_p: None,
+        session: None,
+        since: None,
+        exclude_pending: false,
+        no_matrix: false,
+        matrix: false,
+        k_hyper: false,
+        findings: false,
+        kind: Vec::new(),
+        min_severity: None,
+        tau_j: None,
+        tau_d: None,
+        depth: None,
+        path_limit: None,
         message: None,
         positional: Vec::new(),
     };
@@ -104,6 +141,9 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
     let float = |v: String, flag: &str| -> Result<f64, String> {
         v.parse().map_err(|_| format!("{flag} needs a number"))
     };
+    let int = |v: String, flag: &str| -> Result<usize, String> {
+        v.parse().map_err(|_| format!("{flag} needs an integer"))
+    };
     while let Some(a) = it.next() {
         match a.as_str() {
             "--json" => args.json = true,
@@ -111,14 +151,29 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--hotspots" => args.hotspots = true,
             "--corridors" => args.corridors = true,
             "--top" => args.top = true,
+            "--exclude-pending" => args.exclude_pending = true,
+            "--no-matrix" => args.no_matrix = true,
+            "--matrix" => args.matrix = true,
+            "--k-hyper" => args.k_hyper = true,
+            "--findings" => args.findings = true,
             "--project" => args.project = Some(value(&mut it, "--project")?),
             "--emit-batch" => args.emit_batch = Some(value(&mut it, "--emit-batch")?),
             "--scope" => args.scope = Some(value(&mut it, "--scope")?),
             "--exclude" => args.exclude.push(value(&mut it, "--exclude")?),
             "--only" => args.only.push(value(&mut it, "--only")?),
             "--neutrality" => args.neutrality = Some(value(&mut it, "--neutrality")?),
+            "--session" => args.session = Some(value(&mut it, "--session")?),
+            "--since" => args.since = Some(value(&mut it, "--since")?),
+            "--kind" => args.kind.push(value(&mut it, "--kind")?),
+            "--min-severity" => args.min_severity = Some(value(&mut it, "--min-severity")?),
             "--tau-p" => args.tau_p = Some(float(value(&mut it, "--tau-p")?, "--tau-p")?),
             "--tau-b" => args.tau_b = Some(float(value(&mut it, "--tau-b")?, "--tau-b")?),
+            "--tau-j" => args.tau_j = Some(float(value(&mut it, "--tau-j")?, "--tau-j")?),
+            "--tau-d" => args.tau_d = Some(float(value(&mut it, "--tau-d")?, "--tau-d")?),
+            "--depth" => args.depth = Some(int(value(&mut it, "--depth")?, "--depth")?),
+            "--path-limit" => {
+                args.path_limit = Some(int(value(&mut it, "--path-limit")?, "--path-limit")?)
+            }
             "--global-p" => {
                 args.global_p = Some(float(value(&mut it, "--global-p")?, "--global-p")?)
             }
@@ -294,10 +349,14 @@ fn run_version(args: &Args) -> ExitCode {
                         kind.describe(),
                         file.display()
                     );
-                    // Saving closes the active stress session
+                    // Saving closes the active stress session, and the
+                    // incidence report fires over the finished round
                     // (requirements/versioning.md#versioning--stressing).
                     match docs::close_open_session(&root, &id) {
-                        Ok(Some(session)) => println!("closed stress session `{session}`"),
+                        Ok(Some(session)) => {
+                            println!("closed stress session `{session}`");
+                            fire_incidence(&root, ws.model(), &session);
+                        }
                         Ok(None) => {}
                         Err(e) => eprintln!("archi: warning: {e}"),
                     }
@@ -409,6 +468,130 @@ fn run_build(args: &Args) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// The auto-report over the round a save just closed. Its failure is a
+/// warning, never a failed save; `ARCHI_REPORT_JSON=1` switches it to JSON.
+fn fire_incidence(root: &Path, model: &Model, session: &str) {
+    let opts = incidence::Options {
+        session: Some(session.to_string()),
+        ..Default::default()
+    };
+    match incidence::analyze(root, model, &opts) {
+        Ok(a) => {
+            let findings = incidence::filter(&a.report.findings, &[], None);
+            if std::env::var("ARCHI_REPORT_JSON").as_deref() == Ok("1") {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&incidence::to_json(&a, false, &findings))
+                        .expect("serializes")
+                );
+            } else {
+                print!("{}", incidence::render_human(&a, false, &findings));
+            }
+        }
+        Err(e) => eprintln!("archi: warning: incidence report: {e}"),
+    }
+}
+
+fn run_incidence(args: &Args) -> ExitCode {
+    if [args.json, args.matrix, args.k_hyper, args.findings]
+        .iter()
+        .filter(|f| **f)
+        .count()
+        > 1
+    {
+        return usage_err("--json, --matrix, --k-hyper and --findings are mutually exclusive");
+    }
+    if args.no_matrix && args.matrix {
+        return usage_err("--no-matrix and --matrix are mutually exclusive");
+    }
+    if args.session.is_some() && args.since.is_some() {
+        return usage_err("--session and --since are mutually exclusive");
+    }
+    const KINDS: [&str; 5] = [
+        "hyperliminal_coupling",
+        "stress_hotspot",
+        "compound_vulnerability",
+        "under_stressed",
+        "merge_candidate",
+    ];
+    for k in &args.kind {
+        if !KINDS.contains(&k.as_str()) {
+            return usage_err(&format!("--kind is one of {}; got `{k}`", KINDS.join(", ")));
+        }
+    }
+    let min_severity = match args.min_severity.as_deref() {
+        None => None,
+        Some(s) => match Severity::parse(s) {
+            Some(sev) => Some(sev),
+            None => {
+                return usage_err(&format!(
+                    "--min-severity is `info`, `warn` or `alert`, got `{s}`"
+                ));
+            }
+        },
+    };
+    let root = match locate_project(args) {
+        Ok(r) => r,
+        Err(e) => return usage_err(&e),
+    };
+    let ws = match compile_or_report(&root, false) {
+        Ok(c) => c.workspace,
+        Err(code) => return code,
+    };
+    let mut config = IncidenceConfig::default();
+    if let Some(t) = args.tau_j {
+        config.tau_j = t;
+    }
+    if let Some(t) = args.tau_d {
+        config.tau_d = t;
+    }
+    if let Some(d) = args.depth {
+        config.depth = d;
+    }
+    if let Some(l) = args.path_limit {
+        config.path_limit = l;
+    }
+    let opts = incidence::Options {
+        session: args.session.clone(),
+        since: args.since.clone(),
+        exclude_pending: args.exclude_pending,
+        config,
+    };
+    let analysis = match incidence::analyze(&root, ws.model(), &opts) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("archi: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let findings = incidence::filter(&analysis.report.findings, &args.kind, min_severity);
+    let pretty = |v: Value| serde_json::to_string_pretty(&v).expect("serializes");
+    if args.k_hyper {
+        println!("{:.3}", analysis.report.scope.k_hyper);
+    } else if args.matrix {
+        println!(
+            "{}",
+            pretty(serde_json::to_value(&analysis.report.matrix).expect("serializes"))
+        );
+    } else if args.findings {
+        println!(
+            "{}",
+            pretty(serde_json::to_value(&findings).expect("serializes"))
+        );
+    } else if args.json {
+        println!(
+            "{}",
+            pretty(incidence::to_json(&analysis, args.no_matrix, &findings))
+        );
+    } else {
+        print!(
+            "{}",
+            incidence::render_human(&analysis, args.no_matrix, &findings)
+        );
+    }
+    ExitCode::SUCCESS
+}
+
 fn run_nkp(args: &Args) -> ExitCode {
     if [args.regime, args.hotspots, args.corridors]
         .iter()
@@ -502,6 +685,7 @@ fn main() -> ExitCode {
         "check" => run_check(&args),
         "build" => run_build(&args),
         "nkp" => run_nkp(&args),
+        "incidence" => run_incidence(&args),
         "version" => run_version(&args),
         other => usage_err(&format!("unknown command `{other}`")),
     }

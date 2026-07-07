@@ -359,7 +359,7 @@ fn resolve_path(model: &Model, path: &str) -> Option<NodeId> {
 /// relation both sides qualify. For a `trans` relation the declared sides
 /// already cover the closure: any transitive source starts with a declared
 /// edge of its own.
-fn ends_of(model: &Model, rel: RelId, source_side: bool) -> BTreeSet<NodeId> {
+pub(crate) fn ends_of(model: &Model, rel: RelId, source_side: bool) -> BTreeSet<NodeId> {
     let directed = model.rels[&rel].directed;
     let mut out = BTreeSet::new();
     for e in model.edges.values() {
@@ -380,7 +380,7 @@ fn ends_of(model: &Model, rel: RelId, source_side: bool) -> BTreeSet<NodeId> {
 /// Everything the relation reaches from `start` (or reaches `start`, when
 /// `forward` is false): the transitive closure for `trans` relations, one
 /// step otherwise. `start` itself is included only if a cycle reaches it.
-fn reach(model: &Model, rel: RelId, start: NodeId, forward: bool) -> BTreeSet<NodeId> {
+pub(crate) fn reach(model: &Model, rel: RelId, start: NodeId, forward: bool) -> BTreeSet<NodeId> {
     let rt = &model.rels[&rel];
     let neighbors = |n: NodeId| -> Vec<NodeId> {
         model

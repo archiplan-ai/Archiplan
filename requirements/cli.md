@@ -34,6 +34,17 @@ archi nkp [--project <dir>] [--regime | --hotspots | --corridors] [--top | --sco
 The [NKP landscape analysis](./scoring/nkp.md) over the model's epistatic slice. Output is JSON: the full report
 by default, or one facet via `--regime` / `--hotspots` / `--corridors`.
 
+```
+archi incidence [--project <dir>] [--session <slug> | --since <id>] [--exclude-pending]
+                [--json | --matrix | --k-hyper | --findings] [--no-matrix]
+                [--kind <kind>]... [--min-severity info|warn|alert]
+                [--tau-j <f>] [--tau-d <f>] [--depth <n>] [--path-limit <n>]
+```
+
+The [incidence analysis](./scoring/incidence.md): the stressor × component matrix of one stress session — or of
+every session since a version — and its typed findings. The default output is the human report; `--json` and the
+facet flags emit JSON. The same report auto-fires on the `archi version save` that closes a session.
+
 ## Output
 
 Human-readable by default: compile diagnostics as `file:line:col: CODE: message` lines, findings as one-liners

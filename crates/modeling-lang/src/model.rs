@@ -14,6 +14,7 @@ use serde_json::json;
 
 use crate::error::{ErrorCode, LangError};
 use crate::ids::{ConnId, EdgeId, NodeId, PortId, RelId, ViewId};
+use crate::incidence::{IncidenceConfig, IncidenceReport, IncidenceRow, Invariant};
 use crate::nkp::{NkpConfig, NkpReport};
 use crate::result::Finding;
 use crate::statement::Statement;
@@ -447,5 +448,28 @@ impl Model {
     /// (`requirements/scoring/nkp.md`).
     pub fn nkp(&self, config: &NkpConfig) -> Result<NkpReport, LangError> {
         crate::nkp::analyze(self, config)
+    }
+
+    /// The pressure surface of an absolute path
+    /// (`requirements/scoring/incidence.md`): a term is the one-element
+    /// surface holding itself; a type expands to the user terms its
+    /// `type_of` closure classifies. `None` when the path resolves to
+    /// nothing. Stressor affects and `satisfied-by` entries expand through
+    /// this, each against the model their contract names.
+    pub fn term_surface(&self, path: &str) -> Option<Vec<String>> {
+        crate::incidence::term_surface(self, path)
+    }
+
+    /// Incidence analysis with this model as the frame: the stressor ×
+    /// component matrix and its findings (`requirements/scoring/incidence.md`).
+    /// Rows carry term paths already expanded against their session's own
+    /// version ([`Model::term_surface`]).
+    pub fn incidence(
+        &self,
+        rows: &[IncidenceRow],
+        invariants: &[Invariant],
+        config: &IncidenceConfig,
+    ) -> IncidenceReport {
+        crate::incidence::analyze(self, rows, invariants, config)
     }
 }

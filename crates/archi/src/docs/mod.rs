@@ -13,7 +13,7 @@
 //! model.
 
 mod md;
-mod schema;
+pub(crate) mod schema;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -171,24 +171,33 @@ pub struct DocReport {
 
 /// Everything the doc trees hold, parsed best-effort.
 #[derive(Default)]
-struct Tree {
-    intents: Vec<Intent>,
-    requirements: Vec<Requirement>,
-    sessions: Vec<Session>,
-    stressors: Vec<Stressor>,
+pub(crate) struct Tree {
+    pub(crate) intents: Vec<Intent>,
+    pub(crate) requirements: Vec<Requirement>,
+    pub(crate) sessions: Vec<Session>,
+    pub(crate) stressors: Vec<Stressor>,
 }
 
 /// Compile and cross-check the doc sources of a project against its
 /// compiled model.
 pub fn check(root: &Path, model: &Model) -> DocReport {
+    load(root, model).1
+}
+
+/// [`check`], keeping the parsed tree — analyses over the doc sources
+/// (`crate::incidence`) read sessions, stressors and requirements from it.
+pub(crate) fn load(root: &Path, model: &Model) -> (Tree, DocReport) {
     let mut diags = Vec::new();
     let tree = discover(root, &mut diags);
     let findings = cross_check(root, model, &tree, &mut diags);
     diags.sort_by(|a, b| (a.file.as_str(), a.line).cmp(&(b.file.as_str(), b.line)));
-    DocReport {
-        diagnostics: diags,
-        findings,
-    }
+    (
+        tree,
+        DocReport {
+            diagnostics: diags,
+            findings,
+        },
+    )
 }
 
 // ---- discovery -------------------------------------------------------------
@@ -628,7 +637,7 @@ fn cross_check(
 
 /// Reconstruct an archived version and compile it against the preset it was
 /// saved with.
-fn compile_version(
+pub(crate) fn compile_version(
     root: &Path,
     archive: &versions::Archive,
     id: &str,
