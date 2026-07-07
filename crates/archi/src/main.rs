@@ -1,7 +1,9 @@
 //! `archi` — a thin runner for the `.arch` source-format compiler
 //! (`requirements/cli.md`, `requirements/modeling-lang/source-format.md`),
-//! the NKP landscape analysis (`requirements/scoring/nkp.md`) and the
-//! version archive (`requirements/versioning.md`).
+//! the NKP landscape analysis (`requirements/scoring/nkp.md`), the version
+//! archive (`requirements/versioning.md`) and the doc sources — intents,
+//! requirements, stress sessions (`requirements/requirements.md`,
+//! `requirements/stressing.md`), compiled and cross-checked by `check`.
 //!
 //! ```text
 //! archi check [--project <dir>] [--json]
@@ -19,6 +21,7 @@
 //! the only source of truth: the CLI offers no JSON editing of the model;
 //! mutation is a text edit and a recompile.
 
+mod docs;
 mod versions;
 
 use std::fs;
@@ -200,8 +203,21 @@ fn run_check(args: &Args) -> ExitCode {
     // The version archive is sealed: an edited keyframe, patch or manifest
     // is a compile error, not a finding (requirements/versioning.md).
     let archive_errors = versions::verify_at(&root);
+    // Doc sources — intents, requirements, stress sessions — compile with
+    // the model and cross-check against it; their errors fail the check,
+    // their findings are advisory (requirements/requirements.md#compile).
+    let doc = docs::check(&root, ws.model());
     if args.json {
-        let mut envelope = json!({ "status": "ok", "findings": findings });
+        let mut all: Vec<Value> = findings
+            .iter()
+            .map(|f| serde_json::to_value(f).expect("serializes"))
+            .collect();
+        all.extend(
+            doc.findings
+                .iter()
+                .map(|f| serde_json::to_value(f).expect("serializes")),
+        );
+        let mut envelope = json!({ "status": "ok", "findings": all });
         if !archive_errors.is_empty() {
             envelope["status"] = json!("error");
             envelope["archive"] = json!(
@@ -211,23 +227,33 @@ fn run_check(args: &Args) -> ExitCode {
                     .collect::<Vec<Value>>()
             );
         }
+        if !doc.diagnostics.is_empty() {
+            envelope["status"] = json!("error");
+            envelope["docs"] = serde_json::to_value(&doc.diagnostics).expect("serializes");
+        }
         println!(
             "{}",
             serde_json::to_string_pretty(&envelope).expect("serializes")
         );
     } else {
-        if findings.is_empty() {
+        if findings.is_empty() && doc.findings.is_empty() {
             println!("no findings");
         } else {
             for f in &findings {
+                println!("{f}");
+            }
+            for f in &doc.findings {
                 println!("{f}");
             }
         }
         for e in &archive_errors {
             eprintln!("archi/versions: E_ARCHIVE: {e}");
         }
+        for d in &doc.diagnostics {
+            eprintln!("{d}");
+        }
     }
-    if archive_errors.is_empty() {
+    if archive_errors.is_empty() && doc.diagnostics.is_empty() {
         ExitCode::SUCCESS
     } else {
         ExitCode::from(1)
@@ -268,6 +294,13 @@ fn run_version(args: &Args) -> ExitCode {
                         kind.describe(),
                         file.display()
                     );
+                    // Saving closes the active stress session
+                    // (requirements/versioning.md#versioning--stressing).
+                    match docs::close_open_session(&root, &id) {
+                        Ok(Some(session)) => println!("closed stress session `{session}`"),
+                        Ok(None) => {}
+                        Err(e) => eprintln!("archi: warning: {e}"),
+                    }
                     ExitCode::SUCCESS
                 }
                 Ok(versions::Saved::Unchanged { latest }) => fail(format!(

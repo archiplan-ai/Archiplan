@@ -62,6 +62,15 @@ impl CompileFailure {
     }
 }
 
+/// Resolve the preset the project's manifest pins — what a fresh compile of
+/// this project loads as its stdlib. The doc-source layer recompiles
+/// archived versions against it to validate stressor affects
+/// (`requirements/stressing.md`).
+pub fn project_preset(root: &Path) -> Result<Preset, Diagnostic> {
+    let manifest = project::read_manifest(root)?;
+    project::resolve_preset(root, &manifest)
+}
+
 /// Compile the project rooted at `root` (the directory holding `archi.toml`).
 pub fn compile_project(root: &Path) -> Result<Compiled, CompileFailure> {
     let fail_project = |d: Diagnostic| CompileFailure {

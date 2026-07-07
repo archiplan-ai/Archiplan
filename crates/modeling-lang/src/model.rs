@@ -407,6 +407,15 @@ impl Model {
         })
     }
 
+    /// Whether an absolute dot path names a node of this model. The
+    /// doc-source layer (`requirements/requirements.md`,
+    /// `requirements/stressing.md`) validates its model references —
+    /// `satisfied-by` elements, stressor affects — through this.
+    pub fn has_node(&self, path: &str) -> bool {
+        let segs: Vec<String> = path.split('.').map(str::to_string).collect();
+        self.resolve_in(None, &segs).is_some()
+    }
+
     /// Which layer a node belongs to; `None` if the path does not resolve.
     /// The path is absolute, from the root scope.
     pub fn layer_of(&self, path: &str) -> Option<Layer> {
