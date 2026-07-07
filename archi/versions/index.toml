@@ -452,6 +452,7 @@ model = "sha256:5785d233f1210f6212fd0c95db7c8d239ea3a0b4d0ceb20c09dac98b39e7d41e
 parent = "v0003"
 kind = "patch"
 preset = "default"
+commit = "a1e7d7019ef91a5d50fa8fddbe22f23ce945d8f9"
 
 [version.scopes.Agent]
 full = "sha256:09b6665f058e006d327a840930b02953b9d36738e2177dbd8e0de632ea6fea5a"
