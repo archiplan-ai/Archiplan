@@ -14,7 +14,7 @@ def node Cli:
   port build       // compile, optionally emit the lowered batch
   port nkp         // landscape analysis verb
   port incidence   // incidence analysis verb
-  port version     // save, list, show, diff, current
+  port version     // save, anchor, list, show, diff, current
   port link        // add, ls, verify, confirm, rm, repin, capture, audit
   port plan        // use, task add, verify, start, next, close, reset
   port query       // one composed subgraph query
@@ -33,6 +33,7 @@ def node DocsCompiler:
 
 def node Archive:
   port save         // canonical render in; keyframe or patch + manifest entry
+  port anchor       // post-hoc commit provenance: clean tree, render-hash match
   port serve        // reconstructs any version, verified against its seal
   port canonicalize // consults the renderer for the canonical bytes
 
@@ -108,6 +109,7 @@ Cli.drive consult(->ModelGraph, <-Findings) Query.audit in read_flow
 Cli.drive consult(->ModelGraph, <-NkpReport) Nkp.scan in read_flow
 Cli.drive consult(->ModelGraph, <-IncidenceReport) Incidence.scan in harden_flow
 Cli.drive consult(->ModelGraph, <-Report) Archive.save in harden_flow
+Cli.drive consult(->ModelGraph, <-Report) Archive.anchor in harden_flow
 Cli.drive consult(->ModelGraph, <-Diagnostics) DocsCompiler.compile_docs in harden_flow
 Cli.drive consult(->Command, <-Report) Links.record in trace_flow
 Cli.drive consult(->Command, <-Report) Links.verify in trace_flow

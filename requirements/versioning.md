@@ -82,6 +82,15 @@ commit  = "de3eb58"             # optional provenance; never a dependency
 - **Save** (`archi version save -m "note"`) — compile the live tree, render canonical, hash. Refuse if
   the hash equals the latest version's. Otherwise write a patch or keyframe per policy and append the
   manifest entry. Saving closes the active stress session (see below). The note is mandatory prose.
+  `commit` provenance is recorded only when the working tree is clean at save time — so the commit
+  really contains the sources the render came from.
+- **Anchor** (`archi version anchor`) — record `commit` provenance post hoc on the version the live
+  render matches. A save on a dirty tree mints without provenance — adoption's normal case: a bootstrap
+  saves before its first commit — leaving `link audit` no delta source
+  ([code-link.md](code-link.md#audit--dark-deltas-dark-spec)). Committing and anchoring closes that gap
+  under the save-time guarantee: the tree must be clean and its render must hash to the version being
+  anchored. Provenance is a birth fact — anchoring a version that has it is a no-op reporting the
+  recorded commit, never a rewrite.
 - **List** — every version with note and metadata, from the manifest.
 - **Show** — materialize a version's canonical source. The output is compilable source.
 - **Diff** — semantic diff between two versions' canonical renders. For adjacent versions this is the

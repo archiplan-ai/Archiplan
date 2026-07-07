@@ -1,0 +1,18 @@
+--- original
++++ modified
+@@ -3,6 +3,7 @@
+   port drive
+ def node ArchSource
+ def node Archive:
++  port anchor
+   port canonicalize
+   port save
+   port serve
+@@ -216,6 +217,7 @@
+ Cli.drive consult(->ModelGraph, <-NkpReport) Nkp.scan in read_flow
+ Cli.drive consult(->ModelGraph, <-IncidenceReport) Incidence.scan in harden_flow
+ Cli.drive consult(->ModelGraph, <-Report) Archive.save in harden_flow
++Cli.drive consult(->ModelGraph, <-Report) Archive.anchor in harden_flow
+ Cli.drive consult(->ModelGraph, <-Diagnostics) DocsCompiler.compile_docs in harden_flow
+ Cli.drive consult(->Command, <-Report) Links.record in trace_flow
+ Cli.drive consult(->Command, <-Report) Links.verify in trace_flow

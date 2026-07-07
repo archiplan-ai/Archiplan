@@ -16,7 +16,7 @@
 //!             [--json | --matrix | --k-hyper | --findings] [--no-matrix]
 //!             [--kind <kind>]... [--min-severity info|warn|alert]
 //!             [--tau-j <f>] [--tau-d <f>] [--depth <n>] [--path-limit <n>]
-//! archi version save -m <note> | list | show <id> | diff <a> <b> | current
+//! archi version save -m <note> | anchor | list | show <id> | diff <a> <b> | current
 //!             [--project <dir>]
 //! archi link add <spec[@ver]> <file[#symbol]> --kind literal|indirect
 //! archi link ls [--spec <ref>] [--evidence] [--json]
@@ -67,6 +67,7 @@ const USAGE: &str = "usage:
               [--kind <kind>]... [--min-severity info|warn|alert]
               [--tau-j <f>] [--tau-d <f>] [--depth <n>] [--path-limit <n>]
   archi version save -m <note> [--project <dir>]
+  archi version anchor [--project <dir>]
   archi version list [--project <dir>]
   archi version show <id> [--project <dir>]
   archi version diff <a> <b> [--project <dir>]
@@ -406,8 +407,9 @@ fn run_version(args: &Args) -> ExitCode {
         Ok(r) => r,
         Err(e) => return usage_err(&e),
     };
-    // Subcommands that read the archive alone; save and current compile the
-    // live tree first — a model that does not compile has no version.
+    // Subcommands that read the archive alone; save, anchor and current
+    // compile the live tree first — a model that does not compile has no
+    // version.
     match (sub, rest) {
         (Some("save"), []) => {
             let Some(note) = args.message.as_deref() else {
@@ -445,6 +447,23 @@ fn run_version(args: &Args) -> ExitCode {
                 Ok(versions::Saved::Unchanged { latest }) => fail(format!(
                     "nothing to save: the model is unchanged since {latest}"
                 )),
+                Err(e) => fail(e),
+            }
+        }
+        (Some("anchor"), []) => {
+            let ws = match compile_or_report(&root, false) {
+                Ok(c) => c.workspace,
+                Err(code) => return code,
+            };
+            match versions::anchor(&root, ws.model()) {
+                Ok(versions::Anchored::Recorded { id, commit }) => {
+                    println!("anchored {id} at commit {commit}");
+                    ExitCode::SUCCESS
+                }
+                Ok(versions::Anchored::Already { id, commit }) => {
+                    println!("{id} is already anchored at commit {commit}");
+                    ExitCode::SUCCESS
+                }
                 Err(e) => fail(e),
             }
         }
@@ -509,9 +528,9 @@ fn run_version(args: &Args) -> ExitCode {
             }
             ExitCode::SUCCESS
         }
-        _ => {
-            usage_err("`version` takes: save -m <note> | list | show <id> | diff <a> <b> | current")
-        }
+        _ => usage_err(
+            "`version` takes: save -m <note> | anchor | list | show <id> | diff <a> <b> | current",
+        ),
     }
 }
 

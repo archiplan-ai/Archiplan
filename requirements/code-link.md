@@ -135,8 +135,9 @@ With deltas as the input, coverage inverts from "which links exist" to "what is 
 | `unlinked_spec_ref` | a spec element in an active plan's scope with no asserted link and no live evidence |
 | `decayed_evidence` | an evidence link whose confidence fell below the floor — confirm or retire |
 
-The delta source is the latest version's commit provenance — recorded only on a clean tree — or an
-explicit `--since <rev>`; without either, the audit says so instead of guessing. The aggregate view is
+The delta source is the latest version's commit provenance — recorded on a clean-tree save, or post
+hoc by `archi version anchor` ([versioning.md](versioning.md#capabilities)) — or an explicit
+`--since <rev>`; without either, the audit says so instead of guessing. The aggregate view is
 the **spec × code incidence matrix**, same shape as the stressor × component matrix of
 [scoring/incidence.md](scoring/incidence.md). Link fragility stops being silent rot and becomes a scored
 surface: visible until lifted, never blocking.

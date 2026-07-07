@@ -1308,8 +1308,8 @@ pub fn audit(root: &Path, model: &Model, opts: &AuditOptions) -> Result<AuditRep
     };
     match rev {
         None => report.notes.push(
-            "no delta source: pass --since <rev>, or save a version on a clean tree so its \
-             commit provenance anchors the audit"
+            "no delta source: commit the tree and run `archi version anchor` so the latest \
+             version gains commit provenance, or pass --since <rev>"
                 .to_string(),
         ),
         Some(rev) => {

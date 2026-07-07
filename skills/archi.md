@@ -69,7 +69,9 @@ are authored from day one.
 3. Recover the model: read the code; model only what the intent touches
    plus its boundaries (neighbors as single nodes). Write requirements for
    observed behavior that must not break, alongside the new asks.
-4. Anchor reality: `version save`, then
+4. Anchor reality: `version save`, commit, `archi version anchor` (a
+   bootstrap saves on a dirty tree, so provenance — the audit's delta
+   source — needs the post-hoc anchor), then
    `archi link add <element> <file#symbol> --kind indirect` for the
    load-bearing existing code — asserted links make `link verify` and
    `link audit` meaningful immediately. `indirect` by default; `literal`
@@ -85,6 +87,9 @@ are authored from day one.
 
 ## Failure modes
 
+- `link audit` notes no delta source → the last save happened on a dirty
+  tree (every bootstrap does); commit, then `archi version anchor` records
+  the commit as the latest version's provenance.
 - `plan use` refuses → the model has unsaved changes; `version save` first.
 - `plan next` blocked on coverage → not an error, the loop: confirm or
   retire the candidates it just minted, re-run.

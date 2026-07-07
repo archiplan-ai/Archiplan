@@ -27,3 +27,14 @@ reverse-lookup that seeds plan requirements.
 Let `satisfied-by` accept what links already accept: port paths and canonical edge text. The
 expansion machinery exists — `term_surface` handles types, and plans already match edge refs
 through their endpoints (`plans::matched_requirements`).
+
+## Update (2026-07-07, adoption-pressure round)
+
+The asymmetry is smaller than stated above: **port paths resolve nowhere**, links included —
+`archi link add Archive.anchor <code-ref>` fails with `E_MODEL_REF` exactly like `satisfied-by`
+does, so "what links already accept" is node paths and edge surface text only. The practiced
+workaround for a port-level claim is linking an edge whose canonical surface names the port
+(l0029, `Cli.drive consult(->ModelGraph, <-Report) Archive.anchor ←
+crates/archi/src/versions.rs#anchor`) while `satisfied-by` launders through the owning node
+(`provenance-anchors-post-hoc` → `[Archive]`). Fix shape accordingly: ports become resolvable
+SpecRefs in *both* layers, and `satisfied-by` additionally gains edge text.

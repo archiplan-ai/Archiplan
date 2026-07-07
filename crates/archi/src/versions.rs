@@ -120,6 +120,26 @@ pub enum Current {
     DirtySince(String),
 }
 
+/// The outcome of an anchor.
+#[derive(Debug)]
+pub enum Anchored {
+    /// Commit provenance was recorded on the version.
+    Recorded {
+        /// The anchored version.
+        id: String,
+        /// The commit recorded as its provenance.
+        commit: String,
+    },
+    /// The version already carries commit provenance; provenance is a
+    /// birth fact and anchoring never rewrites it.
+    Already {
+        /// The version.
+        id: String,
+        /// Its recorded provenance.
+        commit: String,
+    },
+}
+
 /// A loaded version archive.
 pub struct Archive {
     dir: PathBuf,
@@ -417,6 +437,39 @@ pub fn current(root: &Path, model: &Model) -> Result<Current, String> {
     )
 }
 
+/// Record commit provenance on the version the live model is at — the
+/// post-hoc counterpart of the recording `save` does on a clean tree, for
+/// saves minted on a dirty one (adoption: a bootstrap saves before its
+/// first commit). The guarantee is the same as at save time: the tree must
+/// be clean and its render must hash to the version being anchored, so the
+/// recorded commit really contains the sources the render came from.
+/// Provenance already on a version is a birth fact and is never rewritten.
+pub fn anchor(root: &Path, model: &Model) -> Result<Anchored, String> {
+    let mut archive = Archive::open(root)?
+        .filter(|a| !a.entries.is_empty())
+        .ok_or("no versions saved: nothing to anchor")?;
+    let live = hash(&model.render_source());
+    let Some(pos) = archive.entries.iter().rposition(|e| e.model == live) else {
+        let latest = &archive.entries.last().expect("non-empty").id;
+        return Err(format!(
+            "the live model matches no saved version (dirty since {latest}): \
+             `archi version save` first, commit, then anchor"
+        ));
+    };
+    let entry = &mut archive.entries[pos];
+    let id = entry.id.clone();
+    if let Some(existing) = &entry.commit {
+        return Ok(Anchored::Already {
+            id,
+            commit: existing.clone(),
+        });
+    }
+    let sha = clean_head(root)?;
+    entry.commit = Some(sha.clone());
+    archive.write_manifest()?;
+    Ok(Anchored::Recorded { id, commit: sha })
+}
+
 fn id_of(index: usize) -> String {
     format!("v{:04}", index + 1)
 }
@@ -449,6 +502,12 @@ fn hash(text: &str) -> String {
 /// sources the render came from. Code-link birth records share the policy
 /// (`requirements/code-link.md#stored-as-files`).
 pub(crate) fn provenance(root: &Path) -> Option<String> {
+    clean_head(root).ok()
+}
+
+/// HEAD's sha when the project's working tree is clean — the provenance
+/// precondition, checked silently by `save` and loudly by `anchor`.
+fn clean_head(root: &Path) -> Result<String, String> {
     let git = |args: &[&str]| {
         Command::new("git")
             .arg("-C")
@@ -458,10 +517,24 @@ pub(crate) fn provenance(root: &Path) -> Option<String> {
             .ok()
             .filter(|o| o.status.success())
     };
-    let head = git(&["rev-parse", "HEAD"])?;
-    let sha = String::from_utf8(head.stdout).ok()?.trim().to_string();
-    let status = git(&["status", "--porcelain", "--", "."])?;
-    status.stdout.is_empty().then_some(sha)
+    let head = git(&["rev-parse", "HEAD"]).ok_or(
+        "no commit to anchor to: git is unavailable, the project is not in a \
+         git repository, or the repository has no commits yet",
+    )?;
+    let sha = String::from_utf8(head.stdout)
+        .map_err(|_| "git printed a non-utf8 HEAD sha".to_string())?
+        .trim()
+        .to_string();
+    let status = git(&["status", "--porcelain", "--", "."])
+        .ok_or("cannot tell whether the working tree is clean: `git status` failed")?;
+    if !status.stdout.is_empty() {
+        return Err(
+            "the working tree is dirty: commit first, so the anchored commit really \
+             contains the model's sources"
+                .to_string(),
+        );
+    }
+    Ok(sha)
 }
 
 /// Civil-from-days (Howard Hinnant's algorithm): epoch seconds to ISO-8601
@@ -659,6 +732,99 @@ mod tests {
         assert_eq!(a1.interface, a2.interface);
         // B saw no change at all.
         assert_eq!(e1.scopes["B"], e2.scopes["B"]);
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    fn git(root: &Path, args: &[&str]) {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn head(root: &Path) -> String {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    }
+
+    /// The adoption flow of `issues/audit-blind-without-clean-tree-provenance`:
+    /// a bootstrap saves on a dirty (here: not even versioned) tree, commits,
+    /// then anchors the save post hoc.
+    #[test]
+    fn anchor_records_provenance_post_hoc() {
+        let root = temp_project(&v1());
+        save_ok(&root, "bootstrap");
+        let ws = compiled_model(&root);
+
+        // No repository yet: nothing to anchor to.
+        assert!(anchor(&root, ws.model()).unwrap_err().contains("no commit"));
+
+        git(&root, &["init", "-q"]);
+        git(&root, &["add", "-A"]);
+        git(&root, &["commit", "-q", "-m", "bootstrap"]);
+
+        // An untracked file keeps the tree dirty: anchor refuses.
+        fs::write(root.join("junk.txt"), "x").unwrap();
+        assert!(anchor(&root, ws.model()).unwrap_err().contains("dirty"));
+        fs::remove_file(root.join("junk.txt")).unwrap();
+
+        // Clean tree whose render matches v0001: provenance lands, and a
+        // second anchor is a no-op — even though recording it just dirtied
+        // the manifest.
+        let first = head(&root);
+        match anchor(&root, ws.model()).unwrap() {
+            Anchored::Recorded { id, commit } => {
+                assert_eq!((id.as_str(), commit), ("v0001", first.clone()))
+            }
+            Anchored::Already { .. } => panic!("first anchor must record"),
+        }
+        let archive = Archive::open(&root).unwrap().unwrap();
+        assert_eq!(archive.entries()[0].commit.as_deref(), Some(first.as_str()));
+        assert!(matches!(
+            anchor(&root, ws.model()).unwrap(),
+            Anchored::Already { id, .. } if id == "v0001"
+        ));
+
+        // A live model matching no saved version cannot anchor.
+        write_model(&root, &v2());
+        let ws = compiled_model(&root);
+        assert!(
+            anchor(&root, ws.model())
+                .unwrap_err()
+                .contains("matches no saved version")
+        );
+
+        // Recorded provenance is a birth fact: after HEAD moves on, anchor
+        // still reports the recorded commit rather than rewriting it.
+        save_ok(&root, "second");
+        git(&root, &["add", "-A"]);
+        git(&root, &["commit", "-q", "-m", "second"]);
+        let second = head(&root);
+        assert!(matches!(
+            anchor(&root, ws.model()).unwrap(),
+            Anchored::Recorded { id, commit } if id == "v0002" && commit == second
+        ));
+        fs::write(root.join("later.txt"), "y").unwrap();
+        git(&root, &["add", "-A"]);
+        git(&root, &["commit", "-q", "-m", "later"]);
+        assert!(matches!(
+            anchor(&root, ws.model()).unwrap(),
+            Anchored::Already { id, commit } if id == "v0002" && commit == second
+        ));
 
         fs::remove_dir_all(&root).unwrap();
     }
