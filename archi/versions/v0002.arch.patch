@@ -1,0 +1,92 @@
+--- original
++++ modified
+@@ -68,11 +68,31 @@
+   port capture
+   port journal
+   port pin_spec
+-  port read_tree
++  port read_code
++  port read_index
+   port record
+   port serve_links
+   port sweep
+   port verify
++def node Links.Canonizer:
++  port hash
++def node Links.Capture:
++  port canon
++  port diff_wave
++  port load_index
++  port mint
++def node Links.Grader:
++  port audit
++  port canon
++  port grade
++  port read_fold
++  port resolve_pins
++  port scan_code
++def node Links.Journal:
++  port append
++  port flush
++  port record_events
++  port serve_fold
+ def node ModelGraph
+ def node Nkp:
+   port scan
+@@ -102,11 +122,13 @@
+ def node StatementBatch
+ def node StressDoc
+ def node SubgraphResult
++def node SymbolHashes
+ def node Tokens
+ def view compile_flow
+ def view harden_flow
+ def view read_flow
+ def view trace_flow
++def conn canonize := * ->CodeItem, <-SymbolHashes *
+ def conn compile := * ->ArchSource, <-StatementBatch *
+ def conn consult := * ->(Data type_of *), <-(Data type_of *) *
+ def conn execute := * ->StatementBatch, <-ModelGraph *
+@@ -134,6 +156,7 @@
+ Data type_of PlanFile
+ Data type_of LinkEvent
+ Data type_of CodeItem
++Data type_of SymbolHashes
+ Data type_of ItemHashIndex
+ Data type_of Command
+ Data type_of Report
+@@ -181,6 +204,10 @@
+ Agent.author persist(StressDoc) SourceTree.store in harden_flow
+ Agent.author persist(PlanFile) SourceTree.store in trace_flow
+ Agent.author persist(CodeItem) SourceTree.store in trace_flow
++Links.Grader.canon canonize(->CodeItem, <-SymbolHashes) Links.Canonizer.hash in trace_flow
++Links.Capture.canon canonize(->CodeItem, <-SymbolHashes) Links.Canonizer.hash in trace_flow
++Links.Grader.read_fold recall(<-LinkEvent) Links.Journal.serve_fold in trace_flow
++Links.Capture.mint persist(LinkEvent) Links.Journal.append in trace_flow
+ Compiler.load_sources recall(<-ArchSource) SourceTree.serve in compile_flow
+ Cli.compile_src compile(->ArchSource, <-StatementBatch) Compiler.compile in compile_flow
+ Cli.exec execute(->StatementBatch, <-ModelGraph) Engine.execute in compile_flow
+@@ -202,8 +229,8 @@
+ Archive.canonicalize render(->ModelGraph, <-CanonicalRender) Renderer.emit_source in harden_flow
+ Incidence.read_sessions recall(<-StressDoc) SourceTree.serve in harden_flow
+ Incidence.pin_model recall(<-ModelGraph) DocsCompiler.serve_pin in harden_flow
+-Links.read_tree recall(<-CodeItem) SourceTree.serve in trace_flow
+-Links.read_tree recall(<-ItemHashIndex) SourceTree.serve in trace_flow
++Links.read_code recall(<-CodeItem) SourceTree.serve in trace_flow
++Links.read_index recall(<-ItemHashIndex) SourceTree.serve in trace_flow
+ Links.journal persist(LinkEvent) SourceTree.store in trace_flow
+ Links.pin_spec recall(<-ModelGraph) DocsCompiler.serve_pin in trace_flow
+ Planner.pin_model recall(<-ModelGraph) DocsCompiler.serve_pin in trace_flow
+@@ -215,3 +242,12 @@
+ Compiler.compile = Driver.accept
+ Compiler.load_sources = Driver.discover
+ Compiler.fetch_preset = Driver.stdlib
++Links.record = Journal.record_events
++Links.verify = Grader.grade
++Links.sweep = Grader.audit
++Links.pin_spec = Grader.resolve_pins
++Links.capture = Capture.diff_wave
++Links.journal = Journal.flush
++Links.serve_links = Journal.serve_fold
++Links.read_code = Grader.scan_code
++Links.read_index = Capture.load_index

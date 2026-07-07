@@ -1,0 +1,143 @@
+import data
+import conns
+import views
+import lang
+
+// crates/archi — the runner and the archiplan subsystems around the language.
+
+def node SourceTree:
+  port serve // module texts, docs, plan.json, journal events, code items
+  port store // every write lands here: the tree is the only persistence
+
+def node Cli:
+  port check       // compile model + docs + archive, report findings
+  port build       // compile, optionally emit the lowered batch
+  port nkp         // landscape analysis verb
+  port incidence   // incidence analysis verb
+  port version     // save, list, show, diff, current
+  port link        // add, ls, verify, confirm, rm, repin, capture, audit
+  port plan        // use, task add, verify, start, next, close, reset
+  port query       // one composed subgraph query
+  port read        // the agent read envelope over stdin/argv
+  port compile_src // drives the compiler
+  port exec        // replays the lowered batch on the engine
+  port ask         // read statements to the engine's envelope
+  port drive       // consults every subsystem, one verb at a time
+
+def node DocsCompiler:
+  port compile_docs // parse + schema + cross-check docs against the model
+  port load_docs    // pulls requirement and stress markdown from the tree
+  port pin_model    // reconstructs archived versions for pinned checks
+  port compile_pin  // compiles a reconstructed render through the compiler
+  port serve_pin    // hands pinned models to incidence, links and plans
+
+def node Archive:
+  port save         // canonical render in; keyframe or patch + manifest entry
+  port serve        // reconstructs any version, verified against its seal
+  port canonicalize // consults the renderer for the canonical bytes
+
+def node Links:
+  port record      // add, confirm, rm, repin: journal events
+  port verify      // recomputes projections, grades drift per link kind
+  port sweep       // audit: dark deltas, dark spec, decayed evidence
+  port capture     // wave delta to candidate links, pre-attributed by task
+  port read_code   // code items out of the tree: candidate and wave scans
+  port read_index  // wave-open indexes out of the tree
+  port journal     // appends link events to the journal in the tree
+  port pin_spec    // resolves pinned spec refs via reconstructed versions
+  port serve_links // the folded live set, read by the plan's coverage gate
+
+  def node Journal:   // the append-only truth; the live set is its fold
+    port record_events
+    port append
+    port flush
+    port serve_fold
+  def node Canonizer: // rust-tok-v1 / text-v1: the versioned hash contract
+    port hash
+  def node Grader:    // recomputes projections, grades states, audits
+    port grade
+    port audit
+    port resolve_pins
+    port canon
+    port read_fold
+    port scan_code
+  def node Capture:   // wave-open index vs the tree: mints, touches, decays
+    port diff_wave
+    port load_index
+    port canon
+    port mint
+
+  Grader.canon canonize Canonizer.hash in trace_flow
+  Capture.canon canonize Canonizer.hash in trace_flow
+  Grader.read_fold recall(LinkEvent) Journal.serve_fold in trace_flow
+  Capture.mint persist(LinkEvent) Journal.append in trace_flow
+  record = Journal.record_events
+  verify = Grader.grade
+  sweep = Grader.audit
+  pin_spec = Grader.resolve_pins
+  capture = Capture.diff_wave
+  journal = Journal.flush
+  serve_links = Journal.serve_fold
+  read_code = Grader.scan_code
+  read_index = Capture.load_index
+
+def node Planner:
+  port author      // use, task add: pins a version, seeds spec_refs
+  port advance     // start, next: waves, gates, scenario latches
+  port pin_model   // the hardened version the plan projects
+  port store_plan  // plan.json and wave indexes land in the tree
+  port load_plan   // re-reads and re-validates plan.json on every verb
+  port run_capture // fires the wave capture at each close
+  port coverage    // reads the folded links for the asserted-coverage gate
+
+Storage type_of SourceTree
+Storage type_of Archive
+Service type_of Cli
+Function type_of DocsCompiler
+Service type_of Links
+Service type_of Planner
+
+// the compiler and the engine read their inputs out of the tree
+Compiler.load_sources recall(ArchSource) SourceTree.serve in compile_flow
+
+// the cli drives one flow per verb
+Cli.compile_src compile Compiler.compile in compile_flow
+Cli.exec execute Engine.execute in compile_flow
+Cli.ask interrogate Engine.answer in read_flow
+Cli.drive consult(->ModelGraph, <-Findings) Query.audit in read_flow
+Cli.drive consult(->ModelGraph, <-NkpReport) Nkp.scan in read_flow
+Cli.drive consult(->ModelGraph, <-IncidenceReport) Incidence.scan in harden_flow
+Cli.drive consult(->ModelGraph, <-Report) Archive.save in harden_flow
+Cli.drive consult(->ModelGraph, <-Diagnostics) DocsCompiler.compile_docs in harden_flow
+Cli.drive consult(->Command, <-Report) Links.record in trace_flow
+Cli.drive consult(->Command, <-Report) Links.verify in trace_flow
+Cli.drive consult(->Command, <-Report) Links.sweep in trace_flow
+Cli.drive consult(->Command, <-Report) Planner.author in trace_flow
+Cli.drive consult(->Command, <-Report) Planner.advance in trace_flow
+
+// docs cross-check: markdown in, pinned models on demand
+DocsCompiler.load_docs recall(RequirementDoc) SourceTree.serve in harden_flow
+DocsCompiler.load_docs recall(StressDoc) SourceTree.serve in harden_flow
+DocsCompiler.pin_model recall(CanonicalRender) Archive.serve in harden_flow
+DocsCompiler.compile_pin compile Compiler.compile in harden_flow
+
+// the archive canonicalizes through the renderer
+Archive.canonicalize render Renderer.emit_source in harden_flow
+
+// incidence reads sessions and expands affects against pinned versions
+Incidence.read_sessions recall(StressDoc) SourceTree.serve in harden_flow
+Incidence.pin_model recall(ModelGraph) DocsCompiler.serve_pin in harden_flow
+
+// links: journal in the tree, symbols from the tree, pins via docs
+Links.read_code recall(CodeItem) SourceTree.serve in trace_flow
+Links.read_index recall(ItemHashIndex) SourceTree.serve in trace_flow
+Links.journal persist(LinkEvent) SourceTree.store in trace_flow
+Links.pin_spec recall(ModelGraph) DocsCompiler.serve_pin in trace_flow
+
+// plans: pin, author, execute in waves, gate on asserted coverage
+Planner.pin_model recall(ModelGraph) DocsCompiler.serve_pin in trace_flow
+Planner.store_plan persist(PlanFile) SourceTree.store in trace_flow
+Planner.store_plan persist(ItemHashIndex) SourceTree.store in trace_flow
+Planner.load_plan recall(PlanFile) SourceTree.serve in trace_flow
+Planner.run_capture consult(->ItemHashIndex, <-LinkEvent) Links.capture in trace_flow
+Planner.coverage recall(LinkEvent) Links.serve_links in trace_flow

@@ -1,0 +1,77 @@
+import data
+import conns
+import views
+
+// crates/modeling-lang — the language: compiler, engine, model reads, analyses.
+
+def node Compiler:
+  port compile      // one project in, one deterministic batch out
+  port load_sources // pulls manifest and .arch module texts from the tree
+  port fetch_preset // resolves the manifest's preset choice into the stdlib
+
+  def node Driver:  // source/mod.rs — coordinates the pipeline per module
+    port accept
+    port discover
+    port stdlib
+    port lex
+    port build
+    port bind
+    port emit_batch
+  def node Lexer:   // offside-rule tokenizer; rejects tabs in indentation
+    port tokenize
+  def node Parser:  // recursive descent; context-free constraints live here
+    port build_ast
+  def node Resolver: // three passes; every reference becomes an absolute path
+    port bind_names
+  def node Lower:   // fixed emission order makes the batch deterministic
+    port emit
+
+  Driver.lex scan Lexer.tokenize in compile_flow
+  Driver.build parse Parser.build_ast in compile_flow
+  Driver.bind resolve Resolver.bind_names in compile_flow
+  Driver.emit_batch lower Lower.emit in compile_flow
+  compile = Driver.accept
+  load_sources = Driver.discover
+  fetch_preset = Driver.stdlib
+
+def node Engine:
+  port execute      // applies a batch atomically: applied, noop, or rejected
+  port answer       // the read envelope: read statements in, results out
+  port fetch_preset // loads the stdlib into every fresh workspace
+  port slice        // hands read statements to the query module
+
+def node Preset:
+  port serve        // the named creation batch, loaded before user statements
+
+def node Query:
+  port subgraph     // composed filters to a node-link slice
+  port audit        // model-completeness findings
+
+def node Renderer:
+  port emit_source  // the model as canonical source: the archived form
+
+def node Nkp:
+  port scan         // the landscape read: regime, hotspots, corridors
+
+def node Incidence:
+  port scan          // stressor × component matrix and its typed findings
+  port read_sessions // pulls session and stressor docs
+  port pin_model     // expands affects against each stressor's pinned version
+
+Function type_of Compiler
+Function type_of Compiler.Driver
+Function type_of Compiler.Lexer
+Function type_of Compiler.Parser
+Function type_of Compiler.Resolver
+Function type_of Compiler.Lower
+Function type_of Engine
+Function type_of Preset
+Function type_of Query
+Function type_of Renderer
+Function type_of Nkp
+Function type_of Incidence
+
+Compiler.fetch_preset seed Preset.serve in compile_flow
+Engine.fetch_preset seed Preset.serve in compile_flow
+Engine.slice consult(->ModelGraph, <-SubgraphResult) Query.subgraph in read_flow
+Engine.slice consult(->ModelGraph, <-Findings) Query.audit in read_flow

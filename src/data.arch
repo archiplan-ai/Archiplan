@@ -1,0 +1,46 @@
+// The data that flows through archiplan. Sources go in, reports come out;
+// everything here is Data in the default-preset ontology.
+
+def node ArchSource      // .arch surface text — the model's only persistence
+def node Tokens          // lexer output
+def node Ast             // parsed modules, names still relative
+def node Resolution      // the absolute-path picture: nodes, edges, apps resolved
+def node StatementBatch  // the lowered, absolute-path JSON statements
+def node ModelGraph      // the compiled model: nodes, ports, typed edges, views
+def node Diagnostics     // located, coded compile errors — they block
+def node Findings        // advisory observations — surfaced, never blocking
+def node CanonicalRender // canonical(project): the render that versions hash and archive
+def node RequirementDoc  // intent + requirement markdown under archi/requirements/
+def node StressDoc       // session + stressor markdown under archi/stress/
+def node PlanFile        // plan.json — authored fields edited, lifecycle via verbs
+def node LinkEvent       // one append-only journal event: add, confirm, repin, retire…
+def node CodeItem        // a source item of the code tree, addressed by symbol
+def node SymbolHashes    // one item's interface + body hash over canonical tokens
+def node ItemHashIndex   // file → symbol → body hash snapshot taken at wave open
+def node Command         // one CLI invocation: verb + flags
+def node Report          // rendered output: human one-liners or the JSON envelope
+def node SubgraphResult  // a composed query's slice of the model
+def node NkpReport       // the NKP landscape read: regime, hotspots, corridors
+def node IncidenceReport // stressor × component matrix and its typed findings
+
+Data type_of ArchSource
+Data type_of Tokens
+Data type_of Ast
+Data type_of Resolution
+Data type_of StatementBatch
+Data type_of ModelGraph
+Data type_of Diagnostics
+Data type_of Findings
+Data type_of CanonicalRender
+Data type_of RequirementDoc
+Data type_of StressDoc
+Data type_of PlanFile
+Data type_of LinkEvent
+Data type_of CodeItem
+Data type_of SymbolHashes
+Data type_of ItemHashIndex
+Data type_of Command
+Data type_of Report
+Data type_of SubgraphResult
+Data type_of NkpReport
+Data type_of IncidenceReport

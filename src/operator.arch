@@ -1,0 +1,31 @@
+import data
+import conns
+import views
+import tool
+
+// The operator — human or agent — is outside the tool: everything it does
+// is either a text edit into the tree or a verb.
+// (Named operator.arch, not agent.arch: modules sorting before `conns` lose
+// carrier inference — the resolver collects defs and uses in one sorted pass.)
+
+def node Agent:
+  port drive  // runs the verbs
+  port author // edits sources: model, docs, plans, code
+
+Service type_of Agent
+
+Agent.drive invoke Cli.check in compile_flow
+Agent.drive invoke Cli.build in compile_flow
+Agent.drive invoke Cli.query in read_flow
+Agent.drive invoke Cli.read in read_flow
+Agent.drive invoke Cli.nkp in read_flow
+Agent.drive invoke Cli.version in harden_flow
+Agent.drive invoke Cli.incidence in harden_flow
+Agent.drive invoke Cli.link in trace_flow
+Agent.drive invoke Cli.plan in trace_flow
+
+Agent.author persist(ArchSource) SourceTree.store in compile_flow
+Agent.author persist(RequirementDoc) SourceTree.store in harden_flow
+Agent.author persist(StressDoc) SourceTree.store in harden_flow
+Agent.author persist(PlanFile) SourceTree.store in trace_flow
+Agent.author persist(CodeItem) SourceTree.store in trace_flow

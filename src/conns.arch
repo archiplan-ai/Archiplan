@@ -1,0 +1,19 @@
+import data
+
+// Typed traffic between components. Direction is initiation; carried slots
+// say what rides each lane.
+
+def conn invoke      := * ->Command, <-Report *                       // operator drives a verb
+def conn compile     := * ->ArchSource, <-StatementBatch *            // project in, batch out
+def conn scan        := * ->ArchSource, <-Tokens *
+def conn parse       := * ->Tokens, <-Ast *
+def conn resolve     := * ->Ast, <-Resolution *
+def conn lower       := * ->Resolution, <-StatementBatch *
+def conn execute     := * ->StatementBatch, <-ModelGraph *            // atomic batch replay
+def conn seed        := * ->, <-StatementBatch *                      // pull the stdlib
+def conn render      := * ->ModelGraph, <-CanonicalRender *
+def conn interrogate := * ->StatementBatch, <-SubgraphResult *        // the read envelope
+def conn canonize    := * ->CodeItem, <-SymbolHashes *                // the hash contract
+def conn consult     := * ->(Data type_of *), <-(Data type_of *) *    // request/response, typed per edge
+def conn persist     := * ->(Data type_of *) *                        // a write into a store
+def conn recall      := * ->, <-(Data type_of *) *                    // a read out of a store
