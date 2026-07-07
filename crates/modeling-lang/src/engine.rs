@@ -205,6 +205,8 @@ impl Workspace {
                 kinds,
                 views,
                 scopes,
+                carriers,
+                edge_types,
             } => {
                 let resolve_all = |paths: &[String]| -> Result<Vec<NodeId>, LangError> {
                     paths.iter().map(|p| self.resolve_abs(p)).collect()
@@ -217,6 +219,11 @@ impl Workspace {
                         .map(|vs| self.resolve_views(vs))
                         .transpose()?,
                     scopes: scopes.as_deref().map(resolve_all).transpose()?,
+                    carriers: carriers.as_deref().map(resolve_all).transpose()?,
+                    edge_types: edge_types
+                        .as_deref()
+                        .map(|ts| self.resolve_edge_types(ts))
+                        .transpose()?,
                 };
                 let (nodes, edges) = query::subgraph(&self.model, &filter);
                 Ok(Outcome::Graph { nodes, edges })
@@ -302,6 +309,25 @@ impl Workspace {
         } else {
             Ok(Some(self.resolve_views(names)?))
         }
+    }
+
+    /// Resolve `edge_types` filter names against the defined rel and conn
+    /// types.
+    fn resolve_edge_types(&self, names: &[String]) -> Result<query::EdgeTypeFilter, LangError> {
+        let mut filter = query::EdgeTypeFilter {
+            rels: BTreeSet::new(),
+            conns: BTreeSet::new(),
+        };
+        for name in names {
+            if let Some(&id) = self.model.rel_names.get(name) {
+                filter.rels.insert(id);
+            } else if let Some(&id) = self.model.conn_names.get(name) {
+                filter.conns.insert(id);
+            } else {
+                return Err(self.unknown("edge-type", name));
+            }
+        }
+        Ok(filter)
     }
 
     // ---- definitions -----------------------------------------------------------

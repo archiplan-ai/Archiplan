@@ -419,7 +419,10 @@ pub enum Statement {
     /// Subgraph query (`requirements/modeling-lang/queries.md`): composable
     /// filters, each optional; an absent filter does not restrict. An empty
     /// list is the most restrictive filter (matches nothing), not an absent
-    /// one — `"scopes": []` means "the top level only".
+    /// one — `"scopes": []` means "the top level only". `carriers` keeps
+    /// connection edges carrying one of the named nodes (directly or via a
+    /// classifying type); `edge_types` keeps edges of the named rel/conn
+    /// types — applications are untyped and never pass it.
     Query {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         types: Option<Vec<String>>,
@@ -429,6 +432,10 @@ pub enum Statement {
         views: Option<Vec<String>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         scopes: Option<Vec<String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        carriers: Option<Vec<String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        edge_types: Option<Vec<String>>,
     },
     Check {
         #[serde(default, rename = "in", skip_serializing_if = "Vec::is_empty")]
@@ -452,7 +459,15 @@ fn allowed_keys(kind: &str) -> Option<&'static [&'static str]> {
             "views",
         ],
         "app" => &["stmt", "node", "port", "route", "inner"],
-        "query" => &["stmt", "types", "kinds", "views", "scopes"],
+        "query" => &[
+            "stmt",
+            "types",
+            "kinds",
+            "views",
+            "scopes",
+            "carriers",
+            "edge_types",
+        ],
         "check" => &["stmt", "in"],
         _ => return None,
     })
@@ -631,13 +646,15 @@ impl Statement {
                 kinds,
                 views,
                 scopes,
+                carriers,
+                edge_types,
             } => {
                 let seg = |kw: &str, items: Option<Vec<String>>| match items {
                     Some(items) => format!(" {kw} ({})", items.join(", ")),
                     None => String::new(),
                 };
                 format!(
-                    "query{}{}{}{}",
+                    "query{}{}{}{}{}{}",
                     seg("types", types.clone()),
                     seg(
                         "kinds",
@@ -645,6 +662,8 @@ impl Statement {
                             .as_ref()
                             .map(|ks| ks.iter().map(|k| k.name().to_string()).collect())
                     ),
+                    seg("carriers", carriers.clone()),
+                    seg("edge_types", edge_types.clone()),
                     seg("scopes", scopes.clone()),
                     seg("in", views.clone()),
                 )

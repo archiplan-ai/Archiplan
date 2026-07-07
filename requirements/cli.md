@@ -45,11 +45,32 @@ The [incidence analysis](./scoring/incidence.md): the stressor × component matr
 every session since a version — and its typed findings. The default output is the human report; `--json` and the
 facet flags emit JSON. The same report auto-fires on the `archi version save` that closes a session.
 
+```
+archi read [<request.json> | -] [--at <id>] [--project <dir>]
+```
+
+The [agent read envelope](./agent-interface.md) over the CLI transport: a batch of read statements (`query`,
+`check`) in — from a file, `-`, or piped stdin — and the response envelope out, verbatim. `--at <id>` runs the
+batch against a version reconstructed from the sealed archive, which is how an agent grounds itself against a
+plan's pin. Exit 0 on `ok`, 1 when a statement fails (`error.index` names it), 2 on a protocol error
+(`E_BAD_REQUEST`).
+
+```
+archi query [--scope <path>]... [--type <path>]... [--kind <k>]... [--view <v>]...
+            [--carrier <path>]... [--edge-type <name>]... [--top] [--at <id>] [--project <dir>]
+```
+
+One composed [subgraph query](./modeling-lang/queries.md): repeatable filter flags, the single `graph` result
+unwrapped. An absent flag does not restrict; `--top` is the explicit empty `scopes` filter — the top level only.
+`--carrier` slices the flow of a datum (the carrying edges and the nodes related to them, naming the node or a
+classifying type); `--edge-type` slices by rel/conn type name. Errors print as one-liners, exit 1.
+
 ## Output
 
 Human-readable by default: compile diagnostics as `file:line:col: CODE: message` lines, findings as one-liners
-carrying their `hint`. `--json` emits structured output for tools instead; the full
-[agent interface](./agent-interface.md) envelope belongs to that interface's transports, not the CLI.
+carrying their `hint`. `--json` emits structured output for tools instead; `archi read` speaks the full
+[agent interface](./agent-interface.md) envelope verbatim — the CLI is that contract's zero-infrastructure
+transport.
 
 ## Exit codes
 

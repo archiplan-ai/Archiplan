@@ -28,6 +28,9 @@
 //! archi plan use <name> | repin | show [--json] | verify [--json]
 //! archi plan task add <node> [--desc <text>]
 //! archi plan start | next | current-wave | close | reset
+//! archi read  [<request.json> | -] [--at <id>]
+//! archi query [--scope <path>]... [--type <path>]... [--kind <k>]... [--view <v>]...
+//!             [--carrier <path>]... [--edge-type <name>]... [--top] [--at <id>]
 //! ```
 //!
 //! Every verb locates its project by precedence: `--project`, then the
@@ -77,7 +80,10 @@ const USAGE: &str = "usage:
   archi link audit [--scope <path>] [--since <rev>] [--prune] [--json] [--project <dir>]
   archi plan use <name> | repin | show [--json] | verify [--json] [--project <dir>]
   archi plan task add <node> [--desc <text>] [--project <dir>]
-  archi plan start | next | current-wave | close | reset [--project <dir>]";
+  archi plan start | next | current-wave | close | reset [--project <dir>]
+  archi read [<request.json> | -] [--at <id>] [--project <dir>]
+  archi query [--scope <path>]... [--type <path>]... [--kind <k>]... [--view <v>]...
+              [--carrier <path>]... [--edge-type <name>]... [--top] [--at <id>] [--project <dir>]";
 
 struct Args {
     verb: String,
@@ -114,6 +120,12 @@ struct Args {
     to: Option<String>,
     task: Option<String>,
     desc: Option<String>,
+    at: Option<String>,
+    types: Vec<String>,
+    views: Vec<String>,
+    scopes: Vec<String>,
+    carriers: Vec<String>,
+    edge_types: Vec<String>,
     evidence: bool,
     yes: bool,
     prune: bool,
@@ -161,6 +173,12 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         to: None,
         task: None,
         desc: None,
+        at: None,
+        types: Vec::new(),
+        views: Vec::new(),
+        scopes: Vec::new(),
+        carriers: Vec::new(),
+        edge_types: Vec::new(),
         evidence: false,
         yes: false,
         prune: false,
@@ -196,7 +214,17 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--findings" => args.findings = true,
             "--project" => args.project = Some(value(&mut it, "--project")?),
             "--emit-batch" => args.emit_batch = Some(value(&mut it, "--emit-batch")?),
+            // `query` composes repeatable scopes; nkp and link audit keep
+            // the single --scope.
+            "--scope" if args.verb == "query" => {
+                args.scopes.push(value(&mut it, "--scope")?)
+            }
             "--scope" => args.scope = Some(value(&mut it, "--scope")?),
+            "--at" => args.at = Some(value(&mut it, "--at")?),
+            "--type" => args.types.push(value(&mut it, "--type")?),
+            "--view" => args.views.push(value(&mut it, "--view")?),
+            "--carrier" => args.carriers.push(value(&mut it, "--carrier")?),
+            "--edge-type" => args.edge_types.push(value(&mut it, "--edge-type")?),
             "--exclude" => args.exclude.push(value(&mut it, "--exclude")?),
             "--only" => args.only.push(value(&mut it, "--only")?),
             "--neutrality" => args.neutrality = Some(value(&mut it, "--neutrality")?),
@@ -229,7 +257,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             }
             "-m" | "--message" => args.message = Some(value(&mut it, "-m")?),
             other if other.starts_with("--") => return Err(format!("unknown flag `{other}`")),
-            other if matches!(args.verb.as_str(), "version" | "link" | "plan") => {
+            other if matches!(args.verb.as_str(), "version" | "link" | "plan" | "read") => {
                 args.positional.push(other.to_string())
             }
             other => return Err(format!("unexpected argument `{other}`")),
@@ -647,6 +675,134 @@ fn run_link(args: &Args) -> ExitCode {
              audit",
         ),
     }
+}
+
+/// The workspace a read runs against: the live tree, or — with `--at <id>`
+/// — the version reconstructed from the sealed archive.
+fn read_workspace(args: &Args, root: &Path) -> Result<Workspace, ExitCode> {
+    let Some(id) = args.at.as_deref() else {
+        return compile_or_report(root, false).map(|c| c.workspace);
+    };
+    let fail = |e: String| -> ExitCode {
+        eprintln!("archi: {e}");
+        ExitCode::from(1)
+    };
+    match versions::Archive::open(root) {
+        Ok(Some(archive)) => docs::compile_version(root, &archive, id).map_err(fail),
+        Ok(None) => Err(fail("--at needs a version archive; none saved".into())),
+        Err(e) => Err(fail(e)),
+    }
+}
+
+/// `archi read`: the agent read envelope (`requirements/agent-interface.md`)
+/// — one batch of read statements in, the response envelope out, verbatim.
+/// Exit codes: 0 ok, 1 a statement failed (`error.index` says which),
+/// 2 protocol error (the request itself is bad).
+fn run_read(args: &Args) -> ExitCode {
+    use std::io::IsTerminal as _;
+    let root = match locate_project(args) {
+        Ok(r) => r,
+        Err(e) => return usage_err(&e),
+    };
+    let text = match args.positional.as_slice() {
+        [] if std::io::stdin().is_terminal() => {
+            return usage_err("`read` takes a request file, or `-` / piped stdin");
+        }
+        [] => std::io::read_to_string(std::io::stdin()),
+        [path] if path == "-" => std::io::read_to_string(std::io::stdin()),
+        [path] => fs::read_to_string(path),
+        _ => return usage_err("`read` takes one request file"),
+    };
+    let text = match text {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("archi: cannot read the request: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    // Invalid JSON is a protocol error in the same envelope shape the
+    // engine emits — the contract holds before the engine is reached.
+    let request: Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(e) => {
+            let envelope = json!({
+                "status": "error",
+                "error": {
+                    "code": "E_BAD_REQUEST",
+                    "message": format!("the request is not valid JSON: {e}"),
+                },
+            });
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&envelope).expect("serializes")
+            );
+            return ExitCode::from(2);
+        }
+    };
+    let mut ws = match read_workspace(args, &root) {
+        Ok(ws) => ws,
+        Err(code) => return code,
+    };
+    let response = ws.handle(&request);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&response).expect("serializes")
+    );
+    match &response.error {
+        None => ExitCode::SUCCESS,
+        Some(e) if e.index.is_some() => ExitCode::from(1),
+        Some(_) => ExitCode::from(2),
+    }
+}
+
+/// `archi query`: one composed subgraph query — the read envelope's
+/// convenience spelling (`requirements/modeling-lang/queries.md`). An
+/// absent filter does not restrict; `--top` is the explicit empty scopes
+/// filter (the top level only).
+fn run_query(args: &Args) -> ExitCode {
+    if args.top && !args.scopes.is_empty() {
+        return usage_err("--top and --scope are mutually exclusive");
+    }
+    let root = match locate_project(args) {
+        Ok(r) => r,
+        Err(e) => return usage_err(&e),
+    };
+    let mut stmt = json!({ "stmt": "query" });
+    if !args.types.is_empty() {
+        stmt["types"] = json!(args.types);
+    }
+    if !args.kind.is_empty() {
+        stmt["kinds"] = json!(args.kind);
+    }
+    if !args.views.is_empty() {
+        stmt["views"] = json!(args.views);
+    }
+    if !args.carriers.is_empty() {
+        stmt["carriers"] = json!(args.carriers);
+    }
+    if !args.edge_types.is_empty() {
+        stmt["edge_types"] = json!(args.edge_types);
+    }
+    if args.top {
+        stmt["scopes"] = json!([]);
+    } else if !args.scopes.is_empty() {
+        stmt["scopes"] = json!(args.scopes);
+    }
+    let mut ws = match read_workspace(args, &root) {
+        Ok(ws) => ws,
+        Err(code) => return code,
+    };
+    let response = ws.handle(&json!({ "statements": [stmt] }));
+    if let Some(e) = &response.error {
+        eprintln!("archi: {}", e.error.message);
+        return ExitCode::from(1);
+    }
+    let results = response.results.expect("an ok response carries results");
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&results[0]).expect("serializes")
+    );
+    ExitCode::SUCCESS
 }
 
 fn run_plan(args: &Args) -> ExitCode {
@@ -1109,6 +1265,8 @@ fn main() -> ExitCode {
         "version" => run_version(&args),
         "link" => run_link(&args),
         "plan" => run_plan(&args),
+        "read" => run_read(&args),
+        "query" => run_query(&args),
         other => usage_err(&format!("unknown command `{other}`")),
     }
 }

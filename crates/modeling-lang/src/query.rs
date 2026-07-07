@@ -8,7 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use crate::ids::{EdgeId, NodeId, PortId, ViewId};
+use crate::ids::{ConnId, EdgeId, NodeId, PortId, RelId, ViewId};
 use crate::model::{Edge, EdgePayload, Model, Side};
 use crate::result::{Finding, GraphEdge, GraphNode, GraphPort};
 use crate::statement::{EdgeKind, Statement};
@@ -94,6 +94,35 @@ pub(crate) struct SubgraphFilter {
     pub kinds: Option<BTreeSet<EdgeKind>>,
     pub views: Option<BTreeSet<ViewId>>,
     pub scopes: Option<Vec<NodeId>>,
+    pub carriers: Option<Vec<NodeId>>,
+    pub edge_types: Option<EdgeTypeFilter>,
+}
+
+/// Resolved edge-type names of an `edge_types` filter. Applications are
+/// untyped and never pass it.
+pub(crate) struct EdgeTypeFilter {
+    pub rels: BTreeSet<RelId>,
+    pub conns: BTreeSet<ConnId>,
+}
+
+/// Whether an edge carries one of the wanted nodes: the carrier (or
+/// rev_carrier) is the node itself, or is classified by it through the
+/// `type_of` closure — naming a type means its instances, exactly as the
+/// node `types` filter does. Edges with no carrier never pass.
+fn carries(model: &Model, e: &Edge, wanted: &[NodeId]) -> bool {
+    let EdgePayload::Conn {
+        carrier,
+        rev_carrier,
+        ..
+    } = &e.payload
+    else {
+        return false;
+    };
+    carrier.iter().chain(rev_carrier.iter()).any(|&c| {
+        wanted
+            .iter()
+            .any(|&t| c == t || model.rel_holds(model.type_of, t, c))
+    })
 }
 
 fn kind_of(e: &Edge) -> EdgeKind {
@@ -217,6 +246,10 @@ fn graph_edge(model: &Model, e: &Edge) -> GraphEdge {
 /// - `kinds` keeps edges of the listed kinds;
 /// - `views` keeps edges of the listed views, and only nodes related to them
 ///   (their attachments and carriers);
+/// - `carriers` keeps connection edges carrying a listed node (directly or
+///   via a classifying type), and — like `views` — only nodes related to
+///   them: the filter answers "the flow of this data";
+/// - `edge_types` keeps edges of the listed rel/conn type names;
 /// - `scopes` keeps the top level plus the named scopes' chains and subtrees;
 /// - an edge needs all its attachments in the slice to survive.
 pub(crate) fn subgraph(model: &Model, filter: &SubgraphFilter) -> (Vec<GraphNode>, Vec<GraphEdge>) {
@@ -230,9 +263,20 @@ pub(crate) fn subgraph(model: &Model, filter: &SubgraphFilter) -> (Vec<GraphNode
             .as_ref()
             .is_none_or(|ks| ks.contains(&kind_of(e)))
             && edge_in_filter(model, e, filter.views.as_ref())
+            && filter
+                .carriers
+                .as_deref()
+                .is_none_or(|cs| carries(model, e, cs))
+            && filter.edge_types.as_ref().is_none_or(|ts| match &e.payload {
+                EdgePayload::Rel { rel, .. } => ts.rels.contains(rel),
+                EdgePayload::Conn { conn, .. } => ts.conns.contains(conn),
+                EdgePayload::App { .. } => false,
+            })
     };
-    // A views filter admits nodes through its edges: attachments and carriers.
-    let related: Option<BTreeSet<NodeId>> = filter.views.as_ref().map(|_| {
+    // An edge-driven filter — views or carriers — admits nodes through its
+    // edges: attachments and carriers.
+    let by_edges = filter.views.is_some() || filter.carriers.is_some();
+    let related: Option<BTreeSet<NodeId>> = by_edges.then(|| {
         model
             .edges
             .values()
