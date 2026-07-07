@@ -27,9 +27,9 @@ specific spec element with drift semantics — code-links do.
 
 ## Anchors
 
-The **resolution unit is the symbol**: a path in the code's own namespace
-(`crate::module::Type::method`), which survives formatting, reordering and — in languages where the
-module path is not the file path — file moves outright. **Spans appear only in birth records**: they say
+The **resolution unit is the symbol**: the item's path within its file (`Type::method` — enclosing
+`mod`/`impl`/`trait` names, then the item), which survives formatting, reordering and, verbatim moves
+being candidate-tracked, file moves. **Spans appear only in birth records**: they say
 where code was born, not where it lives. Non-symbol assets (configs, migrations, schemas) anchor by file
 path, optionally with a span.
 
@@ -86,12 +86,14 @@ by hand.
 ## Stored as files
 
 ```
-.archi/links/
-  journal.jsonl        # append-only events: add, capture, confirm, retire
+archi/links/
+  journal.jsonl        # append-only events: add, confirm, repin, retire
 ```
 
-The journal is the truth; the current link set is its fold. Birth records store **content, not
-references**: file, span, span-content hash, the symbol resolved at capture, canonicalizer version. A
+The journal is the truth; the current link set is its fold: `add` mints (capture emits a batch of
+adds), `confirm` asserts, `repin` rewrites a projection, `retire` tombstones. Birth records store
+**content, not references**: file, span, span-content hash, the symbol resolved at capture,
+canonicalizer version. A
 commit sha is optional provenance — never a dependency, for the same reasons versions refuse git as a
 store ([versioning.md](versioning.md#why-this-shape)): squash merges and rewrites orphan shas, shallow
 clones cannot resolve them. Projections are recomputed by `verify` and may be cached, never authored.
@@ -105,8 +107,8 @@ it:
 |-------|---------|----------|----------|
 | **Clean** | anchor resolves; watched hash matches | — | confidence holds |
 | **Drifted** | anchor resolves; watched hash moved | review whether spec or code is authoritative; re-pin or fix | confidence decays |
-| **Moved** | anchor gone; heuristic candidate elsewhere | confirm candidate → projection rewritten, birth record untouched | auto-follow at reduced confidence |
-| **Missing** | nothing resolves | **Broken**: restore code or retire the link | retires at next audit |
+| **Moved** | anchor gone; heuristic candidate elsewhere | `repin --to` the candidate → projection rewritten, birth record untouched | auto-follow at reduced confidence |
+| **Missing** | nothing resolves | **Broken**: restore code or retire the link | reported decayed; `audit --prune` retires it |
 | **CanonicalizerMismatch** | stored canonicalizer ≠ verifier's | rehash and re-pin; do not ignore | rehash |
 
 The kind picks the watched hash, so an `indirect` link whose body moved while its interface held is
@@ -130,25 +132,29 @@ With deltas as the input, coverage inverts from "which links exist" to "what is 
 | `unlinked_spec_ref` | a spec element in an active plan's scope with no asserted link and no live evidence |
 | `decayed_evidence` | an evidence link whose confidence fell below the floor — confirm or retire |
 
-The aggregate view is the **spec × code incidence matrix**, same shape as the stressor × component matrix
-of [scoring/incidence.md](scoring/incidence.md). Link fragility stops being silent rot and becomes a
-scored surface: visible until lifted, never blocking.
+The delta source is the latest version's commit provenance — recorded only on a clean tree — or an
+explicit `--since <rev>`; without either, the audit says so instead of guessing. The aggregate view is
+the **spec × code incidence matrix**, same shape as the stressor × component matrix of
+[scoring/incidence.md](scoring/incidence.md). Link fragility stops being silent rot and becomes a scored
+surface: visible until lifted, never blocking.
 
 ## Daily use
 
 Most days you only need three commands; the full loop lives in
-[`skills/code-link.md`](../skills/code-link.md).
+[`skills/code-link.md`](../skills/code-link.md). A `<SPEC_REF>` is `<element>[@<version>]` — a node
+path or an edge's canonical surface text; a `<CODE_REF>` is `<file>[#<symbol>]`.
 
 ```bash
 archi link add <SPEC_REF> <CODE_REF> --kind literal    # or: indirect — authored, asserted
-archi link ls --spec <SPEC_REF> [--evidence]
+archi link ls [--spec <SPEC_REF>] [--evidence]
 archi link verify [--spec <SPEC_REF>] [--since <REV>]  # CI gate; exit codes above
 ```
 
-Around them: **`archi link confirm <LINK_ID>`** asserts an evidence link, **`archi link rm <LINK_ID>`**
-retires one (bulk with `--yes` where supported), **`archi link capture --task <TASK>`** re-runs a task
-capture by hand — capture normally fires from `archi plan next` ([above](#code-links--tasks)) — and
-**`archi link audit`** is aggregate hygiene.
+Around them: **`archi link repin <LINK_ID> [--to <CODE_REF>]`** rewrites a projection — accepting
+drift, following a move; **`archi link confirm <LINK_ID>`** asserts an evidence link;
+**`archi link rm <LINK_ID>`** retires one (bulk: `--spec <SPEC_REF> --yes`);
+**`archi link capture --task <TASK>`** re-runs a task capture by hand — capture normally fires from
+`archi plan next` ([above](#code-links--tasks)); and **`archi link audit`** is aggregate hygiene.
 
 ## Why this shape
 

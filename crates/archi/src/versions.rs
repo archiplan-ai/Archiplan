@@ -446,8 +446,9 @@ fn hash(text: &str) -> String {
 
 /// The commit a save happened on — recorded only when git is available and
 /// the project's working tree is clean, so the commit really contains the
-/// sources the render came from.
-fn provenance(root: &Path) -> Option<String> {
+/// sources the render came from. Code-link birth records share the policy
+/// (`requirements/code-link.md#stored-as-files`).
+pub(crate) fn provenance(root: &Path) -> Option<String> {
     let git = |args: &[&str]| {
         Command::new("git")
             .arg("-C")
@@ -465,7 +466,7 @@ fn provenance(root: &Path) -> Option<String> {
 
 /// Civil-from-days (Howard Hinnant's algorithm): epoch seconds to ISO-8601
 /// UTC without a clock dependency.
-fn iso8601_utc(t: SystemTime) -> String {
+pub(crate) fn iso8601_utc(t: SystemTime) -> String {
     let secs = t
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())

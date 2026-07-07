@@ -81,8 +81,9 @@ plan's job.
 
 ## Persistence
 
-Each plan lives at `.archi/plans/<name>/plan.json`. The marker
-`.archi/plans/.current` records which plan subsequent commands
+Each plan lives at `archi/plans/<name>/plan.json`, beside the
+version archive and the link journal. The marker
+`archi/plans/.current` records which plan subsequent commands
 default to.
 
 ## Cross-references

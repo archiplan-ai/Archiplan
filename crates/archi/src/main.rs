@@ -18,6 +18,12 @@
 //!             [--tau-j <f>] [--tau-d <f>] [--depth <n>] [--path-limit <n>]
 //! archi version save -m <note> | list | show <id> | diff <a> <b> | current
 //!             [--project <dir>]
+//! archi link add <spec[@ver]> <file[#symbol]> --kind literal|indirect
+//! archi link ls [--spec <ref>] [--evidence] [--json]
+//! archi link verify [--spec <ref>] [--since <rev>] [--json]
+//! archi link confirm <id> | rm <id>... | rm --spec <ref> --yes
+//! archi link repin <id> [--to <file[#symbol]>]
+//! archi link audit [--scope <path>] [--since <rev>] [--prune] [--json]
 //! ```
 //!
 //! Every verb locates its project by precedence: `--project`, then the
@@ -28,6 +34,7 @@
 
 mod docs;
 mod incidence;
+mod links;
 mod versions;
 
 use std::fs;
@@ -55,7 +62,13 @@ const USAGE: &str = "usage:
   archi version list [--project <dir>]
   archi version show <id> [--project <dir>]
   archi version diff <a> <b> [--project <dir>]
-  archi version current [--project <dir>]";
+  archi version current [--project <dir>]
+  archi link add <spec[@ver]> <file[#symbol]> --kind literal|indirect [--project <dir>]
+  archi link ls [--spec <ref>] [--evidence] [--json] [--project <dir>]
+  archi link verify [--spec <ref>] [--since <rev>] [--json] [--project <dir>]
+  archi link confirm <id> | rm <id>... | rm --spec <ref> --yes [--project <dir>]
+  archi link repin <id> [--to <file[#symbol]>] [--project <dir>]
+  archi link audit [--scope <path>] [--since <rev>] [--prune] [--json] [--project <dir>]";
 
 struct Args {
     verb: String,
@@ -87,6 +100,13 @@ struct Args {
     depth: Option<usize>,
     path_limit: Option<usize>,
     message: Option<String>,
+    spec: Option<String>,
+    kind_flag: Option<String>,
+    to: Option<String>,
+    task: Option<String>,
+    evidence: bool,
+    yes: bool,
+    prune: bool,
     positional: Vec<String>,
 }
 
@@ -126,6 +146,13 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         depth: None,
         path_limit: None,
         message: None,
+        spec: None,
+        kind_flag: None,
+        to: None,
+        task: None,
+        evidence: false,
+        yes: false,
+        prune: false,
         positional: Vec::new(),
     };
     let mut it = argv.iter().peekable();
@@ -164,6 +191,17 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--neutrality" => args.neutrality = Some(value(&mut it, "--neutrality")?),
             "--session" => args.session = Some(value(&mut it, "--session")?),
             "--since" => args.since = Some(value(&mut it, "--since")?),
+            "--evidence" => args.evidence = true,
+            "--yes" => args.yes = true,
+            "--prune" => args.prune = true,
+            "--spec" => args.spec = Some(value(&mut it, "--spec")?),
+            "--to" => args.to = Some(value(&mut it, "--to")?),
+            "--task" => args.task = Some(value(&mut it, "--task")?),
+            // `link` reads the singular `--kind literal|indirect`; the
+            // incidence filter keeps the repeatable list.
+            "--kind" if args.verb == "link" => {
+                args.kind_flag = Some(value(&mut it, "--kind")?)
+            }
             "--kind" => args.kind.push(value(&mut it, "--kind")?),
             "--min-severity" => args.min_severity = Some(value(&mut it, "--min-severity")?),
             "--tau-p" => args.tau_p = Some(float(value(&mut it, "--tau-p")?, "--tau-p")?),
@@ -179,7 +217,9 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             }
             "-m" | "--message" => args.message = Some(value(&mut it, "-m")?),
             other if other.starts_with("--") => return Err(format!("unknown flag `{other}`")),
-            other if args.verb == "version" => args.positional.push(other.to_string()),
+            other if args.verb == "version" || args.verb == "link" => {
+                args.positional.push(other.to_string())
+            }
             other => return Err(format!("unexpected argument `{other}`")),
         }
     }
@@ -435,6 +475,158 @@ fn run_version(args: &Args) -> ExitCode {
     }
 }
 
+fn run_link(args: &Args) -> ExitCode {
+    let fail = |e: String| -> ExitCode {
+        eprintln!("archi: {e}");
+        ExitCode::from(1)
+    };
+    let pretty = |v: Value| serde_json::to_string_pretty(&v).expect("serializes");
+    let root = match locate_project(args) {
+        Ok(r) => r,
+        Err(e) => return usage_err(&e),
+    };
+    // Subcommands touching the spec side — add, verify, audit — compile the
+    // live tree first; journal-only verbs don't need a compiling model.
+    let live_model = || -> Result<modeling_lang::Workspace, ExitCode> {
+        compile_or_report(&root, false).map(|c| c.workspace)
+    };
+    let sub = args.positional.first().map(String::as_str);
+    let rest = args.positional.get(1..).unwrap_or_default();
+    match (sub, rest) {
+        (Some("add"), [spec, code]) => {
+            let Some(kind) = args.kind_flag.as_deref().and_then(links::LinkKind::parse) else {
+                return usage_err("`link add` needs --kind literal|indirect");
+            };
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            match links::add(&root, ws.model(), spec, code, kind) {
+                Ok(l) => {
+                    println!("linked {}", links::render_link(&l));
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("ls"), []) => match links::ls(&root, args.spec.as_deref(), args.evidence) {
+            Ok(live) => {
+                if args.json {
+                    println!(
+                        "{}",
+                        pretty(serde_json::to_value(&live).expect("serializes"))
+                    );
+                } else if live.is_empty() {
+                    println!("no links");
+                } else {
+                    for l in &live {
+                        println!("{}", links::render_link(l));
+                    }
+                }
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e),
+        },
+        (Some("verify"), []) => {
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            let opts = links::VerifyOptions {
+                spec: args.spec.clone(),
+                since: args.since.clone(),
+            };
+            match links::verify(&root, ws.model(), &opts) {
+                Ok(report) => {
+                    if args.json {
+                        println!(
+                            "{}",
+                            pretty(serde_json::to_value(&report).expect("serializes"))
+                        );
+                    } else {
+                        print!("{}", links::render_verify(&report));
+                    }
+                    if report.failing() {
+                        ExitCode::from(1)
+                    } else {
+                        ExitCode::SUCCESS
+                    }
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("confirm"), [id]) => match links::confirm(&root, id) {
+            Ok(l) => {
+                println!("asserted {}", links::render_link(&l));
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e),
+        },
+        (Some("rm"), []) if args.spec.is_some() => {
+            if !args.yes {
+                return usage_err("`link rm --spec <ref>` retires in bulk: confirm with --yes");
+            }
+            match links::retire_spec(&root, args.spec.as_deref().expect("checked")) {
+                Ok(ids) => {
+                    println!("retired {}", ids.join(", "));
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("rm"), ids) if !ids.is_empty() => match links::retire(&root, ids) {
+            Ok(()) => {
+                println!("retired {}", ids.join(", "));
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e),
+        },
+        (Some("repin"), [id]) => match links::repin(&root, id, args.to.as_deref()) {
+            Ok(l) => {
+                println!("repinned {}", links::render_link(&l));
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e),
+        },
+        (Some("capture"), []) => fail(
+            "task capture fires from the plan lifecycle (`requirements/tasks.md`), which is not \
+             implemented yet — the journal already accepts captured(task) links; authored links \
+             land via `link add`"
+                .to_string(),
+        ),
+        (Some("audit"), []) => {
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            let opts = links::AuditOptions {
+                since: args.since.clone(),
+                scope: args.scope.clone(),
+                prune: args.prune,
+            };
+            match links::audit(&root, ws.model(), &opts) {
+                Ok(report) => {
+                    if args.json {
+                        println!(
+                            "{}",
+                            pretty(serde_json::to_value(&report).expect("serializes"))
+                        );
+                    } else {
+                        print!("{}", links::render_audit(&report));
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        _ => usage_err(
+            "`link` takes: add <spec> <file[#symbol]> --kind <k> | ls | verify | confirm <id> | \
+             rm <id>... | rm --spec <ref> --yes | repin <id> [--to <ref>] | capture --task <t> | \
+             audit",
+        ),
+    }
+}
+
 fn run_build(args: &Args) -> ExitCode {
     let root = match locate_project(args) {
         Ok(r) => r,
@@ -687,6 +879,7 @@ fn main() -> ExitCode {
         "nkp" => run_nkp(&args),
         "incidence" => run_incidence(&args),
         "version" => run_version(&args),
+        "link" => run_link(&args),
         other => usage_err(&format!("unknown command `{other}`")),
     }
 }
