@@ -5,16 +5,9 @@ version. Each stressor is a hypothesized failure mode, scale concern,
 regulatory constraint, or stakeholder perspective that presses on the
 architecture.
 
-## Session lifecycle
+## Fixed Model Version
 
-- **Start a session** — opens an active session against the current
-  version. All subsequent stressor commands attach to it.
-- **Show** the active or a named session with its stressors and
-  outcomes.
-- **List** every session ever run in this scope.
-- A session *closes* when the next version is saved. That save also
-  triggers the automatic incidence report
-  ([scoring/incidence.md](scoring/incidence.md)).
+A stress session is performed against a particular version of the system model, that must be explicitly stated
 
 ## Stressors
 
@@ -47,3 +40,7 @@ surface hidden coupling, hotspots, and compound vulnerabilities would
 have nothing to pivot on.
 
 ## Stored as files
+
+## Compile
+
+Compiled and all invariants are checked on `archi check`

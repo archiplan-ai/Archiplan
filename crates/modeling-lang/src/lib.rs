@@ -113,6 +113,7 @@ pub use nkp::{
     NkpMatrix, NkpMetrics, NkpReport, NkpScope, NkpScopeInfo, NkpWarning, Regime, Slot,
 };
 pub use preset::Preset;
+pub use render::ScopeSource;
 pub use result::{
     BatchError, Finding, GraphEdge, GraphNode, GraphPort, Outcome, Request, Response, ResponseError,
 };

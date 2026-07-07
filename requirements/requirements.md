@@ -86,3 +86,7 @@ File structure:
 - Satisfy
 
 All fields are mandatory, i.e if for instance a requirement doesn't have a satisfy object yet, it must be explicitly left empty
+
+## Compile
+
+Compiled and all invariants are checked on `archi check`

@@ -1,6 +1,7 @@
 //! `archi` — a thin runner for the `.arch` source-format compiler
-//! (`requirements/cli.md`, `requirements/modeling-lang/source-format.md`) and
-//! the NKP landscape analysis (`requirements/scoring/nkp.md`).
+//! (`requirements/cli.md`, `requirements/modeling-lang/source-format.md`),
+//! the NKP landscape analysis (`requirements/scoring/nkp.md`) and the
+//! version archive (`requirements/versioning.md`).
 //!
 //! ```text
 //! archi check [--project <dir>] [--json]
@@ -8,6 +9,8 @@
 //! archi nkp   [--project <dir>] [--regime | --hotspots | --corridors] [--top | --scope <path>]
 //!             [--exclude '<src> <rel> <dst>']... [--only <edge-type>]...
 //!             [--tau-p <f>] [--tau-b <f>] [--neutrality degree|uniform] [--global-p <f>]
+//! archi version save -m <note> | list | show <id> | diff <a> <b> | current
+//!             [--project <dir>]
 //! ```
 //!
 //! Every verb locates its project by precedence: `--project`, then the
@@ -15,6 +18,8 @@
 //! `.arch` files is compiled fresh each run — the source is the model, and
 //! the only source of truth: the CLI offers no JSON editing of the model;
 //! mutation is a text edit and a recompile.
+
+mod versions;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -31,7 +36,12 @@ const USAGE: &str = "usage:
   archi build [--project <dir>] [--emit-batch <file|->]
   archi nkp   [--project <dir>] [--regime | --hotspots | --corridors] [--top | --scope <path>]
               [--exclude '<src> <rel> <dst>']... [--only <edge-type>]...
-              [--tau-p <f>] [--tau-b <f>] [--neutrality degree|uniform] [--global-p <f>]";
+              [--tau-p <f>] [--tau-b <f>] [--neutrality degree|uniform] [--global-p <f>]
+  archi version save -m <note> [--project <dir>]
+  archi version list [--project <dir>]
+  archi version show <id> [--project <dir>]
+  archi version diff <a> <b> [--project <dir>]
+  archi version current [--project <dir>]";
 
 struct Args {
     verb: String,
@@ -49,6 +59,8 @@ struct Args {
     tau_b: Option<f64>,
     neutrality: Option<String>,
     global_p: Option<f64>,
+    message: Option<String>,
+    positional: Vec<String>,
 }
 
 fn usage_err(msg: &str) -> ExitCode {
@@ -73,6 +85,8 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         tau_b: None,
         neutrality: None,
         global_p: None,
+        message: None,
+        positional: Vec::new(),
     };
     let mut it = argv.iter().peekable();
     let Some(verb) = it.next() else {
@@ -105,7 +119,9 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--global-p" => {
                 args.global_p = Some(float(value(&mut it, "--global-p")?, "--global-p")?)
             }
+            "-m" | "--message" => args.message = Some(value(&mut it, "-m")?),
             other if other.starts_with("--") => return Err(format!("unknown flag `{other}`")),
+            other if args.verb == "version" => args.positional.push(other.to_string()),
             other => return Err(format!("unexpected argument `{other}`")),
         }
     }
@@ -172,25 +188,159 @@ fn analysis_workspace(args: &Args) -> Result<Workspace, ExitCode> {
 }
 
 fn run_check(args: &Args) -> ExitCode {
-    let ws = match analysis_workspace(args) {
-        Ok(w) => w,
+    let root = match locate_project(args) {
+        Ok(r) => r,
+        Err(e) => return usage_err(&e),
+    };
+    let ws = match compile_or_report(&root, args.json) {
+        Ok(c) => c.workspace,
         Err(code) => return code,
     };
     let findings: Vec<Finding> = ws.model().check();
+    // The version archive is sealed: an edited keyframe, patch or manifest
+    // is a compile error, not a finding (requirements/versioning.md).
+    let archive_errors = versions::verify_at(&root);
     if args.json {
+        let mut envelope = json!({ "status": "ok", "findings": findings });
+        if !archive_errors.is_empty() {
+            envelope["status"] = json!("error");
+            envelope["archive"] = json!(
+                archive_errors
+                    .iter()
+                    .map(|m| json!({ "code": "E_ARCHIVE", "message": m }))
+                    .collect::<Vec<Value>>()
+            );
+        }
         println!(
             "{}",
-            serde_json::to_string_pretty(&json!({ "status": "ok", "findings": findings }))
-                .expect("serializes")
+            serde_json::to_string_pretty(&envelope).expect("serializes")
         );
-    } else if findings.is_empty() {
-        println!("no findings");
     } else {
-        for f in &findings {
-            println!("{f}");
+        if findings.is_empty() {
+            println!("no findings");
+        } else {
+            for f in &findings {
+                println!("{f}");
+            }
+        }
+        for e in &archive_errors {
+            eprintln!("archi/versions: E_ARCHIVE: {e}");
         }
     }
-    ExitCode::SUCCESS
+    if archive_errors.is_empty() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    }
+}
+
+fn run_version(args: &Args) -> ExitCode {
+    let fail = |e: String| -> ExitCode {
+        eprintln!("archi: {e}");
+        ExitCode::from(1)
+    };
+    let sub = args.positional.first().map(String::as_str);
+    let rest = args.positional.get(1..).unwrap_or_default();
+    let root = match locate_project(args) {
+        Ok(r) => r,
+        Err(e) => return usage_err(&e),
+    };
+    // Subcommands that read the archive alone; save and current compile the
+    // live tree first — a model that does not compile has no version.
+    match (sub, rest) {
+        (Some("save"), []) => {
+            let Some(note) = args.message.as_deref() else {
+                return usage_err("`version save` needs a note: -m <note>");
+            };
+            let ws = match compile_or_report(&root, false) {
+                Ok(c) => c.workspace,
+                Err(code) => return code,
+            };
+            match versions::save(&root, ws.model(), note) {
+                Ok(versions::Saved::Written {
+                    id,
+                    kind,
+                    file,
+                    bytes,
+                }) => {
+                    println!(
+                        "saved {id} ({}, {bytes} bytes, {}) — {note}",
+                        kind.describe(),
+                        file.display()
+                    );
+                    ExitCode::SUCCESS
+                }
+                Ok(versions::Saved::Unchanged { latest }) => fail(format!(
+                    "nothing to save: the model is unchanged since {latest}"
+                )),
+                Err(e) => fail(e),
+            }
+        }
+        (Some("list"), []) => match versions::Archive::open(&root) {
+            Ok(None) => {
+                println!("no versions saved");
+                ExitCode::SUCCESS
+            }
+            Ok(Some(archive)) => {
+                for e in archive.entries() {
+                    println!(
+                        "{}  {}  {:8}  {}",
+                        e.id,
+                        e.created,
+                        e.kind.describe(),
+                        e.note
+                    );
+                }
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e),
+        },
+        (Some("show"), [id]) => match versions::Archive::open(&root) {
+            Ok(None) => fail("no versions saved".into()),
+            Ok(Some(archive)) => match archive.reconstruct(id) {
+                Ok(text) => {
+                    print!("{text}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            },
+            Err(e) => fail(e),
+        },
+        (Some("diff"), [a, b]) => match versions::Archive::open(&root) {
+            Ok(None) => fail("no versions saved".into()),
+            Ok(Some(archive)) => {
+                match archive
+                    .reconstruct(a)
+                    .and_then(|from| archive.reconstruct(b).map(|to| (from, to)))
+                {
+                    Ok((from, to)) => {
+                        print!("{}", diffy::create_patch(&from, &to));
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => fail(e),
+                }
+            }
+            Err(e) => fail(e),
+        },
+        (Some("current"), []) => {
+            let ws = match compile_or_report(&root, false) {
+                Ok(c) => c.workspace,
+                Err(code) => return code,
+            };
+            match versions::current(&root, ws.model()) {
+                Ok(versions::Current::NoVersions) => println!("no versions saved"),
+                Ok(versions::Current::At(id)) => println!("at {id}"),
+                Ok(versions::Current::DirtySince(id)) => {
+                    println!("dirty: unsaved model changes since {id}")
+                }
+                Err(e) => return fail(e),
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            usage_err("`version` takes: save -m <note> | list | show <id> | diff <a> <b> | current")
+        }
+    }
 }
 
 fn run_build(args: &Args) -> ExitCode {
@@ -319,6 +469,7 @@ fn main() -> ExitCode {
         "check" => run_check(&args),
         "build" => run_build(&args),
         "nkp" => run_nkp(&args),
+        "version" => run_version(&args),
         other => usage_err(&format!("unknown command `{other}`")),
     }
 }
