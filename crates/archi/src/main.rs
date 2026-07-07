@@ -13,7 +13,7 @@
 //!             [--exclude '<src> <rel> <dst>']... [--only <edge-type>]...
 //!             [--tau-p <f>] [--tau-b <f>] [--neutrality degree|uniform] [--global-p <f>]
 //! archi incidence [--project <dir>] [--session <slug> | --since <id>] [--exclude-pending]
-//!             [--json | --matrix | --k-hyper | --findings] [--no-matrix]
+//!             [--all-terms] [--json | --matrix | --k-hyper | --findings] [--no-matrix]
 //!             [--kind <kind>]... [--min-severity info|warn|alert]
 //!             [--tau-j <f>] [--tau-d <f>] [--depth <n>] [--path-limit <n>]
 //! archi version save -m <note> | anchor | list | show <id> | diff <a> <b> | current
@@ -63,7 +63,7 @@ const USAGE: &str = "usage:
               [--exclude '<src> <rel> <dst>']... [--only <edge-type>]...
               [--tau-p <f>] [--tau-b <f>] [--neutrality degree|uniform] [--global-p <f>]
   archi incidence [--project <dir>] [--session <slug> | --since <id>] [--exclude-pending]
-              [--json | --matrix | --k-hyper | --findings] [--no-matrix]
+              [--all-terms] [--json | --matrix | --k-hyper | --findings] [--no-matrix]
               [--kind <kind>]... [--min-severity info|warn|alert]
               [--tau-j <f>] [--tau-d <f>] [--depth <n>] [--path-limit <n>]
   archi version save -m <note> [--project <dir>]
@@ -105,6 +105,7 @@ struct Args {
     session: Option<String>,
     since: Option<String>,
     exclude_pending: bool,
+    all_terms: bool,
     no_matrix: bool,
     matrix: bool,
     k_hyper: bool,
@@ -158,6 +159,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         session: None,
         since: None,
         exclude_pending: false,
+        all_terms: false,
         no_matrix: false,
         matrix: false,
         k_hyper: false,
@@ -209,6 +211,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--corridors" => args.corridors = true,
             "--top" => args.top = true,
             "--exclude-pending" => args.exclude_pending = true,
+            "--all-terms" => args.all_terms = true,
             "--no-matrix" => args.no_matrix = true,
             "--matrix" => args.matrix = true,
             "--k-hyper" => args.k_hyper = true,
@@ -1146,6 +1149,7 @@ fn run_incidence(args: &Args) -> ExitCode {
     if let Some(l) = args.path_limit {
         config.path_limit = l;
     }
+    config.all_terms = args.all_terms;
     let opts = incidence::Options {
         session: args.session.clone(),
         since: args.since.clone(),

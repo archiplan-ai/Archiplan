@@ -263,3 +263,94 @@ fn hotspots_zero_columns_and_the_degenerate_warnings() {
     assert!(r.warnings.iter().any(|w| w.code == "NO_STRESSORS"));
     assert_eq!(r.scope.k_hyper, 0.0);
 }
+
+/// The under-stressed sweep names behavior
+/// (`archi/requirements/self-hosting/under-stressed-names-behavior.md`):
+/// zero columns in `Data`'s closure are muted by default, `all_terms`
+/// widens the sweep, and nothing else consults the filter.
+#[test]
+fn under_stressed_names_behavior_and_all_terms_widens() {
+    let mut ws = ontology_ws();
+    outcomes(
+        &mut ws,
+        json!([
+            { "stmt": "define", "node": "Handler" },
+            { "stmt": "define", "node": "Quiet" },
+            { "stmt": "define", "node": "Journal" },
+            { "stmt": "define", "node": "Tokens" },
+            { "stmt": "rel-edge", "rel": "type_of", "source": "Service", "target": "Handler" },
+            { "stmt": "rel-edge", "rel": "type_of", "source": "Data", "target": "Journal" },
+            { "stmt": "rel-edge", "rel": "type_of", "source": "Data", "target": "Tokens" }
+        ]),
+    );
+    let model = ws.model();
+    let rows = [
+        row("s1", &["Handler", "Journal"], StressOutcome::Surviving),
+        row("s2", &["Journal"], StressOutcome::Breaking),
+    ];
+    let under = |r: &IncidenceReport| -> Vec<String> {
+        r.findings
+            .iter()
+            .filter_map(|f| match &f.kind {
+                IncidenceKind::UnderStressed { node } => Some(node.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+
+    // Default: the unpressed behavioral term stays loud; the unpressed data
+    // term is muted. The pressed data term counts everywhere — full matrix,
+    // hotspot findings — because only the emission consults the filter.
+    let r = incidence(model, &rows, &[]);
+    assert_eq!(r.matrix.components, ["Handler", "Quiet", "Journal", "Tokens"]);
+    assert_eq!(under(&r), ["Quiet"]);
+    assert!(
+        r.findings.iter().any(|f| matches!(
+            &f.kind,
+            IncidenceKind::StressHotspot { node, hits, .. } if node == "Journal" && *hits == 2
+        )),
+        "{:?}",
+        kinds(&r)
+    );
+
+    // all_terms widens the sweep back; matrix and the other findings are
+    // identical either way.
+    let all = model.incidence(
+        &rows,
+        &[],
+        &IncidenceConfig {
+            all_terms: true,
+            ..IncidenceConfig::default()
+        },
+    );
+    assert_eq!(under(&all), ["Quiet", "Tokens"]);
+    assert_eq!(r.matrix.rows, all.matrix.rows);
+    assert_eq!(r.matrix.components, all.matrix.components);
+    let non_under = |r: &IncidenceReport| -> Vec<&'static str> {
+        r.findings
+            .iter()
+            .filter(|f| !matches!(f.kind, IncidenceKind::UnderStressed { .. }))
+            .map(|f| f.kind.name())
+            .collect()
+    };
+    assert_eq!(non_under(&r), non_under(&all));
+
+    // No `Data` in the preset: the closure is empty and the sweep is
+    // complete — an unclassified term is never muted, even one that merely
+    // borrows the name `Data` without classifying anything.
+    let mut ws = Workspace::with_preset(&Preset::core()).expect("the core preset loads");
+    outcomes(
+        &mut ws,
+        json!([
+            { "stmt": "define", "node": "A" },
+            { "stmt": "define", "node": "B" },
+            { "stmt": "define", "node": "Data" }
+        ]),
+    );
+    let r = incidence(
+        ws.model(),
+        &[row("s1", &["A"], StressOutcome::Surviving)],
+        &[],
+    );
+    assert_eq!(under(&r), ["B", "Data"]);
+}

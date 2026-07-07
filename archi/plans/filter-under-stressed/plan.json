@@ -1,0 +1,77 @@
+{
+  "name": "filter-under-stressed",
+  "version": "v0004",
+  "created": "2026-07-07T19:47:31Z",
+  "state": "completed",
+  "closed_waves": 1,
+  "problem": "The incidence report emits one under_stressed info finding per never-pressed term, data vocabulary included (issues/incidence-under-stressed-noise.md): this repository's own rounds buried one warn and two alerts under 31-42 info lines, most of them Tokens/Ast/Report-class nodes no stressor would sensibly press. NKP already draws the boundary (its default slice drops Data-classified terms); the under-stressed sweep needs the same class filter at its emission site — and only there, per the signal-pressure round's survivors: pressed data terms keep counting everywhere, and terms no ontology classifies are never muted.",
+  "technology_stack": [
+    {
+      "tech": "Rust 2024, crates/modeling-lang incidence analysis + crates/archi CLI flag, no new dependencies",
+      "provenance": "the analysis and its one config surface live there; NkpConfig's exclude default is the in-repo precedent"
+    },
+    {
+      "tech": "cargo test — modeling-lang incidence tests plus the archi-side incidence tests",
+      "provenance": "the suites the requirement's regressions extend"
+    }
+  ],
+  "architecture_summary": [
+    {
+      "node": "Incidence",
+      "role": "scan consults the type_of closure of Data only when emitting under_stressed; matrix, hotspots, coupling and compound findings always see every column; all_terms in the config disables the filter"
+    }
+  ],
+  "stack_mapping": [
+    {
+      "tech": "IncidenceConfig.all_terms + a Data-closure skip in analyze's zero-column loop (crates/modeling-lang/src/incidence.rs)",
+      "node": "Incidence"
+    },
+    {
+      "tech": "--all-terms flag parsed in run_incidence (crates/archi/src/main.rs), documented in requirements/scoring/incidence.md and requirements/cli.md usage",
+      "node": "Cli"
+    }
+  ],
+  "scenarios": [
+    "cargo test --workspace green, including the three analysis regressions: pressed data term keeps its column and findings while only the unpressed data term's info line is muted; all_terms restores the muted findings verbatim; a core-preset model (no Data node) emits every under-stressed finding with the filter on.",
+    "On this repository, archi incidence --session signal-pressure names no pure-data terms under-stressed by default (the wall is gone; behavioral gaps remain visible), and --all-terms prints the full sweep again.",
+    "The spec keeps up: requirements/scoring/incidence.md documents the behavioral default and the widening flag on the under_stressed row."
+  ],
+  "scenarios_displayed": true,
+  "scenarios_closed": true,
+  "tasks": [
+    {
+      "id": "t1",
+      "node": "Incidence",
+      "description": "Scope the under-stressed emission to behavioral terms: compute the Data type_of closure once in analyze, skip zero-column findings for terms inside it unless config.all_terms; plumb --all-terms through the CLI; document in the incidence spec; add the three regressions.",
+      "spec_refs": [
+        "Incidence",
+        "Function type_of Incidence",
+        "Cli.drive consult(->ModelGraph, <-IncidenceReport) Incidence.scan"
+      ],
+      "stack_details": "IncidenceConfig gains all_terms: bool (default false). analyze resolves the term named Data (if any), takes reach(type_of) minus types minus stdlib — the same closure term_surface uses — and consults it only in the zero-column branch. main.rs parses --all-terms into the config. No report-shape change beyond the findings list.",
+      "inputs": {},
+      "outputs": [
+        "crates/modeling-lang/src/incidence.rs",
+        "crates/modeling-lang/tests/incidence.rs",
+        "crates/archi/src/main.rs",
+        "crates/archi/src/incidence.rs",
+        "requirements/scoring/incidence.md",
+        "requirements/cli.md"
+      ],
+      "verifications": {
+        "coupling-is-measured": [
+          "the filter never touches column construction: the pressed-data regression asserts the full matrix and the coupling/hotspot findings are byte-identical with the filter on and off; the existing coupling tests stay green"
+        ],
+        "findings-never-block": [
+          "filtered or widened, incidence findings stay advisory: existing exit-code behavior unchanged (archi incidence exits 0 with findings; archi check keeps findings non-blocking) — no exit-code paths touched by this change"
+        ],
+        "under-stressed-names-behavior": [
+          "modeling-lang test: matrix with a pressed and an unpressed data term — pressed column present in matrix and findings, only the unpressed term's under_stressed line muted",
+          "modeling-lang test: all_terms=true restores the muted findings verbatim",
+          "modeling-lang test: core-preset model with no Data node emits under-stressed for every zero column with the filter on",
+          "cli: archi incidence --all-terms widens; default report over this repo's rounds names no pure-data terms"
+        ]
+      }
+    }
+  ]
+}

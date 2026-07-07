@@ -36,14 +36,15 @@ by default, or one facet via `--regime` / `--hotspots` / `--corridors`.
 
 ```
 archi incidence [--project <dir>] [--session <slug> | --since <id>] [--exclude-pending]
-                [--json | --matrix | --k-hyper | --findings] [--no-matrix]
+                [--all-terms] [--json | --matrix | --k-hyper | --findings] [--no-matrix]
                 [--kind <kind>]... [--min-severity info|warn|alert]
                 [--tau-j <f>] [--tau-d <f>] [--depth <n>] [--path-limit <n>]
 ```
 
 The [incidence analysis](./scoring/incidence.md): the stressor × component matrix of one stress session — or of
 every session since a version — and its typed findings. The default output is the human report; `--json` and the
-facet flags emit JSON. The same report auto-fires on the `archi version save` that closes a session.
+facet flags emit JSON. The same report auto-fires on the `archi version save` that closes a session. The
+under-stressed sweep names behavioral terms by default; `--all-terms` widens it to the data vocabulary too.
 
 ```
 archi read [<request.json> | -] [--at <id>] [--project <dir>]

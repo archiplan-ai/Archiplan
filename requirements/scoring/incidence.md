@@ -38,6 +38,14 @@ currency:
 | `merge_candidate` | info | the same response similarity as hyperliminal coupling but *over* a declared path — two nodes that might really be one, or a shared concern worth extracting |
 | `under_stressed` | info | a zero column: no stressor touches the term — genuinely invulnerable or (more likely) the stress work is blind to it |
 
+The under-stressed sweep names **behavior** by default: zero columns in the `type_of` closure of
+`Data` — the boundary [NKP's default slice](nkp.md) already draws — emit no finding, so the
+report's tail is the list of unpressed components rather than a wall of vocabulary;
+`--all-terms` widens the sweep back to every zero column. The filter lives at the emission site
+alone: column construction, the matrix and every other finding always see all terms — a
+*pressed* data column counts everywhere regardless — and a model with no `Data` (or one whose
+`Data` classifies nothing) mutes nothing.
+
 An **invariant** is the satisfaction claim of an intent-origin
 requirement — the `satisfied-by` elements of a promise derived directly
 from the initial problem statement

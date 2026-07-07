@@ -51,6 +51,12 @@ pub struct IncidenceConfig {
     /// Node budget per connectivity probe; an exhausted budget assumes the
     /// pair connected (suppressing the finding) and warns `PATH_LIMIT_HIT`.
     pub path_limit: usize,
+    /// Widen the under-stressed sweep to every zero column. Off, the sweep
+    /// names behavior only: terms in the `type_of` closure of `Data` — the
+    /// boundary NKP's default slice draws — emit no finding
+    /// (`requirements/scoring/incidence.md#findings`). The matrix and every
+    /// other finding always see all columns.
+    pub all_terms: bool,
 }
 
 impl Default for IncidenceConfig {
@@ -60,6 +66,7 @@ impl Default for IncidenceConfig {
             tau_d: 0.5,
             depth: 2,
             path_limit: 4096,
+            all_terms: false,
         }
     }
 }
@@ -515,9 +522,29 @@ pub(crate) fn analyze(
 
     let mut findings: Vec<IncidenceFinding> = Vec::new();
 
+    // The under-stressed sweep names behavior: zero columns classified
+    // under `Data` stay silent unless the config widens the sweep. Only
+    // the emission consults this set — a pressed data column counts in the
+    // matrix and every other finding regardless. A term named `Data` that
+    // classifies nothing is no ontology: nothing is muted.
+    let muted: BTreeSet<usize> = if config.all_terms {
+        BTreeSet::new()
+    } else {
+        model
+            .resolve_in(None, &["Data".to_string()])
+            .filter(|n| types.contains(n))
+            .map(|n| {
+                reach(model, model.type_of, n, true)
+                    .into_iter()
+                    .filter_map(|m| index.get(model.node_path(m).as_str()).copied())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+
     // Hotspots and zero columns.
     for (j, hit) in hits.iter().enumerate() {
-        if s > 0 && hit.is_empty() {
+        if s > 0 && hit.is_empty() && !muted.contains(&j) {
             findings.push(IncidenceFinding {
                 severity: Severity::Info,
                 kind: IncidenceKind::UnderStressed {
