@@ -1,0 +1,39 @@
+--- original
++++ modified
+@@ -45,6 +45,12 @@
+   port build_ast
+ def node Compiler.Resolver:
+   port bind_names
++def node Compiler.Resolver.Defs:
++  port collect
++def node Compiler.Resolver.Uses:
++  port bind
++  port read_table
++def node DefTable
+ def node Diagnostics
+ def node DocsCompiler:
+   port compile_docs
+@@ -146,6 +152,7 @@
+ Data type_of ArchSource
+ Data type_of Tokens
+ Data type_of Ast
++Data type_of DefTable
+ Data type_of Resolution
+ Data type_of StatementBatch
+ Data type_of ModelGraph
+@@ -183,6 +190,7 @@
+ Function type_of DocsCompiler
+ Service type_of Links
+ Service type_of Planner
++Compiler.Resolver.Uses.read_table recall(<-DefTable) Compiler.Resolver.Defs.collect in compile_flow
+ Compiler.Driver.lex scan(->ArchSource, <-Tokens) Compiler.Lexer.tokenize in compile_flow
+ Compiler.Driver.build parse(->Tokens, <-Ast) Compiler.Parser.build_ast in compile_flow
+ Compiler.Driver.bind resolve(->Ast, <-Resolution) Compiler.Resolver.bind_names in compile_flow
+@@ -241,6 +249,7 @@
+ Planner.load_plan recall(<-PlanFile) SourceTree.serve in trace_flow
+ Planner.run_capture consult(->ItemHashIndex, <-LinkEvent) Links.capture in trace_flow
+ Planner.coverage recall(<-LinkEvent) Links.serve_links in trace_flow
++Compiler.Resolver.bind_names = Uses.bind
+ Compiler.compile = Driver.accept
+ Compiler.load_sources = Driver.discover
+ Compiler.fetch_preset = Driver.stdlib

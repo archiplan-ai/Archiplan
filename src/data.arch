@@ -4,6 +4,7 @@
 def node ArchSource      // .arch surface text — the model's only persistence
 def node Tokens          // lexer output
 def node Ast             // parsed modules, names still relative
+def node DefTable        // every module's rel/conn/view defs, complete before any use binds
 def node Resolution      // the absolute-path picture: nodes, edges, apps resolved
 def node StatementBatch  // the lowered, absolute-path JSON statements
 def node ModelGraph      // the compiled model: nodes, ports, typed edges, views
@@ -26,6 +27,7 @@ def node IncidenceReport // stressor × component matrix and its typed findings
 Data type_of ArchSource
 Data type_of Tokens
 Data type_of Ast
+Data type_of DefTable
 Data type_of Resolution
 Data type_of StatementBatch
 Data type_of ModelGraph

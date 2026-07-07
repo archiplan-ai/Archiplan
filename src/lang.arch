@@ -21,8 +21,15 @@ def node Compiler:
     port tokenize
   def node Parser:  // recursive descent; context-free constraints live here
     port build_ast
-  def node Resolver: // three passes; every reference becomes an absolute path
+  def node Resolver: // phased passes; every reference becomes an absolute path
     port bind_names
+    def node Defs: // sweeps every module's rel/conn/view defs into the table
+      port collect
+    def node Uses: // binds edges, apps, carriers against the complete table
+      port bind
+      port read_table
+    Uses.read_table recall(DefTable) Defs.collect in compile_flow
+    bind_names = Uses.bind
   def node Lower:   // fixed emission order makes the batch deterministic
     port emit
 
