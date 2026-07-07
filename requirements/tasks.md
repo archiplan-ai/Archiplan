@@ -28,18 +28,23 @@ Scope specifies what the plan implements. It may target:
   dependencies), and `outputs` (files written).
 - **Auto-derived requirements** — for every `spec_ref` the task
   lists, the requirements targeting it are pulled from the spec via
-  reverse lookup and attached. Cross-scope edge refs also pull reqs
-  on their non-excluded endpoints. Spec-side identity is
-  `(req_id, home_scope)` — two scopes can mint reqs with the same id
-  and they stay distinct. Each matched req carries `matched_refs`
-  (which of the task's own spec_refs pulled it in) and a stable
-  `slot_id` (`r1`, `r2`, …) — the local address CLI verbs like
-  `verification add/remove` use to disambiguate colliding ids on the
-  same task.
+  reverse lookup: a requirement matches when its `satisfied-by`
+  expansion ([requirements.md](requirements.md#satisfy), expanded
+  against the pinned version) intersects the task's spec_refs; edge
+  refs match through their endpoint nodes. Requirement identity is
+  the slug — slugs are unique project-wide
+  ([requirements.md](requirements.md#slugs), `E_SLUG`), so nothing
+  disambiguates further. Matched reqs are recomputed, never stored:
+  requirements are living documents outside the version archive, so
+  a stored match set could only go stale. Each match carries
+  `matched_refs` (which of the task's own spec_refs pulled it in)
+  and a `slot_id` (`r1`, `r2`, …) — a derived per-task ordinal for
+  short addresses in reports, not an identity.
 - **Verifications** — authored per task per requirement: how the
   implementer will prove the req is met (a failing test, a runtime
   contract, a migration assertion, anything the prose prescribes).
-  Verifications live on the plan, not on the requirement itself.
+  Verifications live on the plan, not on the requirement itself,
+  keyed by the requirement's slug in the task's `verifications` map.
 - **Scenarios** — free-text user stories on the plan envelope,
   decoupled from spec requirements. They never become tasks. After
   the last task wave is closed, `archi plan next` prints the
@@ -53,16 +58,27 @@ Scope specifies what the plan implements. It may target:
   the current spec. `plan start` refuses to transition until every
   matched requirement has ≥1 verification and the plan is
   structurally clean. Opening a wave records the tree state each of
-  its tasks' deltas is later diffed against. `plan next` first runs
-  the code-link capture — each closing task's delta is minted into
-  candidate links the closing agent reviews and selectively asserts
+  its tasks' deltas is later diffed against — a canonical item-hash
+  index (file → symbol → body hash, by the code-link canonicalizer),
+  so deltas are symbol-granular and git-free by construction.
+  `plan next` first runs the code-link capture — each closing task's
+  delta is minted into candidate links the closing agent reviews and
+  selectively asserts
   ([code-link.md](code-link.md#code-links--tasks)) — then advances
   the wave under two gates: structural verify (same checks as
   `plan start`) and asserted code-link coverage of every active
   task's spec_refs at the Working version. The step that demands
-  links is the step that produces them. `plan current-wave` prints
-  the tasks in flight. `plan close` and `plan reset` are manual
-  overrides.
+  links is the step that produces them; `plan next` is re-runnable,
+  so a failed gate is reviewed (`link confirm`) and retried. `plan
+  current-wave` prints the tasks in flight. `plan close` and
+  `plan reset` are manual overrides.
+- **Pinning** — `plan use` pins the version the live model is *at*
+  and refuses on a dirty or unversioned model: a plan projects a
+  hardened spec, and hardening is `archi version save`. When the
+  spec advances mid-plan, `plan verify` notes it; `plan repin`
+  re-pins the active plan to the version the live model is at (same
+  refusals), and the next `plan verify` flags every task whose
+  obligations no longer hold.
 
 ## Why
 
@@ -82,13 +98,23 @@ plan's job.
 ## Persistence
 
 Each plan lives at `archi/plans/<name>/plan.json`, beside the
-version archive and the link journal. The marker
-`archi/plans/.current` records which plan subsequent commands
-default to.
+version archive and the link journal; wave-open indexes sit under
+`archi/plans/<name>/waves/`. The marker `archi/plans/.current`
+records which plan subsequent commands default to.
+
+The editing surface splits like the rest of the system: authored
+fields — envelope prose, task descriptions, `stack_details`,
+`inputs`, `outputs`, extra `spec_refs`, `verifications`, scenarios —
+are edited in `plan.json` directly, exactly as requirements are
+edited in their markdown ([requirements.md](requirements.md));
+lifecycle state and derived content move only through verbs
+(`use`, `repin`, `task add`, `start`, `next`, `close`, `reset`), and
+every verb re-validates the file on load, so a hand edit cannot
+drift silently.
 
 ## Cross-references
 
-- [`skills/archiplan.md`](../skills/archiplan.md) — the agent
-  workflow that drives plan authoring end to end.
+- [`skills/archi.md`](../skills/archi.md) — the agent workflow that
+  drives plan authoring end to end.
 - [`code-link.md`](code-link.md) — capture at wave close, and how
   asserted links gate `plan next` wave transitions.

@@ -73,9 +73,10 @@ The plan is the join point: work happens inside a task that already carries `spe
 line is written ([tasks.md](tasks.md)), so intent is known at write time and never has to be recovered
 after the fact — the delta arrives pre-attributed.
 
-When a wave opens, the tree state is recorded per task. When it closes at `archi plan next`, each task's
-delta against its opening state is **captured**: hunks resolve to symbols, and the task's `spec_refs` ×
-touched symbols become candidate links. The closing agent reviews the batch — subtracts drive-by edits,
+When a wave opens, the tree state is recorded as a canonical item-hash index (file → symbol → body
+hash — no git involved, so squashes and shallow clones cannot break it). When the wave closes at
+`archi plan next`, each task's delta against that index is **captured**: the changed symbols are read
+off the index directly, and the task's `spec_refs` × touched symbols become candidate links. The closing agent reviews the batch — subtracts drive-by edits,
 asserts the load-bearing links, leaves the rest as evidence. Only then does the coverage gate count
 asserted links: the step that demands links is the step that produces them.
 
@@ -87,11 +88,13 @@ by hand.
 
 ```
 archi/links/
-  journal.jsonl        # append-only events: add, confirm, repin, retire
+  journal.jsonl        # append-only events: add, confirm, repin, retire, touch, decay
 ```
 
 The journal is the truth; the current link set is its fold: `add` mints (capture emits a batch of
-adds), `confirm` asserts, `repin` rewrites a projection, `retire` tombstones. Birth records store
+adds), `confirm` asserts, `repin` rewrites a projection, `retire` tombstones; `touch` and `decay` are
+capture's confidence observations on evidence links — recorded as events at the moment they are seen,
+so confidence itself stays derived, never stored. Birth records store
 **content, not references**: file, span, span-content hash, the symbol resolved at capture,
 canonicalizer version. A
 commit sha is optional provenance — never a dependency, for the same reasons versions refuse git as a
@@ -141,7 +144,7 @@ surface: visible until lifted, never blocking.
 ## Daily use
 
 Most days you only need three commands; the full loop lives in
-[`skills/code-link.md`](../skills/code-link.md). A `<SPEC_REF>` is `<element>[@<version>]` — a node
+[`skills/archi.md`](../skills/archi.md). A `<SPEC_REF>` is `<element>[@<version>]` — a node
 path or an edge's canonical surface text; a `<CODE_REF>` is `<file>[#<symbol>]`.
 
 ```bash
@@ -185,6 +188,6 @@ drift, following a move; **`archi link confirm <LINK_ID>`** asserts an evidence 
   verifications are the natural executable complement — checked by running, not hashing.
 - [`kb/code-link.md`](../kb/code-link.md) — full design: model, storage, cascade, CLI reference,
   acceptance posture.
-- [`skills/code-link.md`](../skills/code-link.md) — agent workflow: when to link, loop, kinds, roles,
-  escape hatch, failure modes.
+- [`skills/archi.md`](../skills/archi.md) — agent workflow: the full loop from intent to waves, when
+  to link, failure modes.
 - [`kb/tasks/code_link/`](../kb/tasks/code_link/) — implementation task breakdown for the feature.

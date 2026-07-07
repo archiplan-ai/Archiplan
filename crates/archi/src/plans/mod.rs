@@ -1,0 +1,1491 @@
+//! Plans: a hardened spec projected into an executable task graph
+//! (`requirements/tasks.md`).
+//!
+//! A plan pins one archived spec version and cuts **one task per node**;
+//! each task's `spec_refs` are seeded from the pinned model — the node plus
+//! its incoming edges — and its requirements are **derived**: the reverse
+//! lookup over the doc tree recomputes them on every read, because
+//! requirements are living documents outside the version archive and a
+//! stored match set could only go stale. Requirement identity is the slug
+//! (unique project-wide, `E_SLUG`); the `slot` is a per-task ordinal for
+//! short addresses, derived with the rest.
+//!
+//! The editing surface splits like the rest of the system: authored fields
+//! — envelope prose, descriptions, `inputs`, `outputs`, extra `spec_refs`,
+//! `verifications`, scenarios — are edited in `plan.json` directly, exactly
+//! as requirements are edited in their markdown; lifecycle state and
+//! derived content move only through verbs, and every verb re-validates the
+//! file on load, so a hand edit cannot drift silently.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
+
+use modeling_lang::{Definition, Model, Statement, Workspace};
+use serde::{Deserialize, Serialize};
+
+use crate::docs;
+use crate::links;
+use crate::versions;
+
+// ---- the plan model ---------------------------------------------------------
+
+/// Lifecycle state. `Draft` is authoring, `Started` runs waves,
+/// `Completed` is closed — by the scenario dance or `plan close`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PlanState {
+    /// Tasks are being cut and verifications authored.
+    Draft,
+    /// Waves are in flight; `plan next` advances.
+    Started,
+    /// All waves closed and scenarios latched, or manually closed.
+    Completed,
+}
+
+impl PlanState {
+    fn describe(self) -> &'static str {
+        match self {
+            PlanState::Draft => "draft",
+            PlanState::Started => "started",
+            PlanState::Completed => "completed",
+        }
+    }
+}
+
+/// One technology choice of the envelope, with its provenance — why this
+/// tech, mandated by what.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TechChoice {
+    /// The concrete technology.
+    pub tech: String,
+    /// Where the choice came from.
+    #[serde(default)]
+    pub provenance: String,
+}
+
+/// One line of the architecture summary: a top-level node and its role.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SummaryLine {
+    /// The node path.
+    pub node: String,
+    /// Its one-line role.
+    pub role: String,
+}
+
+/// Which concrete tech realizes which summary node.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StackMapping {
+    /// The technology, as named in the stack.
+    pub tech: String,
+    /// The node it realizes.
+    pub node: String,
+}
+
+/// One task: pinned to one node of one scope at the plan's version.
+/// `spec_refs` are seeded on create; everything else is authored by
+/// editing `plan.json`.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Task {
+    /// Dense id, `t1` onward — never reused, even past hand deletions.
+    pub id: String,
+    /// The node this task implements, at the pinned version.
+    pub node: String,
+    /// What the task does.
+    #[serde(default)]
+    pub description: String,
+    /// The spec elements it realizes: node paths and canonical edge text,
+    /// version-free — the plan's pin applies to all of them.
+    pub spec_refs: Vec<String>,
+    /// Concrete tech detail for this task.
+    #[serde(default)]
+    pub stack_details: String,
+    /// What this task consumes, keyed by the producing task's id — the
+    /// single source of truth for inter-task dependencies.
+    #[serde(default)]
+    pub inputs: BTreeMap<String, String>,
+    /// Files this task writes. An entry ending in `/` claims a directory;
+    /// capture attributes deltas through these.
+    #[serde(default)]
+    pub outputs: Vec<String>,
+    /// Authored proofs, keyed by matched requirement slug: how the
+    /// implementer will show the requirement is met.
+    #[serde(default)]
+    pub verifications: BTreeMap<String, Vec<String>>,
+}
+
+/// One plan, as stored at `archi/plans/<name>/plan.json`.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Plan {
+    /// The plan's name — equals its directory.
+    pub name: String,
+    /// The pinned spec version (`vNNNN`); `plan repin` moves it.
+    pub version: String,
+    /// ISO-8601 UTC timestamp of creation.
+    pub created: String,
+    /// Lifecycle state.
+    pub state: PlanState,
+    /// Waves that passed the gate; the wave in flight is `closed_waves + 1`.
+    #[serde(default)]
+    pub closed_waves: usize,
+    /// What the plan solves.
+    #[serde(default)]
+    pub problem: String,
+    /// The technology stack, with provenance.
+    #[serde(default)]
+    pub technology_stack: Vec<TechChoice>,
+    /// One-line role per top-level node.
+    #[serde(default)]
+    pub architecture_summary: Vec<SummaryLine>,
+    /// Which concrete tech realizes which summary node.
+    #[serde(default)]
+    pub stack_mapping: Vec<StackMapping>,
+    /// Free-text user stories, displayed as the final `plan next` step.
+    #[serde(default)]
+    pub scenarios: Vec<String>,
+    /// The scenarios block was printed after the last wave closed.
+    #[serde(default)]
+    pub scenarios_displayed: bool,
+    /// The scenario step was acknowledged; the plan completed through it.
+    #[serde(default)]
+    pub scenarios_closed: bool,
+    /// The task graph.
+    #[serde(default)]
+    pub tasks: Vec<Task>,
+}
+
+// ---- storage ----------------------------------------------------------------
+
+fn plans_dir(root: &Path) -> PathBuf {
+    root.join("archi").join("plans")
+}
+
+pub(crate) fn plan_dir(root: &Path, name: &str) -> PathBuf {
+    plans_dir(root).join(name)
+}
+
+fn plan_path(root: &Path, name: &str) -> PathBuf {
+    plan_dir(root, name).join("plan.json")
+}
+
+fn marker_path(root: &Path) -> PathBuf {
+    plans_dir(root).join(".current")
+}
+
+/// Plan names are slugs (`requirements/slug.md`): they become directories
+/// and the `.current` marker's content.
+fn validate_name(name: &str) -> Result<(), String> {
+    let slug_bytes = name
+        .bytes()
+        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+    if name.is_empty() || !slug_bytes || name.starts_with('-') || name.ends_with('-') {
+        return Err(format!(
+            "`{name}` is not a slug: lowercase, digits and `-` (E_SLUG)"
+        ));
+    }
+    Ok(())
+}
+
+fn load_plan(root: &Path, name: &str) -> Result<Plan, String> {
+    let path = plan_path(root, name);
+    let text =
+        fs::read_to_string(&path).map_err(|e| format!("cannot read `{}`: {e}", path.display()))?;
+    let plan: Plan = serde_json::from_str(&text)
+        .map_err(|e| format!("`{}` does not parse: {e}", path.display()))?;
+    if plan.name != name {
+        return Err(format!(
+            "`{}` names plan `{}` but sits in `{name}/` — the directory is the identity",
+            path.display(),
+            plan.name
+        ));
+    }
+    Ok(plan)
+}
+
+fn store_plan(root: &Path, plan: &Plan) -> Result<(), String> {
+    let dir = plan_dir(root, &plan.name);
+    fs::create_dir_all(&dir).map_err(|e| format!("cannot create `{}`: {e}", dir.display()))?;
+    let path = plan_path(root, &plan.name);
+    let mut text = serde_json::to_string_pretty(plan).map_err(|e| format!("plan serializes: {e}"))?;
+    text.push('\n');
+    fs::write(&path, text).map_err(|e| format!("cannot write `{}`: {e}", path.display()))
+}
+
+fn write_marker(root: &Path, name: &str) -> Result<(), String> {
+    let path = marker_path(root);
+    let dir = path.parent().expect("marker has a directory");
+    fs::create_dir_all(dir).map_err(|e| format!("cannot create `{}`: {e}", dir.display()))?;
+    fs::write(&path, format!("{name}\n"))
+        .map_err(|e| format!("cannot write `{}`: {e}", path.display()))
+}
+
+/// The name `.current` points at, if any.
+pub(crate) fn active_name(root: &Path) -> Result<Option<String>, String> {
+    let path = marker_path(root);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let text =
+        fs::read_to_string(&path).map_err(|e| format!("cannot read `{}`: {e}", path.display()))?;
+    let name = text.trim().to_string();
+    Ok((!name.is_empty()).then_some(name))
+}
+
+/// The active plan; an explicit error when none is.
+pub(crate) fn load_active(root: &Path) -> Result<Plan, String> {
+    match active_name(root)? {
+        None => Err("no active plan: `archi plan use <name>` creates or switches".into()),
+        Some(name) => load_plan(root, &name),
+    }
+}
+
+fn now() -> String {
+    versions::iso8601_utc(SystemTime::now())
+}
+
+/// The version a plan may pin: the one the live model is *at*. A dirty or
+/// unversioned model refuses — a plan projects a hardened spec, and
+/// hardening is `archi version save`.
+fn pinnable_version(root: &Path, model: &Model) -> Result<String, String> {
+    match versions::current(root, model)? {
+        versions::Current::At(id) => Ok(id),
+        versions::Current::NoVersions => Err(
+            "the project has no versions: a plan pins a hardened spec — \
+             `archi version save -m <note>` first"
+                .into(),
+        ),
+        versions::Current::DirtySince(id) => Err(format!(
+            "the live model has unsaved changes since {id}: a plan pins a hardened spec — \
+             save a version first"
+        )),
+    }
+}
+
+/// Compile the plan's pinned version out of the sealed archive.
+fn compile_pinned(root: &Path, version: &str) -> Result<Workspace, String> {
+    let archive = versions::Archive::open(root)?
+        .ok_or_else(|| "the project has no version archive".to_string())?;
+    docs::compile_version(root, &archive, version)
+}
+
+// ---- verbs: use, repin, task add --------------------------------------------
+
+/// The outcome of `archi plan use`.
+#[derive(Debug)]
+pub enum Used {
+    /// A fresh skeleton was created and made current.
+    Created(Plan),
+    /// An existing plan was made current.
+    Switched(Plan),
+}
+
+/// `archi plan use <name>`: switch to a named plan, creating an empty
+/// skeleton pinned to the current spec version on first use.
+pub fn use_plan(root: &Path, model: &Model, name: &str) -> Result<Used, String> {
+    validate_name(name)?;
+    if plan_path(root, name).exists() {
+        let plan = load_plan(root, name)?;
+        write_marker(root, name)?;
+        return Ok(Used::Switched(plan));
+    }
+    let version = pinnable_version(root, model)?;
+    let plan = Plan {
+        name: name.to_string(),
+        version,
+        created: now(),
+        state: PlanState::Draft,
+        closed_waves: 0,
+        problem: String::new(),
+        technology_stack: Vec::new(),
+        architecture_summary: Vec::new(),
+        stack_mapping: Vec::new(),
+        scenarios: Vec::new(),
+        scenarios_displayed: false,
+        scenarios_closed: false,
+        tasks: Vec::new(),
+    };
+    store_plan(root, &plan)?;
+    write_marker(root, name)?;
+    Ok(Used::Created(plan))
+}
+
+/// `archi plan repin`: move the active plan's pin to the version the live
+/// model is at — the sanctioned fix when the spec advances mid-plan. The
+/// next `plan verify` flags every task whose obligations no longer hold.
+pub fn repin(root: &Path, model: &Model) -> Result<(Plan, String), String> {
+    let mut plan = load_active(root)?;
+    let to = pinnable_version(root, model)?;
+    if to == plan.version {
+        return Err(format!("already pinned to {to}"));
+    }
+    let from = std::mem::replace(&mut plan.version, to);
+    store_plan(root, &plan)?;
+    Ok((plan, from))
+}
+
+/// `archi plan task add <node>`: mint a task pinned to a node of the
+/// pinned version, spec_refs seeded as the node plus its incoming edges.
+pub fn task_add(root: &Path, node: &str, description: Option<&str>) -> Result<Task, String> {
+    let mut plan = load_active(root)?;
+    if plan.state != PlanState::Draft {
+        return Err(format!(
+            "the plan is {}: tasks are cut in draft — `plan reset` restructures",
+            plan.state.describe()
+        ));
+    }
+    let ws = compile_pinned(root, &plan.version)?;
+    let model = ws.model();
+    if !model.has_node(node) {
+        return Err(format!(
+            "`{node}` names no element of {} (E_MODEL_REF)",
+            plan.version
+        ));
+    }
+    if let Some(t) = plan.tasks.iter().find(|t| t.node == node) {
+        return Err(format!("`{}` already pins `{node}` — one task per node", t.id));
+    }
+    let task = Task {
+        id: next_task_id(&plan.tasks),
+        node: node.to_string(),
+        description: description.unwrap_or_default().to_string(),
+        spec_refs: seed_spec_refs(model, node),
+        stack_details: String::new(),
+        inputs: BTreeMap::new(),
+        outputs: Vec::new(),
+        verifications: BTreeMap::new(),
+    };
+    plan.tasks.push(task.clone());
+    store_plan(root, &plan)?;
+    Ok(task)
+}
+
+/// Dense past every id ever seen — a hand-deleted task must not free its id.
+fn next_task_id(tasks: &[Task]) -> String {
+    let max = tasks
+        .iter()
+        .filter_map(|t| t.id.strip_prefix('t')?.parse::<usize>().ok())
+        .max()
+        .unwrap_or(0);
+    format!("t{}", max + 1)
+}
+
+/// The task's obligations at birth: the node itself plus every edge of the
+/// pinned model that comes into it — a directed edge whose target end lands
+/// on the node or inside its subtree from outside, or an undirected edge
+/// crossing that boundary either way.
+fn seed_spec_refs(model: &Model, node: &str) -> Vec<String> {
+    let dump = model.dump();
+    let mut directed: BTreeMap<&str, bool> = BTreeMap::new();
+    for s in &dump {
+        match s {
+            Statement::Define(Definition::Rel {
+                name, directed: d, ..
+            })
+            | Statement::Define(Definition::Conn {
+                name, directed: d, ..
+            }) => {
+                directed.insert(name.as_str(), *d);
+            }
+            _ => {}
+        }
+    }
+    let prefix = format!("{node}.");
+    let inside = |path: &str| path == node || path.starts_with(&prefix);
+    let mut refs = vec![node.to_string()];
+    for s in &dump {
+        let (edge_type, src, dst) = match s {
+            Statement::RelEdge {
+                rel,
+                source,
+                target,
+                ..
+            } => (rel.as_str(), source.as_str(), target.as_str()),
+            Statement::ConnEdge {
+                conn,
+                source,
+                target,
+                ..
+            } => (conn.as_str(), source.node.as_str(), target.node.as_str()),
+            _ => continue,
+        };
+        let (src_in, dst_in) = (inside(src), inside(dst));
+        let incoming = dst_in && !src_in;
+        let undirected_crossing =
+            !directed.get(edge_type).copied().unwrap_or(true) && src_in != dst_in;
+        if (incoming || undirected_crossing)
+            && let Some(pseudo) = links::edge_pseudo(s)
+        {
+            refs.push(pseudo);
+        }
+    }
+    refs
+}
+
+// ---- the derived view: reverse lookup and waves ------------------------------
+
+/// One requirement the reverse lookup matched to a task. Identity is the
+/// slug; `slot` is a per-task ordinal for short addresses, derived with
+/// the rest and stable while the matched set is.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize)]
+pub struct MatchedReq {
+    /// `r1`, `r2`, … in slug order.
+    pub slot: String,
+    /// The requirement's slug.
+    pub req: String,
+    /// Which of the task's own spec_refs pulled it in.
+    pub matched_refs: Vec<String>,
+}
+
+/// Everything derived from a plan against the spec — recomputed, never
+/// stored.
+#[derive(Serialize)]
+pub struct Derived {
+    /// Task id → matched requirements.
+    pub matched: BTreeMap<String, Vec<MatchedReq>>,
+    /// Topological layers of the inputs DAG: wave k holds the tasks whose
+    /// inputs all close earlier. Empty when the structure is broken.
+    pub waves: Vec<Vec<String>>,
+}
+
+/// Endpoint nodes of every edge of a model, keyed by canonical surface
+/// text — how edge spec_refs reach requirements on their ends.
+fn edge_endpoints(model: &Model) -> BTreeMap<String, (String, String)> {
+    let mut out = BTreeMap::new();
+    for s in model.dump() {
+        let ends = match &s {
+            Statement::RelEdge { source, target, .. } => (source.clone(), target.clone()),
+            Statement::ConnEdge { source, target, .. } => {
+                (source.node.clone(), target.node.clone())
+            }
+            _ => continue,
+        };
+        if let Some(pseudo) = links::edge_pseudo(&s) {
+            out.insert(pseudo, ends);
+        }
+    }
+    out
+}
+
+/// The reverse lookup (`requirements/tasks.md`): a requirement matches a
+/// task when its satisfied-by expansion against the pinned model
+/// ([`Model::term_surface`], the expansion stressor affects share)
+/// intersects the task's spec_refs; an edge ref matches through its
+/// endpoint nodes. Entries that do not resolve at the pinned version
+/// contribute nothing — their claim is against the live model, checked by
+/// `archi check`.
+fn matched_requirements(
+    pinned: &Model,
+    tree: &docs::Tree,
+    endpoints: &BTreeMap<String, (String, String)>,
+    task: &Task,
+) -> Vec<MatchedReq> {
+    let ref_nodes: Vec<(&str, BTreeSet<&str>)> = task
+        .spec_refs
+        .iter()
+        .map(|r| {
+            let nodes: BTreeSet<&str> = match endpoints.get(r) {
+                Some((s, d)) => [s.as_str(), d.as_str()].into(),
+                None => [r.as_str()].into(),
+            };
+            (r.as_str(), nodes)
+        })
+        .collect();
+    let mut reqs: Vec<&docs::schema::Requirement> = tree.requirements.iter().collect();
+    reqs.sort_by(|a, b| a.slug.cmp(&b.slug));
+    reqs.dedup_by(|a, b| a.slug == b.slug); // colliding slugs are E_SLUG, reported by `check`
+    let mut out = Vec::new();
+    for r in reqs {
+        let Some(fields) = &r.fields else { continue };
+        let Some((entries, _)) = &fields.satisfied_by else {
+            continue;
+        };
+        let mut surface: BTreeSet<String> = BTreeSet::new();
+        for entry in entries {
+            if let Some(terms) = pinned.term_surface(entry) {
+                surface.extend(terms);
+            }
+        }
+        if surface.is_empty() {
+            continue;
+        }
+        let matched_refs: Vec<String> = ref_nodes
+            .iter()
+            .filter(|(_, nodes)| nodes.iter().any(|n| surface.contains(*n)))
+            .map(|(text, _)| (*text).to_string())
+            .collect();
+        if !matched_refs.is_empty() {
+            out.push(MatchedReq {
+                slot: format!("r{}", out.len() + 1),
+                req: r.slug.clone(),
+                matched_refs,
+            });
+        }
+    }
+    out
+}
+
+/// Topological layers of the inputs DAG. Unknown input keys are treated as
+/// satisfied — they are already reported — so the layering stays total;
+/// a genuine cycle errors with its members.
+fn layer(tasks: &[Task]) -> Result<Vec<Vec<String>>, String> {
+    let ids: BTreeSet<&str> = tasks.iter().map(|t| t.id.as_str()).collect();
+    let mut placed: BTreeSet<&str> = BTreeSet::new();
+    let mut remaining: Vec<&Task> = tasks.iter().collect();
+    let mut waves = Vec::new();
+    while !remaining.is_empty() {
+        let (ready, rest): (Vec<&Task>, Vec<&Task>) = remaining.iter().partition(|t| {
+            t.inputs
+                .keys()
+                .all(|k| placed.contains(k.as_str()) || !ids.contains(k.as_str()))
+        });
+        if ready.is_empty() {
+            let members: Vec<&str> = remaining.iter().map(|t| t.id.as_str()).collect();
+            return Err(format!(
+                "the inputs of {} form a cycle — inputs are a DAG",
+                members.join(", ")
+            ));
+        }
+        placed.extend(ready.iter().map(|t| t.id.as_str()));
+        waves.push(ready.into_iter().map(|t| t.id.clone()).collect());
+        remaining = rest;
+    }
+    Ok(waves)
+}
+
+// ---- verify ------------------------------------------------------------------
+
+/// The outcome of `archi plan verify`: structural errors gate the
+/// lifecycle; notes are advisory, findings-style.
+#[derive(Serialize)]
+pub struct PlanReport {
+    /// The plan's name.
+    pub plan: String,
+    /// The pinned version.
+    pub version: String,
+    /// Lifecycle state.
+    pub state: PlanState,
+    /// Structural errors — `plan start` and `plan next` refuse while any
+    /// stand.
+    pub errors: Vec<String>,
+    /// Advisory: spec drift at Working, a stale pin, doc-layer problems.
+    pub notes: Vec<String>,
+    /// The derived view.
+    #[serde(flatten)]
+    pub derived: Derived,
+}
+
+/// `archi plan verify`: structural invariants against the pinned version,
+/// drift notes against the live model.
+pub fn verify(root: &Path, model: &Model) -> Result<PlanReport, String> {
+    let plan = load_active(root)?;
+    verify_plan(root, model, &plan)
+}
+
+/// `archi plan show`: the active plan and its derived view — the authoring
+/// read surface.
+pub fn show(root: &Path, model: &Model) -> Result<(Plan, PlanReport), String> {
+    let plan = load_active(root)?;
+    let report = verify_plan(root, model, &plan)?;
+    Ok((plan, report))
+}
+
+pub(crate) fn verify_plan(root: &Path, live: &Model, plan: &Plan) -> Result<PlanReport, String> {
+    let mut errors = Vec::new();
+    let mut notes = Vec::new();
+    let ws = compile_pinned(root, &plan.version)?;
+    let pinned = ws.model();
+
+    // Latch order — hand edits cannot outrun the verbs.
+    if plan.scenarios_closed && !plan.scenarios_displayed {
+        errors.push("scenarios_closed without scenarios_displayed — the latches are ordered".into());
+    }
+    if plan.state == PlanState::Draft && (plan.closed_waves > 0 || plan.scenarios_displayed) {
+        errors.push("a draft plan carries lifecycle state — `plan reset` clears it whole".into());
+    }
+
+    // Tasks: ids, nodes, spec_refs — all against the pinned version.
+    let mut ids: BTreeSet<&str> = BTreeSet::new();
+    let mut nodes: BTreeSet<&str> = BTreeSet::new();
+    for t in &plan.tasks {
+        let well_formed = t
+            .id
+            .strip_prefix('t')
+            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+        if !well_formed {
+            errors.push(format!("task ids are `t<N>`; got `{}`", t.id));
+        }
+        if !ids.insert(&t.id) {
+            errors.push(format!("task id `{}` is used twice", t.id));
+        }
+        if !nodes.insert(&t.node) {
+            errors.push(format!("two tasks pin `{}` — one task per node", t.node));
+        }
+        if !pinned.has_node(&t.node) {
+            errors.push(format!(
+                "{}: `{}` names no element of {} (E_MODEL_REF)",
+                t.id, t.node, plan.version
+            ));
+        }
+        for r in &t.spec_refs {
+            if r.contains('@') {
+                errors.push(format!(
+                    "{}: `{r}` carries a version — spec_refs are version-free; the plan's pin applies",
+                    t.id
+                ));
+                continue;
+            }
+            let canonical = links::normalize_ref(r);
+            if *r != canonical {
+                errors.push(format!(
+                    "{}: `{r}` is not canonical — write `{canonical}`",
+                    t.id
+                ));
+                continue;
+            }
+            let spec = links::SpecRef {
+                path: canonical,
+                version: None,
+            };
+            if !links::resolves_in(pinned, &spec) {
+                errors.push(format!(
+                    "{}: `{r}` names no element of {} (E_MODEL_REF)",
+                    t.id, plan.version
+                ));
+            } else if !links::resolves_in(live, &spec) {
+                notes.push(format!(
+                    "{}: `{r}` no longer resolves at Working — the spec moved on; \
+                     `plan repin` when the plan should follow",
+                    t.id
+                ));
+            }
+        }
+    }
+    for t in &plan.tasks {
+        for input in t.inputs.keys() {
+            if input == &t.id {
+                errors.push(format!("{}: inputs itself", t.id));
+            } else if !ids.contains(input.as_str()) {
+                errors.push(format!("{}: input `{input}` names no task", t.id));
+            }
+        }
+    }
+
+    // Waves.
+    let waves = match layer(&plan.tasks) {
+        Ok(w) => w,
+        Err(e) => {
+            errors.push(e);
+            Vec::new()
+        }
+    };
+    if !waves.is_empty() && plan.closed_waves > waves.len() {
+        errors.push(format!(
+            "{} waves closed but the layering has {} — the graph was restructured mid-flight",
+            plan.closed_waves,
+            waves.len()
+        ));
+    }
+
+    // Matched requirements — derived; verification keys must match them.
+    let (tree, doc_report) = docs::load(root, live);
+    if !doc_report.diagnostics.is_empty() {
+        notes.push(format!(
+            "{} doc diagnostics — the reverse lookup reads a best-effort tree (`archi check`)",
+            doc_report.diagnostics.len()
+        ));
+    }
+    let endpoints = edge_endpoints(pinned);
+    let mut matched = BTreeMap::new();
+    for t in &plan.tasks {
+        let m = matched_requirements(pinned, &tree, &endpoints, t);
+        for slug in t.verifications.keys() {
+            if !m.iter().any(|mr| &mr.req == slug) {
+                errors.push(format!(
+                    "{}: verification for `{slug}`, which the reverse lookup does not match — \
+                     a stale key, or the requirement moved",
+                    t.id
+                ));
+            }
+        }
+        matched.insert(t.id.clone(), m);
+    }
+
+    // A stale pin is advisory: the plan may finish against the version it
+    // planned for.
+    if let Some(archive) = versions::Archive::open(root)?
+        && let Some(latest) = archive.entries().last()
+        && latest.id != plan.version
+    {
+        notes.push(format!(
+            "the spec advanced: pinned {}, latest {} — `plan repin` when the plan should follow",
+            plan.version, latest.id
+        ));
+    }
+
+    Ok(PlanReport {
+        plan: plan.name.clone(),
+        version: plan.version.clone(),
+        state: plan.state,
+        errors,
+        notes,
+        derived: Derived { matched, waves },
+    })
+}
+
+// ---- lifecycle ---------------------------------------------------------------
+
+fn gate_structure(report: &PlanReport) -> Result<(), String> {
+    if report.errors.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "the plan is structurally broken:\n  {}",
+        report.errors.join("\n  ")
+    ))
+}
+
+/// Every matched requirement of every task carries at least one authored
+/// verification — the plan refuses to start half-promised.
+fn gate_verifications(plan: &Plan, report: &PlanReport) -> Result<(), String> {
+    let mut missing = Vec::new();
+    for t in &plan.tasks {
+        for m in report.derived.matched.get(&t.id).into_iter().flatten() {
+            if t.verifications.get(&m.req).is_none_or(Vec::is_empty) {
+                missing.push(format!("{}: {} ({})", t.id, m.req, m.slot));
+            }
+        }
+    }
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "every matched requirement needs a verification before start; missing:\n  {}",
+            missing.join("\n  ")
+        ))
+    }
+}
+
+/// Asserted code-link coverage: every spec_ref of every in-flight task has
+/// a live asserted link at the Working slot. Evidence never gates.
+fn gate_coverage(root: &Path, in_flight: &[&Task]) -> Result<(), String> {
+    let live = links::ls(root, None, false)?;
+    let mut gaps = Vec::new();
+    for t in in_flight {
+        for r in &t.spec_refs {
+            let covered = live.iter().any(|l| {
+                l.standing == links::Standing::Asserted
+                    && l.spec.version.is_none()
+                    && l.spec.path == *r
+            });
+            if !covered {
+                gaps.push(format!("{}: `{r}`", t.id));
+            }
+        }
+    }
+    if gaps.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "asserted code-link coverage is incomplete:\n  {}\nreview the captured candidates \
+             (`archi link ls --evidence`), assert the load-bearing ones \
+             (`archi link confirm <id>`), then re-run `archi plan next`",
+            gaps.join("\n  ")
+        ))
+    }
+}
+
+/// `archi plan start`: gate on structure and verifications, open wave 1.
+/// Returns the plan and the wave-1 task ids now in flight.
+pub fn start(root: &Path, model: &Model) -> Result<(Plan, Vec<String>), String> {
+    let mut plan = load_active(root)?;
+    if plan.state != PlanState::Draft {
+        return Err(format!(
+            "the plan is {} — `plan reset` rewinds it",
+            plan.state.describe()
+        ));
+    }
+    if plan.tasks.is_empty() {
+        return Err("the plan has no tasks: `archi plan task add <node>`".into());
+    }
+    let report = verify_plan(root, model, &plan)?;
+    gate_structure(&report)?;
+    gate_verifications(&plan, &report)?;
+    links::capture::write_index(root, &plan.name, 1)?;
+    plan.state = PlanState::Started;
+    plan.closed_waves = 0;
+    store_plan(root, &plan)?;
+    Ok((plan, report.derived.waves[0].clone()))
+}
+
+/// What one `archi plan next` did.
+pub enum Step {
+    /// The coverage gate refused; the capture above it already ran.
+    Blocked(String),
+    /// A wave closed and the next opened.
+    Wave {
+        /// The wave just closed, 1-based.
+        closed: usize,
+        /// The task ids now in flight.
+        next_tasks: Vec<String>,
+    },
+    /// All waves closed: the scenarios block, printed as the final step.
+    Scenarios(Vec<String>),
+    /// The plan completed.
+    Done,
+}
+
+/// The outcome of `archi plan next`: what capture produced (when a wave
+/// was closing), then the step taken.
+pub struct NextOutcome {
+    /// The capture that ran before the gates, if one did.
+    pub capture: Option<links::capture::CaptureOutcome>,
+    /// The step.
+    pub step: Step,
+}
+
+/// `archi plan next`: capture the closing wave's deltas into candidate
+/// links, then advance under the structural and coverage gates — the step
+/// that demands links is the step that produces them, and it is
+/// re-runnable: review (`link confirm`), then run it again.
+pub fn next(root: &Path, model: &Model) -> Result<NextOutcome, String> {
+    let mut plan = load_active(root)?;
+    match plan.state {
+        PlanState::Draft => {
+            return Err("the plan is draft — `plan start` opens the first wave".into());
+        }
+        PlanState::Completed => {
+            return Err("the plan is completed — `plan reset` runs it again".into());
+        }
+        PlanState::Started => {}
+    }
+    let report = verify_plan(root, model, &plan)?;
+    let waves = &report.derived.waves;
+
+    // Past the last wave: the scenario latch dance.
+    if plan.closed_waves >= waves.len() {
+        if plan.scenarios_displayed && !plan.scenarios_closed {
+            plan.scenarios_closed = true;
+            plan.state = PlanState::Completed;
+            store_plan(root, &plan)?;
+            return Ok(NextOutcome {
+                capture: None,
+                step: Step::Done,
+            });
+        }
+        return Err("nothing in flight and no scenario step pending — `archi plan verify`".into());
+    }
+
+    gate_structure(&report)?;
+    let wave = plan.closed_waves + 1;
+    let in_flight: Vec<&Task> = plan
+        .tasks
+        .iter()
+        .filter(|t| waves[wave - 1].contains(&t.id))
+        .collect();
+    let capture = links::capture::capture_wave(root, &plan.name, wave, &in_flight, None)?;
+    if let Err(gaps) = gate_coverage(root, &in_flight) {
+        return Ok(NextOutcome {
+            capture: Some(capture),
+            step: Step::Blocked(gaps),
+        });
+    }
+
+    plan.closed_waves = wave;
+    let step = if plan.closed_waves < waves.len() {
+        links::capture::write_index(root, &plan.name, wave + 1)?;
+        Step::Wave {
+            closed: wave,
+            next_tasks: waves[wave].clone(),
+        }
+    } else if plan.scenarios.is_empty() {
+        // No scenarios recorded: skip the step and close the plan.
+        plan.state = PlanState::Completed;
+        Step::Done
+    } else {
+        plan.scenarios_displayed = true;
+        Step::Scenarios(plan.scenarios.clone())
+    };
+    store_plan(root, &plan)?;
+    Ok(NextOutcome {
+        capture: Some(capture),
+        step,
+    })
+}
+
+/// What `archi plan current-wave` reports.
+pub enum InFlight {
+    /// The 1-based wave and its task ids.
+    Wave(usize, Vec<String>),
+    /// All waves closed; the scenario step is pending.
+    ScenarioStep,
+}
+
+/// `archi plan current-wave`: the tasks in flight.
+pub fn current_wave(root: &Path, model: &Model) -> Result<(Plan, InFlight), String> {
+    let plan = load_active(root)?;
+    if plan.state != PlanState::Started {
+        return Err(format!("the plan is {}", plan.state.describe()));
+    }
+    let report = verify_plan(root, model, &plan)?;
+    let waves = report.derived.waves;
+    if plan.closed_waves >= waves.len() {
+        return Ok((plan, InFlight::ScenarioStep));
+    }
+    let ids = waves[plan.closed_waves].clone();
+    let wave = plan.closed_waves + 1;
+    Ok((plan, InFlight::Wave(wave, ids)))
+}
+
+/// `archi plan close`: manual override to Completed — no gates.
+pub fn close(root: &Path) -> Result<Plan, String> {
+    let mut plan = load_active(root)?;
+    if plan.state == PlanState::Completed {
+        return Err(format!("plan `{}` is already completed", plan.name));
+    }
+    plan.state = PlanState::Completed;
+    store_plan(root, &plan)?;
+    Ok(plan)
+}
+
+/// `archi plan reset`: back to draft — waves rewound, latches unlatched,
+/// wave indexes removed. Journaled links stay: the journal is append-only.
+pub fn reset(root: &Path) -> Result<Plan, String> {
+    let mut plan = load_active(root)?;
+    plan.state = PlanState::Draft;
+    plan.closed_waves = 0;
+    plan.scenarios_displayed = false;
+    plan.scenarios_closed = false;
+    let waves_dir = plan_dir(root, &plan.name).join("waves");
+    if waves_dir.exists() {
+        fs::remove_dir_all(&waves_dir)
+            .map_err(|e| format!("cannot remove `{}`: {e}", waves_dir.display()))?;
+    }
+    store_plan(root, &plan)?;
+    Ok(plan)
+}
+
+// ---- rendering ---------------------------------------------------------------
+
+/// The verify report as human lines: errors, notes, the tally.
+pub fn render_report(report: &PlanReport) -> String {
+    let mut out = format!(
+        "plan `{}` @ {} ({})\n",
+        report.plan,
+        report.version,
+        report.state.describe()
+    );
+    for e in &report.errors {
+        out.push_str(&format!("error: {e}\n"));
+    }
+    for n in &report.notes {
+        out.push_str(&format!("note: {n}\n"));
+    }
+    let reqs: usize = report.derived.matched.values().map(Vec::len).sum();
+    out.push_str(&format!(
+        "{} tasks in {} waves, {} matched requirements: {}\n",
+        report.derived.matched.len(),
+        report.derived.waves.len(),
+        reqs,
+        if report.errors.is_empty() {
+            "structurally clean"
+        } else {
+            "structurally broken"
+        }
+    ));
+    out
+}
+
+/// The plan with its derived view as human lines — the authoring read
+/// surface.
+pub fn render_show(plan: &Plan, report: &PlanReport) -> String {
+    let mut out = format!(
+        "plan `{}` @ {} ({}), created {}\n",
+        plan.name,
+        plan.version,
+        plan.state.describe(),
+        plan.created
+    );
+    if !plan.problem.is_empty() {
+        out.push_str(&format!("problem: {}\n", plan.problem));
+    }
+    for t in &plan.technology_stack {
+        let provenance = if t.provenance.is_empty() {
+            String::new()
+        } else {
+            format!(" — {}", t.provenance)
+        };
+        out.push_str(&format!("stack: {}{provenance}\n", t.tech));
+    }
+    for s in &plan.architecture_summary {
+        out.push_str(&format!("summary: {} — {}\n", s.node, s.role));
+    }
+    for m in &plan.stack_mapping {
+        out.push_str(&format!("mapping: {} realizes {}\n", m.tech, m.node));
+    }
+    for (i, wave) in report.derived.waves.iter().enumerate() {
+        let in_flight = plan.state == PlanState::Started && i == plan.closed_waves;
+        out.push_str(&format!(
+            "wave {}{}:\n",
+            i + 1,
+            if in_flight { " (in flight)" } else { "" }
+        ));
+        for id in wave {
+            let Some(task) = plan.tasks.iter().find(|t| &t.id == id) else {
+                continue;
+            };
+            out.push_str(&format!("  {} {} — {}\n", task.id, task.node, task.description));
+            out.push_str(&format!("    spec_refs: {}\n", task.spec_refs.join(", ")));
+            for m in report.derived.matched.get(id).into_iter().flatten() {
+                let proofs = task.verifications.get(&m.req).map_or(0, Vec::len);
+                out.push_str(&format!(
+                    "    {} {} (via {}) — {} verification{}\n",
+                    m.slot,
+                    m.req,
+                    m.matched_refs.join(", "),
+                    proofs,
+                    if proofs == 1 { "" } else { "s" }
+                ));
+            }
+        }
+    }
+    for s in &plan.scenarios {
+        out.push_str(&format!("scenario: {s}\n"));
+    }
+    for e in &report.errors {
+        out.push_str(&format!("error: {e}\n"));
+    }
+    for n in &report.notes {
+        out.push_str(&format!("note: {n}\n"));
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+    const MODEL: &str = "def conn wire := * -> *\n\
+                         def rel peer := * <-> *\n\
+                         def node Gate:\n  port out\n\
+                         def node Auth:\n  port inn\n  port creds\n\
+                         def node Store:\n  port inn\n\
+                         def node Audit:\n  port inn\n\
+                         Gate.out wire Auth.inn\n\
+                         Auth.creds wire Store.inn\n\
+                         Auth peer Audit\n\
+                         Service type_of Auth\n";
+
+    fn temp_project() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "archi-plans-test-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::SeqCst)
+        ));
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::write(
+            dir.join("archi.toml"),
+            "[project]\nname = \"t\"\npreset = \"default\"\n",
+        )
+        .unwrap();
+        fs::write(dir.join("src").join("model.arch"), MODEL).unwrap();
+        dir
+    }
+
+    fn put(root: &Path, rel_path: &str, text: &str) {
+        let path = root.join(rel_path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
+    }
+
+    fn compiled(root: &Path) -> Workspace {
+        modeling_lang::source::compile_project(root)
+            .unwrap_or_else(|f| panic!("test model failed to compile:\n{}", f.render()))
+            .workspace
+    }
+
+    fn save_version(root: &Path) -> String {
+        let ws = compiled(root);
+        match versions::save(root, ws.model(), "planned").unwrap() {
+            versions::Saved::Written { id, .. } => id,
+            versions::Saved::Unchanged { latest } => latest,
+        }
+    }
+
+    fn requirement(satisfied_by: &str, name: &str) -> String {
+        format!(
+            "---\nkind: functional\norigin: intent\nsatisfied-by: [{satisfied_by}]\ndeferred:\n---\n\n\
+             # {name}\n\nSummary paragraph.\n\n## System Context\n\n## Satisfy\n{}",
+            if satisfied_by.is_empty() {
+                "\n".to_string()
+            } else {
+                "\nProse claim.\n\n- test — proof sketch\n".to_string()
+            }
+        )
+    }
+
+    /// An intent with requirements shaped to exercise every matching rule:
+    /// a term hit, a type expansion, an edge-endpoint hit, an open req.
+    fn put_requirements(root: &Path) {
+        put(
+            root,
+            "archi/requirements/hardening/hardening.md",
+            "# Hardening\n\nThe area.\n",
+        );
+        put(
+            root,
+            "archi/requirements/hardening/store-encrypted.md",
+            &requirement("Store", "Store encrypted"),
+        );
+        put(
+            root,
+            "archi/requirements/hardening/service-hardening.md",
+            &requirement("Service", "Service hardening"),
+        );
+        put(
+            root,
+            "archi/requirements/hardening/gate-throughput.md",
+            &requirement("Gate", "Gate throughput"),
+        );
+        put(
+            root,
+            "archi/requirements/hardening/open-req.md",
+            &requirement("", "Open req"),
+        );
+    }
+
+    fn active(root: &Path) -> Plan {
+        load_active(root).unwrap()
+    }
+
+    #[test]
+    fn use_pins_a_hardened_version_and_switches() {
+        let root = temp_project();
+        let ws = compiled(&root);
+
+        // No versions: nothing to pin.
+        let err = use_plan(&root, ws.model(), "mvp").unwrap_err();
+        assert!(err.contains("version save"), "{err}");
+
+        let v1 = save_version(&root);
+        assert!(matches!(
+            use_plan(&root, ws.model(), "mvp").unwrap(),
+            Used::Created(p) if p.version == v1 && p.state == PlanState::Draft
+        ));
+        assert_eq!(active_name(&root).unwrap().as_deref(), Some("mvp"));
+
+        // A dirty model refuses to mint a new plan, but switching to an
+        // existing one is free.
+        fs::write(
+            root.join("src/model.arch"),
+            format!("{MODEL}def node Extra\n"),
+        )
+        .unwrap();
+        let ws2 = compiled(&root);
+        let err = use_plan(&root, ws2.model(), "next").unwrap_err();
+        assert!(err.contains("unsaved changes"), "{err}");
+        assert!(matches!(
+            use_plan(&root, ws2.model(), "mvp").unwrap(),
+            Used::Switched(_)
+        ));
+
+        // Saving the change permits the second plan; repin moves the first.
+        let v2 = save_version(&root);
+        assert!(matches!(
+            use_plan(&root, ws2.model(), "next").unwrap(),
+            Used::Created(p) if p.version == v2
+        ));
+        use_plan(&root, ws2.model(), "mvp").unwrap();
+        let (repinned, from) = repin(&root, ws2.model()).unwrap();
+        assert_eq!((from.as_str(), repinned.version.as_str()), (v1.as_str(), v2.as_str()));
+        assert!(repin(&root, ws2.model()).is_err(), "already pinned");
+
+        // Names are slugs.
+        assert!(use_plan(&root, ws2.model(), "Not A Slug").is_err());
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn task_add_seeds_the_node_and_its_incoming_edges() {
+        let root = temp_project();
+        let ws = compiled(&root);
+        save_version(&root);
+        use_plan(&root, ws.model(), "mvp").unwrap();
+
+        let store = task_add(&root, "Store", Some("persist creds")).unwrap();
+        assert_eq!(store.id, "t1");
+        assert_eq!(
+            store.spec_refs,
+            vec!["Store".to_string(), "Auth.creds wire Store.inn".to_string()]
+        );
+
+        // Auth pulls its incoming wire, the undirected peer crossing, and
+        // its classification — outgoing edges stay with their targets.
+        let auth = task_add(&root, "Auth", None).unwrap();
+        let mut refs = auth.spec_refs.clone();
+        refs.sort();
+        assert_eq!(
+            refs,
+            vec![
+                "Auth".to_string(),
+                "Auth peer Audit".to_string(),
+                "Gate.out wire Auth.inn".to_string(),
+                "Service type_of Auth".to_string(),
+            ]
+        );
+
+        // One task per node; nodes resolve at the pinned version.
+        let err = task_add(&root, "Store", None).unwrap_err();
+        assert!(err.contains("one task per node"), "{err}");
+        let err = task_add(&root, "Nope", None).unwrap_err();
+        assert!(err.contains("E_MODEL_REF"), "{err}");
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn the_reverse_lookup_matches_terms_types_and_edge_endpoints() {
+        let root = temp_project();
+        let ws = compiled(&root);
+        save_version(&root);
+        put_requirements(&root);
+        use_plan(&root, ws.model(), "mvp").unwrap();
+        task_add(&root, "Store", None).unwrap();
+        task_add(&root, "Auth", None).unwrap();
+
+        let report = verify(&root, ws.model()).unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+
+        // Store: its own node ref pulls store-encrypted — through the node
+        // ref and again through the edge's Store endpoint — and the
+        // incoming edge's far endpoint (Auth, classified `Service`) pulls
+        // service-hardening across the boundary: the wire is Store's
+        // obligation, so the requirements pressing on it ride along.
+        let store = &report.derived.matched["t1"];
+        let pairs: Vec<(&str, &str)> = store
+            .iter()
+            .map(|m| (m.slot.as_str(), m.req.as_str()))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![("r1", "service-hardening"), ("r2", "store-encrypted")]
+        );
+        assert_eq!(
+            store[0].matched_refs,
+            vec!["Auth.creds wire Store.inn".to_string()]
+        );
+        assert_eq!(
+            store[1].matched_refs,
+            vec!["Store".to_string(), "Auth.creds wire Store.inn".to_string()]
+        );
+
+        // Auth: `Service` expands through type_of to Auth (term surface),
+        // and gate-throughput arrives through the incoming edge's Gate
+        // endpoint. Slots follow slug order; the open requirement (empty
+        // satisfied-by) matches nothing.
+        let auth = &report.derived.matched["t2"];
+        let pairs: Vec<(&str, &str)> = auth
+            .iter()
+            .map(|m| (m.slot.as_str(), m.req.as_str()))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![("r1", "gate-throughput"), ("r2", "service-hardening")]
+        );
+        assert_eq!(
+            auth[0].matched_refs,
+            vec!["Gate.out wire Auth.inn".to_string()]
+        );
+        assert!(auth[1].matched_refs.contains(&"Auth".to_string()));
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn the_lifecycle_captures_gates_and_latches_scenarios() {
+        let root = temp_project();
+        let ws = compiled(&root);
+        save_version(&root);
+        put_requirements(&root);
+        put(
+            &root,
+            "code/store.rs",
+            "pub struct Store;\nimpl Store {\n    pub fn put(&mut self) {}\n}\n",
+        );
+        put(&root, "code/auth.rs", "pub fn login() -> bool { true }\n");
+        use_plan(&root, ws.model(), "mvp").unwrap();
+        task_add(&root, "Store", None).unwrap();
+        task_add(&root, "Auth", None).unwrap();
+
+        // Author the plan: outputs, an input edge t1 → t2, a scenario.
+        let mut plan = active(&root);
+        plan.scenarios.push("a user logs in end to end".into());
+        plan.tasks[0].outputs.push("code/store.rs".into());
+        plan.tasks[1].outputs.push("code/auth.rs".into());
+        plan.tasks[1].inputs.insert("t1".into(), "the store api".into());
+        store_plan(&root, &plan).unwrap();
+
+        // The start gate: every matched requirement wants a verification.
+        let err = start(&root, ws.model()).unwrap_err();
+        assert!(err.contains("needs a verification"), "{err}");
+        let mut plan = active(&root);
+        let report = verify_plan(&root, ws.model(), &plan).unwrap();
+        for t in &mut plan.tasks {
+            for m in &report.derived.matched[&t.id] {
+                t.verifications
+                    .insert(m.req.clone(), vec![format!("test — proves {}", m.req)]);
+            }
+        }
+        store_plan(&root, &plan).unwrap();
+        let (started, wave1) = start(&root, ws.model()).unwrap();
+        assert_eq!(started.state, PlanState::Started);
+        assert_eq!(wave1, vec!["t1".to_string()]);
+        assert!(plan_dir(&root, "mvp").join("waves/w01.index.json").exists());
+        assert!(start(&root, ws.model()).is_err(), "already started");
+
+        // Closing wave 1: the claimed delta becomes candidates — 2 refs ×
+        // 1 changed symbol — and the coverage gate blocks until asserted.
+        put(
+            &root,
+            "code/store.rs",
+            "pub struct Store;\nimpl Store {\n    pub fn put(&mut self, n: u8) { let _ = n; }\n}\n",
+        );
+        let outcome = next(&root, ws.model()).unwrap();
+        let Step::Blocked(why) = &outcome.step else {
+            panic!("the coverage gate should block");
+        };
+        assert!(why.contains("t1"), "{why}");
+        let capture = outcome.capture.expect("capture ran");
+        assert_eq!(
+            capture.minted.len(),
+            2,
+            "{}",
+            links::capture::render_capture(&capture)
+        );
+
+        // The loop the spec promises: confirm, re-run — idempotent capture,
+        // gate passes, wave 2 opens.
+        for l in &capture.minted {
+            links::confirm(&root, &l.id).unwrap();
+        }
+        let outcome = next(&root, ws.model()).unwrap();
+        assert!(outcome.capture.as_ref().is_some_and(|c| c.minted.is_empty()));
+        let Step::Wave { closed, next_tasks } = &outcome.step else {
+            panic!("the gate should pass now");
+        };
+        assert_eq!((*closed, next_tasks.clone()), (1, vec!["t2".to_string()]));
+        let (_, in_flight) = current_wave(&root, ws.model()).unwrap();
+        assert!(matches!(in_flight, InFlight::Wave(2, ids) if ids == vec!["t2".to_string()]));
+
+        // Wave 2 closes the same way; the last close prints scenarios and
+        // latches the display.
+        put(
+            &root,
+            "code/auth.rs",
+            "pub fn login(u: &str) -> bool { !u.is_empty() }\n",
+        );
+        let outcome = next(&root, ws.model()).unwrap();
+        assert!(matches!(outcome.step, Step::Blocked(_)));
+        for l in &outcome.capture.expect("capture ran").minted {
+            links::confirm(&root, &l.id).unwrap();
+        }
+        let outcome = next(&root, ws.model()).unwrap();
+        let Step::Scenarios(scenarios) = &outcome.step else {
+            panic!("the scenario step follows the last wave");
+        };
+        assert_eq!(scenarios, &vec!["a user logs in end to end".to_string()]);
+        assert!(active(&root).scenarios_displayed);
+
+        // One more next completes; a completed plan refuses.
+        let outcome = next(&root, ws.model()).unwrap();
+        assert!(matches!(outcome.step, Step::Done));
+        assert_eq!(active(&root).state, PlanState::Completed);
+        assert!(next(&root, ws.model()).is_err());
+
+        // Reset rewinds whole; without scenarios the waves sail through on
+        // the standing asserted links and the plan closes directly.
+        let plan = reset(&root).unwrap();
+        assert_eq!((plan.state, plan.closed_waves), (PlanState::Draft, 0));
+        assert!(!plan.scenarios_displayed && !plan.scenarios_closed);
+        assert!(!plan_dir(&root, "mvp").join("waves").exists());
+        let mut plan = active(&root);
+        plan.scenarios.clear();
+        store_plan(&root, &plan).unwrap();
+        start(&root, ws.model()).unwrap();
+        let outcome = next(&root, ws.model()).unwrap();
+        assert!(matches!(outcome.step, Step::Wave { closed: 1, .. }));
+        let outcome = next(&root, ws.model()).unwrap();
+        assert!(matches!(outcome.step, Step::Done));
+        assert_eq!(active(&root).state, PlanState::Completed);
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn verify_flags_structure_and_notes_drift() {
+        let root = temp_project();
+        let ws = compiled(&root);
+        save_version(&root);
+        put_requirements(&root);
+        use_plan(&root, ws.model(), "mvp").unwrap();
+        task_add(&root, "Store", None).unwrap();
+        task_add(&root, "Auth", None).unwrap();
+
+        // Hand-edit the plan: an input cycle, an unknown input, a stale
+        // verification key, a dangling spec_ref, a versioned ref.
+        let mut plan = active(&root);
+        plan.tasks[0].inputs.insert("t2".into(), "the auth api".into());
+        plan.tasks[1].inputs.insert("t1".into(), "the store".into());
+        plan.tasks[1].inputs.insert("t9".into(), "a ghost".into());
+        plan.tasks[0]
+            .verifications
+            .insert("no-such-req".into(), vec!["test — never matches".into()]);
+        plan.tasks[0].spec_refs.push("Phantom".into());
+        plan.tasks[1].spec_refs.push("Auth@v0001".into());
+        store_plan(&root, &plan).unwrap();
+
+        let report = verify(&root, ws.model()).unwrap();
+        let all = report.errors.join("\n");
+        assert!(all.contains("form a cycle"), "{all}");
+        assert!(all.contains("`t9` names no task"), "{all}");
+        assert!(all.contains("no-such-req"), "{all}");
+        assert!(all.contains("`Phantom` names no element"), "{all}");
+        assert!(all.contains("carries a version"), "{all}");
+        assert!(report.derived.waves.is_empty(), "a cycle has no layering");
+
+        // Untangle, then drift the live model: verify notes, not errors.
+        let mut plan = active(&root);
+        plan.tasks[0].inputs.clear();
+        plan.tasks[0].verifications.clear();
+        plan.tasks[0].spec_refs.retain(|r| r != "Phantom");
+        plan.tasks[1].inputs.remove("t9");
+        plan.tasks[1].spec_refs.retain(|r| !r.contains('@'));
+        store_plan(&root, &plan).unwrap();
+        fs::write(
+            root.join("src/model.arch"),
+            MODEL.replace("def node Store:\n  port inn\n", "def node Safe:\n  port inn\n")
+                .replace("Store.inn", "Safe.inn"),
+        )
+        .unwrap();
+        let live = compiled(&root);
+        let report = verify(&root, live.model()).unwrap();
+        assert_eq!(report.errors, Vec::<String>::new(), "{:?}", report.errors);
+        let notes = report.notes.join("\n");
+        assert!(notes.contains("no longer resolves at Working"), "{notes}");
+        assert_eq!(
+            report.derived.waves,
+            vec![vec!["t1".to_string()], vec!["t2".to_string()]]
+        );
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+}

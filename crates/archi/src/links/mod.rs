@@ -13,6 +13,7 @@
 //! commit sha in a birth record is provenance, never a dependency, exactly
 //! as in the version archive (`requirements/versioning.md#why-this-shape`).
 
+pub(crate) mod capture;
 pub(crate) mod code;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -250,6 +251,14 @@ pub struct Link {
     pub birth: Birth,
     /// The projection's hashes.
     pub pins: Pins,
+    /// Tasks whose captures re-encountered this link — evidence confidence
+    /// accrues. Folded from `touch` events, one entry per task.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub touches: Vec<String>,
+    /// Tasks whose captures saw the anchored item change without carrying
+    /// the spec_ref — confidence decays. Folded from `decay` events.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub decays: Vec<String>,
 }
 
 // ---- the journal -----------------------------------------------------------
@@ -276,11 +285,24 @@ enum Event {
         id: String,
         at: String,
     },
+    Touch {
+        id: String,
+        task: String,
+        at: String,
+    },
+    Decay {
+        id: String,
+        task: String,
+        at: String,
+    },
 }
 
 /// The folded journal: live links in add order, plus mint bookkeeping.
 struct Folded {
     live: Vec<Link>,
+    /// Retired links, folded state at retirement — capture's dedup memory:
+    /// a subtracted candidate must stay subtracted across re-runs.
+    retired: Vec<Link>,
     /// Adds ever journaled — dense ids mint past retirements.
     adds: usize,
 }
@@ -325,7 +347,7 @@ fn read_journal(root: &Path) -> Result<Vec<Event>, String> {
 
 fn fold(events: Vec<Event>) -> Result<Folded, String> {
     let mut live: Vec<Link> = Vec::new();
-    let mut retired: BTreeSet<String> = BTreeSet::new();
+    let mut retired: Vec<Link> = Vec::new();
     let mut adds = 0;
     let corrupt = |id: &str, what: &str| {
         format!("journal corrupt: `{what}` names `{id}`, which is not a live link")
@@ -333,7 +355,7 @@ fn fold(events: Vec<Event>) -> Result<Folded, String> {
     for event in events {
         match event {
             Event::Add { link } => {
-                if live.iter().any(|l| l.id == link.id) || retired.contains(&link.id) {
+                if live.iter().chain(&retired).any(|l| l.id == link.id) {
                     return Err(format!("journal corrupt: `{}` is added twice", link.id));
                 }
                 live.push(link);
@@ -356,12 +378,31 @@ fn fold(events: Vec<Event>) -> Result<Folded, String> {
                 let Some(at) = live.iter().position(|l| l.id == id) else {
                     return Err(corrupt(&id, "retire"));
                 };
-                live.remove(at);
-                retired.insert(id);
+                retired.push(live.remove(at));
             }
+            Event::Touch { id, task, .. } => match live.iter_mut().find(|l| l.id == id) {
+                Some(l) => {
+                    if !l.touches.contains(&task) {
+                        l.touches.push(task);
+                    }
+                }
+                None => return Err(corrupt(&id, "touch")),
+            },
+            Event::Decay { id, task, .. } => match live.iter_mut().find(|l| l.id == id) {
+                Some(l) => {
+                    if !l.decays.contains(&task) {
+                        l.decays.push(task);
+                    }
+                }
+                None => return Err(corrupt(&id, "decay")),
+            },
         }
     }
-    Ok(Folded { live, adds })
+    Ok(Folded {
+        live,
+        retired,
+        adds,
+    })
 }
 
 fn load(root: &Path) -> Result<Folded, String> {
@@ -431,7 +472,7 @@ impl<'a> Slots<'a> {
 
 /// Whether a ref names an element of a model: a node by path, an edge by
 /// its canonical surface text (views stripped, whitespace collapsed).
-fn resolves_in(model: &Model, spec: &SpecRef) -> bool {
+pub(crate) fn resolves_in(model: &Model, spec: &SpecRef) -> bool {
     if spec.is_edge() {
         edge_pseudos(model).contains(&spec.path)
     } else {
@@ -439,47 +480,50 @@ fn resolves_in(model: &Model, spec: &SpecRef) -> bool {
     }
 }
 
-fn normalize_ref(text: &str) -> String {
+pub(crate) fn normalize_ref(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The canonical surface text of an edge statement — views stripped,
+/// whitespace collapsed; `None` for non-edges. The one vocabulary edge
+/// SpecRefs and task spec_ref seeding speak.
+pub(crate) fn edge_pseudo(s: &Statement) -> Option<String> {
+    let stripped = match s {
+        Statement::RelEdge {
+            rel,
+            source,
+            target,
+            ..
+        } => Statement::RelEdge {
+            rel: rel.clone(),
+            source: source.clone(),
+            target: target.clone(),
+            views: Vec::new(),
+        },
+        Statement::ConnEdge {
+            conn,
+            source,
+            carrier,
+            rev_carrier,
+            target,
+            ..
+        } => Statement::ConnEdge {
+            conn: conn.clone(),
+            source: source.clone(),
+            carrier: carrier.clone(),
+            rev_carrier: rev_carrier.clone(),
+            target: target.clone(),
+            views: Vec::new(),
+        },
+        _ => return None,
+    };
+    Some(normalize_ref(&stripped.pseudo()))
 }
 
 /// Every typed edge of the model in canonical surface form — the vocabulary
 /// edge SpecRefs are checked against. Views are presentation, not identity.
 fn edge_pseudos(model: &Model) -> BTreeSet<String> {
-    model
-        .dump()
-        .into_iter()
-        .filter_map(|s| match s {
-            Statement::RelEdge {
-                rel,
-                source,
-                target,
-                ..
-            } => Some(Statement::RelEdge {
-                rel,
-                source,
-                target,
-                views: Vec::new(),
-            }),
-            Statement::ConnEdge {
-                conn,
-                source,
-                carrier,
-                rev_carrier,
-                target,
-                ..
-            } => Some(Statement::ConnEdge {
-                conn,
-                source,
-                carrier,
-                rev_carrier,
-                target,
-                views: Vec::new(),
-            }),
-            _ => None,
-        })
-        .map(|s| normalize_ref(&s.pseudo()))
-        .collect()
+    model.dump().iter().filter_map(edge_pseudo).collect()
 }
 
 /// Every node path of the model, for audit's coverage sweep. Dumps exclude
@@ -631,6 +675,8 @@ pub fn add(
             spans: vec![resolved.span],
         },
         pins: resolved.pins,
+        touches: Vec::new(),
+        decays: Vec::new(),
     };
     append(root, &[Event::Add { link: link.clone() }])?;
     Ok(link)
@@ -778,6 +824,24 @@ impl State {
             State::SpecDrifted => "spec-drifted",
         }
     }
+}
+
+/// The floor below which evidence reads as decayed — confirm or retire
+/// (`requirements/code-link.md#audit--dark-deltas-dark-spec`).
+pub const CONFIDENCE_FLOOR: f64 = 0.25;
+
+/// Derived confidence of an evidence link — never stored. Born at 0.5;
+/// each task whose capture re-encountered it accrues, each task that
+/// rewrote the anchored item without carrying the spec_ref erodes, any
+/// projection drift erodes once, and a dead anchor zeroes.
+pub fn confidence(link: &Link, state: &State) -> f64 {
+    if matches!(state, State::Missing) {
+        return 0.0;
+    }
+    let drift = if matches!(state, State::Clean) { 0.0 } else { -0.25 };
+    let accrued = 0.15 * link.touches.len() as f64;
+    let eroded = 0.25 * link.decays.len() as f64;
+    (0.5 + accrued - eroded + drift).clamp(0.0, 1.0)
 }
 
 /// One verified link.
@@ -1140,14 +1204,16 @@ pub enum AuditFinding {
         /// The node path.
         path: String,
     },
-    /// An evidence link whose anchor no longer resolves.
+    /// An evidence link whose derived confidence fell below the floor.
     DecayedEvidence {
         /// The link id.
         id: String,
         /// Its spec ref.
         spec: String,
-        /// Its dead anchor.
+        /// Its anchor.
         anchor: String,
+        /// The derived confidence, below [`CONFIDENCE_FLOOR`].
+        confidence: f64,
     },
 }
 
@@ -1169,10 +1235,16 @@ impl fmt::Display for AuditFinding {
             AuditFinding::UnlinkedSpecRef { path } => {
                 write!(f, "unlinked spec element: {path} — no asserted code-link")
             }
-            AuditFinding::DecayedEvidence { id, spec, anchor } => {
+            AuditFinding::DecayedEvidence {
+                id,
+                spec,
+                anchor,
+                confidence,
+            } => {
                 write!(
                     f,
-                    "decayed evidence: {id} ({spec} ← {anchor}) — the anchor no longer resolves"
+                    "decayed evidence: {id} ({spec} ← {anchor}) — confidence {confidence:.2} \
+                     is below the floor; confirm or retire"
                 )
             }
         }
@@ -1249,36 +1321,57 @@ pub fn audit(root: &Path, model: &Model, opts: &AuditOptions) -> Result<AuditRep
         }
     }
 
-    // Dark spec: nodes of the scope with no asserted link.
+    // Dark spec: elements of the audited scope with no asserted link and
+    // no live evidence. The scope is `--scope`'s subtree — or, by default,
+    // the active plan's task spec_refs.
+    let dark = |path: &str| {
+        !folded
+            .live
+            .iter()
+            .any(|l| l.spec.version.is_none() && l.spec.path == path)
+    };
     if let Some(scope) = &opts.scope {
         if !model.has_node(scope) {
             return Err(format!("--scope `{scope}` names no element of the live model"));
         }
         let prefix = format!("{scope}.");
         for path in node_paths(model) {
-            if path != *scope && !path.starts_with(&prefix) {
-                continue;
-            }
-            let covered = folded.live.iter().any(|l| {
-                l.standing == Standing::Asserted && l.spec.path == path
-            });
-            if !covered {
+            if (path == *scope || path.starts_with(&prefix)) && dark(&path) {
                 report.findings.push(AuditFinding::UnlinkedSpecRef { path });
             }
         }
+    } else if crate::plans::active_name(root)?.is_some() {
+        match crate::plans::load_active(root) {
+            Ok(plan) => {
+                let refs: BTreeSet<&String> =
+                    plan.tasks.iter().flat_map(|t| t.spec_refs.iter()).collect();
+                for r in refs {
+                    if dark(r) {
+                        report
+                            .findings
+                            .push(AuditFinding::UnlinkedSpecRef { path: r.clone() });
+                    }
+                }
+            }
+            Err(e) => report
+                .notes
+                .push(format!("the unlinked-spec-ref sweep skipped the active plan: {e}")),
+        }
     }
 
-    // Decayed evidence: an evidence anchor that no longer resolves.
+    // Decayed evidence: derived confidence below the floor.
     let mut slots = Slots::new(root);
     let mut decayed = Vec::new();
     for link in folded.live.iter().filter(|l| l.standing == Standing::Evidence) {
         let checked = check_link(root, model, &mut slots, link.clone())?;
-        if matches!(checked.state, State::Missing) {
+        let confidence = confidence(link, &checked.state);
+        if confidence < CONFIDENCE_FLOOR {
             decayed.push(link.id.clone());
             report.findings.push(AuditFinding::DecayedEvidence {
                 id: link.id.clone(),
                 spec: link.spec.to_string(),
                 anchor: link.anchor.to_string(),
+                confidence,
             });
         }
     }
@@ -1674,6 +1767,8 @@ mod tests {
                         spans: vec![resolved.span.clone()],
                     },
                     pins: resolved.pins.clone(),
+                    touches: Vec::new(),
+                    decays: Vec::new(),
                 },
             }],
         )
@@ -1711,6 +1806,8 @@ mod tests {
                         spans: Vec::new(),
                     },
                     pins: resolved.pins,
+                    touches: Vec::new(),
+                    decays: Vec::new(),
                 },
             }],
         )
@@ -1732,6 +1829,163 @@ mod tests {
         );
         assert_eq!(report.pruned, vec!["l0002".to_string()]);
         assert!(ls(&root, None, false).unwrap().iter().all(|l| l.id != "l0002"));
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn confidence_accrues_by_touch_and_erodes_by_decay() {
+        let root = temp_project();
+        let ws = model_of(&root);
+        let resolved = resolve_anchor(
+            &root,
+            &Anchor::parse("code/auth.rs#Vault::persist").unwrap(),
+        )
+        .unwrap();
+        append(
+            &root,
+            &[Event::Add {
+                link: Link {
+                    id: "l0001".into(),
+                    spec: SpecRef::parse("Vault").unwrap(),
+                    anchor: Anchor::parse("code/auth.rs#Vault::persist").unwrap(),
+                    kind: LinkKind::Indirect,
+                    standing: Standing::Evidence,
+                    origin: Origin::Captured { task: "t1".into() },
+                    birth: Birth {
+                        created: now(),
+                        commit: None,
+                        spans: vec![resolved.span],
+                    },
+                    pins: resolved.pins,
+                    touches: Vec::new(),
+                    decays: Vec::new(),
+                },
+            }],
+        )
+        .unwrap();
+
+        // Born clean at 0.5 — above the floor, no finding.
+        let live = ls(&root, None, false).unwrap();
+        assert!((confidence(&live[0], &State::Clean) - 0.5).abs() < 1e-9);
+        let report = audit(&root, ws.model(), &AuditOptions::default()).unwrap();
+        assert!(
+            !report
+                .findings
+                .iter()
+                .any(|f| matches!(f, AuditFinding::DecayedEvidence { .. })),
+        );
+
+        // A touch accrues once per task; decays erode harder. The fold
+        // dedups replayed events.
+        let at = now();
+        let touch = |task: &str| Event::Touch {
+            id: "l0001".into(),
+            task: task.into(),
+            at: at.clone(),
+        };
+        let decay = |task: &str| Event::Decay {
+            id: "l0001".into(),
+            task: task.into(),
+            at: at.clone(),
+        };
+        append(&root, &[touch("t2"), touch("t2"), decay("t3"), decay("t4")]).unwrap();
+        let live = ls(&root, None, false).unwrap();
+        assert_eq!(live[0].touches, vec!["t2".to_string()]);
+        assert_eq!(
+            live[0].decays,
+            vec!["t3".to_string(), "t4".to_string()]
+        );
+        // 0.5 + 0.15 − 2·0.25 = 0.15: below the floor — flagged, prunable.
+        assert!((confidence(&live[0], &State::Clean) - 0.15).abs() < 1e-9);
+        let report = audit(
+            &root,
+            ws.model(),
+            &AuditOptions {
+                prune: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(
+            report.findings.iter().any(|f| matches!(
+                f,
+                AuditFinding::DecayedEvidence { id, confidence, .. }
+                    if id == "l0001" && (confidence - 0.15).abs() < 1e-9
+            )),
+            "{}",
+            render_audit(&report)
+        );
+        assert_eq!(report.pruned, vec!["l0001".to_string()]);
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn audit_scopes_unlinked_refs_from_the_active_plan() {
+        let root = temp_project();
+        let ws = model_of(&root);
+        versions::save(&root, ws.model(), "planned").unwrap();
+        crate::plans::use_plan(&root, ws.model(), "mvp").unwrap();
+        crate::plans::task_add(&root, "Vault", None).unwrap();
+
+        // No --scope: the sweep reads the active plan's task spec_refs —
+        // the node and its incoming edge, both dark.
+        let unlinked = |report: &AuditReport| -> Vec<String> {
+            report
+                .findings
+                .iter()
+                .filter_map(|f| match f {
+                    AuditFinding::UnlinkedSpecRef { path } => Some(path.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+        let report = audit(&root, ws.model(), &AuditOptions::default()).unwrap();
+        assert_eq!(
+            unlinked(&report),
+            vec!["Auth.store wire Vault.inn".to_string(), "Vault".to_string()]
+        );
+
+        // An asserted link lifts the node; live evidence lifts the edge —
+        // dark means no asserted link *and* no live evidence.
+        add(
+            &root,
+            ws.model(),
+            "Vault",
+            "code/auth.rs#Vault::persist",
+            LinkKind::Literal,
+        )
+        .unwrap();
+        let resolved = resolve_anchor(
+            &root,
+            &Anchor::parse("code/auth.rs#Vault::persist").unwrap(),
+        )
+        .unwrap();
+        append(
+            &root,
+            &[Event::Add {
+                link: Link {
+                    id: "l0002".into(),
+                    spec: SpecRef::parse("Auth.store wire Vault.inn").unwrap(),
+                    anchor: Anchor::parse("code/auth.rs#Vault::persist").unwrap(),
+                    kind: LinkKind::Indirect,
+                    standing: Standing::Evidence,
+                    origin: Origin::Captured { task: "t1".into() },
+                    birth: Birth {
+                        created: now(),
+                        commit: None,
+                        spans: vec![resolved.span],
+                    },
+                    pins: resolved.pins,
+                    touches: Vec::new(),
+                    decays: Vec::new(),
+                },
+            }],
+        )
+        .unwrap();
+        let report = audit(&root, ws.model(), &AuditOptions::default()).unwrap();
+        assert_eq!(unlinked(&report), Vec::<String>::new());
 
         fs::remove_dir_all(&root).unwrap();
     }

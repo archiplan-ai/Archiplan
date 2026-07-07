@@ -23,7 +23,11 @@
 //! archi link verify [--spec <ref>] [--since <rev>] [--json]
 //! archi link confirm <id> | rm <id>... | rm --spec <ref> --yes
 //! archi link repin <id> [--to <file[#symbol]>]
+//! archi link capture --task <TASK>
 //! archi link audit [--scope <path>] [--since <rev>] [--prune] [--json]
+//! archi plan use <name> | repin | show [--json] | verify [--json]
+//! archi plan task add <node> [--desc <text>]
+//! archi plan start | next | current-wave | close | reset
 //! ```
 //!
 //! Every verb locates its project by precedence: `--project`, then the
@@ -35,6 +39,7 @@
 mod docs;
 mod incidence;
 mod links;
+mod plans;
 mod versions;
 
 use std::fs;
@@ -68,7 +73,11 @@ const USAGE: &str = "usage:
   archi link verify [--spec <ref>] [--since <rev>] [--json] [--project <dir>]
   archi link confirm <id> | rm <id>... | rm --spec <ref> --yes [--project <dir>]
   archi link repin <id> [--to <file[#symbol]>] [--project <dir>]
-  archi link audit [--scope <path>] [--since <rev>] [--prune] [--json] [--project <dir>]";
+  archi link capture --task <TASK> [--project <dir>]
+  archi link audit [--scope <path>] [--since <rev>] [--prune] [--json] [--project <dir>]
+  archi plan use <name> | repin | show [--json] | verify [--json] [--project <dir>]
+  archi plan task add <node> [--desc <text>] [--project <dir>]
+  archi plan start | next | current-wave | close | reset [--project <dir>]";
 
 struct Args {
     verb: String,
@@ -104,6 +113,7 @@ struct Args {
     kind_flag: Option<String>,
     to: Option<String>,
     task: Option<String>,
+    desc: Option<String>,
     evidence: bool,
     yes: bool,
     prune: bool,
@@ -150,6 +160,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         kind_flag: None,
         to: None,
         task: None,
+        desc: None,
         evidence: false,
         yes: false,
         prune: false,
@@ -197,6 +208,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--spec" => args.spec = Some(value(&mut it, "--spec")?),
             "--to" => args.to = Some(value(&mut it, "--to")?),
             "--task" => args.task = Some(value(&mut it, "--task")?),
+            "--desc" => args.desc = Some(value(&mut it, "--desc")?),
             // `link` reads the singular `--kind literal|indirect`; the
             // incidence filter keeps the repeatable list.
             "--kind" if args.verb == "link" => {
@@ -217,7 +229,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             }
             "-m" | "--message" => args.message = Some(value(&mut it, "-m")?),
             other if other.starts_with("--") => return Err(format!("unknown flag `{other}`")),
-            other if args.verb == "version" || args.verb == "link" => {
+            other if matches!(args.verb.as_str(), "version" | "link" | "plan") => {
                 args.positional.push(other.to_string())
             }
             other => return Err(format!("unexpected argument `{other}`")),
@@ -588,12 +600,22 @@ fn run_link(args: &Args) -> ExitCode {
             }
             Err(e) => fail(e),
         },
-        (Some("capture"), []) => fail(
-            "task capture fires from the plan lifecycle (`requirements/tasks.md`), which is not \
-             implemented yet — the journal already accepts captured(task) links; authored links \
-             land via `link add`"
-                .to_string(),
-        ),
+        (Some("capture"), []) => {
+            let Some(task) = args.task.as_deref() else {
+                return usage_err("`link capture` re-runs a task capture: --task <TASK>");
+            };
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            match links::capture::run_manual(&root, ws.model(), task) {
+                Ok(outcome) => {
+                    print!("{}", links::capture::render_capture(&outcome));
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
         (Some("audit"), []) => {
             let ws = match live_model() {
                 Ok(ws) => ws,
@@ -623,6 +645,212 @@ fn run_link(args: &Args) -> ExitCode {
             "`link` takes: add <spec> <file[#symbol]> --kind <k> | ls | verify | confirm <id> | \
              rm <id>... | rm --spec <ref> --yes | repin <id> [--to <ref>] | capture --task <t> | \
              audit",
+        ),
+    }
+}
+
+fn run_plan(args: &Args) -> ExitCode {
+    let fail = |e: String| -> ExitCode {
+        eprintln!("archi: {e}");
+        ExitCode::from(1)
+    };
+    let pretty = |v: Value| serde_json::to_string_pretty(&v).expect("serializes");
+    let root = match locate_project(args) {
+        Ok(r) => r,
+        Err(e) => return usage_err(&e),
+    };
+    // Every plan verb resolves against models: the live tree for drift and
+    // pinning, the archived pin for structure — so the live tree compiles
+    // first, exactly as for `link`.
+    let live_model = || -> Result<modeling_lang::Workspace, ExitCode> {
+        compile_or_report(&root, false).map(|c| c.workspace)
+    };
+    let sub = args.positional.first().map(String::as_str);
+    let rest = args.positional.get(1..).unwrap_or_default();
+    match (sub, rest) {
+        (Some("use"), [name]) => {
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            match plans::use_plan(&root, ws.model(), name) {
+                Ok(plans::Used::Created(p)) => {
+                    println!("created plan `{}` @ {} — now current", p.name, p.version);
+                    ExitCode::SUCCESS
+                }
+                Ok(plans::Used::Switched(p)) => {
+                    println!("switched to plan `{}` @ {}", p.name, p.version);
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("repin"), []) => {
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            match plans::repin(&root, ws.model()) {
+                Ok((p, from)) => {
+                    println!(
+                        "repinned `{}` {from} → {} — `archi plan verify` shows what moved",
+                        p.name, p.version
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("task"), [add, node]) if add == "add" => {
+            match plans::task_add(&root, node, args.desc.as_deref()) {
+                Ok(t) => {
+                    println!("added {} {} — spec_refs: {}", t.id, t.node, t.spec_refs.join(", "));
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("verify"), []) => {
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            match plans::verify(&root, ws.model()) {
+                Ok(report) => {
+                    if args.json {
+                        println!(
+                            "{}",
+                            pretty(serde_json::to_value(&report).expect("serializes"))
+                        );
+                    } else {
+                        print!("{}", plans::render_report(&report));
+                    }
+                    if report.errors.is_empty() {
+                        ExitCode::SUCCESS
+                    } else {
+                        ExitCode::from(1)
+                    }
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("show"), []) => {
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            match plans::show(&root, ws.model()) {
+                Ok((plan, report)) => {
+                    if args.json {
+                        println!(
+                            "{}",
+                            pretty(json!({ "plan": plan, "report": report }))
+                        );
+                    } else {
+                        print!("{}", plans::render_show(&plan, &report));
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("start"), []) => {
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            match plans::start(&root, ws.model()) {
+                Ok((plan, wave1)) => {
+                    println!(
+                        "started plan `{}` — wave 1 in flight: {}",
+                        plan.name,
+                        wave1.join(", ")
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("next"), []) => {
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            match plans::next(&root, ws.model()) {
+                Ok(outcome) => {
+                    if let Some(c) = &outcome.capture {
+                        print!("{}", links::capture::render_capture(c));
+                    }
+                    match outcome.step {
+                        plans::Step::Blocked(why) => {
+                            eprintln!("archi: {why}");
+                            ExitCode::from(1)
+                        }
+                        plans::Step::Wave { closed, next_tasks } => {
+                            println!(
+                                "wave {closed} closed — in flight: {}",
+                                next_tasks.join(", ")
+                            );
+                            ExitCode::SUCCESS
+                        }
+                        plans::Step::Scenarios(scenarios) => {
+                            println!("all waves closed — scenarios:");
+                            for s in scenarios {
+                                println!("  - {s}");
+                            }
+                            println!("one more `archi plan next` closes the plan");
+                            ExitCode::SUCCESS
+                        }
+                        plans::Step::Done => {
+                            println!("DONE");
+                            ExitCode::SUCCESS
+                        }
+                    }
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("current-wave"), []) => {
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            match plans::current_wave(&root, ws.model()) {
+                Ok((plan, plans::InFlight::Wave(wave, ids))) => {
+                    println!("wave {wave} in flight:");
+                    for id in &ids {
+                        if let Some(t) = plan.tasks.iter().find(|t| &t.id == id) {
+                            println!("  {} {} — {}", t.id, t.node, t.description);
+                        }
+                    }
+                    ExitCode::SUCCESS
+                }
+                Ok((_, plans::InFlight::ScenarioStep)) => {
+                    println!(
+                        "all waves closed — the scenario step is pending (`archi plan next`)"
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("close"), []) => match plans::close(&root) {
+            Ok(p) => {
+                println!("closed plan `{}`", p.name);
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e),
+        },
+        (Some("reset"), []) => match plans::reset(&root) {
+            Ok(p) => {
+                println!("reset plan `{}` to draft", p.name);
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e),
+        },
+        _ => usage_err(
+            "`plan` takes: use <name> | repin | show | verify | task add <node> [--desc <text>] | \
+             start | next | current-wave | close | reset",
         ),
     }
 }
@@ -880,6 +1108,7 @@ fn main() -> ExitCode {
         "incidence" => run_incidence(&args),
         "version" => run_version(&args),
         "link" => run_link(&args),
+        "plan" => run_plan(&args),
         other => usage_err(&format!("unknown command `{other}`")),
     }
 }
