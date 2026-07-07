@@ -45,3 +45,5 @@ The affects list is the join key that makes the stressor × component
 incidence matrix possible. Without it, the cross-layer analyses that
 surface hidden coupling, hotspots, and compound vulnerabilities would
 have nothing to pivot on.
+
+## Stored as files

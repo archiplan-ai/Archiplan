@@ -25,7 +25,7 @@ Junction of serveral requirements often result in new requirements. Archiplan ke
 ## Origin
 
 It's important to track where each requirement came from:
-- Initial (not derived from anything, cannot be added during stress-session)
+- Intent (derived directly from [intent](intent.md), cannot be added during stress-session)
 - Subrequirement (derived from parent requirement)
 - Fused from Set(Requirement) (derived from intersection of requirements, see #Fusion)
 - Stressor/ Set(Stressor) (derived as a solution to [stressor(s)](stressors.md))
@@ -51,15 +51,12 @@ Varinants:
 
 Verifications are subject to scoring, the more requirements have formulated verifications the better.
 
-## Requirements * Agent Interface
+### Satisfy * Agent Interface
 
-- **Add a requirement** with id, description, and an origin.
-- **Remove a requirement** (and its satisfaction, if any).
 - **Satisfy** a requirement with a prose explanation of *how* the
   current design meets it (**inline** at the requirement: one satisfaction
   record per requirement).
 - **Unsatisfy** a requirement when the justification no longer holds.
-- **List requirements** with satisfaction status and origin.
 
 ## Requirements * Human Interface
 
@@ -67,7 +64,17 @@ Each requirement must have a slug -- a short form handle to be used to reference
 
 ## Stored as files
 
-Requirements are stored as structured .md files under `archi/`, subrequirements live in the parent's files. If parent requirements is too large it can be declared as a folder, `requirement.md` describes epic parent requirement, subrequirements are listed as individual files under the folder
+Requirements are stored as structured .md files under `archi/`, subrequirements live in the parent's files. If parent requirements is too large it can be declared as a folder, `<epic_parent_requirement_name>.md` describes epic parent requirement, subrequirements are listed as individual files under the folder.
+
+Folder structure:
+archi/requirements/<intent_name>/
+  - <intent_name>.md
+  - <req_1>.md
+  - <req_n>.md
+  - <epic_req>/
+    - <epic_req>.md
+    - <subreq_1>.md
+    - <subreq_n>.md
 
 File structure:
 - Name
@@ -77,3 +84,5 @@ File structure:
   - System Context
 - Origin
 - Satisfy
+
+All fields are mandatory, i.e if for instance a requirement doesn't have a satisfy object yet, it must be explicitly left empty
