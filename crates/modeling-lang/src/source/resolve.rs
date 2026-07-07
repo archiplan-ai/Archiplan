@@ -230,6 +230,7 @@ pub(crate) fn resolve(
     r.resolve_imports();
     r.build_tree();
     if r.diagnostics.is_empty() {
+        r.collect_type_defs();
         r.collect_uses();
     }
     if r.diagnostics.is_empty() {
@@ -627,9 +628,15 @@ impl<'a> Resolver<'a> {
         self.resolution.nodes.insert(abs.to_string(), info);
     }
 
-    // ---- pass 2: uses -----------------------------------------------------------
+    // ---- pass 2a: the def table ---------------------------------------------
+    //
+    // Every module's rel/conn/view defs land in the resolution before any
+    // use binds, so what a use resolves to — carrier lanes above all — is a
+    // function of the model's complete def set, never of module naming or
+    // of a def's textual position relative to its uses
+    // (`archi/requirements/self-hosting/uses-see-every-def.md`).
 
-    fn collect_uses(&mut self) {
+    fn collect_type_defs(&mut self) {
         for mi in 0..self.modules.len() {
             let items = &self.modules[mi].ast.items;
             for item in items {
@@ -696,6 +703,20 @@ impl<'a> Resolver<'a> {
                             span: *span,
                         });
                     }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    // ---- pass 2b: uses --------------------------------------------------------
+
+    fn collect_uses(&mut self) {
+        for mi in 0..self.modules.len() {
+            let items = &self.modules[mi].ast.items;
+            for item in items {
+                match item {
+                    Item::DefView { .. } | Item::DefRel { .. } | Item::DefConn { .. } => {}
                     Item::DefNode(d) => self.uses_in_def(mi, &mut Vec::new(), d),
                     Item::Open(o) => self.uses_in_open(mi, &mut Vec::new(), o),
                     Item::Edge(e) => self.edge(mi, &[], e),
@@ -1101,7 +1122,10 @@ mod tests {
     use crate::source::parser::parse;
     use crate::source::span::SourceMap;
 
-    fn try_resolve(sources: &[(&str, &str)]) -> Result<Resolution, Vec<Diagnostic>> {
+    fn try_resolve_with(
+        preset: &Preset,
+        sources: &[(&str, &str)],
+    ) -> Result<Resolution, Vec<Diagnostic>> {
         let mut map = SourceMap::new();
         let mut modules = Vec::new();
         for (module, text) in sources {
@@ -1113,9 +1137,13 @@ mod tests {
             });
         }
         modules.sort_by(|a, b| a.module.cmp(&b.module));
-        let ws = Workspace::with_preset(&Preset::default_ontology()).expect("preset loads");
+        let ws = Workspace::with_preset(preset).expect("preset loads");
         let preset = PresetInfo::from_workspace(&ws);
         resolve(&modules, &preset)
+    }
+
+    fn try_resolve(sources: &[(&str, &str)]) -> Result<Resolution, Vec<Diagnostic>> {
+        try_resolve_with(&Preset::default_ontology(), sources)
     }
 
     fn resolve_ok(sources: &[(&str, &str)]) -> Resolution {
@@ -1136,6 +1164,119 @@ mod tests {
                 .map(|d| (d.code.clone(), d.message.clone()))
                 .collect(),
         }
+    }
+
+    /// The carriers of the single `conn` edge in a resolution.
+    fn conn_carriers(r: &Resolution, name: &str) -> (Option<String>, Option<String>) {
+        r.edges
+            .iter()
+            .find_map(|e| match e {
+                EdgeR::Conn {
+                    conn,
+                    carrier,
+                    rev_carrier,
+                    ..
+                } if conn == name => Some((carrier.clone(), rev_carrier.clone())),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no `{name}` edge resolved"))
+    }
+
+    // The next three tests pin `uses-see-every-def`
+    // (`issues/carrier-inference-order-dependence.md`): binding is a
+    // function of the model's complete def set, never of walk order.
+
+    #[test]
+    fn carrier_inference_reads_defs_from_later_modules() {
+        // The conn def lives in the module sorting LAST; the edge
+        // instantiating it, with both lanes inferred, in the module sorting
+        // FIRST.
+        let r = resolve_ok(&[
+            (
+                "aedge",
+                "import zconns\ndef node A:\n  port drive\ndef node B:\n  port check\nA.drive invoke B.check\n",
+            ),
+            (
+                "zconns",
+                "import zmsgs\ndef conn invoke := * ->Command, <-Report *\n",
+            ),
+            ("zmsgs", "def node Command\ndef node Report\n"),
+        ]);
+        assert_eq!(
+            conn_carriers(&r, "invoke"),
+            (Some("Command".into()), Some("Report".into()))
+        );
+
+        // A genuinely uninferable lane still fails here, with the
+        // compiler's hint at the edge — never downstream in the engine.
+        let errs = codes(&[
+            (
+                "aedge",
+                "import zconns\ndef node A:\n  port drive\ndef node B:\n  port check\nA.drive invoke B.check\n",
+            ),
+            ("zconns", "def conn invoke := * ->(Data type_of *) *\n"),
+        ]);
+        assert!(
+            errs.iter()
+                .any(|(c, m)| c == "E_CARRIER_REQUIRED" && m.contains("name it")),
+            "{errs:?}"
+        );
+    }
+
+    #[test]
+    fn defs_bind_uses_that_precede_them_in_one_module() {
+        let r = resolve_ok(&[(
+            "solo",
+            "def node Command\ndef node Report\ndef node A:\n  port drive\ndef node B:\n  port check\n\
+             A.drive invoke B.check\ndef conn invoke := * ->Command, <-Report *\n",
+        )]);
+        assert_eq!(
+            conn_carriers(&r, "invoke"),
+            (Some("Command".into()), Some("Report".into()))
+        );
+    }
+
+    #[test]
+    fn defless_conns_keep_the_untyped_path() {
+        // A conn the preset names but no source defines: the resolver has
+        // no lane knowledge — a bare argument rides the forward lane,
+        // absence stays absence, and the engine re-checks downstream. The
+        // def sweep must change nothing here.
+        let preset = Preset::from_value(
+            "with-conn",
+            &serde_json::json!([
+                { "stmt": "define", "rel": "type_of", "trans": true, "directed": true,
+                  "source": "*", "target": "*" },
+                { "stmt": "define", "conn": "pipe", "directed": true,
+                  "source": "*", "target": "*" }
+            ]),
+        )
+        .expect("preset parses");
+        let r = match try_resolve_with(
+            &preset,
+            &[(
+                "solo",
+                "def node X\ndef node A:\n  port p\n  port p2\ndef node B:\n  port q\n  port q2\n\
+                 A.p pipe(X) B.q\nA.p2 pipe B.q2\n",
+            )],
+        ) {
+            Ok(r) => r,
+            Err(ds) => panic!("{ds:?}"),
+        };
+        let carriers: Vec<_> = r
+            .edges
+            .iter()
+            .filter_map(|e| match e {
+                EdgeR::Conn {
+                    conn,
+                    carrier,
+                    rev_carrier,
+                    ..
+                } if conn == "pipe" => Some((carrier.clone(), rev_carrier.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(carriers, [(Some("X".into()), None), (None, None)]);
     }
 
     #[test]

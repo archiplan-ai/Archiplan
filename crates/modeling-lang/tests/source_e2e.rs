@@ -128,6 +128,48 @@ fn compilation_is_deterministic_under_source_order() {
 }
 
 #[test]
+fn compilation_is_invariant_under_module_renaming() {
+    // Same model, module names shuffled so the conn-USING module flips from
+    // sorting after its def module to sorting before it — the texture
+    // `compilation_is_deterministic_under_source_order` cannot reach, since
+    // permuting discovery order never permutes names
+    // (`issues/carrier-inference-order-dependence.md`). Only module names
+    // and import lines differ; both must lower to a bit-identical batch.
+    let preset = Preset::default_ontology();
+    let late_use = [
+        (
+            "aconns",
+            "import mmsgs\ndef conn login := * ->LoginForm, <-AuthResponse *\n",
+        ),
+        ("mmsgs", "def node LoginForm\ndef node AuthResponse\n"),
+        (
+            "zui",
+            "import aconns\ndef view login_flow\ndef node UI:\n  port login\ndef node AuthService:\n  port handle_login\nUI.login login AuthService.handle_login in login_flow\n",
+        ),
+    ];
+    let early_use = [
+        (
+            "zconns",
+            "import mmsgs\ndef conn login := * ->LoginForm, <-AuthResponse *\n",
+        ),
+        ("mmsgs", "def node LoginForm\ndef node AuthResponse\n"),
+        (
+            "aui",
+            "import zconns\ndef view login_flow\ndef node UI:\n  port login\ndef node AuthService:\n  port handle_login\nUI.login login AuthService.handle_login in login_flow\n",
+        ),
+    ];
+    let a = compile_sources(&preset, &late_use)
+        .map_err(|f| f.render())
+        .unwrap();
+    let b = compile_sources(&preset, &early_use)
+        .map_err(|f| f.render())
+        .unwrap();
+    let batch_a: Vec<_> = a.batch.iter().map(|s| s.to_value()).collect();
+    let batch_b: Vec<_> = b.batch.iter().map(|s| s.to_value()).collect();
+    assert_eq!(batch_a, batch_b);
+}
+
+#[test]
 fn classifier_edges_land_before_shapes_that_consult_them() {
     // The classifying rel edge is written AFTER the conn edge that relies on
     // it; deterministic lowering must still order it first.

@@ -1,0 +1,75 @@
+{
+  "name": "fix-carrier-inference",
+  "version": "v0004",
+  "created": "2026-07-07T19:09:17Z",
+  "state": "completed",
+  "closed_waves": 1,
+  "problem": "Conn-edge carrier inference is walk-order dependent (issues/carrier-inference-order-dependence.md): resolve.rs collects rel/conn/view defs and binds uses in one pass over sorted modules, so an edge that precedes its conn's def — in module-name order or textually within one module — finds no lane patterns, exact-lane inference silently degrades, and the author gets the engine's raw E_CARRIER_REQUIRED instead of the compiler's targeted hint. v0004 hardened the spec: Compiler.Resolver is phased into Defs (whole-model def sweep) and Uses (binding against the complete table). This plan makes the code match it.",
+  "technology_stack": [
+    {
+      "tech": "Rust 2024, crates/modeling-lang, no new dependencies",
+      "provenance": "the resolver being fixed lives there; the workspace toolchain is a given"
+    },
+    {
+      "tech": "cargo test — resolve.rs tests mod plus tests/source_e2e.rs",
+      "provenance": "the suites the requirement's regression tests extend"
+    }
+  ],
+  "architecture_summary": [
+    {
+      "node": "Compiler.Resolver",
+      "role": "phased binding: Defs sweeps every module's rel/conn/view defs into the def table, then Uses binds edges, apps and carriers against the completed table"
+    },
+    {
+      "node": "Compiler.Resolver.Defs",
+      "role": "the whole-model def sweep — all modules, all textual positions, before any use"
+    },
+    {
+      "node": "Compiler.Resolver.Uses",
+      "role": "binds node bodies, opens, edges, apps; carrier inference reads complete lane patterns; the def-less preset path unchanged"
+    }
+  ],
+  "stack_mapping": [
+    {
+      "tech": "collect_type_defs sweep opening pass 2 in crates/modeling-lang/src/source/resolve.rs",
+      "node": "Compiler.Resolver.Defs"
+    },
+    {
+      "tech": "collect_uses walking DefNode/Open/Edge/App only, after the sweep",
+      "node": "Compiler.Resolver.Uses"
+    }
+  ],
+  "scenarios": [
+    "cargo test --workspace is green, including four new order regressions: conn def in module z used with inferred carriers in module a; def textually after its first use in one module; def-less conn edges unchanged; bit-identical batches under module renaming.",
+    "The self-model's workaround is obsolete for inference: renamed to src/agent.arch (sorting before conns.arch) the model compiles clean under archi check — the bootstrap's original failure. The rename itself stays deferred: verifying it surfaced issues/canonical-render-edge-order-depends-on-module-names.md (the canonical render orders edges by module walk, so the rename reorders an identical model's render); operator.arch's comment now points there.",
+    "The bootstrap repro now compiles: scratch project with def conn invoke in zconns.arch and an inferred-carrier edge in aedge.arch passes archi check; omitting a genuinely uninferable carrier yields the compiler hint (name it — `invoke(->X)`) at the edge span, not the engine's JSON error."
+  ],
+  "scenarios_displayed": true,
+  "scenarios_closed": true,
+  "tasks": [
+    {
+      "id": "t1",
+      "node": "Compiler.Resolver",
+      "description": "Split resolver pass 2 into a whole-model def sweep followed by a uses walk, so every edge, app and carrier binds against the complete def table; keep the def-less (preset) branch intact; add the four order regressions the requirement names.",
+      "spec_refs": [
+        "Compiler.Resolver",
+        "Function type_of Compiler.Resolver",
+        "Compiler.Driver.bind resolve(->Ast, <-Resolution) Compiler.Resolver.bind_names"
+      ],
+      "stack_details": "resolve.rs: extract DefView/DefRel/DefConn handling from collect_uses into a defs sweep over all modules that runs first; collect_uses then walks only DefNode/Open/Edge/App. No signature changes above resolve().",
+      "inputs": {},
+      "outputs": [
+        "crates/modeling-lang/src/source/resolve.rs",
+        "crates/modeling-lang/tests/source_e2e.rs"
+      ],
+      "verifications": {
+        "uses-see-every-def": [
+          "resolve.rs test: conn defined in module z, instantiated with inferred carriers in module a — binds, and a genuinely uninferable lane fires the compiler's E_CARRIER_REQUIRED hint at the edge span",
+          "resolve.rs test: def conn textually after its first use inside one module — binds",
+          "resolve.rs test: an edge on a conn with no source def resolves identically before and after the split (bare arg rides forward, engine checks downstream)",
+          "source_e2e.rs test: same module contents under shuffled module names lower to a bit-identical batch"
+        ]
+      }
+    }
+  ]
+}
