@@ -905,3 +905,160 @@ interface = "sha256:e35d569cd82ff00ee51fbc1720eb156c101060a458adfc2f71290cc09b2f
 [version.scopes.Tokens]
 full = "sha256:c521cc38149ceb7d40da2668bf5dc0ae484c27660c303c484ea744a987a66cd5"
 interface = "sha256:042860de1c01c6efbc21351ae1ff7d2ba0a2af99ff13765116ae01b17ad8b8ee"
+
+[[version]]
+id = "v0007"
+note = "the round record gets its verb: Sessions.fold, markers read not smoothed"
+created = "2026-07-08T12:30:18Z"
+model = "sha256:c914904f392ecf55cacac4a4ed28f11ff5addb671e48a51016d9d4b350bca46d"
+parent = "v0006"
+kind = "patch"
+preset = "default"
+
+[version.scopes.Agent]
+full = "sha256:09b6665f058e006d327a840930b02953b9d36738e2177dbd8e0de632ea6fea5a"
+interface = "sha256:f15be18f0dc84efc6b6dbcd9daa74c9e56874ddaca1833217eef95a719d83ad9"
+
+[version.scopes.ArchSource]
+full = "sha256:9d0aa13dfa6da252cf480296b9cfd6ff049b1230b25031116f6a24e420129db1"
+interface = "sha256:ffda07996d37edceff210a814f8b05a79e6dba38af786496b2b16b5927d6eb91"
+
+[version.scopes.Archive]
+full = "sha256:574e18b6ea2d62cdad41134cd9f25a6ddba57c4b2ba19dba0b252befe95cfdbf"
+interface = "sha256:b90b3d3d99141eb34fbc12a63e283fa396d1541a91dac33e9c0c5fa86ca3852f"
+
+[version.scopes.Ast]
+full = "sha256:33d74d63262f0d0d034dfedb45e10e0e40a4daa57c55aded3247a6a8c66ad015"
+interface = "sha256:88556d6a7260a655e80646648d6ae1fe9480149e8efae45c8cbd08ba1c3ecc87"
+
+[version.scopes.CanonicalRender]
+full = "sha256:b9115c08dd13a19ee127f6d97bf21856d749f808812cbaa899dbc3507d5f0032"
+interface = "sha256:480322378acedad863a46886ee6a409a9ec84875045b5163fbb34ba15877b45c"
+
+[version.scopes.Cli]
+full = "sha256:69a04dcafff048ea3628ef2f55b4c0c58f3b3846634e709a6040118310ea1ada"
+interface = "sha256:eb4f92694225cc0c2004eef0f0a0e16bbc0aaa9dc55fed97aea330327775784f"
+
+[version.scopes.CodeItem]
+full = "sha256:c512dd6ec80f4ecec59644bbfcad8f85df7e1f3d76473a8f9a26ed846f0a6c43"
+interface = "sha256:3606d9b78dc5b01f3841483fe9c5943692af2e80b984342ca9f0bf4f6c606dd1"
+
+[version.scopes.Command]
+full = "sha256:aec6608c0538141b43177a1553f539c3ad21a41be62d333ee81c674293e87888"
+interface = "sha256:94608f7a460c9ac553c82971065d972fccfa188724507416d3f2dc1cb0ad3ca9"
+
+[version.scopes.Compiler]
+full = "sha256:f84d1b0505cae39662accc578552014a9d9cf1e94e40365521e3cf3239b5e70c"
+interface = "sha256:626b6d78ff1be8dd84681c82bb0b94abf0d45036f83878e4d10d635cb6bdf300"
+
+[version.scopes.DefTable]
+full = "sha256:46686cd4441757d2ca8a73be164bd7da37e23486585dc734466cefa45546ca22"
+interface = "sha256:e1dbab7d45f3718eb0d08287a1a2a46960afcd09295741dd05b6f2cced510a95"
+
+[version.scopes.Diagnostics]
+full = "sha256:1e69c311466d2851a95a55d9ada2dc0d64e550b2f1f66c9b5afd6bc102e519b7"
+interface = "sha256:91b4bafaf7a543ccf08ee33e3f4385838a3a5bfa2f5b26a3a77bfa3415131843"
+
+[version.scopes.DocsCompiler]
+full = "sha256:9be54f0ce6d215c6d5fae3a9deb475dce8ddba574bc1e8331767aa3f08f02235"
+interface = "sha256:748358fca361f94ad9822a4d7bf6ed7de4965d1693ec4728095085d217ad81dc"
+
+[version.scopes.Engine]
+full = "sha256:4947e4e3972d8e520d387cac18dc5a835bb030a34b13ccd28fcd53c79a851b4b"
+interface = "sha256:0e512ce5e0f698660cd660c9952e20082c17a93df58ebd9d0c59c2d3d681ef1d"
+
+[version.scopes.Findings]
+full = "sha256:260c161ecdcd30a01ac280d0755ac60c9c275f93bc460d50aa7c08fe15ce921a"
+interface = "sha256:daf6050739dd71a751c50e77f7997fd7241773cd13781dfa5977ebd0083100de"
+
+[version.scopes.Incidence]
+full = "sha256:ac9a6ea2d7d11fa1afe487bb31adc692867bad72c5c613769f7f5c0e56cb7a0d"
+interface = "sha256:5c9df0b7baa8d0999da89ff655f453053720a676958d3f9ecac1b76134e14a68"
+
+[version.scopes.IncidenceReport]
+full = "sha256:0274046e5532072a9112d37465733544a8cf8c598c4cb97fbce03cea58adf4a7"
+interface = "sha256:4d14890e8d2ac4849f205ee37f76c39e36d6e0c192abff8ceca6c3f07c905203"
+
+[version.scopes.ItemHashIndex]
+full = "sha256:95f76a9dad85fe30bbed27ad013fef19328470f037c8f18490e3af8c2bb04330"
+interface = "sha256:82eafe466d308d4440abb62fcc26cb91892e800e839cde26ab1e5f1a602cc95a"
+
+[version.scopes.LinkEvent]
+full = "sha256:96862ece4ac49a05a283535893e6d092e218e33914a21120d8e39da44c9e14cc"
+interface = "sha256:910d1aea984f4f7e86e8bc0dd214d747bc4d15b33f2b3a55b86a72d5abd00e38"
+
+[version.scopes.Links]
+full = "sha256:564bb1ceacd52e3cd03d3f6cdee939ca4db59fac5f768443a77db670c98debe5"
+interface = "sha256:a1997cae64ddc764116552613642be375c353ce199dc9f88d7eb93cb67533725"
+
+[version.scopes.ModelGraph]
+full = "sha256:de78a89586b5fc3483089e1f9260b29a863d128a27d99ffff99f6682391ad975"
+interface = "sha256:589c09c5049d3972ca8b0bc16a000e11cdf6594069e4ac1f0e87de6b37a75a8e"
+
+[version.scopes.Nkp]
+full = "sha256:54974f87731016254ff62790a7ceb382c365288a00956152d7ce90d57b03020e"
+interface = "sha256:0383b16abbd8b3b5700b1e0603defc15f7eda2dda2b88b0594c3056d4385756b"
+
+[version.scopes.NkpReport]
+full = "sha256:384c9a562a5893ab984b582bad3910cb072198991b7fb9df11f44159d5ebc1c4"
+interface = "sha256:f761aa6e3211106871678a14d7de5750bf95bb06b3b8eb333160dc8211c29d42"
+
+[version.scopes.PlanFile]
+full = "sha256:2d561b0fda08c2efa9c1887c64dc3b9a7a1c5001b3170954cd6822a4628aafbf"
+interface = "sha256:32883a84931f97b6fdf491ccdfeb7649c02838d5ceb0ee54b7e7e1cb0cf7ca42"
+
+[version.scopes.Planner]
+full = "sha256:b77e6c83e7c0acdcaac248ff8ea8b31d5cca610c8d366f95c57ca748ce3455c8"
+interface = "sha256:2ab39124860b004ff111a6e8ebbf1a2c93f0292132ae4b7dcbd403701671b1f2"
+
+[version.scopes.Preset]
+full = "sha256:802619f31cc95015c9fdf6e7a8ae9e14166fa82be07cd1c19d1d17614d24e592"
+interface = "sha256:9432411c18ffa11b1ec10cdb592ae875e0a0155e30b3f116217dc59b6e0df9b5"
+
+[version.scopes.Query]
+full = "sha256:860de1564c05463c8466c9022cb53e5b9f0439842371aeeb1a626d46e4ac1879"
+interface = "sha256:85684974ea6d1dd9e38aced90d091d7690fc4f67175f196cfa2df648b7813634"
+
+[version.scopes.Renderer]
+full = "sha256:96c0adf2e6c76a871cdea8a553efac4ec3a6ea184c53684053a29cb6e0b09609"
+interface = "sha256:6d6fe4b37975205bb9229742fa7c2d717884076c1f515dcdac5920e7bdda3151"
+
+[version.scopes.Report]
+full = "sha256:89de4fb92abef27f12099fba56804f4f20511605f61b2cb7e6ab5ce2ced024ac"
+interface = "sha256:e34b17523c1947b9aa8258fdfa82bd31561664b48dff4a532451ae90e9f059b2"
+
+[version.scopes.RequirementDoc]
+full = "sha256:ccce07061f79049306d7f7cd35f5f358dfb1d82b0c0f4467dd897435e15da9e5"
+interface = "sha256:0ee2cabadb85315c5b00545ab6c93794d2aee4f442da93b2e630647c9d0bbc6f"
+
+[version.scopes.Resolution]
+full = "sha256:b4a7e136352bea4061e6c28fe418a36f3b5f92f6d15dc37ab263f01012e8bb14"
+interface = "sha256:58cc0cb055771aa4196ef670b6ff20fa380ec7a96573e0ab56f20cdc93b4a272"
+
+[version.scopes.Sessions]
+full = "sha256:36018005327f750cca63fefd08da1d6c4f1096de18544d0b0bfccaa44728473c"
+interface = "sha256:59f28188fcd834bbd3a6318bd00f1e6c4c51633d7aedd54285c9acbf808ecdf4"
+
+[version.scopes.SourceTree]
+full = "sha256:dc9731ec0348fd24aa5faf60ad3cd5b5a268506681e9545ded5e62a509e79bd2"
+interface = "sha256:cfe042f054a38f27a5628b253030c0b49b39cb076f394609c333c503e3299f1d"
+
+[version.scopes.StatementBatch]
+full = "sha256:4c1a4d644a90fc84f11e7351aafce508638154328bee5be6ba0ad3c3ce7f3148"
+interface = "sha256:46fbe52ba685bf12cd5b5ec4dae6f74d8069758ff5f15f94dc9ca9261e1c49be"
+
+[version.scopes.StressDoc]
+full = "sha256:ee84491ce0898f9758f6c5d87ea21fc4cbb599f05450831f9dac3b7b69178a54"
+interface = "sha256:a00b92aed6ce2116074147f15f9d70851a1dc41b5470bdf4b3d498b0702030cf"
+
+[version.scopes.SubgraphResult]
+full = "sha256:4a0b0c5d8b91232ae204b1ae4dfcdbc5e1129420e9763161070a5b4a2e9360d7"
+interface = "sha256:26ba2ba73ee27a2f198106f12f25230a486d78caf7c4db0b6c09ca3a08c2fbab"
+
+[version.scopes.SymbolHashes]
+full = "sha256:baf475f3b669b1cb127b60372b15d51b1de78f3e9f82b663db5e29721e30cdc0"
+interface = "sha256:e35d569cd82ff00ee51fbc1720eb156c101060a458adfc2f71290cc09b2fbf43"
+
+[version.scopes.Tokens]
+full = "sha256:c521cc38149ceb7d40da2668bf5dc0ae484c27660c303c484ea744a987a66cd5"
+interface = "sha256:042860de1c01c6efbc21351ae1ff7d2ba0a2af99ff13765116ae01b17ad8b8ee"

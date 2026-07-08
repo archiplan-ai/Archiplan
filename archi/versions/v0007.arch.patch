@@ -1,0 +1,54 @@
+--- original
++++ modified
+@@ -23,6 +23,7 @@
+   port plan
+   port query
+   port read
++  port session
+   port version
+ def node CodeItem
+ def node Command
+@@ -124,6 +125,10 @@
+ def node Report
+ def node RequirementDoc
+ def node Resolution
++def node Sessions:
++  port fold
++  port read_state
++  port store_record
+ def node SourceTree:
+   port serve
+   port store
+@@ -189,6 +194,7 @@
+ Service type_of Cli
+ Service type_of Links
+ Service type_of Planner
++Service type_of Sessions
+ Storage type_of Archive
+ Storage type_of SourceTree
+ Agent.author persist(ArchSource) SourceTree.store in compile_flow
+@@ -204,6 +210,7 @@
+ Agent.drive invoke(->Command, <-Report) Cli.plan in trace_flow
+ Agent.drive invoke(->Command, <-Report) Cli.query in read_flow
+ Agent.drive invoke(->Command, <-Report) Cli.read in read_flow
++Agent.drive invoke(->Command, <-Report) Cli.session in harden_flow
+ Agent.drive invoke(->Command, <-Report) Cli.version in harden_flow
+ Archive.canonicalize render(->ModelGraph, <-CanonicalRender) Renderer.emit_source in harden_flow
+ Cli.ask interrogate(->StatementBatch, <-SubgraphResult) Engine.answer in read_flow
+@@ -213,6 +220,7 @@
+ Cli.drive consult(->Command, <-Report) Links.verify in trace_flow
+ Cli.drive consult(->Command, <-Report) Planner.advance in trace_flow
+ Cli.drive consult(->Command, <-Report) Planner.author in trace_flow
++Cli.drive consult(->Command, <-Report) Sessions.fold in harden_flow
+ Cli.drive consult(->ModelGraph, <-Diagnostics) DocsCompiler.compile_docs in harden_flow
+ Cli.drive consult(->ModelGraph, <-Findings) Query.audit in read_flow
+ Cli.drive consult(->ModelGraph, <-IncidenceReport) Incidence.scan in harden_flow
+@@ -251,6 +259,8 @@
+ Planner.run_capture consult(->ItemHashIndex, <-LinkEvent) Links.capture in trace_flow
+ Planner.store_plan persist(ItemHashIndex) SourceTree.store in trace_flow
+ Planner.store_plan persist(PlanFile) SourceTree.store in trace_flow
++Sessions.read_state recall(<-StressDoc) SourceTree.serve in harden_flow
++Sessions.store_record persist(StressDoc) SourceTree.store in harden_flow
+ Compiler.Resolver.bind_names = Uses.bind
+ Compiler.compile = Driver.accept
+ Compiler.fetch_preset = Driver.stdlib

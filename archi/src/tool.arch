@@ -15,6 +15,7 @@ def node Cli:
   port nkp         // landscape analysis verb
   port incidence   // incidence analysis verb
   port version     // save, anchor, remint, list, show, diff (archived or live), current
+  port session     // fold: two concurrent rounds into one deliberate record
   port link        // add, ls, verify, confirm, rm, repin, capture, audit
   port plan        // use, task add, verify, start, next, close, reset
   port query       // one composed subgraph query
@@ -37,6 +38,11 @@ def node Archive:
   port remint       // re-mint a round's save onto the merged lineage; re-stamps the session's closed:
   port serve        // reconstructs any version, verified against its seal
   port canonicalize // consults the renderer for the canonical bytes
+
+def node Sessions:
+  port fold         // two rounds into one record: both charters kept, the trace in the file
+  port read_state   // the merged state it folds: fused files, the open pair, their pins
+  port store_record // the folded record lands in the tree
 
 def node Links:
   port record      // add, confirm, rm, repin: journal events
@@ -98,6 +104,7 @@ Service type_of Cli
 Function type_of DocsCompiler
 Service type_of Links
 Service type_of Planner
+Service type_of Sessions
 
 // the compiler and the engine read their inputs out of the tree
 Compiler.load_sources recall(ArchSource) SourceTree.serve in compile_flow
@@ -112,6 +119,7 @@ Cli.drive consult(->ModelGraph, <-IncidenceReport) Incidence.scan in harden_flow
 Cli.drive consult(->ModelGraph, <-Report) Archive.save in harden_flow
 Cli.drive consult(->ModelGraph, <-Report) Archive.anchor in harden_flow
 Cli.drive consult(->ModelGraph, <-Report) Archive.remint in harden_flow
+Cli.drive consult(->Command, <-Report) Sessions.fold in harden_flow
 Cli.drive consult(->ModelGraph, <-Diagnostics) DocsCompiler.compile_docs in harden_flow
 Cli.drive consult(->Command, <-Report) Links.record in trace_flow
 Cli.drive consult(->Command, <-Report) Links.verify in trace_flow
@@ -127,6 +135,10 @@ DocsCompiler.compile_pin compile Compiler.compile in harden_flow
 
 // the archive canonicalizes through the renderer
 Archive.canonicalize render Renderer.emit_source in harden_flow
+
+// sessions: the round record folds through a verb, never a hand merge
+Sessions.read_state recall(StressDoc) SourceTree.serve in harden_flow
+Sessions.store_record persist(StressDoc) SourceTree.store in harden_flow
 
 // incidence reads sessions and expands affects against pinned versions
 Incidence.read_sessions recall(StressDoc) SourceTree.serve in harden_flow

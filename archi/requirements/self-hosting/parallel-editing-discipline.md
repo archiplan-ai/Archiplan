@@ -1,7 +1,7 @@
 ---
 kind: non-functional
-origin: stressor(parallel-rounds)
-satisfied-by:
+origin: stressor(parallel-rounds, union-fuses-charters-silently)
+satisfied-by: [Archive, Sessions, Links.Journal]
 deferred:
 ---
 
@@ -18,8 +18,20 @@ First hit by parallel-rounds; mapped store by store in the merge-pressure round,
 requirements sharpen this umbrella: remint-rejoins-the-lineage, merge-deltas-are-reviewable
 and the-fold-survives-a-merge (landed — the journal folds concurrent histories, the save
 collision has its remint recipe, the live diff reviews a merge before the seal), and
-rounds-fold-deliberately (open). The discipline is specified in requirements/multiplayer.md;
-what still needs one writer at a time is the round record itself — concurrent sessions merge
-detectably but fold only by hand.
+rounds-fold-deliberately. The fold-pressure round settled the last store's boundary
+empirically: `merge=union` fuses charter prose into a schema-perfect chimera, so the round
+record keeps git's default markers and the tool reads them.
 
 ## Satisfy
+
+Store by store, the path back to one lineage is a verb: `Archive.remint` re-mints the
+colliding save onto the merged history and re-stamps the round it closes, `Links.Journal`
+folds concurrent link histories under its union attribute, the live diff reviews a merge
+before any seal, and `Sessions.fold` folds the round record itself — detected by
+marker-reading, folded with both charters kept, refused across pins. The merge boundary is
+chosen per store — union where replay semantics absorb it, markers where prose identity would
+fuse silently — and every merged state lands as one recipe-naming diagnostic, so the
+discipline is a printed sequence of verbs, not one writer per repository.
+
+- test — every store's merged state is one recipe-naming diagnostic: manifest markers, stress markers, the open pair
+- test — the two-writer lab replays end to end: collide, fold, remint, and `check` closes green with both rounds' records intact
