@@ -2,7 +2,7 @@
 kind: non-functional
 origin: stressor(parallel-rounds)
 satisfied-by:
-deferred: multiplayer is a spec stub; until it lands the discipline is one writer per repository — branch-parallel saves and sessions merge loudly (E_SESSION, dense-id conflicts) and the second writer re-mints by hand
+deferred:
 ---
 
 # Parallel editing discipline
@@ -13,7 +13,11 @@ record, and a session-open discipline that spans branches rather than working tr
 
 ## System Context
 
-Everything is files in git, so concurrent work is not preventable — only mergeable or not;
-today's checks make collisions loud but leave the repair to the operator.
+Everything is files in git, so concurrent work is not preventable — only mergeable or not.
+First hit by parallel-rounds; mapped store by store in the merge-pressure round, whose derived
+requirements sharpen this umbrella: remint-rejoins-the-lineage, merge-deltas-are-reviewable,
+the-fold-survives-a-merge, rounds-fold-deliberately. The discipline itself is specified in
+requirements/multiplayer.md; until the verbs land, the operating rule stays one writer per
+repository.
 
 ## Satisfy
