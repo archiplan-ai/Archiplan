@@ -51,11 +51,15 @@ Ground rules, always:
    `archi plan verify --json`). Loop `plan verify` to clean.
 8. **Execute waves** — `archi plan start`. Per wave: implement each
    in-flight task inside its declared outputs, then `archi plan next` — it
-   captures the delta into candidate links and blocks on asserted coverage.
-   Review `archi link ls --evidence`, `link confirm` the load-bearing
-   candidates, `link rm` the drive-bys (subtractions stick), and re-run
-   `plan next`. After the last wave it prints the scenarios: verify them
-   end to end, then one more `plan next` → `DONE`.
+   captures the delta into candidate links (signal-bearing pairs only; the
+   no-signal product is suppressed, whole under `link capture --json`) and
+   blocks on asserted coverage of the refs the delta presses. Review
+   `archi link ls --evidence`, `link confirm` the load-bearing candidates,
+   `link rm` the drive-bys (subtractions stick), and re-run `plan next`.
+   Unpressed uncovered refs arrive as a suggested `link add` checklist —
+   hand-author the ones whose traceability you want, skip the rest. After
+   the last wave it prints the scenarios: verify them end to end, then one
+   more `plan next` → `DONE`.
 9. **Steady state** — `archi check` and `archi link verify` in CI;
    `archi link audit` for dark deltas, dark spec, and decayed evidence.
 

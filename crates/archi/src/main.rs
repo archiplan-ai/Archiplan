@@ -23,7 +23,7 @@
 //! archi link verify [--spec <ref>] [--since <rev>] [--json]
 //! archi link confirm <id> | rm <id>... | rm --spec <ref> --yes
 //! archi link repin <id> [--to <file[#symbol]>]
-//! archi link capture --task <TASK>
+//! archi link capture --task <TASK> [--json]
 //! archi link audit [--scope <path>] [--since <rev>] [--prune] [--json]
 //! archi plan use <name> | repin | show [--json] | verify [--json]
 //! archi plan task add <node> [--desc <text>]
@@ -77,7 +77,7 @@ const USAGE: &str = "usage:
   archi link verify [--spec <ref>] [--since <rev>] [--json] [--project <dir>]
   archi link confirm <id> | rm <id>... | rm --spec <ref> --yes [--project <dir>]
   archi link repin <id> [--to <file[#symbol]>] [--project <dir>]
-  archi link capture --task <TASK> [--project <dir>]
+  archi link capture --task <TASK> [--json] [--project <dir>]
   archi link audit [--scope <path>] [--since <rev>] [--prune] [--json] [--project <dir>]
   archi plan use <name> | repin | show [--json] | verify [--json] [--project <dir>]
   archi plan task add <node> [--desc <text>] [--project <dir>]
@@ -679,7 +679,14 @@ fn run_link(args: &Args) -> ExitCode {
             };
             match links::capture::run_manual(&root, ws.model(), task) {
                 Ok(outcome) => {
-                    print!("{}", links::capture::render_capture(&outcome));
+                    if args.json {
+                        match serde_json::to_string_pretty(&outcome) {
+                            Ok(text) => println!("{text}"),
+                            Err(e) => return fail(format!("outcome serializes: {e}")),
+                        }
+                    } else {
+                        print!("{}", links::capture::render_capture(&outcome));
+                    }
                     ExitCode::SUCCESS
                 }
                 Err(e) => fail(e),
@@ -977,6 +984,15 @@ fn run_plan(args: &Args) -> ExitCode {
                 Ok(outcome) => {
                     if let Some(c) = &outcome.capture {
                         print!("{}", links::capture::render_capture(c));
+                    }
+                    if !outcome.checklist.is_empty() {
+                        println!(
+                            "uncovered refs this delta does not press — hand-author when the \
+                             traceability is wanted:"
+                        );
+                        for line in &outcome.checklist {
+                            println!("  {line}");
+                        }
                     }
                     match outcome.step {
                         plans::Step::Blocked(why) => {

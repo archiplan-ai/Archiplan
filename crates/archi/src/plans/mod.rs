@@ -771,33 +771,59 @@ fn gate_verifications(plan: &Plan, report: &PlanReport) -> Result<(), String> {
     }
 }
 
-/// Asserted code-link coverage: every spec_ref of every in-flight task has
-/// a live asserted link at the Working slot. Evidence never gates.
-fn gate_coverage(root: &Path, in_flight: &[&Task]) -> Result<(), String> {
+/// Asserted code-link coverage, scoped to the delta: a ref gates only when
+/// the closing capture pressed it — some claimed changed item of its task
+/// carries the ref's terms. Unpressed refs never block; the uncovered ones
+/// come back as suggested `link add` lines, since hand-authoring is the
+/// expected move for surface the delta did not touch. Evidence never
+/// gates, and an asserted link satisfies its ref however it was born.
+fn gate_coverage(
+    root: &Path,
+    in_flight: &[&Task],
+    pressed: &BTreeMap<String, BTreeSet<String>>,
+) -> Result<Vec<String>, String> {
     let live = links::ls(root, None, false)?;
+    let covered = |r: &str| {
+        live.iter().any(|l| {
+            l.standing == links::Standing::Asserted
+                && l.spec.version.is_none()
+                && l.spec.path == r
+        })
+    };
     let mut gaps = Vec::new();
+    let mut suggested = Vec::new();
     for t in in_flight {
         for r in &t.spec_refs {
-            let covered = live.iter().any(|l| {
-                l.standing == links::Standing::Asserted
-                    && l.spec.version.is_none()
-                    && l.spec.path == *r
-            });
-            if !covered {
+            if covered(r) {
+                continue;
+            }
+            if pressed.get(&t.id).is_some_and(|p| p.contains(r)) {
                 gaps.push(format!("{}: `{r}`", t.id));
+            } else {
+                suggested.push(format!(
+                    "archi link add \"{r}\" <file#symbol> --kind indirect  # {}",
+                    t.id
+                ));
             }
         }
     }
     if gaps.is_empty() {
-        Ok(())
-    } else {
-        Err(format!(
-            "asserted code-link coverage is incomplete:\n  {}\nreview the captured candidates \
-             (`archi link ls --evidence`), assert the load-bearing ones \
-             (`archi link confirm <id>`), then re-run `archi plan next`",
-            gaps.join("\n  ")
-        ))
+        return Ok(suggested);
     }
+    let mut msg = format!(
+        "asserted code-link coverage of the refs this delta presses is incomplete:\n  {}\n\
+         review the captured candidates (`archi link ls --evidence`), assert the load-bearing \
+         ones (`archi link confirm <id>`), then re-run `archi plan next`",
+        gaps.join("\n  ")
+    );
+    if !suggested.is_empty() {
+        msg.push_str(&format!(
+            "\nrefs the delta does not press are not demanded — hand-author them when the \
+             traceability is wanted:\n  {}",
+            suggested.join("\n  ")
+        ));
+    }
+    Err(msg)
 }
 
 /// `archi plan start`: gate on structure and verifications, open wave 1.
@@ -847,6 +873,10 @@ pub struct NextOutcome {
     pub capture: Option<links::capture::CaptureOutcome>,
     /// The step.
     pub step: Step,
+    /// Suggested `link add` lines for uncovered refs the closing delta did
+    /// not press — the voluntary checklist; empty when the gate blocked
+    /// (the message carries it) or nothing was left to suggest.
+    pub checklist: Vec<String>,
 }
 
 /// `archi plan next`: capture the closing wave's deltas into candidate
@@ -876,6 +906,7 @@ pub fn next(root: &Path, model: &Model) -> Result<NextOutcome, String> {
             return Ok(NextOutcome {
                 capture: None,
                 step: Step::Done,
+                checklist: Vec::new(),
             });
         }
         return Err("nothing in flight and no scenario step pending — `archi plan verify`".into());
@@ -889,12 +920,16 @@ pub fn next(root: &Path, model: &Model) -> Result<NextOutcome, String> {
         .filter(|t| waves[wave - 1].contains(&t.id))
         .collect();
     let capture = links::capture::capture_wave(root, &plan.name, wave, &in_flight, None)?;
-    if let Err(gaps) = gate_coverage(root, &in_flight) {
-        return Ok(NextOutcome {
-            capture: Some(capture),
-            step: Step::Blocked(gaps),
-        });
-    }
+    let checklist = match gate_coverage(root, &in_flight, &capture.pressed) {
+        Ok(suggested) => suggested,
+        Err(gaps) => {
+            return Ok(NextOutcome {
+                capture: Some(capture),
+                step: Step::Blocked(gaps),
+                checklist: Vec::new(),
+            });
+        }
+    };
 
     plan.closed_waves = wave;
     let step = if plan.closed_waves < waves.len() {
@@ -915,6 +950,7 @@ pub fn next(root: &Path, model: &Model) -> Result<NextOutcome, String> {
     Ok(NextOutcome {
         capture: Some(capture),
         step,
+        checklist,
     })
 }
 
@@ -1386,24 +1422,46 @@ mod tests {
         let (_, in_flight) = current_wave(&root, ws.model()).unwrap();
         assert!(matches!(in_flight, InFlight::Wave(2, ids) if ids == vec!["t2".to_string()]));
 
-        // Wave 2 closes the same way; the last close prints scenarios and
-        // latches the display.
+        // Wave 2's delta shares no term with any of t2's refs: nothing is
+        // pressed, so nothing gates — the wave closes straight through,
+        // the no-signal product suppressed and the uncovered surface
+        // suggested for hand-authoring. A pre-asserted ref is silent in
+        // the checklist: covered is covered, however the link was born.
+        links::add(&root, ws.model(), "Auth", "code/auth.rs", links::LinkKind::Indirect).unwrap();
         put(
             &root,
             "code/auth.rs",
             "pub fn login(u: &str) -> bool { !u.is_empty() }\n",
         );
         let outcome = next(&root, ws.model()).unwrap();
-        assert!(matches!(outcome.step, Step::Blocked(_)));
-        for l in &outcome.capture.expect("capture ran").minted {
-            links::confirm(&root, &l.id).unwrap();
-        }
-        let outcome = next(&root, ws.model()).unwrap();
+        let capture = outcome.capture.expect("capture ran");
+        assert!(
+            capture.minted.is_empty(),
+            "{}",
+            links::capture::render_capture(&capture)
+        );
+        assert_eq!(capture.suppressed.len(), 4, "every pair lacks signal");
+        assert!(capture.pressed.is_empty(), "{:?}", capture.pressed);
         let Step::Scenarios(scenarios) = &outcome.step else {
-            panic!("the scenario step follows the last wave");
+            panic!("the unpressed wave closes to the scenario step");
         };
         assert_eq!(scenarios, &vec!["a user logs in end to end".to_string()]);
         assert!(active(&root).scenarios_displayed);
+        assert_eq!(outcome.checklist.len(), 3, "{:?}", outcome.checklist);
+        assert!(
+            outcome
+                .checklist
+                .iter()
+                .all(|s| s.contains("archi link add") && s.ends_with("# t2")),
+            "{:?}",
+            outcome.checklist
+        );
+        assert!(
+            !outcome.checklist.iter().any(|s| s.contains("\"Auth\"")),
+            "the asserted ref is silent: {:?}",
+            outcome.checklist
+        );
+        assert!(outcome.checklist.iter().any(|s| s.contains("Auth peer Audit")));
 
         // One more next completes; a completed plan refuses.
         let outcome = next(&root, ws.model()).unwrap();
@@ -1426,6 +1484,68 @@ mod tests {
         let outcome = next(&root, ws.model()).unwrap();
         assert!(matches!(outcome.step, Step::Done));
         assert_eq!(active(&root).state, PlanState::Completed);
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn the_gate_presses_the_delta_and_suggests_the_rest() {
+        let root = temp_project();
+        let ws = compiled(&root);
+        save_version(&root);
+        put_requirements(&root);
+        put(&root, "code/auth.rs", "pub fn login() -> bool { true }\n");
+        use_plan(&root, ws.model(), "mvp").unwrap();
+        task_add(&root, "Auth", None).unwrap();
+
+        let mut plan = active(&root);
+        plan.tasks[0].outputs.push("code/auth.rs".into());
+        let report = verify_plan(&root, ws.model(), &plan).unwrap();
+        for t in &mut plan.tasks {
+            for m in &report.derived.matched[&t.id] {
+                t.verifications
+                    .insert(m.req.clone(), vec![format!("test — proves {}", m.req)]);
+            }
+        }
+        store_plan(&root, &plan).unwrap();
+        start(&root, ws.model()).unwrap();
+
+        // The delta names the incoming wire's ports but never the node:
+        // exactly one ref is pressed and gates; the rest arrive inside the
+        // blocked message as suggestions, not gaps.
+        put(
+            &root,
+            "code/auth.rs",
+            "pub fn login() -> bool { true }\npub fn inn_wire_probe() -> bool { true }\n",
+        );
+        let outcome = next(&root, ws.model()).unwrap();
+        let Step::Blocked(why) = &outcome.step else {
+            panic!("the pressed ref gates");
+        };
+        assert!(why.contains("coverage of the refs this delta presses"), "{why}");
+        assert!(why.contains("t1: `Gate.out wire Auth.inn`"), "{why}");
+        assert!(!why.contains("t1: `Auth`"), "unpressed refs never gap: {why}");
+        assert!(why.contains("hand-author"), "{why}");
+        assert!(why.contains("archi link add \"Auth\""), "{why}");
+        let capture = outcome.capture.expect("capture ran");
+        let minted: Vec<&str> = capture.minted.iter().map(|l| l.spec.path.as_str()).collect();
+        assert_eq!(minted, vec!["Gate.out wire Auth.inn"], "{minted:?}");
+        assert_eq!(capture.suppressed.len(), 3, "{:?}", capture.suppressed);
+
+        // Confirm the pressed candidate: the wave closes and the same
+        // suggestions ride the passing step as the voluntary checklist.
+        links::confirm(&root, &capture.minted[0].id).unwrap();
+        let outcome = next(&root, ws.model()).unwrap();
+        assert!(matches!(outcome.step, Step::Done));
+        assert_eq!(outcome.checklist.len(), 3, "{:?}", outcome.checklist);
+        assert!(
+            outcome
+                .checklist
+                .iter()
+                .any(|s| s.contains("archi link add \"Auth\" <file#symbol> --kind indirect")),
+            "{:?}",
+            outcome.checklist
+        );
 
         fs::remove_dir_all(&root).unwrap();
     }

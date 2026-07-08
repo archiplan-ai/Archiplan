@@ -168,13 +168,18 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     )
     .unwrap();
     let (stdout, stderr) = fails(&root, &["plan", "next"]);
-    assert!(stderr.contains("coverage is incomplete"), "{stderr}");
+    assert!(stderr.contains("coverage of the refs this delta presses is incomplete"), "{stderr}");
     let ids = captured_ids(&stdout);
     assert_eq!(ids.len(), 2, "{stdout}");
 
-    // A manual re-run is idempotent.
+    // A manual re-run is idempotent, and `--json` carries the full
+    // product: what was pressed, what was suppressed.
     let out = ok(&root, &["link", "capture", "--task", "t1"]);
     assert!(!out.contains("captured "), "{out}");
+    let json: Value =
+        serde_json::from_str(&ok(&root, &["link", "capture", "--task", "t1", "--json"])).unwrap();
+    assert_eq!(json["pressed"]["t1"].as_array().unwrap().len(), 2, "{json}");
+    assert!(json["suppressed"].as_array().unwrap().is_empty(), "{json}");
 
     // Review and assert, then re-run the gate.
     for id in &ids {
@@ -183,17 +188,20 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("wave 1 closed — in flight: t2"), "{out}");
 
-    // Wave 2 the same way; the last close prints the scenarios block.
+    // Wave 2's delta shares no term with any of t2's refs: nothing is
+    // pressed, so nothing gates — the wave closes straight to the
+    // scenarios, the no-signal product suppressed and the untouched
+    // surface suggested as a checklist instead of a jam.
     fs::write(
         root.join("code/auth.rs"),
         "pub fn login(u: &str) -> bool { !u.is_empty() }\n",
     )
     .unwrap();
-    let (stdout, _) = fails(&root, &["plan", "next"]);
-    for id in &captured_ids(&stdout) {
-        ok(&root, &["link", "confirm", id]);
-    }
     let out = ok(&root, &["plan", "next"]);
+    assert!(!out.contains("captured "), "{out}");
+    assert!(out.contains("suppressed 3 no-signal pair(s)"), "{out}");
+    assert!(out.contains("hand-author"), "{out}");
+    assert!(out.contains("archi link add \"Auth\" <file#symbol> --kind indirect"), "{out}");
     assert!(out.contains("a user logs in end to end"), "{out}");
 
     // One more next closes the plan.
@@ -201,13 +209,20 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     assert!(out.contains("DONE"), "{out}");
     assert_eq!(plan_json(&root)["state"], "completed");
 
+    // The checklist is actionable as printed: hand-author the untouched
+    // surface, and the links land asserted — covered is covered, however
+    // a link is born.
+    ok(&root, &["link", "add", "Auth", "code/auth.rs#login", "--kind", "indirect"]);
+    ok(&root, &["link", "add", "Gate.out wire Auth.inn", "code/auth.rs#login", "--kind", "indirect"]);
+    ok(&root, &["link", "add", "Service type_of Auth", "code/auth.rs", "--kind", "indirect"]);
+
     // Nothing in the plan's scope is dark now, and the journal holds the
     // captures with their confirms folded in.
     let out = ok(&root, &["link", "audit"]);
     assert!(!out.contains("unlinked spec element"), "{out}");
     let out = ok(&root, &["link", "ls"]);
     assert!(out.contains("captured(t1)"), "{out}");
-    assert!(out.contains("captured(t2)"), "{out}");
+    assert!(out.contains("authored"), "{out}");
 
     fs::remove_dir_all(&root).unwrap();
 }

@@ -76,9 +76,18 @@ after the fact — the delta arrives pre-attributed.
 When a wave opens, the tree state is recorded as a canonical item-hash index (file → symbol → body
 hash — no git involved, so squashes and shallow clones cannot break it). When the wave closes at
 `archi plan next`, each task's delta against that index is **captured**: the changed symbols are read
-off the index directly, and the task's `spec_refs` × touched symbols become candidate links. The closing agent reviews the batch — subtracts drive-by edits,
-asserts the load-bearing links, leaves the rest as evidence. Only then does the coverage gate count
-asserted links: the step that demands links is the step that produces them.
+off the index directly, and the task's `spec_refs` × touched symbols become candidate links —
+**where the pair carries signal**. A candidate is minted only when the ref's surface terms (node
+path segments, edge endpoints, payload types; case- and underscore-split, the classification
+rel's own tokens excluded) overlap the changed item's symbol path or canonical body tokens
+(file-level items add their path terms). No-signal pairs are suppressed, not subtracted: the
+render counts them, `--json` lists every one, and `link add` mints any of them asserted at any
+time — suppression scopes what capture volunteers, never what links may claim. The closing agent
+reviews the batch — subtracts drive-by edits, asserts the load-bearing links, leaves the rest as
+evidence. Only then does the coverage gate count asserted links: the step that demands links is
+the step that produces them. The capture also reports, per task, the refs its delta **pressed**
+(signal on at least one claimed changed item) — the subset the wave gate demands
+([tasks.md](tasks.md)).
 
 Wave discipline does the attribution: tasks with disjoint in-flight windows claim their hunks
 unambiguously; overlapping tasks split confidence. `archi link capture --task <TASK>` re-runs a capture

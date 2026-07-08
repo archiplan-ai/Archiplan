@@ -1,0 +1,125 @@
+{
+  "name": "follow-the-delta",
+  "version": "v0005",
+  "created": "2026-07-08T09:00:31Z",
+  "state": "completed",
+  "closed_waves": 1,
+  "problem": "Wave close mistreats evidence from both sides. Capture pairs every changed symbol of a claiming task with every spec_ref of that task, no content consulted — a hub-node wave minted 164 candidates of which 158 were retired unread (issues/capture-mints-a-blind-cross-product.md), training the operator to mass-retire through the ratchet's one quality gate. And the coverage gate demands an asserted link for every derived ref of every in-flight task, though capture can only mint from the delta — a one-verb fix on Cli left 10 uncovered refs whose only in-delta candidates were false claims, coercing hand links under gate pressure (issues/wave-gate-covers-the-node-not-the-delta.md). Per the evidence-pressure round: candidates carry signal, gates press the delta.",
+  "technology_stack": [
+    {
+      "tech": "Rust 2024; crates/archi links/capture.rs (term tokenizer + signal test inside the minting loop, suppressed pairs and per-task pressed refs on CaptureOutcome) and plans/mod.rs (gate_coverage takes the pressed map, blocks on pressed refs only, returns the unpressed-uncovered checklist), main.rs rendering both",
+      "provenance": "capture already resolves every changed item and canonicalizes every changed file, so the token stream the signal test needs is in hand; the gate already runs immediately after capture_wave inside plans::next, so the pressed map rides the existing CaptureOutcome return with zero new I/O"
+    },
+    {
+      "tech": "cargo unit tests beside both modules plus the real-binary e2e harness in crates/archi/tests",
+      "provenance": "the suppression boundary (mint vs leftover vs subtraction) and the gate scope (pressed vs checklist) are exactly the invariants the evidence-pressure survivors fence; they need regressions at both the unit seam and the verb surface"
+    }
+  ],
+  "architecture_summary": [
+    {
+      "node": "Links",
+      "role": "capture mints a candidate only where the ref's surface terms overlap the changed item's symbol path or canonical body tokens; no-signal pairs are suppressed — counted in the render, whole under --json, never subtracted — and the outcome carries, per task, the refs its delta pressed; link add, the fold, verify and leftovers never consult the filter"
+    },
+    {
+      "node": "Planner",
+      "role": "the wave-close gate demands asserted Working coverage only for refs the closing delta pressed; unpressed uncovered refs render as suggested `archi link add <ref> <file#symbol> --kind indirect` lines both when the gate blocks and when the wave closes — hand-authoring named as the expected move, never coerced"
+    }
+  ],
+  "stack_mapping": [
+    {
+      "tech": "terms() tokenizer (split on non-alphanumeric, camel-case boundaries, lowercase, len>=2, type_of tokens stopped) + signal test in capture_wave's mint branch; Suppressed{task, spec_ref, item} and pressed: BTreeMap<task, BTreeSet<ref>> on CaptureOutcome; render_capture counts suppressions (crates/archi/src/links/capture.rs)",
+      "node": "Links"
+    },
+    {
+      "tech": "gate_coverage(root, in_flight, pressed) blocks on pressed-and-uncovered refs, returns link-add suggestions for unpressed-and-uncovered ones; plans::next threads capture.pressed into the gate and surfaces the checklist on Blocked, Wave and Scenarios steps; main.rs prints it (crates/archi/src/plans/mod.rs, crates/archi/src/main.rs); spec prose follows in requirements/code-link.md and requirements/tasks.md",
+      "node": "Planner"
+    }
+  ],
+  "scenarios": [
+    "cargo test --workspace green, including the new regressions: plumbing beside a real fix mints only term-overlapping pairs with the suppressed product counted and listed under --json; a retired candidate stays subtracted and an unclaimed change still reports as leftover; a hub-node one-port fix closes its wave on pressed coverage only; the blocked message and the wave close both print the unpressed checklist; a no-signal delta closes without demanding links.",
+    "Closing this very plan is the acceptance run: capture on the follow-the-delta wave mints signal-bearing candidates instead of the 11-ref product per symbol, the suppressed count is visible, the gate presses only the refs this delta touched, and the unpressed remainder of Planner's never-before-covered surface arrives as a link add checklist — one line of which gets hand-run to cover Planner node-level, proving covered-is-covered however the link was born."
+  ],
+  "scenarios_displayed": true,
+  "scenarios_closed": true,
+  "tasks": [
+    {
+      "id": "t1",
+      "node": "Links",
+      "description": "signal-filter capture minting; report pressed refs and suppressed pairs",
+      "spec_refs": [
+        "Links",
+        "Service type_of Links",
+        "Cli.drive consult(->Command, <-Report) Links.record",
+        "Cli.drive consult(->Command, <-Report) Links.sweep",
+        "Cli.drive consult(->Command, <-Report) Links.verify",
+        "Planner.coverage recall(<-LinkEvent) Links.serve_links",
+        "Planner.run_capture consult(->ItemHashIndex, <-LinkEvent) Links.capture"
+      ],
+      "stack_details": "terms() over ref surface text vs changed-item symbol path + canonical body tokens (file-level items add path terms); mint branch suppresses no-signal pairs into CaptureOutcome.suppressed; pressed refs recorded per task independent of mint/touch/subtraction outcomes; existing touch/decay/leftover/retire semantics byte-identical",
+      "inputs": {},
+      "outputs": [
+        "crates/archi/src/links/capture.rs",
+        "crates/archi/src/links/mod.rs"
+      ],
+      "verifications": {
+        "candidates-carry-signal": [
+          "unit tests in capture.rs: a claimed file holding one signal-bearing fix and several no-term helpers mints only the overlapping pairs; the suppressed product is counted in the outcome and serialized whole; suppressed pairs are absent from the journal so a later hand link add mints asserted and verifies clean",
+          "unit test: an unclaimed changed item reports as a leftover whatever its terms — the leftover branch runs before spec_refs are consulted"
+        ],
+        "capture-at-the-join": [
+          "capture still fires only from plan next and link capture --task, still diffs the wave-open index, still mints pre-attributed evidence with captured(task) origin — the filter sits inside the existing mint branch; the capture unit suite and the plans lifecycle test stay green on the same call graph"
+        ],
+        "dark-deltas-are-code": [
+          "the filter reads changed items the excluded walker already scoped — code_files/scan_exclusions untouched by this task; the exclusion unit tests stay green"
+        ],
+        "drift-graded-per-kind": [
+          "verify and the fold never consult the signal filter; grading tests stay green and this wave's own confirmed links verify clean at close"
+        ],
+        "findings-never-block": [
+          "suppression is capture-internal bookkeeping, not a finding: check's finding set and exit codes are untouched by this task (existing check tests)"
+        ],
+        "gates-press-the-delta": [
+          "CaptureOutcome.pressed carries, per task, exactly the refs some claimed changed item has signal for — computed before mint/touch/subtraction branching so an already-covered ref still registers as pressed; the plans lifecycle test consumes it at the gate"
+        ],
+        "unchanged-saves-close-rounds": [
+          "nothing in this task touches version save; the version_e2e regressions stay green"
+        ]
+      }
+    },
+    {
+      "id": "t2",
+      "node": "Planner",
+      "description": "scope the coverage gate to pressed refs; render the hand-authoring checklist",
+      "spec_refs": [
+        "Planner",
+        "Service type_of Planner",
+        "Cli.drive consult(->Command, <-Report) Planner.advance",
+        "Cli.drive consult(->Command, <-Report) Planner.author"
+      ],
+      "stack_details": "gate_coverage takes the capture's pressed map; blocks listing pressed-uncovered gaps with the confirm/re-run guidance plus the unpressed checklist; NextOutcome carries the checklist so Wave/Scenarios closes print it too; render text names hand-authoring as the expected move with exact link add lines",
+      "inputs": {},
+      "outputs": [
+        "crates/archi/src/plans/mod.rs",
+        "crates/archi/src/main.rs",
+        "crates/archi/tests/",
+        "requirements/code-link.md",
+        "requirements/tasks.md",
+        "skills/archi.md"
+      ],
+      "verifications": {
+        "capture-at-the-join": [
+          "plan next still runs capture_wave before any gate and the step that demands links is still the step that produces them — only the demanded set narrows; lifecycle test asserts capture ran on both the blocked and the passing path"
+        ],
+        "findings-never-block": [
+          "the checklist is advisory stdout, not a finding and not an error: only pressed-and-uncovered refs block, and a wave whose delta presses nothing closes clean"
+        ],
+        "gates-press-the-delta": [
+          "plans unit tests: a one-port fix on a hub node closes its wave with asserted coverage of pressed refs only; the blocked message and the wave-close output both carry the link add suggestions for unpressed uncovered refs; an asserted link on an unpressed ref silences its suggestion; a no-signal delta closes without demanding links"
+        ],
+        "unchanged-saves-close-rounds": [
+          "nothing in this task touches version save; the version_e2e regressions stay green"
+        ]
+      }
+    }
+  ]
+}

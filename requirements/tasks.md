@@ -66,12 +66,20 @@ Scope specifies what the plan implements. It may target:
   selectively asserts
   ([code-link.md](code-link.md#code-links--tasks)) — then advances
   the wave under two gates: structural verify (same checks as
-  `plan start`) and asserted code-link coverage of every active
-  task's spec_refs at the Working version. The step that demands
-  links is the step that produces them; `plan next` is re-runnable,
-  so a failed gate is reviewed (`link confirm`) and retried. `plan
-  current-wave` prints the tasks in flight. `plan close` and
-  `plan reset` are manual overrides.
+  `plan start`) and asserted code-link coverage at the Working
+  version of the spec_refs the closing delta **presses** — the refs
+  some claimed changed item carries term signal for, by the same
+  test capture mints with. Unpressed refs never block: the uncovered
+  ones print as a suggested checklist of exact
+  `archi link add <ref> <file#symbol> --kind indirect` lines — on
+  the blocked message and on the passing close alike — so
+  hand-authoring surface the delta did not touch is a named,
+  voluntary move, and a delta pressing nothing closes its wave
+  without demanding links. The step that demands links is the step
+  that produces them; `plan next` is re-runnable, so a failed gate
+  is reviewed (`link confirm`) and retried. `plan current-wave`
+  prints the tasks in flight. `plan close` and `plan reset` are
+  manual overrides.
 - **Pinning** — `plan use` pins the version the live model is *at*
   and refuses on a dirty or unversioned model: a plan projects a
   hardened spec, and hardening is `archi version save`. When the
