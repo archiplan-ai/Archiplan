@@ -1,0 +1,38 @@
+--- original
++++ modified
+@@ -31,8 +31,11 @@
+   port compile
+   port fetch_preset
+   port load_sources
++def node Compiler.Definitions:
++  port attach
+ def node Compiler.Driver:
+   port accept
++  port attach_docs
+   port bind
+   port build
+   port discover
+@@ -141,6 +144,7 @@
+ def view harden_flow
+ def view read_flow
+ def view trace_flow
++def conn annotate := * ->Ast, <-Ast *
+ def conn canonize := * ->CodeItem, <-SymbolHashes *
+ def conn compile := * ->ArchSource, <-StatementBatch *
+ def conn consult := * ->(Data type_of *), <-(Data type_of *) *
+@@ -178,6 +182,7 @@
+ Data type_of SymbolHashes
+ Data type_of Tokens
+ Function type_of Compiler
++Function type_of Compiler.Definitions
+ Function type_of Compiler.Driver
+ Function type_of Compiler.Lexer
+ Function type_of Compiler.Lower
+@@ -229,6 +234,7 @@
+ Cli.drive consult(->ModelGraph, <-Report) Archive.remint in harden_flow
+ Cli.drive consult(->ModelGraph, <-Report) Archive.save in harden_flow
+ Cli.exec execute(->StatementBatch, <-ModelGraph) Engine.execute in compile_flow
++Compiler.Driver.attach_docs annotate(->Ast, <-Ast) Compiler.Definitions.attach in compile_flow
+ Compiler.Driver.bind resolve(->Ast, <-Resolution) Compiler.Resolver.bind_names in compile_flow
+ Compiler.Driver.build parse(->Tokens, <-Ast) Compiler.Parser.build_ast in compile_flow
+ Compiler.Driver.emit_batch lower(->Resolution, <-StatementBatch) Compiler.Lower.emit in compile_flow

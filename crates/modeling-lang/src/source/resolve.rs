@@ -67,6 +67,10 @@ pub(crate) struct NodeInfo {
     /// Declared ports in declaration order.
     pub ports: Vec<String>,
     pub port_spans: BTreeMap<String, Span>,
+    /// The node's definition, from its attached comment.
+    pub doc: Option<String>,
+    /// Definitions of declared ports, from their attached comments.
+    pub port_docs: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug)]
@@ -77,6 +81,7 @@ pub(crate) struct RelDefR {
     pub source: PatternExpr,
     pub target: PatternExpr,
     pub span: Span,
+    pub doc: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -88,12 +93,14 @@ pub(crate) struct ConnDefR {
     pub rev_carrier: Option<PatternExpr>,
     pub target: PatternExpr,
     pub span: Span,
+    pub doc: Option<String>,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct ViewDefR {
     pub name: String,
     pub span: Span,
+    pub doc: Option<String>,
 }
 
 /// A fully resolved edge, ready to lower.
@@ -251,7 +258,7 @@ impl<'a> Resolver<'a> {
                     Item::DefNode(d) if d.path.segments.len() == 1 => {
                         e.roots.insert(d.path.segments[0].value.clone());
                     }
-                    Item::DefView { name } => {
+                    Item::DefView { name, .. } => {
                         e.views.insert(name.value.clone());
                     }
                     Item::DefRel { name, .. } => {
@@ -277,7 +284,7 @@ impl<'a> Resolver<'a> {
                 let (kind, name): (&'static str, &Spanned<String>) = match item {
                     Item::DefRel { name, .. } => ("type", name),
                     Item::DefConn { name, .. } => ("type", name),
-                    Item::DefView { name } => ("view", name),
+                    Item::DefView { name, .. } => ("view", name),
                     _ => continue,
                 };
                 let preset_hit = match kind {
@@ -610,19 +617,24 @@ impl<'a> Resolver<'a> {
             span: ast.path.span,
             ports: Vec::new(),
             port_spans: BTreeMap::new(),
+            doc: ast.doc.clone(),
+            port_docs: BTreeMap::new(),
         };
         for item in &ast.body {
             if let BlockItem::Port(p) = item {
-                if info.port_spans.contains_key(&p.value) {
+                if info.port_spans.contains_key(&p.name.value) {
                     self.diagnostics.push(Diagnostic::new(
                         "E_REDECLARED",
-                        format!("port `{}` is declared twice on `{abs}`", p.value),
-                        p.span,
+                        format!("port `{}` is declared twice on `{abs}`", p.name.value),
+                        p.name.span,
                     ));
                     continue;
                 }
-                info.ports.push(p.value.clone());
-                info.port_spans.insert(p.value.clone(), p.span);
+                info.ports.push(p.name.value.clone());
+                info.port_spans.insert(p.name.value.clone(), p.name.span);
+                if let Some(doc) = &p.doc {
+                    info.port_docs.insert(p.name.value.clone(), doc.clone());
+                }
             }
         }
         self.resolution.nodes.insert(abs.to_string(), info);
@@ -641,9 +653,10 @@ impl<'a> Resolver<'a> {
             let items = &self.modules[mi].ast.items;
             for item in items {
                 match item {
-                    Item::DefView { name } => self.resolution.views.push(ViewDefR {
+                    Item::DefView { name, doc } => self.resolution.views.push(ViewDefR {
                         name: name.value.clone(),
                         span: name.span,
+                        doc: doc.clone(),
                     }),
                     Item::DefRel {
                         name,
@@ -652,6 +665,7 @@ impl<'a> Resolver<'a> {
                         source,
                         target,
                         span,
+                        doc,
                     } => {
                         let (Some(source), Some(target)) =
                             (self.pattern(mi, &[], source), self.pattern(mi, &[], target))
@@ -665,6 +679,7 @@ impl<'a> Resolver<'a> {
                             source,
                             target,
                             span: *span,
+                            doc: doc.clone(),
                         });
                     }
                     Item::DefConn {
@@ -673,6 +688,7 @@ impl<'a> Resolver<'a> {
                         lanes,
                         target,
                         span,
+                        doc,
                     } => {
                         let (Some(source), Some(target)) =
                             (self.pattern(mi, &[], source), self.pattern(mi, &[], target))
@@ -701,6 +717,7 @@ impl<'a> Resolver<'a> {
                             rev_carrier,
                             target,
                             span: *span,
+                            doc: doc.clone(),
                         });
                     }
                     _ => {}
@@ -1130,7 +1147,7 @@ mod tests {
         let mut modules = Vec::new();
         for (module, text) in sources {
             let fid = map.add_file(format!("archi/src/{}.arch", module.replace('.', "/")), *text);
-            let ast = parse(fid, text).map_err(|d| vec![d])?;
+            let (ast, _) = parse(fid, text).map_err(|d| vec![d])?;
             modules.push(ModuleAst {
                 module: module.to_string(),
                 ast,

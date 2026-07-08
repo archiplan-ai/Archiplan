@@ -1,0 +1,282 @@
+def node Agent:
+  port author // edits sources: model, docs, plans, code
+  port drive // runs the verbs
+def node ArchSource // .arch surface text — the model's only persistence
+def node Archive:
+  port anchor // post-hoc commit provenance: clean tree, render-hash match
+  port canonicalize // consults the renderer for the canonical bytes
+  port remint // re-mint a round's save onto the merged lineage; re-stamps the session's closed:
+  port save // canonical render in; keyframe or patch + manifest entry
+  port serve // reconstructs any version, verified against its seal
+def node Ast // parsed modules, names still relative
+def node CanonicalRender // canonical(project): the render that versions hash and archive
+def node Cli:
+  port ask // read statements to the engine's envelope
+  port build // compile, optionally emit the lowered batch
+  port check // compile model + docs + archive, report findings
+  port compile_src // drives the compiler
+  port drive // consults every subsystem, one verb at a time
+  port exec // replays the lowered batch on the engine
+  port incidence // incidence analysis verb
+  port link // add, ls, verify, confirm, rm, repin, capture, audit
+  port nkp // landscape analysis verb
+  port plan // use, task add, verify, start, next, close, reset
+  port query // one composed subgraph query
+  port read // the agent read envelope over stdin/argv
+  port session // fold: two concurrent rounds into one deliberate record
+  port version // save, anchor, remint, list, show, diff (archived or live), current
+def node CodeItem // a source item of the code tree, addressed by symbol
+def node Command // one CLI invocation: verb + flags
+def node Compiler:
+  port compile // one project in, one deterministic batch out
+  port fetch_preset // resolves the manifest's preset choice into the stdlib
+  port load_sources // pulls manifest and .arch module texts from the tree
+def node Compiler.Definitions: // the prose gate: attaches each definition comment to its element and rejects obligation prose
+  port attach
+def node Compiler.Driver: // source/mod.rs — coordinates the pipeline per module
+  port accept
+  port attach_docs
+  port bind
+  port build
+  port discover
+  port emit_batch
+  port lex
+  port stdlib
+def node Compiler.Lexer: // offside-rule tokenizer; rejects tabs in indentation
+  port tokenize
+def node Compiler.Lower: // fixed emission order makes the batch deterministic
+  port emit
+def node Compiler.Parser: // recursive descent; context-free constraints live here
+  port build_ast
+def node Compiler.Resolver: // phased passes; every reference becomes an absolute path
+  port bind_names
+def node Compiler.Resolver.Defs: // sweeps every module's rel/conn/view defs into the table
+  port collect
+def node Compiler.Resolver.Uses: // binds edges, apps, carriers against the complete table
+  port bind
+  port read_table
+def node DefTable // every module's rel/conn/view defs, complete before any use binds
+def node Diagnostics // located, coded compile errors — they block
+def node DocsCompiler:
+  port compile_docs // parse + schema + cross-check docs against the model
+  port compile_pin // compiles a reconstructed render through the compiler
+  port load_docs // pulls requirement and stress markdown from the tree
+  port pin_model // reconstructs archived versions for pinned checks
+  port serve_pin // hands pinned models to incidence, links and plans
+def node Engine:
+  port answer // the read envelope: read statements in, results out
+  port execute // applies a batch atomically: applied, noop, or rejected
+  port fetch_preset // loads the stdlib into every fresh workspace
+  port slice // hands read statements to the query module
+def node Findings // advisory observations — surfaced, never blocking
+def node Incidence:
+  port pin_model // expands affects against each stressor's pinned version
+  port read_sessions // pulls session and stressor docs
+  port scan // stressor × component matrix and its typed findings
+def node IncidenceReport // stressor × component matrix and its typed findings
+def node ItemHashIndex // file → symbol → body hash snapshot taken at wave open
+def node LinkEvent // one append-only journal event: add, confirm, repin, retire…
+def node Links:
+  port capture // wave delta to candidate links, pre-attributed by task
+  port journal // appends link events to the journal in the tree
+  port pin_spec // resolves pinned spec refs via reconstructed versions
+  port read_code // code items out of the tree: candidate and wave scans
+  port read_index // wave-open indexes out of the tree
+  port record // add, confirm, rm, repin: journal events
+  port serve_links // the folded live set, read by the plan's coverage gate
+  port sweep // audit: dark deltas, dark spec, decayed evidence
+  port verify // recomputes projections, grades drift per link kind
+def node Links.Canonizer: // rust-tok-v1 / text-v1: the versioned hash contract
+  port hash
+def node Links.Capture: // wave-open index vs the tree: mints, touches, decays
+  port canon
+  port diff_wave
+  port load_index
+  port mint
+def node Links.Grader: // recomputes projections, grades states, audits
+  port audit
+  port canon
+  port grade
+  port read_fold
+  port resolve_pins
+  port scan_code
+def node Links.Journal: // the append-only truth; the live set is its fold
+  port append
+  port flush
+  port record_events
+  port serve_fold
+def node ModelGraph // the compiled model: nodes, ports, typed edges, views
+def node Nkp:
+  port scan // the landscape read: regime, hotspots, corridors
+def node NkpReport // the NKP landscape read: regime, hotspots, corridors
+def node PlanFile // plan.json — authored fields edited, lifecycle via verbs
+def node Planner:
+  port advance // start, next: waves, gates, scenario latches
+  port author // use, task add: pins a version, seeds spec_refs
+  port coverage // reads the folded links for the asserted-coverage gate
+  port load_plan // re-reads and re-validates plan.json on every verb
+  port pin_model // the hardened version the plan projects
+  port run_capture // fires the wave capture at each close
+  port store_plan // plan.json and wave indexes land in the tree
+def node Preset:
+  port serve // the named creation batch, loaded before user statements
+def node Query:
+  port audit // model-completeness findings
+  port subgraph // composed filters to a node-link slice
+def node Renderer:
+  port emit_source // the model as canonical source: the archived form
+def node Report // rendered output: human one-liners or the JSON envelope
+def node RequirementDoc // intent + requirement markdown under archi/requirements/
+def node Resolution // the absolute-path picture: nodes, edges, apps resolved
+def node Sessions:
+  port fold // two rounds into one record: both charters kept, the trace in the file
+  port read_state // the merged state it folds: fused files, the open pair, their pins
+  port store_record // the folded record lands in the tree
+def node SourceTree:
+  port serve // module texts, docs, plan.json, journal events, code items
+  port store // every write lands here: the tree is the only persistence
+def node StatementBatch // the lowered, absolute-path JSON statements
+def node StressDoc // session + stressor markdown under archi/stress/
+def node SubgraphResult // a composed query's slice of the model
+def node SymbolHashes // one item's interface + body hash over canonical tokens
+def node Tokens // lexer output
+def view compile_flow // source to model: the compiler pipeline and the engine
+def view harden_flow // versions, docs, stress and incidence: the harden loop
+def view read_flow // agents interrogating the model: queries, envelope, nkp
+def view trace_flow // links, plans, capture: spec to code and back
+def conn annotate := * ->Ast, <-Ast * // definitions attached and validated
+def conn canonize := * ->CodeItem, <-SymbolHashes * // the hash contract
+def conn compile := * ->ArchSource, <-StatementBatch * // project in, batch out
+def conn consult := * ->(Data type_of *), <-(Data type_of *) * // request/response, typed per edge
+def conn execute := * ->StatementBatch, <-ModelGraph * // atomic batch replay
+def conn interrogate := * ->StatementBatch, <-SubgraphResult * // the read envelope
+def conn invoke := * ->Command, <-Report * // operator drives a verb
+def conn lower := * ->Resolution, <-StatementBatch *
+def conn parse := * ->Tokens, <-Ast *
+def conn persist := * ->(Data type_of *) * // a write into a store
+def conn recall := * ->, <-(Data type_of *) * // a read out of a store
+def conn render := * ->ModelGraph, <-CanonicalRender *
+def conn resolve := * ->Ast, <-Resolution *
+def conn scan := * ->ArchSource, <-Tokens *
+def conn seed := * ->, <-StatementBatch * // pull the stdlib
+Data type_of ArchSource
+Data type_of Ast
+Data type_of CanonicalRender
+Data type_of CodeItem
+Data type_of Command
+Data type_of DefTable
+Data type_of Diagnostics
+Data type_of Findings
+Data type_of IncidenceReport
+Data type_of ItemHashIndex
+Data type_of LinkEvent
+Data type_of ModelGraph
+Data type_of NkpReport
+Data type_of PlanFile
+Data type_of Report
+Data type_of RequirementDoc
+Data type_of Resolution
+Data type_of StatementBatch
+Data type_of StressDoc
+Data type_of SubgraphResult
+Data type_of SymbolHashes
+Data type_of Tokens
+Function type_of Compiler
+Function type_of Compiler.Definitions
+Function type_of Compiler.Driver
+Function type_of Compiler.Lexer
+Function type_of Compiler.Lower
+Function type_of Compiler.Parser
+Function type_of Compiler.Resolver
+Function type_of DocsCompiler
+Function type_of Engine
+Function type_of Incidence
+Function type_of Nkp
+Function type_of Preset
+Function type_of Query
+Function type_of Renderer
+Service type_of Agent
+Service type_of Cli
+Service type_of Links
+Service type_of Planner
+Service type_of Sessions
+Storage type_of Archive
+Storage type_of SourceTree
+Agent.author persist(ArchSource) SourceTree.store in compile_flow
+Agent.author persist(CodeItem) SourceTree.store in trace_flow
+Agent.author persist(PlanFile) SourceTree.store in trace_flow
+Agent.author persist(RequirementDoc) SourceTree.store in harden_flow
+Agent.author persist(StressDoc) SourceTree.store in harden_flow
+Agent.drive invoke(->Command, <-Report) Cli.build in compile_flow
+Agent.drive invoke(->Command, <-Report) Cli.check in compile_flow
+Agent.drive invoke(->Command, <-Report) Cli.incidence in harden_flow
+Agent.drive invoke(->Command, <-Report) Cli.link in trace_flow
+Agent.drive invoke(->Command, <-Report) Cli.nkp in read_flow
+Agent.drive invoke(->Command, <-Report) Cli.plan in trace_flow
+Agent.drive invoke(->Command, <-Report) Cli.query in read_flow
+Agent.drive invoke(->Command, <-Report) Cli.read in read_flow
+Agent.drive invoke(->Command, <-Report) Cli.session in harden_flow
+Agent.drive invoke(->Command, <-Report) Cli.version in harden_flow
+Archive.canonicalize render(->ModelGraph, <-CanonicalRender) Renderer.emit_source in harden_flow
+Cli.ask interrogate(->StatementBatch, <-SubgraphResult) Engine.answer in read_flow
+Cli.compile_src compile(->ArchSource, <-StatementBatch) Compiler.compile in compile_flow
+Cli.drive consult(->Command, <-Report) Links.record in trace_flow
+Cli.drive consult(->Command, <-Report) Links.sweep in trace_flow
+Cli.drive consult(->Command, <-Report) Links.verify in trace_flow
+Cli.drive consult(->Command, <-Report) Planner.advance in trace_flow
+Cli.drive consult(->Command, <-Report) Planner.author in trace_flow
+Cli.drive consult(->Command, <-Report) Sessions.fold in harden_flow
+Cli.drive consult(->ModelGraph, <-Diagnostics) DocsCompiler.compile_docs in harden_flow
+Cli.drive consult(->ModelGraph, <-Findings) Query.audit in read_flow
+Cli.drive consult(->ModelGraph, <-IncidenceReport) Incidence.scan in harden_flow
+Cli.drive consult(->ModelGraph, <-NkpReport) Nkp.scan in read_flow
+Cli.drive consult(->ModelGraph, <-Report) Archive.anchor in harden_flow
+Cli.drive consult(->ModelGraph, <-Report) Archive.remint in harden_flow
+Cli.drive consult(->ModelGraph, <-Report) Archive.save in harden_flow
+Cli.exec execute(->StatementBatch, <-ModelGraph) Engine.execute in compile_flow
+Compiler.Driver.attach_docs annotate(->Ast, <-Ast) Compiler.Definitions.attach in compile_flow
+Compiler.Driver.bind resolve(->Ast, <-Resolution) Compiler.Resolver.bind_names in compile_flow
+Compiler.Driver.build parse(->Tokens, <-Ast) Compiler.Parser.build_ast in compile_flow
+Compiler.Driver.emit_batch lower(->Resolution, <-StatementBatch) Compiler.Lower.emit in compile_flow
+Compiler.Driver.lex scan(->ArchSource, <-Tokens) Compiler.Lexer.tokenize in compile_flow
+Compiler.Resolver.Uses.read_table recall(<-DefTable) Compiler.Resolver.Defs.collect in compile_flow
+Compiler.fetch_preset seed(<-StatementBatch) Preset.serve in compile_flow
+Compiler.load_sources recall(<-ArchSource) SourceTree.serve in compile_flow
+DocsCompiler.compile_pin compile(->ArchSource, <-StatementBatch) Compiler.compile in harden_flow
+DocsCompiler.load_docs recall(<-RequirementDoc) SourceTree.serve in harden_flow
+DocsCompiler.load_docs recall(<-StressDoc) SourceTree.serve in harden_flow
+DocsCompiler.pin_model recall(<-CanonicalRender) Archive.serve in harden_flow
+Engine.fetch_preset seed(<-StatementBatch) Preset.serve in compile_flow
+Engine.slice consult(->ModelGraph, <-Findings) Query.audit in read_flow
+Engine.slice consult(->ModelGraph, <-SubgraphResult) Query.subgraph in read_flow
+Incidence.pin_model recall(<-ModelGraph) DocsCompiler.serve_pin in harden_flow
+Incidence.read_sessions recall(<-StressDoc) SourceTree.serve in harden_flow
+Links.Capture.canon canonize(->CodeItem, <-SymbolHashes) Links.Canonizer.hash in trace_flow
+Links.Capture.mint persist(LinkEvent) Links.Journal.append in trace_flow
+Links.Grader.canon canonize(->CodeItem, <-SymbolHashes) Links.Canonizer.hash in trace_flow
+Links.Grader.read_fold recall(<-LinkEvent) Links.Journal.serve_fold in trace_flow
+Links.journal persist(LinkEvent) SourceTree.store in trace_flow
+Links.pin_spec recall(<-ModelGraph) DocsCompiler.serve_pin in trace_flow
+Links.read_code recall(<-CodeItem) SourceTree.serve in trace_flow
+Links.read_index recall(<-ItemHashIndex) SourceTree.serve in trace_flow
+Planner.coverage recall(<-LinkEvent) Links.serve_links in trace_flow
+Planner.load_plan recall(<-PlanFile) SourceTree.serve in trace_flow
+Planner.pin_model recall(<-ModelGraph) DocsCompiler.serve_pin in trace_flow
+Planner.run_capture consult(->ItemHashIndex, <-LinkEvent) Links.capture in trace_flow
+Planner.store_plan persist(ItemHashIndex) SourceTree.store in trace_flow
+Planner.store_plan persist(PlanFile) SourceTree.store in trace_flow
+Sessions.read_state recall(<-StressDoc) SourceTree.serve in harden_flow
+Sessions.store_record persist(StressDoc) SourceTree.store in harden_flow
+Compiler.Resolver.bind_names = Uses.bind
+Compiler.compile = Driver.accept
+Compiler.fetch_preset = Driver.stdlib
+Compiler.load_sources = Driver.discover
+Links.capture = Capture.diff_wave
+Links.journal = Journal.flush
+Links.pin_spec = Grader.resolve_pins
+Links.read_code = Grader.scan_code
+Links.read_index = Capture.load_index
+Links.record = Journal.record_events
+Links.serve_links = Journal.serve_fold
+Links.sweep = Grader.audit
+Links.verify = Grader.grade

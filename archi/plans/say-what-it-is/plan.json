@@ -1,0 +1,192 @@
+{
+  "name": "say-what-it-is",
+  "version": "v0008",
+  "created": "2026-07-08T13:28:40Z",
+  "state": "completed",
+  "closed_waves": 3,
+  "problem": "Definitions for every element, parsed from the comments spec files already carry, constrained to identity prose. The comments exist and are invisible: the lexer drops them at tokenization, so what a node IS lives outside the model — unreadable to agents, unarchived by versions. Prose-pressure hardened the gate before code: obligations reject by vocabulary (the modal words, anywhere), not by punctuation; the statement API is a second door that needs the same shared validator; and the render round-trip must hold byte-stable with definitions inside, or every seal after the first lies.",
+  "technology_stack": [
+    {
+      "tech": "Rust 2024; crates/modeling-lang: source/lexer.rs (comment capture beside the token stream), source/defs.rs (new: the attach pass, pairing comments to elements by position), definition.rs (new: the shared prose validator), source/{ast,parser,resolve,lower}.rs + statement.rs (definition threading, source to batch), engine.rs + model.rs (storage, divergence rule, the second door), render.rs (canonical emission)",
+      "provenance": "every change extends the pipeline stage it names in the model — the attach pass is a new stage between parse and bind, exactly where lang.arch places Compiler.Definitions; the engine and renderer changes ride seams the fold and remint rounds already proved"
+    },
+    {
+      "tech": "trailing-comment canonical form: a definition renders as `// <text>` on its defining line, normalized at attach (block lines joined, whitespace collapsed) so the stored form is the emitted form",
+      "provenance": "prose-pressure's the-render-echoes-what-it-stored: byte-stable seals demand one normal form, and the existing corpus already writes this exact style"
+    }
+  ],
+  "architecture_summary": [
+    {
+      "node": "Compiler.Definitions",
+      "role": "the prose gate: pairs comments with elements by position, normalizes, validates identity prose, rejects obligations — every violation one located diagnostic at the offending comment"
+    },
+    {
+      "node": "Engine",
+      "role": "stores definitions as element identity: no-op on identical restatement, reject on divergence with the stored actual, and the same shared validator guards the statement-API door"
+    },
+    {
+      "node": "Renderer",
+      "role": "emits each definition as the trailing comment of its defining line, so dumps, archived renders and seals carry definitions byte-stably"
+    }
+  ],
+  "stack_mapping": [
+    {
+      "tech": "source/lexer.rs + source/defs.rs + definition.rs + source pipeline threading",
+      "node": "Compiler.Definitions"
+    },
+    {
+      "tech": "engine.rs + model.rs storage and both-door validation",
+      "node": "Engine"
+    },
+    {
+      "tech": "render.rs + statement.rs pseudo emission",
+      "node": "Renderer"
+    }
+  ],
+  "scenarios": [
+    "this repository's own model compiles with every existing trailing comment attached: archi build passes, the dump carries Agent.drive's `runs the verbs`, and check stays green",
+    "an obligation cannot enter: `must reject tabs in indentation` rejects at the comment — bare, comma-spliced or semicolon-spliced alike — and the same prose rejects through the statement API, both diagnostics naming the rule",
+    "the archive carries definitions: version save mints, the archived render reconstructs byte-identically against its seal, and every pre-definition version still reconstructs and compiles unchanged",
+    "a restatement with a divergent definition rejects carrying the stored actual, exactly as divergent ports do; an identical restatement no-ops"
+  ],
+  "scenarios_displayed": true,
+  "scenarios_closed": true,
+  "tasks": [
+    {
+      "id": "t1",
+      "node": "Compiler.Definitions",
+      "description": "the prose gate and its plumbing: lexer captures comments beside the tokens, the attach pass pairs them to elements by position (trailing line or abutting block, blank line detaches, both-forms rejects), the shared validator enforces identity prose — one sentence, 240 chars, modal vocabulary rejects anywhere — and definitions thread ast → resolution → lowered define statements; engine/model/render get compile-threading only, their real work lands in t2/t3",
+      "spec_refs": [
+        "Compiler.Definitions",
+        "Function type_of Compiler.Definitions",
+        "Compiler.Driver.attach_docs annotate(->Ast, <-Ast) Compiler.Definitions.attach"
+      ],
+      "stack_details": "new source/defs.rs (attach) + definition.rs (validator); lexer.rs returns comments with lines; ast.rs carries doc fields; parser.rs threads; resolve.rs carries docs on NodeInfo/RelDefR/ConnDefR/ViewDefR; lower.rs + statement.rs put them on Definition; engine.rs/model.rs/render.rs touched only to keep patterns exhaustive",
+      "inputs": {},
+      "outputs": [
+        "crates/modeling-lang/src/source/lexer.rs",
+        "crates/modeling-lang/src/source/defs.rs",
+        "crates/modeling-lang/src/source/ast.rs",
+        "crates/modeling-lang/src/source/parser.rs",
+        "crates/modeling-lang/src/source/resolve.rs",
+        "crates/modeling-lang/src/source/lower.rs",
+        "crates/modeling-lang/src/source/mod.rs",
+        "crates/modeling-lang/src/definition.rs",
+        "crates/modeling-lang/src/statement.rs",
+        "crates/modeling-lang/src/lib.rs",
+        "crates/modeling-lang/src/engine.rs",
+        "crates/modeling-lang/src/model.rs",
+        "crates/modeling-lang/src/render.rs",
+        "crates/modeling-lang/tests/definitions.rs",
+        "crates/modeling-lang/tests/errors.rs",
+        "crates/modeling-lang/tests/source_e2e.rs",
+        "requirements/modeling-lang/source-format.md",
+        "requirements/modeling-lang/modeling-lang.md"
+      ],
+      "verifications": {
+        "definitions-are-identity-prose": [
+          "unit: an identity sentence passes and a 241-character one rejects naming the limit; a second sentence rejects while dotted tokens (mod.rs, plan.json) never split; every violation carries file:line:col of the offending comment, and all of a file's violations surface in one pass"
+        ],
+        "definitions-parse-from-comments": [
+          "unit: trailing and standalone comments are captured with their lines and the token stream is unchanged; definitions land on nodes, ports, views, rels and conns from both positions; a blank line detaches; open lines and whitespace-only comments attach nothing; trailing plus adjacent block is one located error",
+          "e2e: this repository's own sources compile with every existing trailing comment attached as its element's definition"
+        ],
+        "obligations-never-define": [
+          "unit: each of must, should, shall, ensures, handles rejects bare and under comma, semicolon, em-dash and colon splices alike; matching is whole-word and case-insensitive — mustard and handler pass; the validator is the single exported rule the engine consults in t2"
+        ]
+      }
+    },
+    {
+      "id": "t2",
+      "node": "Engine",
+      "description": "definitions become element identity in the store: define statements carry them, the engine persists them on nodes, declared ports, views, rels and conns, no-ops identical restatements, rejects divergent ones with the stored actual, and consults the shared validator on every define — the statement-API door meets the source-path gate",
+      "spec_refs": [
+        "Engine",
+        "Function type_of Engine",
+        "Cli.ask interrogate(->StatementBatch, <-SubgraphResult) Engine.answer",
+        "Cli.exec execute(->StatementBatch, <-ModelGraph) Engine.execute"
+      ],
+      "stack_details": "engine.rs define_{node,view,rel,conn} store docs + divergence compare (absent = no claim, mirroring ports); port docs only on declared ports, unknown port names reject; parse_statement strict schema admits the new fields; model.rs structs gain doc storage",
+      "inputs": {
+        "t1": "definition-carrying define statements in the lowered batch, and the shared validator exported for the engine to consult"
+      },
+      "outputs": [
+        "crates/modeling-lang/src/engine.rs",
+        "crates/modeling-lang/src/model.rs",
+        "crates/modeling-lang/src/statement.rs",
+        "crates/modeling-lang/tests/definitions.rs",
+        "crates/modeling-lang/tests/semantics.rs"
+      ],
+      "verifications": {
+        "agents-read-lowered-statements": [
+          "the lowered define statements carry definitions, so dumps and the read envelope expose them to agents; the envelope stays read-only and its suite stays green"
+        ],
+        "definitions-are-semantic": [
+          "unit: an identical restatement no-ops; a divergent definition rejects carrying the stored actual, exactly as divergent ports do; an omitted definition makes no claim; port docs land only on declared ports"
+        ],
+        "findings-never-block": [
+          "definition violations are errors at the define gate, never findings; advisory finding surfaces and exit codes are untouched — suite stays green"
+        ],
+        "obligations-never-define": [
+          "unit: obligation prose rejects through parse_statement and through direct Workspace::execute alike, with the same rule text the source gate emits"
+        ],
+        "one-semantic-authority": [
+          "the engine re-checks definition prose on every define like any other constraint — the attach pass validates early but the engine remains the authority; no rule is duplicated, both doors call the one exported validator"
+        ],
+        "unchanged-saves-close-rounds": [
+          "the save/close ceremony is untouched by this task; the version e2e suite stays green"
+        ]
+      }
+    },
+    {
+      "id": "t3",
+      "node": "Renderer",
+      "description": "stored definitions reach every render: node/view/rel/conn statements rebuilt from the model carry their definitions, the canonical render emits them as trailing comments, render → compile → render is byte-identical, and the archive seals hold with definitions inside while pre-definition versions reconstruct unchanged",
+      "spec_refs": [
+        "Renderer",
+        "Function type_of Renderer",
+        "Archive.canonicalize render(->ModelGraph, <-CanonicalRender) Renderer.emit_source"
+      ],
+      "stack_details": "render.rs node_statement/view_statement/rel_statement/conn_statement read docs off the model; scope_sources inherits them; e2e in crates/archi proves save → mint → reconstruct → seal with definitions and the backward path over v0001–v0008",
+      "inputs": {
+        "t1": "statement pseudo renders definitions as trailing comments on defining lines",
+        "t2": "the model stores each element's definition where the render can read it"
+      },
+      "outputs": [
+        "crates/modeling-lang/src/render.rs",
+        "crates/modeling-lang/tests/definitions.rs",
+        "crates/archi/tests/definitions_e2e.rs"
+      ],
+      "verifications": {
+        "definitions-are-semantic": [
+          "unit: a model with definitions renders canonically, recompiles to the identical model and re-renders byte-for-byte",
+          "e2e: a save after definitions land mints, and the archived version reconstructs against its seal"
+        ],
+        "merge-deltas-are-reviewable": [
+          "version diff renders definition changes as statement-level lines like any other define delta; the diff suite stays green"
+        ],
+        "parallel-editing-discipline": [
+          "no session, journal or fold path is touched; the multiplayer suites stay green"
+        ],
+        "provenance-anchors-post-hoc": [
+          "the anchor path is untouched; its suite stays green"
+        ],
+        "remint-rejoins-the-lineage": [
+          "the remint path is untouched; its suite stays green"
+        ],
+        "renders-are-layout-blind": [
+          "unit: the same definitions authored in different modules and orders render identically — definitions come from the stored model, never from layout"
+        ],
+        "stress-pins-versions": [
+          "e2e: every archived version v0001–v0008 (no definition comments) reconstructs and compiles under the new parser, so pinned affects expansion is unchanged"
+        ],
+        "the-archive-is-sealed": [
+          "e2e: reconstruction verifies seals with definitions inside; a tampered render still fails its seal"
+        ],
+        "versions-mint-on-meaning": [
+          "e2e: adding a definition changes the render, so save mints; a no-op save on the unchanged model still exits 0"
+        ]
+      }
+    }
+  ]
+}

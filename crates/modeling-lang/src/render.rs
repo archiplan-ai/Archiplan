@@ -46,15 +46,19 @@ impl Model {
 
     pub(crate) fn node_statement(&self, node: NodeId) -> Statement {
         let declared = self.declared_ports(node);
+        let port_docs = self.declared_port_docs(node);
         Statement::Define(Definition::Node {
             path: self.node_path(node),
             ports: (!declared.is_empty()).then_some(declared),
+            doc: self.nodes[&node].doc.clone(),
+            port_docs: (!port_docs.is_empty()).then_some(port_docs),
         })
     }
 
     pub(crate) fn view_statement(&self, v: &ViewDef) -> Statement {
         Statement::Define(Definition::View {
             name: v.name.clone(),
+            doc: v.doc.clone(),
         })
     }
 
@@ -65,6 +69,7 @@ impl Model {
             directed: rt.directed,
             source: self.pattern_expr(&rt.src),
             target: self.pattern_expr(&rt.dst),
+            doc: rt.doc.clone(),
         })
     }
 
@@ -76,6 +81,7 @@ impl Model {
             carrier: ct.carrier.as_ref().map(|c| self.pattern_expr(c)),
             rev_carrier: ct.rev_carrier.as_ref().map(|c| self.pattern_expr(c)),
             target: self.pattern_expr(&ct.dst),
+            doc: ct.doc.clone(),
         })
     }
 

@@ -103,11 +103,21 @@ pub(crate) struct AppAst {
     pub span: Span,
 }
 
+/// A declared port: `port name`, plus the definition its comment attaches.
+#[derive(Clone, Debug)]
+pub(crate) struct PortAst {
+    pub name: Spanned<String>,
+    /// Normalized definition text, set by the attach pass.
+    pub doc: Option<String>,
+}
+
 /// `def node Path[: block]`.
 #[derive(Clone, Debug)]
 pub(crate) struct DefNodeAst {
     pub path: PathAst,
     pub body: Vec<BlockItem>,
+    /// Normalized definition text, set by the attach pass.
+    pub doc: Option<String>,
 }
 
 /// `open Path: block` — augment an existing node's scope.
@@ -121,18 +131,20 @@ pub(crate) struct OpenAst {
 /// `def node` block — the interface lives at the definition.
 #[derive(Clone, Debug)]
 pub(crate) enum BlockItem {
-    Port(Spanned<String>),
+    Port(PortAst),
     DefNode(DefNodeAst),
     Open(OpenAst),
     Edge(EdgeAst),
     App(AppAst),
 }
 
-/// One top-level item.
+/// One top-level item. The `doc` fields hold normalized definition text,
+/// set by the attach pass from the element's comment.
 #[derive(Clone, Debug)]
 pub(crate) enum Item {
     DefView {
         name: Spanned<String>,
+        doc: Option<String>,
     },
     DefRel {
         name: Spanned<String>,
@@ -141,6 +153,7 @@ pub(crate) enum Item {
         source: PatternAst,
         target: PatternAst,
         span: Span,
+        doc: Option<String>,
     },
     DefConn {
         name: Spanned<String>,
@@ -148,6 +161,7 @@ pub(crate) enum Item {
         lanes: LanesAst,
         target: PatternAst,
         span: Span,
+        doc: Option<String>,
     },
     DefNode(DefNodeAst),
     Open(OpenAst),

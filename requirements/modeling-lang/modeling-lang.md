@@ -322,6 +322,14 @@ names it (a path for nodes, a name for the rest), and the definition's parameter
 different body, or a rel/conn kind clash — it fails with E_REDECLARED and reports the existing definition. There is
 no re-definition verb: replacing what a name means is a **source edit** — change the `def` line and recompile.
 
+Every subject also takes an optional **`doc`** field — the element's prose definition: one identity sentence, at
+most 240 characters, free of obligation vocabulary
+([source-format.md#definitions](./source-format.md#definitions)); node defines additionally take **`port_docs`**,
+a map from declared ports to their definitions (it requires `ports` and may name only its entries). Text is
+normalized (whitespace collapsed) and validated at the schema with the same shared rule the source comment gate
+applies, so a stored definition always re-parses from a render. `doc` participates in identity like every other
+parameter: an omitted `doc` makes no claim, a divergent one is E_REDECLARED.
+
 Edge statements (`rel-edge`, `conn-edge`, `app`) take no verb: an edge's identity is structural, stating it *is*
 addressing it — a no-op, a view extension, or a fresh edge, never a duplicate. Together with idempotent definitions
 this is what makes whole-batch replays safe — a recompile of unchanged source re-applies the same batch as all

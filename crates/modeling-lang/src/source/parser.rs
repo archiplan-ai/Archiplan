@@ -5,13 +5,14 @@
 //! blocks, carrier-argument shapes, app ends); name resolution does not.
 
 use super::ast::*;
-use super::lexer::{Tok, Token, lex};
+use super::lexer::{Comment, Tok, Token, lex};
 use super::span::{Diagnostic, FileId, Span, Spanned};
 
 /// Parse one file. `src` must be the text registered for `file` in the map.
-pub(crate) fn parse(file: FileId, src: &str) -> Result<FileAst, Diagnostic> {
-    let tokens = lex(file, src)?;
-    Parser { tokens, pos: 0 }.file()
+/// Comments come back beside the AST for the definition attach pass.
+pub(crate) fn parse(file: FileId, src: &str) -> Result<(FileAst, Vec<Comment>), Diagnostic> {
+    let (tokens, comments) = lex(file, src)?;
+    Ok((Parser { tokens, pos: 0 }.file()?, comments))
 }
 
 struct Parser {
@@ -144,7 +145,7 @@ impl Parser {
                 self.advance();
                 let name = self.expect_ident("a view name")?;
                 self.expect_newline()?;
-                Ok(Item::DefView { name })
+                Ok(Item::DefView { name, doc: None })
             }
             Tok::Rel => self.def_rel(),
             Tok::Conn => self.def_conn(),
@@ -181,6 +182,7 @@ impl Parser {
             source,
             target,
             span,
+            doc: None,
         })
     }
 
@@ -198,6 +200,7 @@ impl Parser {
             lanes,
             target,
             span,
+            doc: None,
         })
     }
 
@@ -284,7 +287,11 @@ impl Parser {
             self.expect_newline()?;
             Vec::new()
         };
-        Ok(DefNodeAst { path, body })
+        Ok(DefNodeAst {
+            path,
+            body,
+            doc: None,
+        })
     }
 
     fn open_block(&mut self) -> Result<OpenAst, Diagnostic> {
@@ -320,7 +327,7 @@ impl Parser {
                 self.advance();
                 let name = self.expect_ident("a port name")?;
                 self.expect_newline()?;
-                Ok(BlockItem::Port(name))
+                Ok(BlockItem::Port(PortAst { name, doc: None }))
             }
             Tok::Def => {
                 self.advance();
@@ -565,7 +572,7 @@ mod tests {
         let mut map = SourceMap::new();
         let f = map.add_file("test.arch", src);
         match parse(f, src) {
-            Ok(ast) => ast,
+            Ok((ast, _)) => ast,
             Err(d) => panic!("parse failed: {}", d.render(&map)),
         }
     }
@@ -587,7 +594,7 @@ mod tests {
             .body
             .iter()
             .map(|i| match i {
-                BlockItem::Port(p) => p.value.clone(),
+                BlockItem::Port(p) => p.name.value.clone(),
                 other => panic!("expected ports, got {other:?}"),
             })
             .collect();

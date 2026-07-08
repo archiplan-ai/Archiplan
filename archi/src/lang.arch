@@ -15,12 +15,15 @@ def node Compiler:
     port stdlib
     port lex
     port build
+    port attach_docs
     port bind
     port emit_batch
   def node Lexer:   // offside-rule tokenizer; rejects tabs in indentation
     port tokenize
   def node Parser:  // recursive descent; context-free constraints live here
     port build_ast
+  def node Definitions: // the prose gate: attaches each definition comment to its element and rejects obligation prose
+    port attach
   def node Resolver: // phased passes; every reference becomes an absolute path
     port bind_names
     def node Defs: // sweeps every module's rel/conn/view defs into the table
@@ -35,6 +38,7 @@ def node Compiler:
 
   Driver.lex scan Lexer.tokenize in compile_flow
   Driver.build parse Parser.build_ast in compile_flow
+  Driver.attach_docs annotate Definitions.attach in compile_flow
   Driver.bind resolve Resolver.bind_names in compile_flow
   Driver.emit_batch lower Lower.emit in compile_flow
   compile = Driver.accept
@@ -69,6 +73,7 @@ Function type_of Compiler
 Function type_of Compiler.Driver
 Function type_of Compiler.Lexer
 Function type_of Compiler.Parser
+Function type_of Compiler.Definitions
 Function type_of Compiler.Resolver
 Function type_of Compiler.Lower
 Function type_of Engine

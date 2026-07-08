@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 
 use serde_json::{Value, json};
 
+use crate::definition;
 use crate::error::{ErrorCode, LangError};
 use crate::ids::{ConnId, EdgeId, NodeId, PortId, RelId, ViewId};
 use crate::model::{
@@ -334,15 +335,21 @@ impl Workspace {
 
     fn do_define(&mut self, def: &Definition) -> Result<Outcome, LangError> {
         match def {
-            Definition::Node { path, ports } => self.define_node(path, ports.as_deref()),
-            Definition::View { name } => self.define_view(name),
+            Definition::Node {
+                path,
+                ports,
+                doc,
+                port_docs,
+            } => self.define_node(path, ports.as_deref(), doc.as_deref(), port_docs.as_ref()),
+            Definition::View { name, doc } => self.define_view(name, doc.as_deref()),
             Definition::Rel {
                 name,
                 trans,
                 directed,
                 source,
                 target,
-            } => self.define_rel(name, *trans, *directed, source, target),
+                doc,
+            } => self.define_rel(name, *trans, *directed, source, target, doc.as_deref()),
             Definition::Conn {
                 name,
                 directed,
@@ -350,6 +357,7 @@ impl Workspace {
                 carrier,
                 rev_carrier,
                 target,
+                doc,
             } => self.define_conn(
                 name,
                 *directed,
@@ -357,17 +365,65 @@ impl Workspace {
                 carrier.as_ref(),
                 rev_carrier.as_ref(),
                 target,
+                doc.as_deref(),
             ),
         }
     }
 
-    fn define_node(&mut self, path: &str, ports: Option<&[String]>) -> Result<Outcome, LangError> {
+    /// Normalize and validate definition prose entering through `execute` —
+    /// the same shared rule the source attach pass and the statement schema
+    /// apply, so no door stores what a render could not re-parse.
+    fn check_doc(&self, doc: Option<&str>) -> Result<Option<String>, LangError> {
+        match doc {
+            None => Ok(None),
+            Some(text) => {
+                let normalized = definition::normalize(text);
+                definition::validate(&normalized)
+                    .map_err(|m| LangError::new(ErrorCode::Parse, m))?;
+                Ok(Some(normalized))
+            }
+        }
+    }
+
+    fn define_node(
+        &mut self,
+        path: &str,
+        ports: Option<&[String]>,
+        doc: Option<&str>,
+        port_docs: Option<&BTreeMap<String, String>>,
+    ) -> Result<Outcome, LangError> {
         let segs = self.parse_path(path)?;
         if let Some(ps) = ports {
             for p in ps {
                 self.check_ident(p, "port name")?;
             }
         }
+        let doc = self.check_doc(doc)?;
+        let port_docs = match port_docs {
+            None => None,
+            Some(pd) => {
+                let Some(ps) = ports else {
+                    return Err(LangError::new(
+                        ErrorCode::Parse,
+                        "`port_docs` requires `ports`: definitions attach to declared ports",
+                    ));
+                };
+                let mut normalized = BTreeMap::new();
+                for (port, text) in pd {
+                    if !ps.contains(port) {
+                        return Err(LangError::new(
+                            ErrorCode::Parse,
+                            format!("`port_docs` names `{port}`, which is not in `ports`"),
+                        ));
+                    }
+                    normalized.insert(
+                        port.clone(),
+                        self.check_doc(Some(text))?.expect("doc is present"),
+                    );
+                }
+                Some(normalized)
+            }
+        };
         let (name, prefix) = segs.split_last().expect("paths are non-empty");
         let parent = if prefix.is_empty() {
             None
@@ -378,23 +434,35 @@ impl Workspace {
             })?)
         };
         if let Some(&id) = self.model.children(parent).get(name) {
-            // An omitted `ports` field makes no claim; a present one must
-            // restate the declared set exactly.
-            let Some(claim) = ports else {
-                return Ok(Outcome::Noop);
+            // An omitted field makes no claim; a present one must restate
+            // what is stored exactly — ports as a set, definitions verbatim.
+            let redeclared = |what: &str| {
+                LangError::new(
+                    ErrorCode::Redeclared,
+                    format!("node `{path}` is already defined with {what}"),
+                )
+                .with_ref("node", path, Some(id.raw()))
+                .with_actual(self.model.node_statement(id).to_value())
             };
-            let declared = self.model.declared_ports(id);
-            let mut claim_sorted: Vec<String> = claim.to_vec();
-            claim_sorted.sort();
-            if claim_sorted == declared {
-                return Ok(Outcome::Noop);
+            if let Some(claim) = ports {
+                let declared = self.model.declared_ports(id);
+                let mut claim_sorted: Vec<String> = claim.to_vec();
+                claim_sorted.sort();
+                if claim_sorted != declared {
+                    return Err(redeclared("different ports"));
+                }
             }
-            return Err(LangError::new(
-                ErrorCode::Redeclared,
-                format!("node `{path}` is already defined with different ports"),
-            )
-            .with_ref("node", path, Some(id.raw()))
-            .with_actual(self.model.node_statement(id).to_value()));
+            if let Some(d) = &doc
+                && self.model.nodes[&id].doc.as_ref() != Some(d)
+            {
+                return Err(redeclared("a different definition"));
+            }
+            if let Some(pd) = &port_docs
+                && *pd != self.model.declared_port_docs(id)
+            {
+                return Err(redeclared("different port definitions"));
+            }
+            return Ok(Outcome::Noop);
         }
         let id = NodeId(self.model.alloc());
         self.model.nodes.insert(
@@ -405,6 +473,7 @@ impl Workspace {
                 parent,
                 children: BTreeMap::new(),
                 ports: BTreeMap::new(),
+                doc,
             },
         );
         match parent {
@@ -421,14 +490,26 @@ impl Workspace {
             }
         }
         for p in ports.unwrap_or_default() {
-            self.create_port(id, p, None, None, true);
+            let port_doc = port_docs.as_ref().and_then(|m| m.get(p)).cloned();
+            self.create_port(id, p, None, None, true, port_doc);
         }
         Ok(Outcome::Applied)
     }
 
-    fn define_view(&mut self, name: &str) -> Result<Outcome, LangError> {
+    fn define_view(&mut self, name: &str, doc: Option<&str>) -> Result<Outcome, LangError> {
         self.check_ident(name, "view name")?;
-        if self.model.view_names.contains_key(name) {
+        let doc = self.check_doc(doc)?;
+        if let Some(&id) = self.model.view_names.get(name) {
+            if let Some(d) = &doc
+                && self.model.views[&id].doc.as_ref() != Some(d)
+            {
+                return Err(LangError::new(
+                    ErrorCode::Redeclared,
+                    format!("view `{name}` is already defined with a different definition"),
+                )
+                .with_ref("view", name, Some(id.raw()))
+                .with_actual(self.model.view_statement(&self.model.views[&id]).to_value()));
+            }
             return Ok(Outcome::Noop);
         }
         let id = ViewId(self.model.alloc());
@@ -437,6 +518,7 @@ impl Workspace {
             ViewDef {
                 id,
                 name: name.to_string(),
+                doc,
             },
         );
         self.model.view_names.insert(name.to_string(), id);
@@ -450,8 +532,10 @@ impl Workspace {
         directed: bool,
         source: &PatternExpr,
         target: &PatternExpr,
+        doc: Option<&str>,
     ) -> Result<Outcome, LangError> {
         self.check_ident(name, "relation type name")?;
+        let doc = self.check_doc(doc)?;
         let src = self.resolve_pattern(source)?;
         let dst = self.resolve_pattern(target)?;
         if let Some(&id) = self.model.rel_names.get(name) {
@@ -459,7 +543,8 @@ impl Workspace {
             let identical = existing.trans == trans
                 && existing.directed == directed
                 && existing.src == src
-                && existing.dst == dst;
+                && existing.dst == dst
+                && (doc.is_none() || existing.doc == doc);
             if identical {
                 return Ok(Outcome::Noop);
             }
@@ -492,6 +577,7 @@ impl Workspace {
                 directed,
                 src,
                 dst,
+                doc,
             },
         );
         self.model.rel_names.insert(name.to_string(), id);
@@ -522,9 +608,11 @@ impl Workspace {
         carrier: Option<&PatternExpr>,
         rev_carrier: Option<&PatternExpr>,
         target: &PatternExpr,
+        doc: Option<&str>,
     ) -> Result<Outcome, LangError> {
         self.check_ident(name, "connection type name")?;
         self.check_rev_lane(directed, rev_carrier)?;
+        let doc = self.check_doc(doc)?;
         let src = self.resolve_pattern(source)?;
         let carrier_pat = carrier.map(|c| self.resolve_pattern(c)).transpose()?;
         let rev_carrier_pat = rev_carrier.map(|c| self.resolve_pattern(c)).transpose()?;
@@ -535,7 +623,8 @@ impl Workspace {
                 && existing.src == src
                 && existing.carrier == carrier_pat
                 && existing.rev_carrier == rev_carrier_pat
-                && existing.dst == dst;
+                && existing.dst == dst
+                && (doc.is_none() || existing.doc == doc);
             if identical {
                 return Ok(Outcome::Noop);
             }
@@ -565,6 +654,7 @@ impl Workspace {
                 carrier: carrier_pat,
                 rev_carrier: rev_carrier_pat,
                 dst,
+                doc,
             },
         );
         self.model.conn_names.insert(name.to_string(), id);
@@ -726,6 +816,7 @@ impl Workspace {
         conn: Option<ConnId>,
         side: Option<Side>,
         declared: bool,
+        doc: Option<String>,
     ) -> PortId {
         let id = PortId(self.model.alloc());
         self.model.ports.insert(
@@ -737,6 +828,7 @@ impl Workspace {
                 conn,
                 side,
                 declared,
+                doc,
             },
         );
         self.model
@@ -863,14 +955,14 @@ impl Workspace {
                 self.fix_port_use(p, conn_id, side_a);
                 p
             }
-            None => self.create_port(a, &source.port, Some(conn_id), side_a, false),
+            None => self.create_port(a, &source.port, Some(conn_id), side_a, false, None),
         };
         let pb = match pb {
             Some(p) => {
                 self.fix_port_use(p, conn_id, side_b);
                 p
             }
-            None => self.create_port(b, &target.port, Some(conn_id), side_b, false),
+            None => self.create_port(b, &target.port, Some(conn_id), side_b, false, None),
         };
         self.insert_edge(
             EdgePayload::Conn {
@@ -983,7 +1075,7 @@ impl Workspace {
                 self.fix_port_use(p, outer_conn, outer.side);
                 p
             }
-            None => self.create_port(inner_node, &inner.port, Some(outer_conn), outer.side, false),
+            None => self.create_port(inner_node, &inner.port, Some(outer_conn), outer.side, false, None),
         };
         self.insert_edge(
             EdgePayload::App {

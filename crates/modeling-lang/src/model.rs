@@ -42,6 +42,8 @@ pub(crate) struct Node {
     pub parent: Option<NodeId>,
     pub children: BTreeMap<String, NodeId>,
     pub ports: BTreeMap<String, PortId>,
+    /// The node's definition: identity prose from its `define`.
+    pub doc: Option<String>,
 }
 
 /// A named attachment point on a node. Its connection type and, for directed
@@ -59,6 +61,8 @@ pub(crate) struct Port {
     pub conn: Option<ConnId>,
     pub side: Option<Side>,
     pub declared: bool,
+    /// The port's definition; declared ports only.
+    pub doc: Option<String>,
 }
 
 /// A resolved pattern. Anchors and relations are bound by id at declaration
@@ -78,6 +82,8 @@ pub(crate) struct RelType {
     pub directed: bool,
     pub src: Pattern,
     pub dst: Pattern,
+    /// The type's definition: identity prose from its `define`.
+    pub doc: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -92,12 +98,16 @@ pub(crate) struct ConnType {
     /// direction means initiation, a reverse carrier is the response payload.
     pub rev_carrier: Option<Pattern>,
     pub dst: Pattern,
+    /// The type's definition: identity prose from its `define`.
+    pub doc: Option<String>,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct ViewDef {
     pub id: ViewId,
     pub name: String,
+    /// The view's definition: identity prose from its `define`.
+    pub doc: Option<String>,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -274,6 +284,21 @@ impl Model {
     pub(crate) fn port_path(&self, port: PortId) -> String {
         let p = &self.ports[&port];
         format!("{}.{}", self.node_path(p.node), p.name)
+    }
+
+    /// Definitions of the node's declared ports, keyed by port name.
+    pub(crate) fn declared_port_docs(&self, node: NodeId) -> BTreeMap<String, String> {
+        self.nodes[&node]
+            .ports
+            .values()
+            .filter_map(|pid| {
+                let p = &self.ports[pid];
+                match (&p.doc, p.declared) {
+                    (Some(d), true) => Some((p.name.clone(), d.clone())),
+                    _ => None,
+                }
+            })
+            .collect()
     }
 
     /// Names of the node's declared ports, in name order.

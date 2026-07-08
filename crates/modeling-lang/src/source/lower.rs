@@ -95,6 +95,8 @@ pub(crate) fn lower(res: &Resolution) -> Result<Lowered, Vec<Diagnostic>> {
             Statement::Define(Definition::Node {
                 path: path.clone(),
                 ports: (!info.ports.is_empty()).then(|| info.ports.clone()),
+                doc: info.doc.clone(),
+                port_docs: (!info.port_docs.is_empty()).then(|| info.port_docs.clone()),
             }),
             info.span,
             &mut batch,
@@ -109,6 +111,7 @@ pub(crate) fn lower(res: &Resolution) -> Result<Lowered, Vec<Diagnostic>> {
         push(
             Statement::Define(Definition::View {
                 name: v.name.clone(),
+                doc: v.doc.clone(),
             }),
             v.span,
             &mut batch,
@@ -149,6 +152,7 @@ pub(crate) fn lower(res: &Resolution) -> Result<Lowered, Vec<Diagnostic>> {
                 directed: r.directed,
                 source: r.source.clone(),
                 target: r.target.clone(),
+                doc: r.doc.clone(),
             }),
             r.span,
             &mut batch,
@@ -168,6 +172,7 @@ pub(crate) fn lower(res: &Resolution) -> Result<Lowered, Vec<Diagnostic>> {
                 carrier: c.fwd_carrier.clone(),
                 rev_carrier: c.rev_carrier.clone(),
                 target: c.target.clone(),
+                doc: c.doc.clone(),
             }),
             c.span,
             &mut batch,

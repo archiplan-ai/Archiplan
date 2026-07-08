@@ -7,6 +7,7 @@ def conn invoke      := * ->Command, <-Report *                       // operato
 def conn compile     := * ->ArchSource, <-StatementBatch *            // project in, batch out
 def conn scan        := * ->ArchSource, <-Tokens *
 def conn parse       := * ->Tokens, <-Ast *
+def conn annotate    := * ->Ast, <-Ast *                              // definitions attached and validated
 def conn resolve     := * ->Ast, <-Resolution *
 def conn lower       := * ->Resolution, <-StatementBatch *
 def conn execute     := * ->StatementBatch, <-ModelGraph *            // atomic batch replay

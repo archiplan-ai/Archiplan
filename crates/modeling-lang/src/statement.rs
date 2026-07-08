@@ -6,6 +6,7 @@
 //! render as valid source text, so dumps paste back into modules; reads
 //! render display-only.
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 use serde::de::Error as _;
@@ -13,24 +14,33 @@ use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 
+use crate::definition;
 use crate::error::{ErrorCode, LangError};
 
 /// What a `define` statement defines. The subject key — `node`,
 /// `view`, `rel` or `conn` — names the element (a path for nodes, a name for
 /// everything else); the definition's parameters are sibling fields.
+///
+/// Every subject takes an optional `doc`: the element's definition — one
+/// sentence of identity prose ([`crate::definition`]), part of the element's
+/// identity like every other parameter. An omitted `doc` makes no claim; a
+/// present one is compared against the stored definition.
 #[derive(Clone, PartialEq, Debug)]
 #[allow(missing_docs)]
 pub enum Definition {
     /// `"node": <path>` — the prefix names the (existing) container — plus
     /// `ports` (optional): the node's declared ports. An omitted `ports`
     /// field makes no claim about the port set; a present one is compared
-    /// exactly against the node's declared ports.
+    /// exactly against the node's declared ports. `port_docs` (optional)
+    /// maps declared ports to their definitions, and requires `ports`.
     Node {
         path: String,
         ports: Option<Vec<String>>,
+        doc: Option<String>,
+        port_docs: Option<BTreeMap<String, String>>,
     },
-    /// `"view": <name>` — a view has no definition body.
-    View { name: String },
+    /// `"view": <name>` — a view's definition body is its `doc` alone.
+    View { name: String, doc: Option<String> },
     /// `"rel": <name>` plus `trans` (optional), `directed`, `source`, `target`.
     Rel {
         name: String,
@@ -38,6 +48,7 @@ pub enum Definition {
         directed: bool,
         source: PatternExpr,
         target: PatternExpr,
+        doc: Option<String>,
     },
     /// `"conn": <name>` plus `directed`, `source`, `carrier` (forward-lane
     /// carried slot), `rev_carrier` (reverse-lane carried slot, directed
@@ -49,40 +60,62 @@ pub enum Definition {
         carrier: Option<PatternExpr>,
         rev_carrier: Option<PatternExpr>,
         target: PatternExpr,
+        doc: Option<String>,
     },
+}
+
+/// A definition rendered as its trailing comment, empty when absent.
+fn doc_suffix(doc: &Option<String>) -> String {
+    match doc {
+        Some(d) => format!(" // {d}"),
+        None => String::new(),
+    }
 }
 
 impl Definition {
     /// Surface syntax without the leading verb: `node Payments`,
     /// `rel trans of_sort := * -> *`. A node with declared ports renders as
-    /// its block form, across lines.
+    /// its block form, across lines. Definitions render as trailing
+    /// comments on their defining lines — the attach pass reads the same
+    /// position back, so dumps round-trip.
     fn pseudo(&self) -> String {
         match self {
-            Definition::Node { path, ports } => match ports {
-                None => format!("node {path}"),
+            Definition::Node {
+                path,
+                ports,
+                doc,
+                port_docs,
+            } => match ports {
+                None => format!("node {path}{}", doc_suffix(doc)),
                 Some(ps) => {
-                    let mut out = format!("node {path}:");
+                    let mut out = format!("node {path}:{}", doc_suffix(doc));
                     for p in ps {
                         out.push_str("\n  port ");
                         out.push_str(p);
+                        if let Some(d) = port_docs.as_ref().and_then(|m| m.get(p)) {
+                            out.push_str(" // ");
+                            out.push_str(d);
+                        }
                     }
                     out
                 }
             },
-            Definition::View { name } => format!("view {name}"),
+            Definition::View { name, doc } => format!("view {name}{}", doc_suffix(doc)),
             Definition::Rel {
                 name,
                 trans,
                 directed,
                 source,
                 target,
+                doc,
             } => {
                 let trans = if *trans { "trans " } else { "" };
                 let arrow = if *directed { "->" } else { "<->" };
                 format!(
-                    "rel {trans}{name} := {} {arrow} {}",
+                    "rel {trans}{name} := {} {arrow} {}{}",
                     source.pseudo_slot(),
-                    target.pseudo_slot()
+                    target.pseudo_slot(),
+                    doc_suffix(doc)
                 )
             }
             Definition::Conn {
@@ -92,6 +125,7 @@ impl Definition {
                 carrier,
                 rev_carrier,
                 target,
+                doc,
             } => {
                 let mut lanes = String::from(if *directed { "->" } else { "<->" });
                 if let Some(c) = carrier {
@@ -102,9 +136,10 @@ impl Definition {
                     lanes.push_str(&rc.pseudo_slot());
                 }
                 format!(
-                    "conn {name} := {} {lanes} {}",
+                    "conn {name} := {} {lanes} {}{}",
                     source.pseudo_slot(),
-                    target.pseudo_slot()
+                    target.pseudo_slot(),
+                    doc_suffix(doc)
                 )
             }
         }
@@ -115,19 +150,36 @@ impl Serialize for Definition {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let mut m = s.serialize_map(None)?;
         match self {
-            Definition::Node { path, ports } => {
+            Definition::Node {
+                path,
+                ports,
+                doc,
+                port_docs,
+            } => {
                 m.serialize_entry("node", path)?;
                 if let Some(ps) = ports {
                     m.serialize_entry("ports", ps)?;
                 }
+                if let Some(d) = doc {
+                    m.serialize_entry("doc", d)?;
+                }
+                if let Some(pd) = port_docs {
+                    m.serialize_entry("port_docs", pd)?;
+                }
             }
-            Definition::View { name } => m.serialize_entry("view", name)?,
+            Definition::View { name, doc } => {
+                m.serialize_entry("view", name)?;
+                if let Some(d) = doc {
+                    m.serialize_entry("doc", d)?;
+                }
+            }
             Definition::Rel {
                 name,
                 trans,
                 directed,
                 source,
                 target,
+                doc,
             } => {
                 m.serialize_entry("rel", name)?;
                 if *trans {
@@ -136,6 +188,9 @@ impl Serialize for Definition {
                 m.serialize_entry("directed", directed)?;
                 m.serialize_entry("source", source)?;
                 m.serialize_entry("target", target)?;
+                if let Some(d) = doc {
+                    m.serialize_entry("doc", d)?;
+                }
             }
             Definition::Conn {
                 name,
@@ -144,6 +199,7 @@ impl Serialize for Definition {
                 carrier,
                 rev_carrier,
                 target,
+                doc,
             } => {
                 m.serialize_entry("conn", name)?;
                 m.serialize_entry("directed", directed)?;
@@ -155,6 +211,9 @@ impl Serialize for Definition {
                     m.serialize_entry("rev_carrier", rc)?;
                 }
                 m.serialize_entry("target", target)?;
+                if let Some(d) = doc {
+                    m.serialize_entry("doc", d)?;
+                }
             }
         }
         m.end()
@@ -168,11 +227,14 @@ impl<'de> Deserialize<'de> for Definition {
         struct NodeBody {
             node: String,
             ports: Option<Vec<String>>,
+            doc: Option<String>,
+            port_docs: Option<BTreeMap<String, String>>,
         }
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct ViewBody {
             view: String,
+            doc: Option<String>,
         }
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
@@ -183,6 +245,7 @@ impl<'de> Deserialize<'de> for Definition {
             directed: bool,
             source: PatternExpr,
             target: PatternExpr,
+            doc: Option<String>,
         }
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
@@ -193,6 +256,7 @@ impl<'de> Deserialize<'de> for Definition {
             carrier: Option<PatternExpr>,
             rev_carrier: Option<PatternExpr>,
             target: PatternExpr,
+            doc: Option<String>,
         }
 
         let v = Value::deserialize(d)?;
@@ -210,11 +274,16 @@ impl<'de> Deserialize<'de> for Definition {
                 Ok(Definition::Node {
                     path: b.node,
                     ports: b.ports,
+                    doc: b.doc,
+                    port_docs: b.port_docs,
                 })
             }
             ["view"] => {
                 let b: ViewBody = serde_json::from_value(v).map_err(de)?;
-                Ok(Definition::View { name: b.view })
+                Ok(Definition::View {
+                    name: b.view,
+                    doc: b.doc,
+                })
             }
             ["rel"] => {
                 let b: RelBody = serde_json::from_value(v).map_err(de)?;
@@ -224,6 +293,7 @@ impl<'de> Deserialize<'de> for Definition {
                     directed: b.directed,
                     source: b.source,
                     target: b.target,
+                    doc: b.doc,
                 })
             }
             ["conn"] => {
@@ -235,6 +305,7 @@ impl<'de> Deserialize<'de> for Definition {
                     carrier: b.carrier,
                     rev_carrier: b.rev_carrier,
                     target: b.target,
+                    doc: b.doc,
                 })
             }
             _ => Err(D::Error::custom(
@@ -481,9 +552,9 @@ fn definition_keys(obj: &serde_json::Map<String, Value>) -> Option<&'static [&'s
         .filter(|k| obj.contains_key(*k))
         .collect();
     Some(match subjects.as_slice() {
-        ["node"] => &["stmt", "node", "ports"],
-        ["view"] => &["stmt", "view"],
-        ["rel"] => &["stmt", "rel", "trans", "directed", "source", "target"],
+        ["node"] => &["stmt", "node", "ports", "doc", "port_docs"],
+        ["view"] => &["stmt", "view", "doc"],
+        ["rel"] => &["stmt", "rel", "trans", "directed", "source", "target", "doc"],
         ["conn"] => &[
             "stmt",
             "conn",
@@ -492,6 +563,7 @@ fn definition_keys(obj: &serde_json::Map<String, Value>) -> Option<&'static [&'s
             "carrier",
             "rev_carrier",
             "target",
+            "doc",
         ],
         _ => return None,
     })
@@ -530,12 +602,59 @@ fn validate_keys(value: &Value) -> Result<&str, LangError> {
     Ok(kind)
 }
 
+/// Normalize and validate the definition prose of a `define`, and check
+/// that `port_docs` names only declared ports. The same shared rule guards
+/// the source attach pass and the engine — every door stores only
+/// normalized text, so renders round-trip byte-stably.
+fn validate_docs(d: &mut Definition) -> Result<(), String> {
+    fn check(doc: &mut Option<String>) -> Result<(), String> {
+        if let Some(text) = doc {
+            let normalized = definition::normalize(text);
+            definition::validate(&normalized)?;
+            *text = normalized;
+        }
+        Ok(())
+    }
+    match d {
+        Definition::Node {
+            ports,
+            doc,
+            port_docs,
+            ..
+        } => {
+            check(doc)?;
+            if let Some(pd) = port_docs {
+                let Some(ps) = ports else {
+                    return Err(
+                        "`port_docs` requires `ports`: definitions attach to declared ports"
+                            .into(),
+                    );
+                };
+                for (port, text) in pd.iter_mut() {
+                    if !ps.contains(port) {
+                        return Err(format!(
+                            "`port_docs` names `{port}`, which is not in `ports`"
+                        ));
+                    }
+                    let normalized = definition::normalize(text);
+                    definition::validate(&normalized)?;
+                    *text = normalized;
+                }
+            }
+        }
+        Definition::View { doc, .. }
+        | Definition::Rel { doc, .. }
+        | Definition::Conn { doc, .. } => check(doc)?,
+    }
+    Ok(())
+}
+
 /// Parse one statement from a JSON value, with strict schema validation:
-/// unknown kinds and fields, ill-typed fields, and a `define` without
-/// exactly one subject are all `E_PARSE`.
+/// unknown kinds and fields, ill-typed fields, a `define` without exactly
+/// one subject, and invalid definition prose are all `E_PARSE`.
 pub fn parse_statement(value: &Value) -> Result<Statement, LangError> {
     validate_keys(value)?;
-    let stmt: Statement = serde_path_to_error::deserialize(value).map_err(
+    let mut stmt: Statement = serde_path_to_error::deserialize(value).map_err(
         |e: serde_path_to_error::Error<serde_json::Error>| {
             let path = e.path().to_string();
             let msg = if path == "." {
@@ -573,6 +692,9 @@ pub fn parse_statement(value: &Value) -> Result<Statement, LangError> {
             }
         }
         _ => {}
+    }
+    if let Statement::Define(d) = &mut stmt {
+        validate_docs(d).map_err(|m| parse_err(m, value))?;
     }
     Ok(stmt)
 }

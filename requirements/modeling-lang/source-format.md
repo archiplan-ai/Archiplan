@@ -79,7 +79,9 @@ freely.
 ## Lexical structure
 
 - UTF-8; identifiers `[A-Za-z_][A-Za-z0-9_]*`; paths join them with `.`.
-- Comments run from `//` to end of line.
+- Comments run from `//` to end of line and are invisible to the token stream. A comment in *definition
+  position* — trailing a defining line, or a standalone block abutting one from above — attaches to that
+  element as its [definition](#definitions); every other comment is free prose.
 - One statement per line; no semicolons; no line continuations.
 - **Blocks** are indentation (offside rule): a line ending in `:` opens a block; its items sit strictly deeper, at
   one common column; blank and comment-only lines are invisible; a dedent must return to an enclosing level. Tabs
@@ -147,6 +149,30 @@ on the defining file. Every port used by an edge or application must be declared
 connection type and side are still fixed by its first use, and a declared, never-wired port is the `unused_port`
 finding, not an error. (The JSON API keeps creation-on-first-use for ports; declare-first is the source
 discipline.)
+
+### Definitions
+
+Every defined element — node, port, view, rel, conn — can carry a **definition**: one sentence of identity
+prose stating what the element *is* (`archi/requirements/element-definitions/`). The comment already sitting in
+definition position is the surface:
+
+```
+// The operator, human or agent, outside the tool.
+def node Agent:
+  port drive // runs the verbs
+```
+
+- **Position** — the trailing comment on the defining line, or the standalone comment block abutting it from
+  above (lines joined with spaces). A blank line detaches the block; `open` lines, edges and applications take
+  nothing; a whitespace-only comment is no definition; claiming both forms at once is `E_DEFINITION`.
+- **Prose gate** — normalized text (whitespace collapsed) of at most 240 characters, exactly one sentence (a
+  terminator followed by whitespace ends a sentence, so dotted tokens like `mod.rs` never split), and free of
+  obligation vocabulary: `must`, `should`, `shall`, `ensures`, `handles` reject wherever they stand, whole-word
+  and case-insensitive. Obligations belong in requirement docs. Violations are located `E_DEFINITION`
+  diagnostics, all of a file's in one pass.
+- **Semantics** — the definition joins the element's identity: it lowers onto the `define` statement (`doc`,
+  and `port_docs` on nodes), a divergent restatement rejects like divergent ports, and the canonical render
+  emits it back in the same position, byte-stably.
 
 ### `open`: scope in another file
 

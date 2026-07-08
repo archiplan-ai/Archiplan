@@ -94,6 +94,7 @@
 // size is irrelevant; boxing it would push the cost onto every consumer match.
 #![allow(clippy::result_large_err)]
 
+pub mod definition;
 mod engine;
 mod error;
 mod ids;

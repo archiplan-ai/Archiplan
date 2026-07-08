@@ -8,6 +8,7 @@
 //! or engine — come back as [`Diagnostic`]s with `file:line:col` locations.
 
 mod ast;
+mod defs;
 mod lexer;
 mod lower;
 mod parser;
@@ -112,10 +113,13 @@ fn compile_modules(
     for src in &sources {
         let file = map.add_file(src.rel_path.clone(), src.text.clone());
         match parser::parse(file, &src.text) {
-            Ok(ast) => modules.push(resolve::ModuleAst {
-                module: src.module.clone(),
-                ast,
-            }),
+            Ok((mut ast, comments)) => {
+                defs::attach(&mut ast, &comments, &map, &mut diagnostics);
+                modules.push(resolve::ModuleAst {
+                    module: src.module.clone(),
+                    ast,
+                });
+            }
             Err(d) => diagnostics.push(d),
         }
     }
