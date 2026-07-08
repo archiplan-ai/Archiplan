@@ -1,0 +1,76 @@
+{
+  "name": "sort-the-batch",
+  "version": "v0004",
+  "created": "2026-07-08T08:34:16Z",
+  "state": "completed",
+  "closed_waves": 1,
+  "problem": "Lowering emits edges and applications in authoring order, and authoring order across files is the sorted-module walk — so the canonical render is a function of module names (issues/canonical-render-edge-order-depends-on-module-names.md): renaming operator.arch to agent.arch reorders ±18 edge lines, the hash moves, version current reports dirty on an identical model, and a save would mint a version whose patch records nothing. Versioning's core iff breaks, and cross-module delegation chains can even fail to compile under adverse module names. Per the identity-pressure round: sort the batch — surface order within every semantic precedence — fenced by three survivors: real edits still move the hash and diff minimally, renders still compile and replay (chains outward-in), and sealed versions reconstruct byte-identically across the contract change, which the migration save records as one reorder-only patch.",
+  "technology_stack": [
+    {
+      "tech": "Rust 2024, crates/modeling-lang lowering only — lower.rs stages 5/6/7 collect-sort-emit by Statement::pseudo() surface; dump, render_source, scope_sources and emit-batch all inherit the order from batch creation ids, so one seam fixes render, slices and batch alike",
+      "provenance": "read of the seams: dump() and scope_sources() sort by creation id; render_source is dump().pseudo() lines; the batch makes the creation ids"
+    },
+    {
+      "tech": "cargo tests: strengthened renaming-invariance e2e (multi-module edges across the sort boundary), a new chain-order e2e (inner-module-first delegation), existing round-trip and semantic-change coverage as the do-not-break net",
+      "provenance": "compilation_is_invariant_under_module_renaming had to stay single-edge to pass — the issue names it as the regression to strengthen once fixed"
+    }
+  ],
+  "architecture_summary": [
+    {
+      "node": "Compiler.Lower",
+      "role": "emits the one deterministic statement batch as a function of the model alone: rel edges in surface order within their type's topological rank (classifiers before consumers), conn edges in surface order, applications in delegation-chain order (outer attaches before inner lowers) with surface order among the ready — authoring order and module names stop being load-bearing anywhere downstream"
+    }
+  ],
+  "stack_mapping": [
+    {
+      "tech": "lower.rs stages 5-7: rel edges sort_by (rank, pseudo), conn edges sort_by pseudo, applications Kahn-ordered over the attaches-outer-port relation with pseudo-sorted ready set, spans re-aligned through the sort (crates/modeling-lang/src/source/lower.rs, Statement::pseudo visibility in statement.rs)",
+      "node": "Compiler.Lower"
+    },
+    {
+      "tech": "specs: requirements/modeling-lang/source-format.md lowering order items 5-7 and the delegation note; requirements/versioning.md canonical-form paragraph gains the layout-blind claim and the contract-change migration note; the operator.arch comment retires with the rename to agent.arch",
+      "node": "Compiler.Lower"
+    }
+  ],
+  "scenarios": [
+    "cargo test --workspace green: the strengthened renaming-invariance test lowers two adversely renamed edge-carrying modules to a bit-identical batch and byte-identical render; the new chain test compiles an inner-module-first delegation chain; every existing round-trip, semantic-change and engine-replay test unchanged.",
+    "On this repository the migration is one honest patch: the fixed binary reads the tree as dirty (the contract changed), version save mints v0005 closing identity-pressure, and version diff v0004 v0005 is a pure edge/application reorder — then git mv src/operator.arch src/agent.arch and version current still says at v0005, archi check clean: the rename three rounds of comments called blocked just happened without minting anything.",
+    "The spec keeps up: source-format.md's lowering order names surface order and chain order instead of authoring order, and versioning.md records both the layout-blind claim and the one-time re-render a canonical-form change costs."
+  ],
+  "scenarios_displayed": true,
+  "scenarios_closed": true,
+  "tasks": [
+    {
+      "id": "t1",
+      "node": "Compiler.Lower",
+      "description": "Make the batch a function of the model alone: collect stages 5/6/7 as (statement, span) pairs and emit rel edges by (topological rank, surface), conn edges by surface, applications by delegation-chain order with surface among the ready; keep every semantic precedence the lowering encodes. Strengthen the renaming-invariance regression to multiple edge-carrying modules, add the inner-module-first chain regression, update the lowering and versioning specs, then run the repo's own migration: save the reorder-only v0005 and land the operator.arch → agent.arch rename it unblocks.",
+      "spec_refs": [
+        "Compiler.Lower",
+        "Function type_of Compiler.Lower",
+        "Compiler.Driver.emit_batch lower(->Resolution, <-StatementBatch) Compiler.Lower.emit"
+      ],
+      "stack_details": "lower(): stages 5-7 currently push directly in authoring order; change to collect Vec<(Statement, Span)> per stage, sort, then push — spans stay index-aligned by sorting pairs. Rel edges: key (rank, stmt.pseudo()); conn edges: key stmt.pseudo(); applications: build full inner path (node + '.' + inner_node), map (path, port) -> enabler app indices, Kahn with BTreeSet ready sorted by pseudo, append any unreachable remainder in authoring order (cycles cannot compile today; diagnostics unchanged). Statement::pseudo may need pub(crate). No renderer change: dump()/scope_sources() sort by creation id and inherit the batch order.",
+      "inputs": {},
+      "outputs": [
+        "crates/modeling-lang/src/source/lower.rs",
+        "crates/modeling-lang/src/statement.rs",
+        "crates/modeling-lang/src/render.rs",
+        "crates/modeling-lang/tests/source_e2e.rs",
+        "crates/archi/tests/read_e2e.rs",
+        "requirements/modeling-lang/source-format.md",
+        "requirements/versioning.md"
+      ],
+      "verifications": {
+        "deterministic-lowering": [
+          "the batch stays deterministic and gains name-invariance: same sources in any module names lower to one bit-identical batch (strengthened compilation_is_invariant_under_module_renaming plus the existing source-order determinism test, both green)",
+          "every semantic precedence survives the sort: classifier rel edges before consuming shapes (rank outranks surface), applications after the application that attaches their outer port (chain order outranks surface) — engine replay and round-trip tests unchanged"
+        ],
+        "renders-are-layout-blind": [
+          "source_e2e: two edge-carrying modules renamed across the sort boundary lower to a bit-identical batch and byte-identical render",
+          "source_e2e: a delegation chain authored inner-module-first compiles under chain-ordered lowering",
+          "existing coverage: an added edge still moves the hash; compile-render round-trip stays byte-exact",
+          "on this repository: version diff v0004 v0005 is a pure reorder and the agent.arch rename leaves version current at v0005"
+        ]
+      }
+    }
+  ]
+}

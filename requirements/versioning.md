@@ -28,8 +28,12 @@ model is source-built and round-trips by construction.
 
 Canonicalization is the compression. Comments, formatting and file organization are stripped, so
 canonical bytes differ **iff the model differs** — and because statements sit in path/name-sorted order,
-a line diff between two renders is a semantic diff: an inserted definition does not shift unrelated
-lines.
+edges and applications included (surface order within lowering's semantic precedences —
+[source-format.md](modeling-lang/source-format.md#lowering-and-determinism)), a line diff between two
+renders is a semantic diff: an inserted definition or edge does not shift unrelated lines, and renaming
+or splitting `.arch` files moves nothing at all. The canonical form is itself a contract: changing it
+re-renders every live model once — the next save records the change as one reorder-only patch, and older
+versions simply never hash-match a live render again, which is what being older means.
 
 A version's identity is `sha256` over its canonical bytes. Consequences:
 

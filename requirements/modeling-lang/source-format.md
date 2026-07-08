@@ -221,7 +221,9 @@ events(OrderCreated) = OrderHandler.handle     // routed by carried-node pattern
 
 The left side names the delegating node's port (bare inside its block; `path.port` otherwise); the right side is
 always `Child.port` — a **direct child**, per the core rule. The outer port must have a connection attached when
-the application applies; since applications lower last in authoring order, delegation chains read outward-in.
+the application applies; lowering sequences applications by their delegation chains — the application that
+attaches a port lowers before the applications delegating through it — so chains read outward-in wherever and in
+whatever order they were authored.
 
 ### Views
 
@@ -248,7 +250,8 @@ each end into node and port.
 
 ## Lowering and determinism
 
-The project lowers to **one statement batch**, in an order independent of authoring order:
+The project lowers to **one statement batch**, a function of the model alone — module names, file splits and
+authoring order never move a statement:
 
 1. nodes, parents before children (path order), each `define` carrying its declared ports;
 2. views (name order);
@@ -256,13 +259,15 @@ The project lowers to **one statement batch**, in an order independent of author
    `E_DEF_CYCLE`;
 4. conn types (name order);
 5. rel edges, grouped by type in the same topological order — classifier edges land before the shapes that consult
-   them — authoring order (module, then line) within a group;
-6. conn edges, authoring order;
-7. applications, authoring order.
+   them — canonical surface order within a group;
+6. conn edges, canonical surface order;
+7. applications, delegation-chain order — an application lowers after the application that attaches its outer
+   port — canonical surface order among the ready.
 
-The batch executes on a fresh workspace holding the manifest's preset. Identical sources produce an identical
-batch, bit for bit — permuting file discovery changes nothing. A statement→span table maps any engine rejection
-back to the source line, so shape violations, port conflicts and scope errors read as ordinary compile errors.
+The batch executes on a fresh workspace holding the manifest's preset. Identical *models* produce an identical
+batch, bit for bit — permuting file discovery changes nothing, and neither does renaming or splitting modules.
+A statement→span table maps any engine rejection back to the source line, so shape violations, port conflicts
+and scope errors read as ordinary compile errors.
 
 ## Errors
 

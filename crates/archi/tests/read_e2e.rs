@@ -143,8 +143,15 @@ fn query_composes_filters_and_reads_sealed_versions() {
     assert_eq!(v["result"], "graph");
     let ids = node_ids(&v);
     assert!(ids.contains(&"Orders".to_string()) && ids.contains(&"Billing".to_string()));
-    assert_eq!(v["edges"][0]["kind"], "connection");
-    assert_eq!(v["edges"][0]["type"], "wire");
+    let mut edge_types: Vec<String> = v["edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .inspect(|e| assert_eq!(e["kind"], "connection"))
+        .map(|e| e["type"].as_str().unwrap().to_string())
+        .collect();
+    edge_types.sort();
+    assert_eq!(edge_types, vec!["order_wire".to_string(), "wire".to_string()]);
 
     // A kind filter restricts edges; unknown names error humanly, exit 1.
     let (code, out, _) = run(&root, &["query", "--kind", "relation"], None);

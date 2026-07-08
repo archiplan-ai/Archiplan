@@ -1,6 +1,7 @@
 # Canonical render orders edges by module walk — renaming a file reorders the archive
 
 **Kind:** bug (canonical form) · found while verifying the carrier-inference fix
+**Status:** resolved 2026-07-08 — batch in surface order, migration v0005 (`renders-are-layout-blind`)
 
 Deterministic lowering emits edges "in authoring order", and authoring order across files means
 the sorted-module walk: the canonical render's edge block is a function of module *names*.
@@ -36,3 +37,27 @@ version per project), and the render contract has no version stamp to make that 
 same ruler-vs-thing problem `hash-contract-is-versioned` solved for code links. Strengthen the
 renaming-invariance test to multiple edge-carrying modules once fixed; then
 `src/operator.arch` can finally become `agent.arch` (comment there points here).
+
+## Resolution
+
+Sorted in lowering, as the loop: `archi/stress/identity-pressure/` pressed v0004 — the phantom
+replay (breaking) plus three survivors fencing the fix (`semantic-diffs-stay-semantic`: sorting
+is a permutation, never a projection, and a total order makes one-edge diffs *smaller*;
+`renders-still-compile`: every semantic precedence survives — classifiers within rank,
+applications by delegation chain; `old-versions-stay-reconstructable`: reconstruction is byte
+replay, seals never recompute against the new contract). Derived `renders-are-layout-blind`;
+implemented via plan `sort-the-batch` @ v0004: lower.rs stages 5–7 emit rel edges by
+(topological rank, surface), conn edges by surface, applications Kahn-ordered over the
+attaches-outer-port relation with surface among the ready — the batch, render, scope slices and
+`--emit-batch` all inherit it. Bonus the sort surfaced: delegation chains authored
+inner-module-first used to fail compile (`NoOuterPort`) under adverse module names — chain order
+fixed a latent correctness bug, pinned by
+`delegation_chains_lower_outward_in_whatever_the_module_names`.
+
+The migration went exactly as costed while the archive was five versions small: v0005 minted as
+the reorder-only change (`version diff v0004 v0005` verified a pure permutation — 69 lines
+moved, none added or removed), and `src/operator.arch` became `agent.arch` the same round with
+`version current` unmoved at v0005. The renaming-invariance regression now spans two
+edge-carrying modules and asserts byte-identical renders. Specs updated:
+`source-format.md#lowering-and-determinism` (surface order, chain order, "identical *models*"),
+`versioning.md` (the layout-blind claim and what changing the canonical form costs).

@@ -129,12 +129,15 @@ fn compilation_is_deterministic_under_source_order() {
 
 #[test]
 fn compilation_is_invariant_under_module_renaming() {
-    // Same model, module names shuffled so the conn-USING module flips from
-    // sorting after its def module to sorting before it — the texture
+    // Same model, module names shuffled so BOTH edge-carrying modules flip
+    // across the sort boundary — the texture
     // `compilation_is_deterministic_under_source_order` cannot reach, since
     // permuting discovery order never permutes names
-    // (`issues/carrier-inference-order-dependence.md`). Only module names
-    // and import lines differ; both must lower to a bit-identical batch.
+    // (`issues/carrier-inference-order-dependence.md`,
+    // `issues/canonical-render-edge-order-depends-on-module-names.md`).
+    // Only module names and import lines differ; both spellings must lower
+    // to a bit-identical batch and render to identical bytes — the batch is
+    // a function of the model, never of file layout.
     let preset = Preset::default_ontology();
     let late_use = [
         (
@@ -146,6 +149,10 @@ fn compilation_is_invariant_under_module_renaming() {
             "zui",
             "import aconns\ndef view login_flow\ndef node UI:\n  port login\ndef node AuthService:\n  port handle_login\nUI.login login AuthService.handle_login in login_flow\n",
         ),
+        (
+            "zzops",
+            "import zui\nimport aconns\ndef node Operator:\n  port drive\nOperator.drive login AuthService.handle_login in login_flow\nService type_of Operator\n",
+        ),
     ];
     let early_use = [
         (
@@ -154,8 +161,12 @@ fn compilation_is_invariant_under_module_renaming() {
         ),
         ("mmsgs", "def node LoginForm\ndef node AuthResponse\n"),
         (
-            "aui",
+            "xui",
             "import zconns\ndef view login_flow\ndef node UI:\n  port login\ndef node AuthService:\n  port handle_login\nUI.login login AuthService.handle_login in login_flow\n",
+        ),
+        (
+            "aops",
+            "import xui\nimport zconns\ndef node Operator:\n  port drive\nOperator.drive login AuthService.handle_login in login_flow\nService type_of Operator\n",
         ),
     ];
     let a = compile_sources(&preset, &late_use)
@@ -167,6 +178,50 @@ fn compilation_is_invariant_under_module_renaming() {
     let batch_a: Vec<_> = a.batch.iter().map(|s| s.to_value()).collect();
     let batch_b: Vec<_> = b.batch.iter().map(|s| s.to_value()).collect();
     assert_eq!(batch_a, batch_b);
+    assert_eq!(
+        a.workspace.model().render_source(),
+        b.workspace.model().render_source()
+    );
+}
+
+#[test]
+fn delegation_chains_lower_outward_in_whatever_the_module_names() {
+    // A delegation chain split across modules so the INNER application's
+    // module sorts first: authoring order would replay the chained
+    // application before the application that attaches its outer port and
+    // the engine would refuse (`NoOuterPort`). Chain-ordered lowering
+    // sequences applications outward-in regardless of file layout
+    // (`issues/canonical-render-edge-order-depends-on-module-names.md`).
+    let preset = Preset::default_ontology();
+    let sources = [
+        ("aainner", "import zouter\nGate.Desk.answer = Clerk.reply\n"),
+        (
+            "zouter",
+            "def conn ask := * -> *\n\
+             def node Gate:\n  port answer\n\
+             \x20 def node Desk:\n    port answer\n\
+             \x20   def node Clerk:\n      port reply\n\
+             def node Caller:\n  port ask\n\
+             Caller.ask ask Gate.answer\n\
+             Gate.answer = Desk.answer\n",
+        ),
+    ];
+    let compiled = compile_sources(&preset, &sources)
+        .map_err(|f| f.render())
+        .unwrap();
+    let apps: Vec<String> = compiled
+        .batch
+        .iter()
+        .filter_map(|s| {
+            let v = s.to_value();
+            (v["stmt"] == "app").then(|| v["node"].as_str().unwrap().to_string())
+        })
+        .collect();
+    assert_eq!(
+        apps,
+        vec!["Gate".to_string(), "Gate.Desk".to_string()],
+        "the outer application lowers before the chained inner one"
+    );
 }
 
 #[test]

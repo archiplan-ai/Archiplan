@@ -1,0 +1,264 @@
+def node Agent:
+  port author
+  port drive
+def node ArchSource
+def node Archive:
+  port anchor
+  port canonicalize
+  port save
+  port serve
+def node Ast
+def node CanonicalRender
+def node Cli:
+  port ask
+  port build
+  port check
+  port compile_src
+  port drive
+  port exec
+  port incidence
+  port link
+  port nkp
+  port plan
+  port query
+  port read
+  port version
+def node CodeItem
+def node Command
+def node Compiler:
+  port compile
+  port fetch_preset
+  port load_sources
+def node Compiler.Driver:
+  port accept
+  port bind
+  port build
+  port discover
+  port emit_batch
+  port lex
+  port stdlib
+def node Compiler.Lexer:
+  port tokenize
+def node Compiler.Lower:
+  port emit
+def node Compiler.Parser:
+  port build_ast
+def node Compiler.Resolver:
+  port bind_names
+def node Compiler.Resolver.Defs:
+  port collect
+def node Compiler.Resolver.Uses:
+  port bind
+  port read_table
+def node DefTable
+def node Diagnostics
+def node DocsCompiler:
+  port compile_docs
+  port compile_pin
+  port load_docs
+  port pin_model
+  port serve_pin
+def node Engine:
+  port answer
+  port execute
+  port fetch_preset
+  port slice
+def node Findings
+def node Incidence:
+  port pin_model
+  port read_sessions
+  port scan
+def node IncidenceReport
+def node ItemHashIndex
+def node LinkEvent
+def node Links:
+  port capture
+  port journal
+  port pin_spec
+  port read_code
+  port read_index
+  port record
+  port serve_links
+  port sweep
+  port verify
+def node Links.Canonizer:
+  port hash
+def node Links.Capture:
+  port canon
+  port diff_wave
+  port load_index
+  port mint
+def node Links.Grader:
+  port audit
+  port canon
+  port grade
+  port read_fold
+  port resolve_pins
+  port scan_code
+def node Links.Journal:
+  port append
+  port flush
+  port record_events
+  port serve_fold
+def node ModelGraph
+def node Nkp:
+  port scan
+def node NkpReport
+def node PlanFile
+def node Planner:
+  port advance
+  port author
+  port coverage
+  port load_plan
+  port pin_model
+  port run_capture
+  port store_plan
+def node Preset:
+  port serve
+def node Query:
+  port audit
+  port subgraph
+def node Renderer:
+  port emit_source
+def node Report
+def node RequirementDoc
+def node Resolution
+def node SourceTree:
+  port serve
+  port store
+def node StatementBatch
+def node StressDoc
+def node SubgraphResult
+def node SymbolHashes
+def node Tokens
+def view compile_flow
+def view harden_flow
+def view read_flow
+def view trace_flow
+def conn canonize := * ->CodeItem, <-SymbolHashes *
+def conn compile := * ->ArchSource, <-StatementBatch *
+def conn consult := * ->(Data type_of *), <-(Data type_of *) *
+def conn execute := * ->StatementBatch, <-ModelGraph *
+def conn interrogate := * ->StatementBatch, <-SubgraphResult *
+def conn invoke := * ->Command, <-Report *
+def conn lower := * ->Resolution, <-StatementBatch *
+def conn parse := * ->Tokens, <-Ast *
+def conn persist := * ->(Data type_of *) *
+def conn recall := * ->, <-(Data type_of *) *
+def conn render := * ->ModelGraph, <-CanonicalRender *
+def conn resolve := * ->Ast, <-Resolution *
+def conn scan := * ->ArchSource, <-Tokens *
+def conn seed := * ->, <-StatementBatch *
+Data type_of ArchSource
+Data type_of Ast
+Data type_of CanonicalRender
+Data type_of CodeItem
+Data type_of Command
+Data type_of DefTable
+Data type_of Diagnostics
+Data type_of Findings
+Data type_of IncidenceReport
+Data type_of ItemHashIndex
+Data type_of LinkEvent
+Data type_of ModelGraph
+Data type_of NkpReport
+Data type_of PlanFile
+Data type_of Report
+Data type_of RequirementDoc
+Data type_of Resolution
+Data type_of StatementBatch
+Data type_of StressDoc
+Data type_of SubgraphResult
+Data type_of SymbolHashes
+Data type_of Tokens
+Function type_of Compiler
+Function type_of Compiler.Driver
+Function type_of Compiler.Lexer
+Function type_of Compiler.Lower
+Function type_of Compiler.Parser
+Function type_of Compiler.Resolver
+Function type_of DocsCompiler
+Function type_of Engine
+Function type_of Incidence
+Function type_of Nkp
+Function type_of Preset
+Function type_of Query
+Function type_of Renderer
+Service type_of Agent
+Service type_of Cli
+Service type_of Links
+Service type_of Planner
+Storage type_of Archive
+Storage type_of SourceTree
+Agent.author persist(ArchSource) SourceTree.store in compile_flow
+Agent.author persist(CodeItem) SourceTree.store in trace_flow
+Agent.author persist(PlanFile) SourceTree.store in trace_flow
+Agent.author persist(RequirementDoc) SourceTree.store in harden_flow
+Agent.author persist(StressDoc) SourceTree.store in harden_flow
+Agent.drive invoke(->Command, <-Report) Cli.build in compile_flow
+Agent.drive invoke(->Command, <-Report) Cli.check in compile_flow
+Agent.drive invoke(->Command, <-Report) Cli.incidence in harden_flow
+Agent.drive invoke(->Command, <-Report) Cli.link in trace_flow
+Agent.drive invoke(->Command, <-Report) Cli.nkp in read_flow
+Agent.drive invoke(->Command, <-Report) Cli.plan in trace_flow
+Agent.drive invoke(->Command, <-Report) Cli.query in read_flow
+Agent.drive invoke(->Command, <-Report) Cli.read in read_flow
+Agent.drive invoke(->Command, <-Report) Cli.version in harden_flow
+Archive.canonicalize render(->ModelGraph, <-CanonicalRender) Renderer.emit_source in harden_flow
+Cli.ask interrogate(->StatementBatch, <-SubgraphResult) Engine.answer in read_flow
+Cli.compile_src compile(->ArchSource, <-StatementBatch) Compiler.compile in compile_flow
+Cli.drive consult(->Command, <-Report) Links.record in trace_flow
+Cli.drive consult(->Command, <-Report) Links.sweep in trace_flow
+Cli.drive consult(->Command, <-Report) Links.verify in trace_flow
+Cli.drive consult(->Command, <-Report) Planner.advance in trace_flow
+Cli.drive consult(->Command, <-Report) Planner.author in trace_flow
+Cli.drive consult(->ModelGraph, <-Diagnostics) DocsCompiler.compile_docs in harden_flow
+Cli.drive consult(->ModelGraph, <-Findings) Query.audit in read_flow
+Cli.drive consult(->ModelGraph, <-IncidenceReport) Incidence.scan in harden_flow
+Cli.drive consult(->ModelGraph, <-NkpReport) Nkp.scan in read_flow
+Cli.drive consult(->ModelGraph, <-Report) Archive.anchor in harden_flow
+Cli.drive consult(->ModelGraph, <-Report) Archive.save in harden_flow
+Cli.exec execute(->StatementBatch, <-ModelGraph) Engine.execute in compile_flow
+Compiler.Driver.bind resolve(->Ast, <-Resolution) Compiler.Resolver.bind_names in compile_flow
+Compiler.Driver.build parse(->Tokens, <-Ast) Compiler.Parser.build_ast in compile_flow
+Compiler.Driver.emit_batch lower(->Resolution, <-StatementBatch) Compiler.Lower.emit in compile_flow
+Compiler.Driver.lex scan(->ArchSource, <-Tokens) Compiler.Lexer.tokenize in compile_flow
+Compiler.Resolver.Uses.read_table recall(<-DefTable) Compiler.Resolver.Defs.collect in compile_flow
+Compiler.fetch_preset seed(<-StatementBatch) Preset.serve in compile_flow
+Compiler.load_sources recall(<-ArchSource) SourceTree.serve in compile_flow
+DocsCompiler.compile_pin compile(->ArchSource, <-StatementBatch) Compiler.compile in harden_flow
+DocsCompiler.load_docs recall(<-RequirementDoc) SourceTree.serve in harden_flow
+DocsCompiler.load_docs recall(<-StressDoc) SourceTree.serve in harden_flow
+DocsCompiler.pin_model recall(<-CanonicalRender) Archive.serve in harden_flow
+Engine.fetch_preset seed(<-StatementBatch) Preset.serve in compile_flow
+Engine.slice consult(->ModelGraph, <-Findings) Query.audit in read_flow
+Engine.slice consult(->ModelGraph, <-SubgraphResult) Query.subgraph in read_flow
+Incidence.pin_model recall(<-ModelGraph) DocsCompiler.serve_pin in harden_flow
+Incidence.read_sessions recall(<-StressDoc) SourceTree.serve in harden_flow
+Links.Capture.canon canonize(->CodeItem, <-SymbolHashes) Links.Canonizer.hash in trace_flow
+Links.Capture.mint persist(LinkEvent) Links.Journal.append in trace_flow
+Links.Grader.canon canonize(->CodeItem, <-SymbolHashes) Links.Canonizer.hash in trace_flow
+Links.Grader.read_fold recall(<-LinkEvent) Links.Journal.serve_fold in trace_flow
+Links.journal persist(LinkEvent) SourceTree.store in trace_flow
+Links.pin_spec recall(<-ModelGraph) DocsCompiler.serve_pin in trace_flow
+Links.read_code recall(<-CodeItem) SourceTree.serve in trace_flow
+Links.read_index recall(<-ItemHashIndex) SourceTree.serve in trace_flow
+Planner.coverage recall(<-LinkEvent) Links.serve_links in trace_flow
+Planner.load_plan recall(<-PlanFile) SourceTree.serve in trace_flow
+Planner.pin_model recall(<-ModelGraph) DocsCompiler.serve_pin in trace_flow
+Planner.run_capture consult(->ItemHashIndex, <-LinkEvent) Links.capture in trace_flow
+Planner.store_plan persist(ItemHashIndex) SourceTree.store in trace_flow
+Planner.store_plan persist(PlanFile) SourceTree.store in trace_flow
+Compiler.Resolver.bind_names = Uses.bind
+Compiler.compile = Driver.accept
+Compiler.fetch_preset = Driver.stdlib
+Compiler.load_sources = Driver.discover
+Links.capture = Capture.diff_wave
+Links.journal = Journal.flush
+Links.pin_spec = Grader.resolve_pins
+Links.read_code = Grader.scan_code
+Links.read_index = Capture.load_index
+Links.record = Journal.record_events
+Links.serve_links = Journal.serve_fold
+Links.sweep = Grader.audit
+Links.verify = Grader.grade

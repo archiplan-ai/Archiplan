@@ -1,7 +1,8 @@
 //! Lowering: a resolved project → one deterministic statement batch, plus a
 //! span table mapping every statement back to the source item it came from.
 //!
-//! Emission order is independent of authoring order:
+//! Emission order is a function of the model alone — module names, file
+//! splits and authoring order never move a statement:
 //!
 //! 1. nodes, parents before children (path order), each carrying its
 //!    declared ports;
@@ -10,11 +11,12 @@
 //!    tie-break; a reference cycle is `E_DEF_CYCLE`);
 //! 4. conn types (name order — they reference only nodes and rels);
 //! 5. rel edges, grouped by type in the same topological order — classifier
-//!    edges land before the shapes that consult them — authoring order
-//!    within a group;
-//! 6. conn edges, authoring order;
-//! 7. applications, authoring order — an application needs its outer port
-//!    attached, so delegation chains read outward-in.
+//!    edges land before the shapes that consult them — canonical surface
+//!    order within a group;
+//! 6. conn edges, canonical surface order;
+//! 7. applications, delegation-chain order — an application needs its outer
+//!    port attached, so the application that attaches it lowers first and
+//!    chains read outward-in — canonical surface order among the ready.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -174,82 +176,78 @@ pub(crate) fn lower(res: &Resolution) -> Result<Lowered, Vec<Diagnostic>> {
     }
 
     // 5. Rel edges: preset types first (rank 0), then user types in
-    // topological order; authoring order within a type.
-    let mut rel_edges: Vec<(usize, usize, &EdgeR)> = Vec::new();
-    let mut conn_edges: Vec<&EdgeR> = Vec::new();
-    for (seq, e) in res.edges.iter().enumerate() {
+    // topological order; canonical surface order within a type, so the
+    // batch — and every render downstream — is a function of the model
+    // alone, never of module names or authoring order.
+    let mut rel_edges: Vec<(usize, String, Statement, Span)> = Vec::new();
+    let mut conn_edges: Vec<(String, Statement, Span)> = Vec::new();
+    for e in &res.edges {
         match e {
-            EdgeR::Rel { rel, .. } => {
+            EdgeR::Rel {
+                rel,
+                source,
+                target,
+                views,
+                span,
+            } => {
                 let rank = rel_rank.get(rel.as_str()).copied().unwrap_or(0);
-                rel_edges.push((rank, seq, e));
+                let stmt = Statement::RelEdge {
+                    rel: rel.clone(),
+                    source: source.clone(),
+                    target: target.clone(),
+                    views: views.clone(),
+                };
+                rel_edges.push((rank, stmt.pseudo(), stmt, *span));
             }
-            EdgeR::Conn { .. } => conn_edges.push(e),
+            EdgeR::Conn {
+                conn,
+                source,
+                carrier,
+                rev_carrier,
+                target,
+                views,
+                span,
+            } => {
+                let stmt = Statement::ConnEdge {
+                    conn: conn.clone(),
+                    source: End {
+                        node: source.0.clone(),
+                        port: source.1.clone(),
+                    },
+                    carrier: carrier.clone(),
+                    rev_carrier: rev_carrier.clone(),
+                    target: End {
+                        node: target.0.clone(),
+                        port: target.1.clone(),
+                    },
+                    views: views.clone(),
+                };
+                conn_edges.push((stmt.pseudo(), stmt, *span));
+            }
         }
     }
-    rel_edges.sort_by_key(|(rank, seq, _)| (*rank, *seq));
-    for (_, _, e) in rel_edges {
-        let EdgeR::Rel {
-            rel,
-            source,
-            target,
-            views,
-            span,
-        } = e
-        else {
-            unreachable!("filtered to rel edges");
-        };
-        push(
-            Statement::RelEdge {
-                rel: rel.clone(),
-                source: source.clone(),
-                target: target.clone(),
-                views: views.clone(),
-            },
-            *span,
-            &mut batch,
-            &mut spans,
-        );
+    rel_edges.sort_by(|(ra, ka, ..), (rb, kb, ..)| ra.cmp(rb).then_with(|| ka.cmp(kb)));
+    for (_, _, stmt, span) in rel_edges {
+        push(stmt, span, &mut batch, &mut spans);
     }
 
-    // 6. Conn edges.
-    for e in conn_edges {
-        let EdgeR::Conn {
-            conn,
-            source,
-            carrier,
-            rev_carrier,
-            target,
-            views,
-            span,
-        } = e
-        else {
-            unreachable!("filtered to conn edges");
-        };
-        push(
-            Statement::ConnEdge {
-                conn: conn.clone(),
-                source: End {
-                    node: source.0.clone(),
-                    port: source.1.clone(),
-                },
-                carrier: carrier.clone(),
-                rev_carrier: rev_carrier.clone(),
-                target: End {
-                    node: target.0.clone(),
-                    port: target.1.clone(),
-                },
-                views: views.clone(),
-            },
-            *span,
-            &mut batch,
-            &mut spans,
-        );
+    // 6. Conn edges, canonical surface order.
+    conn_edges.sort_by(|(ka, ..), (kb, ..)| ka.cmp(kb));
+    for (_, stmt, span) in conn_edges {
+        push(stmt, span, &mut batch, &mut spans);
     }
 
-    // 7. Applications.
-    for a in &res.apps {
-        push(
-            Statement::App {
+    // 7. Applications: delegation-chain order — an application attaches
+    // its inner port, and a chained application needs its outer port
+    // attached first — canonical surface order among the ready. Authoring
+    // order stops being load-bearing: a chain authored inner-module-first
+    // lowers outward-in all the same. Anything unplaced (a cycle cannot
+    // compile) keeps authoring order so diagnostics read as written.
+    let apps: Vec<(String, Statement, Span)> = res
+        .apps
+        .iter()
+        .map(|a| {
+            let stmt = Statement::App {
                 node: a.node.clone(),
                 port: a.port.clone(),
                 route: a.route.clone(),
@@ -257,11 +255,47 @@ pub(crate) fn lower(res: &Resolution) -> Result<Lowered, Vec<Diagnostic>> {
                     node: a.inner_node.clone(),
                     port: a.inner_port.clone(),
                 },
-            },
-            a.span,
-            &mut batch,
-            &mut spans,
-        );
+            };
+            (stmt.pseudo(), stmt, a.span)
+        })
+        .collect();
+    let attaches: Vec<(String, String)> = res
+        .apps
+        .iter()
+        .map(|a| (format!("{}.{}", a.node, a.inner_node), a.inner_port.clone()))
+        .collect();
+    let deps: Vec<Vec<usize>> = res
+        .apps
+        .iter()
+        .map(|a| {
+            attaches
+                .iter()
+                .enumerate()
+                .filter(|(_, (path, port))| *path == a.node && *port == a.port)
+                .map(|(i, _)| i)
+                .collect()
+        })
+        .collect();
+    let mut placed = vec![false; apps.len()];
+    let mut remaining = apps.len();
+    while remaining > 0 {
+        let mut ready: Vec<usize> = (0..apps.len())
+            .filter(|&i| !placed[i] && deps[i].iter().all(|&d| placed[d]))
+            .collect();
+        if ready.is_empty() {
+            break;
+        }
+        ready.sort_by(|&a, &b| apps[a].0.cmp(&apps[b].0));
+        for i in ready {
+            placed[i] = true;
+            remaining -= 1;
+            push(apps[i].1.clone(), apps[i].2, &mut batch, &mut spans);
+        }
+    }
+    for (i, (_, stmt, span)) in apps.iter().enumerate() {
+        if !placed[i] {
+            push(stmt.clone(), *span, &mut batch, &mut spans);
+        }
     }
 
     Ok(Lowered { batch, spans })

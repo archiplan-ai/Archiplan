@@ -5,10 +5,10 @@ import tool
 
 // The operator — human or agent — is outside the tool: everything it does
 // is either a text edit into the tree or a verb.
-// (Still operator.arch, not agent.arch: carrier inference no longer cares —
-// uses-see-every-def — but the canonical render orders edges by module walk,
-// so the rename would reorder the archive's render of an identical model.
-// See issues/canonical-render-edge-order-depends-on-module-names.md.)
+// (Finally agent.arch: two rounds spent making this rename free —
+// uses-see-every-def made carrier inference module-order-blind, and
+// renders-are-layout-blind made the canonical render so. The file name
+// stopped being load-bearing on v0005.)
 
 def node Agent:
   port drive  // runs the verbs
