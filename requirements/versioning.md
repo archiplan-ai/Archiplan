@@ -33,8 +33,9 @@ lines.
 
 A version's identity is `sha256` over its canonical bytes. Consequences:
 
-- **Versions mint only on semantic change.** `save` refuses when the new render hashes equal to the
-  latest version. Comment and formatting churn never creates versions.
+- **Versions mint only on semantic change.** `save` mints nothing when the new render hashes equal to
+  the latest version. Comment and formatting churn never creates versions. The no-op save is still a
+  success — and still closes an open stress round (see [Versioning * Stressing](#versioning--stressing)).
 - **"Current" is derived, not stored.** The live tree is *at* whichever version's hash its render
   matches; otherwise it is dirty relative to the latest version.
 
@@ -109,9 +110,17 @@ report fires automatically ([scoring/incidence.md](scoring/incidence.md)), surfa
 coupling, stress hotspots, compound vulnerabilities and under-stressed components revealed by the
 session.
 
-Version saves are the natural checkpoint between stress rounds: each round produces a new version
-carrying the design changes that answered the breaking stressors, and the round's patch file is the
-record of those changes.
+A save that finds the model unchanged mints nothing but still finishes the ceremony: it closes the open
+session against the *current* version — a round whose answers were code, docs or tests hardens the
+version it pressed without re-minting it — fires the same incidence report, and exits 0. With nothing
+to close, the no-op save reports and exits 0. Two rounds may therefore close against the same version
+id; the sessions' `closed:` fields, not the version lineage, are the record of the rounds. Only genuine
+failures — compile diagnostics, a corrupt archive, two open sessions — exit nonzero.
+
+Version saves are the natural checkpoint between stress rounds: a round that changed the model produces
+a new version carrying the design changes that answered its breaking stressors, and the round's patch
+file is the record of those changes; a behavior-only round closes against the version it pressed, its
+record the session file and the code delta.
 
 Because versions are reconstructable, a session's analyses are reproducible after the fact: a
 stressor's type-affects expand against the terms of the version the session actually pressed on, not

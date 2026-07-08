@@ -1,0 +1,82 @@
+{
+  "name": "close-without-minting",
+  "version": "v0004",
+  "created": "2026-07-08T07:04:46Z",
+  "state": "completed",
+  "closed_waves": 1,
+  "problem": "A round whose answers change no model cannot close (issues/rounds-without-model-change-cannot-close.md): sessions close only on Saved::Written, and an unchanged save exits 1 `nothing to save` — the same code as a broken save (issues/no-op-save-exits-nonzero.md) — so the session dangles, the one-open-session discipline jams the next round, and the incidence report that should fire at the close never fires. Per the lifecycle-pressure round: the Unchanged arm must close the open session against the current version, fire the report, and exit 0 — fenced by three survivors: no minting on unchanged, the Written path untouched byte for byte, and genuine failures (compile errors, two open sessions) keeping exit 1.",
+  "technology_stack": [
+    {
+      "tech": "Rust 2024, crates/archi run_version arm only — no library changes: versions.rs already returns Saved::Unchanged{latest} before any write, and docs::close_open_session is id-agnostic",
+      "provenance": "read of the existing seams; the fix is composition, not new mechanism"
+    },
+    {
+      "tech": "cargo integration tests through the real binary (CARGO_BIN_EXE_archi), new crates/archi/tests/version_e2e.rs",
+      "provenance": "plan_e2e.rs sets the harness pattern; exit codes and stdout are the contract under test, so the test must cross the process boundary"
+    }
+  ],
+  "architecture_summary": [
+    {
+      "node": "Cli",
+      "role": "version save composes the archive's answer with the round ceremony: Written closes at the minted id as today; Unchanged closes the open session at the current id, fires the incidence report, and succeeds; the bare no-op reports and succeeds; compile diagnostics, archive corruption and two open sessions keep exit 1"
+    }
+  ],
+  "stack_mapping": [
+    {
+      "tech": "run_version's Saved::Unchanged arm: docs::close_open_session(&root, &latest) then fire_incidence then ExitCode::SUCCESS, Ok(None) reports the benign no-op, Err stays fail (crates/archi/src/main.rs)",
+      "node": "Cli"
+    },
+    {
+      "tech": "version_e2e.rs regressions over the real binary; spec prose in requirements/versioning.md, requirements/cli.md, skills/archi.md and the versions-mint-on-meaning requirement kept honest",
+      "node": "Cli"
+    }
+  ],
+  "scenarios": [
+    "cargo test --workspace green, including the four version_e2e regressions: unchanged+open closes at the current id with the incidence report in stdout and no new archive entry; unchanged+none is a benign exit-0 no-op; changed+open mints and closes at the minted id; two open sessions still exit 1.",
+    "On this repository the fix closes its own round: `archi version save` with lifecycle-pressure open and the model unchanged at v0004 stamps `closed: v0004`, prints the incidence report, and exits 0 — and a second save immediately after reports the no-op and exits 0.",
+    "The spec keeps up: requirements/versioning.md documents close-without-mint and no-op-is-success, versions-mint-on-meaning keeps its minting claim with the refusal rephrased to the mint alone, and skills/archi.md's loop step no longer implies a round must mint to close."
+  ],
+  "scenarios_displayed": true,
+  "scenarios_closed": true,
+  "tasks": [
+    {
+      "id": "t1",
+      "node": "Cli",
+      "description": "Let the no-op save finish the round ceremony: in run_version's save arm, handle Saved::Unchanged by closing the open session against the latest version, firing the incidence report, and exiting 0; report-and-succeed when nothing is open; leave Written and every failure path untouched. Cover with version_e2e regressions through the real binary and update the spec prose.",
+      "spec_refs": [
+        "Cli",
+        "Service type_of Cli",
+        "Agent.drive invoke(->Command, <-Report) Cli.check",
+        "Agent.drive invoke(->Command, <-Report) Cli.build",
+        "Agent.drive invoke(->Command, <-Report) Cli.query",
+        "Agent.drive invoke(->Command, <-Report) Cli.read",
+        "Agent.drive invoke(->Command, <-Report) Cli.nkp",
+        "Agent.drive invoke(->Command, <-Report) Cli.version",
+        "Agent.drive invoke(->Command, <-Report) Cli.incidence",
+        "Agent.drive invoke(->Command, <-Report) Cli.link",
+        "Agent.drive invoke(->Command, <-Report) Cli.plan"
+      ],
+      "stack_details": "The Unchanged arm gains the same close call the Written arm already makes, pointed at `latest` instead of a minted id: Ok(Some(session)) prints the no-mint notice plus the close line, fires incidence, exits 0; Ok(None) prints `nothing to save ... and no session is open`, exits 0; Err(e) keeps fail(e) — that is the two-open-sessions jam. No versions.rs or docs change; messages move from stderr to stdout because they now report success.",
+      "inputs": {},
+      "outputs": [
+        "crates/archi/src/main.rs",
+        "crates/archi/tests/version_e2e.rs",
+        "requirements/versioning.md",
+        "requirements/cli.md",
+        "skills/archi.md"
+      ],
+      "verifications": {
+        "findings-never-block": [
+          "exit semantics stay findings-agnostic: the no-op success is decided by archive and session state alone, never by findings; the loud side is fenced by the two-open-sessions regression keeping exit 1, and no existing check/exit-code test changes"
+        ],
+        "unchanged-saves-close-rounds": [
+          "version_e2e: open session + unchanged model exits 0, stamps closed: with the current id, prints the incidence report, archive gains no entry",
+          "version_e2e: no open session + unchanged model exits 0 reporting the no-op, nothing written",
+          "version_e2e: open session + changed model mints and closes against the minted id, as every prior round",
+          "version_e2e: two open sessions + unchanged model exits 1 — the jam stays loud",
+          "on this repository: the lifecycle-pressure session is closed by the fixed binary itself at v0004, incidence report printed, exit 0"
+        ]
+      }
+    }
+  ]
+}

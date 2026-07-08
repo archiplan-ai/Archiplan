@@ -37,8 +37,9 @@ Ground rules, always:
    version; one stressor file per pressure (`affects`, `outcome`). Breaking
    stressors demand answers: new requirements (`origin: stressor(…)`) and
    model edits. The next `version save` closes the session and prints the
-   incidence report. Repeat 4–6 until a round survives — that version is
-   the hardened spec.
+   incidence report — model changed or not: a behavior-only round closes
+   against the version it pressed, no mint, exit 0. Repeat 4–6 until a
+   round survives — that version is the hardened spec.
 7. **Plan** — `archi plan use <name>` (refuses on an unsaved model — save
    first). `archi plan task add <node>` per node to implement; spec_refs
    and requirements are derived, never retyped. Then edit `plan.json`:

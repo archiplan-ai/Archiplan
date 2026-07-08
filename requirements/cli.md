@@ -77,7 +77,7 @@ transport.
 
 | code | meaning                                                             |
 |------|----------------------------------------------------------------------|
-| 0    | clean compile; findings, if any, are advisory                        |
+| 0    | clean compile; findings, if any, are advisory; benign no-ops (an unchanged `version save`) are successes |
 | 1    | the project fails to compile; diagnostics printed                    |
 | 2    | the invocation itself is malformed (unknown verb, bad flags)         |
 

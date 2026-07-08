@@ -447,9 +447,28 @@ fn run_version(args: &Args) -> ExitCode {
                     }
                     ExitCode::SUCCESS
                 }
-                Ok(versions::Saved::Unchanged { latest }) => fail(format!(
-                    "nothing to save: the model is unchanged since {latest}"
-                )),
+                Ok(versions::Saved::Unchanged { latest }) => {
+                    // No mint on an unchanged model — but the ceremony
+                    // finishes: an open round closes against the current
+                    // version and its incidence report fires; the bare
+                    // no-op is a success
+                    // (requirements/versioning.md#versioning--stressing).
+                    match docs::close_open_session(&root, &latest) {
+                        Ok(Some(session)) => {
+                            println!("nothing to mint: the model is unchanged since {latest}");
+                            println!("closed stress session `{session}` at {latest} — {note}");
+                            fire_incidence(&root, ws.model(), &session);
+                            ExitCode::SUCCESS
+                        }
+                        Ok(None) => {
+                            println!(
+                                "nothing to save: the model is unchanged since {latest} and no session is open"
+                            );
+                            ExitCode::SUCCESS
+                        }
+                        Err(e) => fail(e),
+                    }
+                }
                 Err(e) => fail(e),
             }
         }
