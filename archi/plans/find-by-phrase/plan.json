@@ -1,0 +1,127 @@
+{
+  "name": "find-by-phrase",
+  "version": "v0010",
+  "created": "2026-07-08T14:27:40Z",
+  "state": "completed",
+  "closed_waves": 2,
+  "problem": "The KB outgrows whole-reading: an agent needs one verb that turns a natural-language phrase into ranked addresses across every archi object — model elements with their identity prose, intents, requirements, stressors, sessions. Retrieval-pressure fixed the shape before code: no persisted index (a stale index lies), corpus-statistic damping and prefix matching (the flood and the morphology gap), per-corpus degradation (search is the orientation verb for a broken tree), next-hop refs on every card (a bare pointer wastes the round-trip the phrase paid for), and no --at until the whole corpus can honor one horizon.",
+  "technology_stack": [
+    {
+      "tech": "Rust 2024; crates/archi: search.rs (new: the whole scan — corpus cards, tokenizer, per-query df scoring, ranking, cross-ref inversion, degradation), main.rs (the verb: flags, non-fatal compile, human blocks and the JSON envelope)",
+      "provenance": "the scan is a pure read analysis beside DocsCompiler exactly where tool.arch places Search; it reuses docs::discover for placement and docs::md for parsing, so search can never disagree with check about what a file is"
+    },
+    {
+      "tech": "corpus = docs::discover's tree (intents, requirements, sessions, stressors with their machine fields) + Model::dump() definitions (nodes with ports and docs, rels, conns, views); files discover skipped fall back to raw-text cards",
+      "provenance": "search-reads-the-tree-it-stands-on: the only stores consulted are the ones check already reads; a-dark-corpus-stays-partial: each corpus fails alone, so the doc walk must not require a compiled model"
+    },
+    {
+      "tech": "scoring: one tokenizer (lowercase; split on non-alphanumerics and camel-case), df computed over the scanned corpus per query, idf = ln(N/df) so a term in every card scores zero, field weights name 3.0 / summary-definition 2.0 / body 1.0, shared prefix (>= 3 chars and >= half the longer token) at half weight, order = score desc then kind then slug",
+      "provenance": "matching-forgives-the-phrasing verbatim; scan-first makes the statistics free — the pass that reads every card already knows every frequency"
+    }
+  ],
+  "architecture_summary": [
+    {
+      "node": "Search",
+      "role": "the scan: builds one card per KB object from the doc tree and the model dump, scores against the phrase with per-query corpus statistics, inverts satisfied-by and affects onto element cards, ranks deterministically, degrades per corpus"
+    },
+    {
+      "node": "Cli",
+      "role": "the search verb: parses phrase and flags, compiles the project without dying on diagnostics, hands the model (or its absence) to the scan, renders human blocks or the JSON envelope, exits zero on partial corpora"
+    }
+  ],
+  "stack_mapping": [
+    {
+      "tech": "crates/archi/src/search.rs — corpus, tokenizer, scoring, cards, inversion",
+      "node": "Search"
+    },
+    {
+      "tech": "crates/archi/src/main.rs — run_search, flag parsing, rendering, usage",
+      "node": "Cli"
+    }
+  ],
+  "scenarios": [
+    "on this repository's own KB, `archi search fold` surfaces the fold-pressure round, its stressors and the Sessions element in one ranked list, each hit carrying its next hop",
+    "edit a requirement file, search the new wording in the immediately following call: the hit reflects the edit, no save between, and the tree is byte-identical after the search",
+    "break the model (an unbound edge in a scratch copy), search a requirement phrase: doc hits still return with `dark` naming the model corpus, exit zero, while `archi check` exits one",
+    "`archi search versioning --kind requirement --limit 3 --json` returns at most three requirement cards, prefix-matched onto `versions`, in a deterministic order that repeats byte-identically",
+    "the scan stays interactive on this repository (hundreds of cards, milliseconds) — measured at close: 41ms wall for the whole verb, compile included, debug build"
+  ],
+  "scenarios_displayed": true,
+  "scenarios_closed": true,
+  "tasks": [
+    {
+      "id": "t1",
+      "node": "Search",
+      "description": "the scan: corpus cards from the doc tree and the model dump, tokenizer, per-query idf scoring, ranking, cross-ref inversion, degradation",
+      "spec_refs": [
+        "Search",
+        "Function type_of Search",
+        "Cli.drive consult(->ModelGraph, <-SearchReport) Search.find"
+      ],
+      "stack_details": "new crates/archi/src/search.rs: Card {kind, slug, file, line, name/summary/body token fields, refs}; corpus() walks docs::discover's tree re-reading each file through docs::md for text, leftover .md files under the two roots become raw cards, Option<&Model> gates the element cards (dump() definitions; ports and port docs fold into the node card); tokenize() lowercases and splits camel/dots/hyphens; score() computes df per query token over all cards, idf = ln(N/df), field weights 3/2/1, prefix >= 3 at half; rank = score desc, kind, slug; cross-refs invert satisfied-by and affects onto element cards and collect edge neighbors from the dump; SearchReport {query, dark, hits} serializes the envelope; docs::discover and md::parse become pub(crate) as needed",
+      "inputs": {},
+      "outputs": [
+        "crates/archi/src/search.rs",
+        "crates/archi/src/docs/mod.rs",
+        "crates/archi/src/docs/md.rs"
+      ],
+      "verifications": {
+        "a-dark-corpus-stays-partial": [
+          "unit: corpus built with no model still yields doc cards and a dark note; an unparseable md file degrades to a raw-text card that still matches"
+        ],
+        "cards-carry-the-next-hop": [
+          "unit: element cards carry definition, stamped requirements, pressing stressors and neighbors; requirement cards carry origin, satisfied-by, state; stressor cards carry session, affects, outcome; doc cards carry file:line, element cards their model path"
+        ],
+        "findings-never-block": [
+          "unit: advisory doc states (open requirements, deferred, pending stressors) are searchable content — the scan surfaces them and returns them, never refuses on them"
+        ],
+        "matching-forgives-the-phrasing": [
+          "unit: `folding` reaches `fold` and `versioning` reaches `versions` via the prefix rule; a token in every card contributes nothing and the rarer companion decides; a name hit outranks a body hit; same tree same phrase twice is byte-identical"
+        ],
+        "one-verb-searches-everything": [
+          "unit: one phrase over a fixture KB returns hits spanning element, requirement and stressor kinds in one ranked list; kind filter narrows; limit bounds"
+        ],
+        "search-reads-the-tree-it-stands-on": [
+          "unit: an edit to a fixture requirement file changes the immediately following scan's hits, no save between; the scan creates and modifies no files under the project"
+        ],
+        "unchanged-saves-close-rounds": [
+          "unit: the scan is a pure read — the no-writes test proves the tree (render included) is byte-identical after a search, so the save path's unchanged detection is undisturbed"
+        ]
+      }
+    },
+    {
+      "id": "t2",
+      "node": "Cli",
+      "description": "the search verb: flag parsing, non-fatal compile, human and JSON rendering, usage, spec docs",
+      "spec_refs": [
+        "Cli",
+        "Service type_of Cli",
+        "Agent.drive invoke(->Command, <-Report) Cli.search"
+      ],
+      "stack_details": "main.rs: `search` verb — positional words join into the phrase; --kind (repeatable: element|intent|requirement|stressor|session), --limit <n> (default 10), --json; compile_project errors become the dark note instead of an exit; human rendering one block per hit (kind, slug, score, file:line, snippet, refs line), JSON prints the SearchReport envelope; usage text and requirements/cli.md + requirements/search.md updated to the shipped contract; e2e test drives the real binary against this repository's KB",
+      "inputs": {
+        "t1": "SearchReport and the scan API: corpus/score/rank signatures and the envelope shape"
+      },
+      "outputs": [
+        "crates/archi/src/main.rs",
+        "crates/archi/tests/search_e2e.rs",
+        "requirements/cli.md",
+        "requirements/search.md"
+      ],
+      "verifications": {
+        "a-dark-corpus-stays-partial": [
+          "e2e: against a scratch project with a non-compiling model, the verb exits zero, doc hits return, dark names the model corpus with its first diagnostic"
+        ],
+        "findings-never-block": [
+          "e2e: a KB whose check reports findings (open and deferred requirements) searches fine and exits zero — advisory states never block the verb"
+        ],
+        "one-verb-searches-everything": [
+          "e2e: the real binary on this repository's KB — `archi search fold` spans kinds and surfaces the fold-pressure round and the Sessions element; --kind and --limit narrow and bound; --json carries status, query, dark, hits"
+        ],
+        "unchanged-saves-close-rounds": [
+          "e2e: `version save` directly after a search still reports the model unchanged — the verb wrote nothing that could re-mint"
+        ]
+      }
+    }
+  ]
+}

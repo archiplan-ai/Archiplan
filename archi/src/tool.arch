@@ -20,6 +20,7 @@ def node Cli:
   port plan        // use, task add, verify, start, next, close, reset
   port query       // one composed subgraph query
   port read        // the agent read envelope over stdin/argv
+  port search      // ranked retrieval by phrase across model defs and doc objects
   port compile_src // drives the compiler
   port exec        // replays the lowered batch on the engine
   port ask         // read statements to the engine's envelope
@@ -31,6 +32,10 @@ def node DocsCompiler:
   port pin_model    // reconstructs archived versions for pinned checks
   port compile_pin  // compiles a reconstructed render through the compiler
   port serve_pin    // hands pinned models to incidence, links and plans
+
+def node Search:
+  port find      // phrase in, ranked cards out: one scan per query, no second store
+  port read_docs // requirement and stress markdown out of the tree, best-effort
 
 def node Archive:
   port save         // canonical render in; keyframe or patch + manifest entry
@@ -102,6 +107,7 @@ Storage type_of SourceTree
 Storage type_of Archive
 Service type_of Cli
 Function type_of DocsCompiler
+Function type_of Search
 Service type_of Links
 Service type_of Planner
 Service type_of Sessions
@@ -126,6 +132,11 @@ Cli.drive consult(->Command, <-Report) Links.verify in trace_flow
 Cli.drive consult(->Command, <-Report) Links.sweep in trace_flow
 Cli.drive consult(->Command, <-Report) Planner.author in trace_flow
 Cli.drive consult(->Command, <-Report) Planner.advance in trace_flow
+
+// search: one scan over the docs and the model it was handed, ranked cards out
+Cli.drive consult(->ModelGraph, <-SearchReport) Search.find in read_flow
+Search.read_docs recall(RequirementDoc) SourceTree.serve in read_flow
+Search.read_docs recall(StressDoc) SourceTree.serve in read_flow
 
 // docs cross-check: markdown in, pinned models on demand
 DocsCompiler.load_docs recall(RequirementDoc) SourceTree.serve in harden_flow

@@ -66,6 +66,19 @@ unwrapped. An absent flag does not restrict; `--top` is the explicit empty `scop
 `--carrier` slices the flow of a datum (the carrying edges and the nodes related to them, naming the node or a
 classifying type); `--edge-type` slices by rel/conn type name. Errors print as one-liners, exit 1.
 
+```
+archi search <phrase>... [--kind element|intent|requirement|stressor|session]...
+             [--limit <n>] [--json] [--project <dir>]
+```
+
+[Ranked retrieval](./search.md) by natural-language phrase across every KB object: model elements with their
+identity prose, intents, requirements, stressors, sessions. Positional words join into one phrase; `--kind`
+narrows (repeatable), `--limit` bounds the list (ten by default), `--json` emits the report envelope. Every hit
+carries its address (slug or model path, `file:line` for docs) and its kind's next-hop refs. Unlike `query` and
+`read`, search does not die with the model: a failed compile darkens only the element corpus — doc hits still
+return, `dark` names the missing corpus, exit 0. Searching is always live-tree; there is no `--at` (the archive
+seals the model alone).
+
 ## Output
 
 Human-readable by default: compile diagnostics as `file:line:col: CODE: message` lines, findings as one-liners

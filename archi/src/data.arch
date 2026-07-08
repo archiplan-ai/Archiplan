@@ -23,6 +23,7 @@ def node Report          // rendered output: human one-liners or the JSON envelo
 def node SubgraphResult  // a composed query's slice of the model
 def node NkpReport       // the NKP landscape read: regime, hotspots, corridors
 def node IncidenceReport // stressor × component matrix and its typed findings
+def node SearchReport    // the ranked answer: hit cards with slugs, scores, snippets and next-hop refs
 
 Data type_of ArchSource
 Data type_of Tokens
@@ -46,3 +47,4 @@ Data type_of Report
 Data type_of SubgraphResult
 Data type_of NkpReport
 Data type_of IncidenceReport
+Data type_of SearchReport

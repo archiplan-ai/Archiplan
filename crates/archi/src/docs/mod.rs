@@ -303,6 +303,14 @@ pub(crate) fn conflict_marker_line(text: &str) -> Option<usize> {
     (opens && closes).then_some(first).flatten()
 }
 
+/// Walk the doc trees without cross-checking — the placement rules alone
+/// decide what each file is. `crate::search` builds its corpus on this so
+/// retrieval can never disagree with `check` about a file's kind, and needs
+/// no compiled model to do it.
+pub(crate) fn discover_tree(root: &Path) -> Tree {
+    discover(root, &mut Vec::new())
+}
+
 fn discover(root: &Path, diags: &mut Vec<DocDiagnostic>) -> Tree {
     let mut tree = Tree::default();
 

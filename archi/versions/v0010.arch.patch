@@ -1,0 +1,62 @@
+--- original
++++ modified
+@@ -23,6 +23,7 @@
+   port plan // use, task add, verify, start, next, close, reset
+   port query // one composed subgraph query
+   port read // the agent read envelope over stdin/argv
++  port search // ranked retrieval by phrase across model defs and doc objects
+   port session // fold: two concurrent rounds into one deliberate record
+   port version // save, anchor, remint, list, show, diff (archived or live), current
+ def node CodeItem // a source item of the code tree, addressed by symbol
+@@ -128,6 +129,10 @@
+ def node Report // rendered output: human one-liners or the JSON envelope
+ def node RequirementDoc // intent + requirement markdown under archi/requirements/
+ def node Resolution // the absolute-path picture: nodes, edges, apps resolved
++def node Search:
++  port find // phrase in, ranked cards out: one scan per query, no second store
++  port read_docs // requirement and stress markdown out of the tree, best-effort
++def node SearchReport // the ranked answer: hit cards with slugs, scores, snippets and next-hop refs
+ def node Sessions:
+   port fold // two rounds into one record: both charters kept, the trace in the file
+   port read_state // the merged state it folds: fused files, the open pair, their pins
+@@ -176,6 +181,7 @@
+ Data type_of Report
+ Data type_of RequirementDoc
+ Data type_of Resolution
++Data type_of SearchReport
+ Data type_of StatementBatch
+ Data type_of StressDoc
+ Data type_of SubgraphResult
+@@ -195,6 +201,7 @@
+ Function type_of Preset
+ Function type_of Query
+ Function type_of Renderer
++Function type_of Search
+ Service type_of Agent
+ Service type_of Cli
+ Service type_of Links
+@@ -215,6 +222,7 @@
+ Agent.drive invoke(->Command, <-Report) Cli.plan in trace_flow
+ Agent.drive invoke(->Command, <-Report) Cli.query in read_flow
+ Agent.drive invoke(->Command, <-Report) Cli.read in read_flow
++Agent.drive invoke(->Command, <-Report) Cli.search in read_flow
+ Agent.drive invoke(->Command, <-Report) Cli.session in harden_flow
+ Agent.drive invoke(->Command, <-Report) Cli.version in harden_flow
+ Archive.canonicalize render(->ModelGraph, <-CanonicalRender) Renderer.emit_source in harden_flow
+@@ -233,6 +241,7 @@
+ Cli.drive consult(->ModelGraph, <-Report) Archive.anchor in harden_flow
+ Cli.drive consult(->ModelGraph, <-Report) Archive.remint in harden_flow
+ Cli.drive consult(->ModelGraph, <-Report) Archive.save in harden_flow
++Cli.drive consult(->ModelGraph, <-SearchReport) Search.find in read_flow
+ Cli.exec execute(->StatementBatch, <-ModelGraph) Engine.execute in compile_flow
+ Compiler.Driver.attach_docs annotate(->Ast, <-Ast) Compiler.Definitions.attach in compile_flow
+ Compiler.Driver.bind resolve(->Ast, <-Resolution) Compiler.Resolver.bind_names in compile_flow
+@@ -265,6 +274,8 @@
+ Planner.run_capture consult(->ItemHashIndex, <-LinkEvent) Links.capture in trace_flow
+ Planner.store_plan persist(ItemHashIndex) SourceTree.store in trace_flow
+ Planner.store_plan persist(PlanFile) SourceTree.store in trace_flow
++Search.read_docs recall(<-RequirementDoc) SourceTree.serve in read_flow
++Search.read_docs recall(<-StressDoc) SourceTree.serve in read_flow
+ Sessions.read_state recall(<-StressDoc) SourceTree.serve in harden_flow
+ Sessions.store_record persist(StressDoc) SourceTree.store in harden_flow
+ Compiler.Resolver.bind_names = Uses.bind

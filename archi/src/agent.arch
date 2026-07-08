@@ -20,6 +20,7 @@ Agent.drive invoke Cli.check in compile_flow
 Agent.drive invoke Cli.build in compile_flow
 Agent.drive invoke Cli.query in read_flow
 Agent.drive invoke Cli.read in read_flow
+Agent.drive invoke Cli.search in read_flow
 Agent.drive invoke Cli.nkp in read_flow
 Agent.drive invoke Cli.version in harden_flow
 Agent.drive invoke Cli.session in harden_flow

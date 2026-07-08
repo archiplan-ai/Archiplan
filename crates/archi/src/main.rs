@@ -32,6 +32,8 @@
 //! archi read  [<request.json> | -] [--at <id>]
 //! archi query [--scope <path>]... [--type <path>]... [--kind <k>]... [--view <v>]...
 //!             [--carrier <path>]... [--edge-type <name>]... [--top] [--at <id>]
+//! archi search <phrase>... [--kind element|intent|requirement|stressor|session]...
+//!             [--limit <n>] [--json]
 //! ```
 //!
 //! Every verb locates its project by precedence: `--project`, then the
@@ -44,6 +46,7 @@ mod docs;
 mod incidence;
 mod links;
 mod plans;
+mod search;
 mod sessions;
 mod versions;
 
@@ -89,7 +92,9 @@ const USAGE: &str = "usage:
   archi plan start | next | current-wave | close | reset [--project <dir>]
   archi read [<request.json> | -] [--at <id>] [--project <dir>]
   archi query [--scope <path>]... [--type <path>]... [--kind <k>]... [--view <v>]...
-              [--carrier <path>]... [--edge-type <name>]... [--top] [--at <id>] [--project <dir>]";
+              [--carrier <path>]... [--edge-type <name>]... [--top] [--at <id>] [--project <dir>]
+  archi search <phrase>... [--kind element|intent|requirement|stressor|session]...
+              [--limit <n>] [--json] [--project <dir>]";
 
 struct Args {
     verb: String,
@@ -130,6 +135,7 @@ struct Args {
     task: Option<String>,
     desc: Option<String>,
     at: Option<String>,
+    limit: Option<usize>,
     types: Vec<String>,
     views: Vec<String>,
     scopes: Vec<String>,
@@ -186,6 +192,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         task: None,
         desc: None,
         at: None,
+        limit: None,
         types: Vec::new(),
         views: Vec::new(),
         scopes: Vec::new(),
@@ -263,6 +270,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--tau-b" => args.tau_b = Some(float(value(&mut it, "--tau-b")?, "--tau-b")?),
             "--tau-j" => args.tau_j = Some(float(value(&mut it, "--tau-j")?, "--tau-j")?),
             "--tau-d" => args.tau_d = Some(float(value(&mut it, "--tau-d")?, "--tau-d")?),
+            "--limit" => args.limit = Some(int(value(&mut it, "--limit")?, "--limit")?),
             "--depth" => args.depth = Some(int(value(&mut it, "--depth")?, "--depth")?),
             "--path-limit" => {
                 args.path_limit = Some(int(value(&mut it, "--path-limit")?, "--path-limit")?)
@@ -274,7 +282,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             other if other.starts_with("--") => return Err(format!("unknown flag `{other}`")),
             other if matches!(
                 args.verb.as_str(),
-                "version" | "link" | "plan" | "read" | "session"
+                "version" | "link" | "plan" | "read" | "session" | "search"
             ) =>
             {
                 args.positional.push(other.to_string())
@@ -961,6 +969,61 @@ fn run_query(args: &Args) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// `archi search`: ranked retrieval by phrase across every KB object
+/// (`requirements/search.md`). The one verb that does not die with the
+/// model: a failed compile darkens the element corpus alone — doc cards
+/// still answer, the report names what went dark, and the exit stays zero
+/// (a-dark-corpus-stays-partial). Diagnosing the breakage is `check`'s job.
+fn run_search(args: &Args) -> ExitCode {
+    let root = match locate_project(args) {
+        Ok(r) => r,
+        Err(e) => return usage_err(&e),
+    };
+    let phrase = args.positional.join(" ");
+    if phrase.trim().is_empty() {
+        return usage_err("`search` takes a phrase");
+    }
+    let mut kinds = Vec::new();
+    for k in &args.kind {
+        match search::Kind::parse(k) {
+            Some(kind) => kinds.push(kind),
+            None => {
+                return usage_err(&format!(
+                    "--kind is element, intent, requirement, stressor or session; got `{k}`"
+                ));
+            }
+        }
+    }
+    let limit = args.limit.unwrap_or(10);
+    let (workspace, dark) = match compile_project(&root) {
+        Ok(c) => (Some(c.workspace), Vec::new()),
+        Err(f) => {
+            let reason = match f.diagnostics.first() {
+                Some(d) => format!("model: it does not compile ({})", d.message),
+                None => "model: it does not compile".to_string(),
+            };
+            (None, vec![reason])
+        }
+    };
+    let report = search::search(
+        &root,
+        workspace.as_ref().map(|ws| ws.model()),
+        dark,
+        &phrase,
+        &kinds,
+        limit,
+    );
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report).expect("serializes")
+        );
+    } else {
+        print!("{}", search::render_human(&report));
+    }
+    ExitCode::SUCCESS
+}
+
 fn run_plan(args: &Args) -> ExitCode {
     let fail = |e: String| -> ExitCode {
         eprintln!("archi: {e}");
@@ -1483,6 +1546,7 @@ fn main() -> ExitCode {
         "plan" => run_plan(&args),
         "read" => run_read(&args),
         "query" => run_query(&args),
+        "search" => run_search(&args),
         other => usage_err(&format!("unknown command `{other}`")),
     }
 }
