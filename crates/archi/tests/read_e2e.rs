@@ -27,9 +27,9 @@ fn temp_project() -> PathBuf {
         std::process::id(),
         NEXT.fetch_add(1, Ordering::SeqCst)
     ));
-    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::create_dir_all(dir.join("archi/src")).unwrap();
     fs::write(dir.join("archi.toml"), "[project]\nname = \"t\"\n").unwrap();
-    fs::write(dir.join("src/model.arch"), MODEL).unwrap();
+    fs::write(dir.join("archi/src/model.arch"), MODEL).unwrap();
     dir
 }
 
@@ -188,7 +188,7 @@ fn query_composes_filters_and_reads_sealed_versions() {
     let (code, _, _) = run(&root, &["version", "save", "-m", "first"], None);
     assert_eq!(code, 0);
     fs::write(
-        root.join("src/model.arch"),
+        root.join("archi/src/model.arch"),
         format!("{MODEL}def node Ledger\n"),
     )
     .unwrap();

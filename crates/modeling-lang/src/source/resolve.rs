@@ -1129,7 +1129,7 @@ mod tests {
         let mut map = SourceMap::new();
         let mut modules = Vec::new();
         for (module, text) in sources {
-            let fid = map.add_file(format!("src/{}.arch", module.replace('.', "/")), *text);
+            let fid = map.add_file(format!("archi/src/{}.arch", module.replace('.', "/")), *text);
             let ast = parse(fid, text).map_err(|d| vec![d])?;
             modules.push(ModuleAst {
                 module: module.to_string(),

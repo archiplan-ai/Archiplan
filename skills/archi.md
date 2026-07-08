@@ -7,8 +7,8 @@ description: Drive the archiplan workflow end to end — capture intent, derive 
 
 Ground rules, always:
 
-- Everything is text. Model = `.arch` sources, requirements and stressors =
-  markdown under `archi/`, plan = `plan.json`. Mutate by editing files;
+- Everything is text. Model = `.arch` sources under `archi/src/`,
+  requirements and stressors = markdown under `archi/`, plan = `plan.json`. Mutate by editing files;
   lifecycle moves only through verbs. Run `archi check` after every editing
   round — errors block, findings are the worklist.
 - Never invent references. Requirements name model elements by absolute
@@ -19,7 +19,7 @@ Ground rules, always:
 
 ## Greenfield
 
-1. **Init** — `archi.toml` (`[project]` name, preset) plus `src/model.arch`.
+1. **Init** — `archi.toml` (`[project]` name, preset) plus `archi/src/model.arch`.
    `archi build` must pass before anything else.
 2. **Capture intent** — one folder per problem area:
    `archi/requirements/<intent>/<intent>.md`, a name and the problem

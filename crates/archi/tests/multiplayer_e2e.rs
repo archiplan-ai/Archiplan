@@ -25,14 +25,14 @@ fn temp_project() -> PathBuf {
         std::process::id(),
         NEXT.fetch_add(1, Ordering::SeqCst)
     ));
-    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::create_dir_all(dir.join("archi/src")).unwrap();
     fs::create_dir_all(dir.join("code")).unwrap();
     fs::write(
         dir.join("archi.toml"),
         "[project]\nname = \"t\"\npreset = \"default\"\n",
     )
     .unwrap();
-    fs::write(dir.join("src/model.arch"), MODEL).unwrap();
+    fs::write(dir.join("archi/src/model.arch"), MODEL).unwrap();
     fs::write(dir.join("code/gate.rs"), GATE_RS).unwrap();
     dir
 }
@@ -197,7 +197,7 @@ fn remint_rejoins_the_lineage_and_restamps_the_round() {
     // The winner lands first: a port on Gate, saved as v0002 on main.
     assert!(git(&root, &["checkout", "-qb", "winner"]));
     fs::write(
-        root.join("src/model.arch"),
+        root.join("archi/src/model.arch"),
         MODEL.replace("def node Gate:\n  port out", "def node Gate:\n  port out\n  port late"),
     )
     .unwrap();
@@ -222,7 +222,7 @@ fn remint_rejoins_the_lineage_and_restamps_the_round() {
          ## Attractor\n\nBends.\n\n## Resolution\n\nAnswered by node Loser.\n",
     )
     .unwrap();
-    fs::write(root.join("src/model.arch"), format!("{MODEL}def node Loser\n")).unwrap();
+    fs::write(root.join("archi/src/model.arch"), format!("{MODEL}def node Loser\n")).unwrap();
     let (ok, out, err) = run(&root, &["version", "save", "-m", "loser: node Loser"]);
     assert!(ok, "{err}");
     assert!(out.contains("closed stress session `loser-round`"), "{out}");
@@ -279,7 +279,7 @@ fn remint_refuses_unchanged_unknown_and_open() {
     assert!(err.contains("nothing to remint"), "{err}");
 
     // Unknown session.
-    fs::write(root.join("src/model.arch"), format!("{MODEL}def node Extra\n")).unwrap();
+    fs::write(root.join("archi/src/model.arch"), format!("{MODEL}def node Extra\n")).unwrap();
     let (ok, _, err) = run(&root, &["version", "remint", "-m", "x", "--session", "ghost"]);
     assert!(!ok);
     assert!(err.contains("no session `ghost`"), "{err}");
@@ -305,7 +305,7 @@ fn diff_live_shows_the_unsaved_delta() {
     let root = temp_project();
     let (ok, _, err) = run(&root, &["version", "save", "-m", "base"]);
     assert!(ok, "{err}");
-    fs::write(root.join("src/model.arch"), format!("{MODEL}def node Extra\n")).unwrap();
+    fs::write(root.join("archi/src/model.arch"), format!("{MODEL}def node Extra\n")).unwrap();
 
     let (ok, out, err) = run(&root, &["version", "diff", "v0001", "live"]);
     assert!(ok, "{err}");

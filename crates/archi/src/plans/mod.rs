@@ -1126,13 +1126,13 @@ mod tests {
             std::process::id(),
             NEXT.fetch_add(1, Ordering::SeqCst)
         ));
-        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::create_dir_all(dir.join("archi/src")).unwrap();
         fs::write(
             dir.join("archi.toml"),
             "[project]\nname = \"t\"\npreset = \"default\"\n",
         )
         .unwrap();
-        fs::write(dir.join("src").join("model.arch"), MODEL).unwrap();
+        fs::write(dir.join("archi/src").join("model.arch"), MODEL).unwrap();
         dir
     }
 
@@ -1221,7 +1221,7 @@ mod tests {
         // A dirty model refuses to mint a new plan, but switching to an
         // existing one is free.
         fs::write(
-            root.join("src/model.arch"),
+            root.join("archi/src/model.arch"),
             format!("{MODEL}def node Extra\n"),
         )
         .unwrap();
@@ -1591,7 +1591,7 @@ mod tests {
         plan.tasks[1].spec_refs.retain(|r| !r.contains('@'));
         store_plan(&root, &plan).unwrap();
         fs::write(
-            root.join("src/model.arch"),
+            root.join("archi/src/model.arch"),
             MODEL.replace("def node Store:\n  port inn\n", "def node Safe:\n  port inn\n")
                 .replace("Store.inn", "Safe.inn"),
         )

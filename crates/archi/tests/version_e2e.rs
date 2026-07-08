@@ -22,13 +22,13 @@ fn temp_project() -> PathBuf {
         std::process::id(),
         NEXT.fetch_add(1, Ordering::SeqCst)
     ));
-    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::create_dir_all(dir.join("archi/src")).unwrap();
     fs::write(
         dir.join("archi.toml"),
         "[project]\nname = \"t\"\npreset = \"default\"\n",
     )
     .unwrap();
-    fs::write(dir.join("src/model.arch"), MODEL).unwrap();
+    fs::write(dir.join("archi/src/model.arch"), MODEL).unwrap();
     dir
 }
 
@@ -115,7 +115,7 @@ fn changed_save_still_mints_and_closes_at_the_minted_id() {
     ok(&root, &["version", "save", "-m", "first"]);
     open_session(&root, "round-one", "Round one", "v0001");
     fs::write(
-        root.join("src/model.arch"),
+        root.join("archi/src/model.arch"),
         format!("{MODEL}def node Store:\n  port inn\n"),
     )
     .unwrap();

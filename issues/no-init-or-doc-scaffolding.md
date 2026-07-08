@@ -6,7 +6,7 @@ Bootstrapping a project is entirely hand-rolled: `archi.toml`, the `src/` layout
 under `archi/` were authored from the specs (and, in practice, from reading
 `docs/schema.rs` — the specs alone leave schema corners open). Nothing scaffolds:
 
-- `archi init` — manifest + `src/` + a passing empty model;
+- `archi init` — manifest + `archi/src/` + a passing empty model;
 - `archi new intent|requirement|epic|session|stressor <name>` — a file with the right slug-derived
   name, all frontmatter fields present-but-empty, reserved sections in the right order.
 

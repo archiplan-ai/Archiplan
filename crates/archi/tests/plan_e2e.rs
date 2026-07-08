@@ -26,14 +26,14 @@ fn temp_project() -> PathBuf {
         std::process::id(),
         NEXT.fetch_add(1, Ordering::SeqCst)
     ));
-    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::create_dir_all(dir.join("archi/src")).unwrap();
     fs::create_dir_all(dir.join("code")).unwrap();
     fs::write(
         dir.join("archi.toml"),
         "[project]\nname = \"t\"\npreset = \"default\"\n",
     )
     .unwrap();
-    fs::write(dir.join("src/model.arch"), MODEL).unwrap();
+    fs::write(dir.join("archi/src/model.arch"), MODEL).unwrap();
     fs::write(
         dir.join("code/store.rs"),
         "pub struct Store;\nimpl Store {\n    pub fn put(&mut self) {}\n}\n",

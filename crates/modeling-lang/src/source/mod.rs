@@ -94,7 +94,7 @@ pub fn compile_sources(
         .iter()
         .map(|(module, text)| project::ModuleSource {
             module: module.to_string(),
-            rel_path: format!("src/{}.arch", module.replace('.', "/")),
+            rel_path: format!("archi/src/{}.arch", module.replace('.', "/")),
             text: text.to_string(),
         })
         .collect();

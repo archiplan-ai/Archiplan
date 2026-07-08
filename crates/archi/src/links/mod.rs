@@ -1692,10 +1692,10 @@ mod tests {
             std::process::id(),
             NEXT.fetch_add(1, Ordering::SeqCst)
         ));
-        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::create_dir_all(dir.join("archi/src")).unwrap();
         fs::create_dir_all(dir.join("code")).unwrap();
         fs::write(dir.join("archi.toml"), "[project]\nname = \"t\"\n").unwrap();
-        fs::write(dir.join("src").join("model.arch"), MODEL).unwrap();
+        fs::write(dir.join("archi/src").join("model.arch"), MODEL).unwrap();
         fs::write(dir.join("code").join("auth.rs"), AUTH_RS).unwrap();
         dir
     }
@@ -1858,7 +1858,7 @@ mod tests {
             add(&root, ws.model(), "Vault@v0001", "code/auth.rs", LinkKind::Indirect).unwrap();
         let working = add(&root, ws.model(), "Vault", "code/auth.rs", LinkKind::Indirect).unwrap();
         fs::write(
-            root.join("src").join("model.arch"),
+            root.join("archi/src").join("model.arch"),
             MODEL.replace("Vault", "Safe"),
         )
         .unwrap();

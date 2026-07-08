@@ -17,23 +17,27 @@ editing surface: the source tree is the only persistence and the only way to cha
 
 ```
 myproject/
-  archi.toml            # manifest
-  src/
-    messages.arch       # module `messages`
-    conns.arch          # module `conns`
-    auth.arch           # module `auth`
-    auth_internals.arch # module `auth_internals`
-    ui.arch             # module `ui`
-    flows/
-      login.arch        # module `flows.login`
+  archi.toml              # manifest
+  archi/
+    src/
+      messages.arch       # module `messages`
+      conns.arch          # module `conns`
+      auth.arch           # module `auth`
+      auth_internals.arch # module `auth_internals`
+      ui.arch             # module `ui`
+      flows/
+        login.arch        # module `flows.login`
 ```
+
+The model lives under the tool's own `archi/` directory (alongside requirements, stress sessions and the
+version archive), so it never collides with the host project's `src/`.
 
 `archi.toml` marks the project root:
 
 ```toml
 [project]
 name = "myproject"
-src = "src"        # optional, default "src"
+src = "archi/src"  # optional, default "archi/src"
 preset = "default" # optional: "core", "default", or a relative path to a JSON preset file
 
 [audit]                    # optional: settings for the link layer's tree scans
@@ -44,7 +48,7 @@ The `[audit]` section is consumed by `archi`'s link layer ([code-link.md](../cod
 the compiler validates its shape so a typo inside it is an `E_PROJECT`, not a silently ignored setting.
 
 One file is one **module**; its module path is the dotted relative path under the source root
-(`src/auth/service.arch` is `auth.service`). Directory and file names must be identifiers. Discovery is a sorted
+(`archi/src/auth/service.arch` is `auth.service`). Directory and file names must be identifiers. Discovery is a sorted
 walk: module order — and everything downstream of it — is independent of filesystem iteration order.
 
 The [preset](./ontology.md) is ambient: its names (`type_of`, and the ontology nodes of the `default` preset) are
@@ -302,7 +306,7 @@ source. Reads have no surface form: the source is state, not a transcript.
 name = "auth"
 ```
 
-`src/messages.arch`
+`archi/src/messages.arch`
 
 ```
 def node LoginForm
@@ -314,7 +318,7 @@ Data type_of AuthResponse
 Data type_of CredHash
 ```
 
-`src/conns.arch`
+`archi/src/conns.arch`
 
 ```
 import messages
@@ -327,7 +331,7 @@ def conn login := * ->LoginForm, <-AuthResponse *
 def conn store := * ->(Data type_of *) *
 ```
 
-`src/auth.arch` — the interface in one place
+`archi/src/auth.arch` — the interface in one place
 
 ```
 def node AuthService:
@@ -338,7 +342,7 @@ def node AuthService:
 Service type_of AuthService
 ```
 
-`src/auth_internals.arch` — the inner structure in another
+`archi/src/auth_internals.arch` — the inner structure in another
 
 ```
 import auth
@@ -357,7 +361,7 @@ open AuthService:
   handle_login = LoginHandler.handle // boundary port realized by an inner port
 ```
 
-`src/ui.arch`
+`archi/src/ui.arch`
 
 ```
 import auth

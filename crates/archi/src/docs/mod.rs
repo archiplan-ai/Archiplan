@@ -909,13 +909,13 @@ mod tests {
             std::process::id(),
             NEXT.fetch_add(1, Ordering::SeqCst)
         ));
-        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::create_dir_all(dir.join("archi/src")).unwrap();
         fs::write(
             dir.join("archi.toml"),
             "[project]\nname = \"t\"\npreset = \"default\"\n",
         )
         .unwrap();
-        fs::write(dir.join("src").join("model.arch"), MODEL).unwrap();
+        fs::write(dir.join("archi/src").join("model.arch"), MODEL).unwrap();
         dir
     }
 
@@ -1072,7 +1072,7 @@ mod tests {
         full_tree(&root);
         // The live model grows a node the pinned v0001 does not have.
         fs::write(
-            root.join("src").join("model.arch"),
+            root.join("archi/src").join("model.arch"),
             format!("{MODEL}def node RateLimiter\n"),
         )
         .unwrap();
@@ -1299,7 +1299,7 @@ mod tests {
             "---\naffects:\noutcome: pending\n---\n\n# Hollow\n\nPress.\n\n## Attractor\n\n## Resolution\n",
         );
         fs::write(
-            root.join("src/model.arch"),
+            root.join("archi/src/model.arch"),
             format!("{MODEL}def node Extra\n"),
         )
         .unwrap();
@@ -1346,7 +1346,7 @@ mod tests {
         let root = temp_project();
         full_tree(&root);
         fs::write(
-            root.join("src/model.arch"),
+            root.join("archi/src/model.arch"),
             format!("{MODEL}def node RateLimiter\n"),
         )
         .unwrap();

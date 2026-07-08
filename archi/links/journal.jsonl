@@ -978,3 +978,6 @@
 {"event":"retire","id":"l0519-bbd49f","at":"2026-07-08T10:49:05Z"}
 {"event":"retire","id":"l0520-006051","at":"2026-07-08T10:49:05Z"}
 {"event":"retire","id":"l0521-11e78c","at":"2026-07-08T10:49:05Z"}
+{"event":"repin","id":"l0372","at":"2026-07-08T11:48:13Z","anchor":{"file":"crates/archi/src/links/mod.rs"},"pins":{"canonicalizer":"rust-tok-v1","interface":"sha256:86d875f889d217ff7b4727953dd0b0c04c415716e7a1fa312344b5e758edda13","body":"sha256:86d875f889d217ff7b4727953dd0b0c04c415716e7a1fa312344b5e758edda13"}}
+{"event":"repin","id":"l0427","at":"2026-07-08T11:48:13Z","anchor":{"file":"crates/archi/src/plans/mod.rs"},"pins":{"canonicalizer":"rust-tok-v1","interface":"sha256:dc6f56908f3632b454413294d6e4756e38d2d832f0b7a1c97ce5b7a396db04b0","body":"sha256:dc6f56908f3632b454413294d6e4756e38d2d832f0b7a1c97ce5b7a396db04b0"}}
+{"event":"repin","id":"l0522-d07f9e","at":"2026-07-08T11:48:13Z","anchor":{"file":"crates/archi/src/versions.rs"},"pins":{"canonicalizer":"rust-tok-v1","interface":"sha256:7495dea468ed8f4d6c1bfa81e3d8a78fa35e3dd1ae3fdca4ffbfebb663c8a4e6","body":"sha256:7495dea468ed8f4d6c1bfa81e3d8a78fa35e3dd1ae3fdca4ffbfebb663c8a4e6"}}

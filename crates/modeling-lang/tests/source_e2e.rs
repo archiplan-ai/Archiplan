@@ -264,7 +264,7 @@ fn engine_errors_localize_to_source_lines() {
     let (file, line, _col) = err
         .map
         .location(d.span.expect("engine errors are localized"));
-    assert_eq!((file, line), ("src/main.arch", 7));
+    assert_eq!((file, line), ("archi/src/main.arch", 7));
 }
 
 #[test]

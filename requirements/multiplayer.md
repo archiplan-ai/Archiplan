@@ -13,7 +13,7 @@ off a shared origin, real conflicts, real resolutions.
 
 ## The stores and their joins
 
-**Model text (`src/*.arch`).** Git merges it, but the contract is the canonical render, not the
+**Model text (`archi/src/*.arch`).** Git merges it, but the contract is the canonical render, not the
 text ([versioning.md](versioning.md)). Textually disjoint edits compose into unreviewed
 semantics: broken (an edge whose node the other branch deleted — loud, but only at the
 integrator's post-merge check) or silently drifted (a retyped carrier under a standing

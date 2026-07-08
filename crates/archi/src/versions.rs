@@ -586,21 +586,21 @@ mod tests {
 
     static NEXT: AtomicUsize = AtomicUsize::new(0);
 
-    /// A throwaway project directory; callers overwrite `src/` to evolve it.
+    /// A throwaway project directory; callers overwrite `archi/src/` to evolve it.
     fn temp_project(model: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "archi-versions-test-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::SeqCst)
         ));
-        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::create_dir_all(dir.join("archi/src")).unwrap();
         fs::write(dir.join("archi.toml"), "[project]\nname = \"t\"\n").unwrap();
         write_model(&dir, model);
         dir
     }
 
     fn write_model(root: &Path, text: &str) {
-        fs::write(root.join("src").join("model.arch"), text).unwrap();
+        fs::write(root.join("archi/src").join("model.arch"), text).unwrap();
     }
 
     fn compiled_model(root: &Path) -> modeling_lang::Workspace {

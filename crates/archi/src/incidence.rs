@@ -344,13 +344,13 @@ mod tests {
             std::process::id(),
             NEXT.fetch_add(1, Ordering::SeqCst)
         ));
-        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::create_dir_all(dir.join("archi/src")).unwrap();
         fs::write(
             dir.join("archi.toml"),
             "[project]\nname = \"t\"\npreset = \"default\"\n",
         )
         .unwrap();
-        fs::write(dir.join("src").join("model.arch"), MODEL).unwrap();
+        fs::write(dir.join("archi/src").join("model.arch"), MODEL).unwrap();
         dir
     }
 
@@ -408,7 +408,7 @@ mod tests {
         // The live tree grows another Service instance the pinned version
         // does not have: the row must not widen to it.
         fs::write(
-            root.join("src/model.arch"),
+            root.join("archi/src/model.arch"),
             format!("{MODEL}def node RateLimiter\nService type_of RateLimiter\n"),
         )
         .unwrap();
@@ -442,7 +442,7 @@ mod tests {
         let v1 = save_version(&root, "first");
         // v2 drops `Legacy` and grows `TenantKeyer`.
         fs::write(
-            root.join("src/model.arch"),
+            root.join("archi/src/model.arch"),
             MODEL.replace("def node Legacy\n", "def node TenantKeyer\n"),
         )
         .unwrap();
@@ -558,7 +558,7 @@ mod tests {
         // A closed session re-validates on analysis: its affects must
         // resolve in the version it pressed on.
         fs::write(
-            root.join("src/model.arch"),
+            root.join("archi/src/model.arch"),
             format!("{MODEL}def node Extra\n"),
         )
         .unwrap();

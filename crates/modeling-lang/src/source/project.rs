@@ -2,10 +2,12 @@
 //! selection.
 //!
 //! A project is a directory with an `archi.toml` at its root and `.arch`
-//! modules under the source directory (default `src/`). One file is one
-//! module; its module path is the dotted relative path — `src/auth/service.arch`
-//! is `auth.service`. Discovery is a sorted walk, so module order — and with
-//! it every downstream ordering — is independent of filesystem iteration.
+//! modules under the source directory (default `archi/src/`, keeping the
+//! model out of the way of a host project's own `src/`). One file is one
+//! module; its module path is the dotted path relative to the source dir —
+//! `archi/src/auth/service.arch` is `auth.service`. Discovery is a sorted
+//! walk, so module order — and with it every downstream ordering — is
+//! independent of filesystem iteration.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -83,7 +85,7 @@ pub(crate) fn read_manifest(root: &Path) -> Result<Manifest, Diagnostic> {
         toml::from_str(&text).map_err(|e| project_err(format!("{}: {e}", path.display())))?;
     Ok(Manifest {
         name: parsed.project.name,
-        src: parsed.project.src.unwrap_or_else(|| "src".to_string()),
+        src: parsed.project.src.unwrap_or_else(|| "archi/src".to_string()),
         preset: parsed
             .project
             .preset
@@ -117,7 +119,7 @@ pub(crate) fn resolve_preset(root: &Path, manifest: &Manifest) -> Result<Preset,
 pub(crate) struct ModuleSource {
     /// Dotted module path (`auth.service`).
     pub module: String,
-    /// Display path relative to the project root (`src/auth/service.arch`).
+    /// Display path relative to the project root (`archi/src/auth/service.arch`).
     pub rel_path: String,
     pub text: String,
 }
