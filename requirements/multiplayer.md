@@ -42,12 +42,15 @@ tombstone — surfacing every absorption through `link verify` and `link audit` 
 Subtractions still stick, and an event naming an id the journal never minted is still
 corruption: tolerance extends exactly as far as merge residue.
 
-**Stress sessions (`archi/stress/`).** "At most one open session" is a repository invariant
-that parallel branches violate silently — git sees only unrelated folders. And same-name
-sessions can chimera: one add/add conflict, a keep-a-charter resolution, and the merged repo
-holds a green round nobody authored, closed and incidence-reported as if designed. Folding two
-rounds into one is legitimate and must be deliberate: detected, recipe-named, both charters
-preserved in the surviving record (`rounds-fold-deliberately`).
+**Stress sessions (`archi/stress/`).** Landed (`rounds-fold-deliberately`, fold-pressure round).
+The merge boundary stays git's default markers — fold-pressure falsified `merge=union` for prose
+stores: identical frontmatter and H1 merge clean, so the union commits a schema-perfect chimera
+with no pause. The tool reads the boundary instead: markers anywhere under `archi/stress/` are
+one recipe-naming `E_SESSION` (ahead of any parse error), the two-open diagnostic names the
+fold, and save and remint refuse a fused record. `archi session fold` is the only path that
+merges round records — both charters kept under a schema-validated `## Folded:` heading, folds
+across pins refused, and a fused sealed pair folds with the folded stamp `pending remint` until
+`version remint --session` re-stamps it (`requirements/stressing.md#folding-merged-rounds`).
 
 **Slugs.** The doc namespace is project-wide and branch-blind; two branches can each be green
 and collide at the join (requirement vs session of the same name). Detection is good —
@@ -61,9 +64,10 @@ Whoever merges authored neither side. Every post-merge broken state must therefo
 by verbs alone. For the journal, the archive and the model-review surface all three now hold:
 the journal merges itself and its fold surfaces the residue, the manifest collision names the
 remint recipe in one diagnostic (session validation stays quiet while the archive is
-unreadable), and the live diff reviews the merge before the seal. The remaining gap is the
-session record: two open sessions and the same-name chimera are detected but folded only by
-hand (`rounds-fold-deliberately`, open — tracked in `issues/multiplayer-is-a-stub.md`).
+unreadable), the live diff reviews the merge before the seal, and the session record folds
+through a verb that keeps both charters and hands remint the stamp it must make true. Every
+store's merged state is a recipe-naming diagnostic, and the recipes compose: archive, then
+fold, then remint.
 
 ## Non-goals
 

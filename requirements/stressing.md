@@ -84,7 +84,9 @@ lifecycle, before the API surface widens.
 | `closed` | empty while the session is open; stamped by `archi version save` with the id of the version whose save closed it |
 
 The H1 is the session's name; the first paragraph is its **charter** — what this round presses and why now. At
-most one session file may have an empty `closed` (`E_SESSION`).
+most one session file may have an empty `closed` (`E_SESSION`). The only sections a session file may hold are
+the `## Folded: <label>` records `archi session fold` writes — a folded round's charter verbatim, then a
+`pin:` / `closed:` / `note:` trailer — so a fold's trace validates forever.
 
 ### Stressor file
 
@@ -142,6 +144,28 @@ Closed sessions are the durable record of pressure applied. They stay checkable 
 reconstructs exactly; re-running an analysis over an old session expands against the terms it actually pressed
 on.
 
+## Folding merged rounds
+
+Branch-parallel rounds merge as ordinary files, so a merge can assemble a round nobody authored: two open
+folders after a different-slug merge, or one file claimed by two charters after a same-slug one. The conflict
+markers git leaves are the honest boundary — fold-pressure falsified `merge=union` here (identical frontmatter
+and H1 merge clean and the fusion commits itself as a schema-perfect chimera) — so the tool reads them: markers
+anywhere under `archi/stress/` are one recipe-naming `E_SESSION`, ahead of any parse error, and remint and save
+refuse a fused record. The only path that merges round records is the verb:
+
+- `archi session fold <slug> -m <note> [--keep theirs]` normalizes a marker-fused file in place — the kept
+  side's charter survives, the other lands under `## Folded:` with the merge side's label;
+- `archi session fold <loser> --into <winner> -m <note>` folds two open folders — stressor files move (name
+  collisions refuse; a stressor is one writer's pressure), the loser's charter, pin and stamp land under
+  `## Folded: <loser>`, and the loser folder is deleted.
+
+A fold refuses what it cannot keep true: rounds that pressed different pins (a stressor's ground truth is its
+session's version) and mixed open/sealed pairs. A *fused sealed pair* — two complete same-slug rounds joined by
+a merge, the archive collision's twin — folds with the surviving stamp intact and the folded stamp marked
+`closed: pending remint`; that half-done state is a finding until `archi version remint -m <note>
+--session <slug>` re-stamps the folded stamp (never the one already telling the lineage's truth). The sequence
+is archive, then fold, then remint — and each step's diagnostic names the next.
+
 ## Compile
 
 `archi check` compiles the stress tree under the shared doc catalog of
@@ -155,7 +179,7 @@ Two codes of its own:
 | code | raised when |
 |------|-------------|
 | `E_AFFECTS_EMPTY` | a stressor's affects list is empty — delete the stressor if it is obsolete |
-| `E_SESSION` | `version` or `closed` names no archived version, or more than one session is open |
+| `E_SESSION` | `version` or `closed` names no archived version (a folded round's stamp included), more than one session is open, or a stress file holds merge conflict markers — the fused-record diagnostic names the fold recipe |
 
 Findings:
 
@@ -164,6 +188,7 @@ Findings:
 | `pending_stressor` | a closed session holds a stressor with no outcome |
 | `breaking_unanswered` | a breaking stressor that no requirement records as its origin |
 | `empty_session` | a session with no stressors |
+| `folded_awaits_remint` | a folded round's stamp is `pending remint` — the archive → fold → remint sequence is half-done |
 
 ## Why this shape
 

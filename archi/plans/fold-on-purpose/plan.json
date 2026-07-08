@@ -1,0 +1,141 @@
+{
+  "name": "fold-on-purpose",
+  "version": "v0007",
+  "created": "2026-07-08T12:30:46Z",
+  "state": "completed",
+  "closed_waves": 1,
+  "problem": "The fold-pressure round proved the round record is the last store a merge can still author: conflict markers in a charter pass for prose (check green with the conflict in the tree), merge=union auto-commits a schema-perfect chimera, the archive's own remint recipe re-stamps a fused seal, and a hand-fold re-grounds stressors across pins. Sessions.fold + marker-reading detection close rounds-fold-deliberately and the parallel-editing-discipline umbrella: every merged session state lands as one recipe-naming diagnostic, and the only path that merges round records is a verb that keeps both charters and refuses what it cannot keep true.",
+  "technology_stack": [
+    {
+      "tech": "Rust 2024; crates/archi: sessions.rs (new module: the fold verb — two-folder --into form, in-place marker-fused form, --keep, pin-match and seal rules, ## Folded trace), docs/mod.rs (pre-parse conflict-marker scan over archi/stress/ as recipe-naming E_SESSION; ## Folded section schema; two-open diagnostic names the verb), versions.rs (remint refuses marker-fused sessions; re-stamps a pending folded stamp, never a lineage-true one), main.rs (archi session fold dispatch + usage)",
+      "provenance": "every change extends a proven seam: the marker scan mirrors index.toml's E_ARCHIVE recipe from make-the-join-safe, the fold writes through the same doc-line surgery as stamp_closed, and the verb ships e2e-tested in the same real-binary harness as remint"
+    },
+    {
+      "tech": "git default merge boundary for archi/stress/ — deliberately NO merge attribute",
+      "provenance": "fold-pressure lab falsified merge=union for prose stores: the fusion commits itself and validates; markers are the one honest detection surface"
+    }
+  ],
+  "architecture_summary": [
+    {
+      "node": "Sessions",
+      "role": "owns the round-record join: reads the merged state, folds two rounds into one record with both charters kept, refuses folds across pins and untrue seals"
+    },
+    {
+      "node": "DocsCompiler",
+      "role": "detection: reads the merge boundary git draws — markers anywhere under archi/stress/ are one E_SESSION naming the session and the verb; validates the ## Folded trace forever"
+    }
+  ],
+  "stack_mapping": [
+    {
+      "tech": "sessions.rs + main.rs (archi session fold)",
+      "node": "Sessions"
+    },
+    {
+      "tech": "docs/mod.rs marker scan + ## Folded schema",
+      "node": "DocsCompiler"
+    }
+  ],
+  "scenarios": [
+    "mid-round same-slug merge: markers land in the charter, check names the session and the fold verb, session fold <slug> -m note normalizes in place (--keep picks the survivor), the round continues and the next save closes green with both charters in the record",
+    "sealed same-slug collision: E_ARCHIVE recipe keeps the first-landed entry, session fold preserves the surviving stamp and marks the folded stamp for remint, version remint -m note --session <slug> re-stamps the folded stamp — both rounds' records true on one lineage, remint refuses while markers remain",
+    "two open folders: E_SESSION names both and the verb, session fold <loser> --into <winner> -m note moves the stressors, keeps the loser's charter pin and stamp under ## Folded, deletes the loser folder, check green forever after",
+    "a fold across pins: the verb refuses and names the rule — a fold is only honest between rounds that pressed the same ground"
+  ],
+  "scenarios_displayed": true,
+  "scenarios_closed": true,
+  "tasks": [
+    {
+      "id": "t1",
+      "node": "Sessions",
+      "description": "the fold verb: two rounds into one record, both charters kept, refusals for pins and seals",
+      "spec_refs": [
+        "Sessions",
+        "Service type_of Sessions",
+        "Cli.drive consult(->Command, <-Report) Sessions.fold"
+      ],
+      "stack_details": "",
+      "inputs": {},
+      "outputs": [
+        "crates/archi/src/sessions.rs",
+        "crates/archi/src/main.rs",
+        "crates/archi/src/versions.rs",
+        "crates/archi/tests/session_e2e.rs"
+      ],
+      "verifications": {
+        "findings-never-block": [
+          "fold refusals are hard errors with recipes; check's session findings stay advisory except genuine structural breaks, exit codes unchanged for green trees"
+        ],
+        "parallel-editing-discipline": [
+          "e2e: the two-writer lab replays end to end — collide, fold, remint — and check closes green with both rounds' records intact on one lineage"
+        ],
+        "rounds-fold-deliberately": [
+          "e2e (session_e2e.rs): fold <loser> --into <winner> moves stressors, keeps both charters under ## Folded, refuses filename collisions, deletes the loser folder, and the survivor passes check",
+          "e2e: a marker-fused open pair folds in place; --keep theirs picks the surviving charter; the folded charter, pin and stamp are preserved verbatim",
+          "unit: fold refuses across differing pins, on mixed open/sealed pairs it cannot keep true, and on sessions with no fused or paired state",
+          "e2e: a fused sealed pair folds with the surviving stamp intact and the folded stamp marked pending remint; remint --session re-stamps the folded stamp and refuses while markers remain"
+        ],
+        "unchanged-saves-close-rounds": [
+          "save's close/stamp path is untouched by the fold; the version_e2e suite stays green"
+        ]
+      }
+    },
+    {
+      "id": "t2",
+      "node": "DocsCompiler",
+      "description": "detection: markers are one recipe-naming E_SESSION; the ## Folded trace validates forever",
+      "spec_refs": [
+        "DocsCompiler",
+        "Function type_of DocsCompiler",
+        "Cli.drive consult(->ModelGraph, <-Diagnostics) DocsCompiler.compile_docs",
+        "Incidence.pin_model recall(<-ModelGraph) DocsCompiler.serve_pin",
+        "Links.pin_spec recall(<-ModelGraph) DocsCompiler.serve_pin",
+        "Planner.pin_model recall(<-ModelGraph) DocsCompiler.serve_pin"
+      ],
+      "stack_details": "",
+      "inputs": {},
+      "outputs": [
+        "crates/archi/src/docs/mod.rs",
+        "crates/archi/src/docs/schema.rs"
+      ],
+      "verifications": {
+        "candidates-carry-signal": [
+          "capture's term gating untouched by this task; its suite stays green"
+        ],
+        "capture-at-the-join": [
+          "pinned-spec resolution untouched by this task; its suite stays green"
+        ],
+        "coupling-is-measured": [
+          "incidence scoring untouched by this task; its suite stays green"
+        ],
+        "dark-deltas-are-code": [
+          "audit scan boundaries untouched by this task; its suite stays green"
+        ],
+        "docs-compile-with-the-model": [
+          "the marker scan runs before md parse only for files under archi/stress/ holding conflict markers; every other doc parses byte-identically — docs tests stay green"
+        ],
+        "drift-graded-per-kind": [
+          "link grading untouched by this task; its suite stays green"
+        ],
+        "findings-never-block": [
+          "the marker E_SESSION is an error naming a recipe (a fused record is structural, like the manifest's markers); advisory findings unchanged"
+        ],
+        "gates-press-the-delta": [
+          "wave gating untouched by this task; its suite stays green"
+        ],
+        "rounds-fold-deliberately": [
+          "unit: markers in a charter, in frontmatter, or in a stressor file are one E_SESSION naming the file, the session and the fold verb — not prose, not a bare E_DOC",
+          "unit: the two-open E_SESSION names the fold verb; a ## Folded section validates (charter, pin, stamp) and a dangling pending-remint folded stamp is a finding"
+        ],
+        "stress-pins-versions": [
+          "session pin validation is unchanged; a marker-fused file reports the fusion instead of a pin error until it parses again"
+        ],
+        "unchanged-saves-close-rounds": [
+          "close-on-save stamping untouched by this task; its suite stays green"
+        ],
+        "under-stressed-names-behavior": [
+          "incidence muting untouched by this task; its suite stays green"
+        ]
+      }
+    }
+  ]
+}

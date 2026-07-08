@@ -108,6 +108,15 @@ are authored from day one.
 - journal merges concatenate (union attribute) instead of conflicting; `link verify` surfaces
   any absorbed merge residue as `journal:` notes — read them, they are one writer's op landing
   on the other's tombstone.
+- post-merge `check` says a session is *claimed by two charters* → a same-slug merge fused two
+  rounds (markers are the signal — never add `merge=union` to `archi/stress/`, the fusion would
+  commit itself silently); `archi session fold <slug> -m <note> [--keep theirs]` normalizes it,
+  both charters kept under `## Folded:`. Two sessions *both open* → `archi session fold <loser>
+  --into <winner> -m <note>`. A fold refuses across pins and mixed open/sealed pairs — those
+  split by hand.
+- a *folded round awaits remint* finding → a fused **sealed** pair was folded; `archi version
+  remint -m <note> --session <slug>` re-stamps the folded stamp (the surviving one is already
+  true). Remint and save refuse while markers remain — the sequence is archive, fold, remint.
 - `plan next` blocked on coverage → not an error, the loop: confirm or
   retire the candidates it just minted, re-run.
 - verify notes "no longer resolves at Working" → the spec advanced;

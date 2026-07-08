@@ -12,7 +12,7 @@
 //! reconstructed from the archive; `satisfied-by` validates against the live
 //! model.
 
-mod md;
+pub(crate) mod md;
 pub(crate) mod schema;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -131,6 +131,14 @@ pub enum DocFinding {
         /// The session's slug.
         session: String,
     },
+    /// A folded round whose `closed:` trailer awaits its re-mint — the
+    /// archive → fold → remint sequence is half-done.
+    FoldedAwaitsRemint {
+        /// The surviving session's slug.
+        session: String,
+        /// The folded round's label.
+        label: String,
+    },
 }
 
 impl fmt::Display for DocFinding {
@@ -157,6 +165,11 @@ impl fmt::Display for DocFinding {
                 "breaking stressor unanswered: {stressor} — no requirement records it as origin"
             ),
             DocFinding::EmptySession { session } => write!(f, "empty session: {session}"),
+            DocFinding::FoldedAwaitsRemint { session, label } => write!(
+                f,
+                "folded round awaits remint: `{label}` in session `{session}` — \
+                 `archi version remint -m <note> --session {session}` re-stamps it"
+            ),
         }
     }
 }
@@ -265,6 +278,31 @@ fn read_doc(
     }
 }
 
+/// The 1-based line of the first merge conflict marker, when the file holds
+/// a whole conflict (`<<<<<<<` and `>>>>>>>` both present — a lone run of
+/// `=` or `<` could be prose). Read errors are `read_doc`'s to report.
+pub(crate) fn fused_at(path: &Path) -> Option<usize> {
+    let text = fs::read_to_string(path).ok()?;
+    conflict_marker_line(&text)
+}
+
+/// [`fused_at`] over text already in hand.
+pub(crate) fn conflict_marker_line(text: &str) -> Option<usize> {
+    let mut first = None;
+    let mut opens = false;
+    let mut closes = false;
+    for (i, line) in text.lines().enumerate() {
+        if line.starts_with("<<<<<<< ") {
+            opens = true;
+            first.get_or_insert(i + 1);
+        } else if line.starts_with(">>>>>>> ") {
+            closes = true;
+            first.get_or_insert(i + 1);
+        }
+    }
+    (opens && closes).then_some(first).flatten()
+}
+
 fn discover(root: &Path, diags: &mut Vec<DocDiagnostic>) -> Tree {
     let mut tree = Tree::default();
 
@@ -308,7 +346,22 @@ fn discover(root: &Path, diags: &mut Vec<DocDiagnostic>) -> Tree {
             let sslug = file_name(&path);
             let anchor = path.join(format!("{sslug}.md"));
             if anchor.is_file() {
-                if let Some((file, doc)) = read_doc(root, &anchor, diags) {
+                if let Some(line) = fused_at(&anchor) {
+                    // The one moment a chimera is machine-obvious: the merge
+                    // boundary git drew is still in the file. One recipe-naming
+                    // diagnostic instead of parse noise or silent charter prose
+                    // (fold-pressure: markers-pass-for-prose).
+                    diags.push(DocDiagnostic::new(
+                        "E_SESSION",
+                        format!(
+                            "session `{sslug}` is claimed by two charters — a merge fused two \
+                             rounds into this file; fold them deliberately: `archi session fold \
+                             {sslug} -m <note> [--keep theirs]` (requirements/stressing.md)"
+                        ),
+                        &rel(root, &anchor),
+                        line,
+                    ));
+                } else if let Some((file, doc)) = read_doc(root, &anchor, diags) {
                     tree.sessions
                         .push(schema::session(&doc, &file, &sslug, diags));
                 }
@@ -328,17 +381,29 @@ fn discover(root: &Path, diags: &mut Vec<DocDiagnostic>) -> Tree {
                         &rel(root, &inner),
                         1,
                     ));
-                } else if is_md(&inner)
-                    && stem(&inner) != sslug
-                    && let Some((file, doc)) = read_doc(root, &inner, diags)
-                {
-                    tree.stressors.push(schema::stressor(
-                        &doc,
-                        &file,
-                        &stem(&inner),
-                        &sslug,
-                        diags,
-                    ));
+                } else if is_md(&inner) && stem(&inner) != sslug {
+                    if let Some(line) = fused_at(&inner) {
+                        diags.push(DocDiagnostic::new(
+                            "E_SESSION",
+                            format!(
+                                "`{}` holds merge conflict markers — two branches wrote this \
+                                 stressor of session `{sslug}`; keep or split the sides by hand \
+                                 (a stressor is one writer's pressure), then fold the round if \
+                                 both charters claim it: `archi session fold {sslug} -m <note>`",
+                                stem(&inner)
+                            ),
+                            &rel(root, &inner),
+                            line,
+                        ));
+                    } else if let Some((file, doc)) = read_doc(root, &inner, diags) {
+                        tree.stressors.push(schema::stressor(
+                            &doc,
+                            &file,
+                            &stem(&inner),
+                            &sslug,
+                            diags,
+                        ));
+                    }
                 }
             }
         } else if is_md(&path) {
@@ -579,6 +644,24 @@ fn cross_check(
                 *line,
             ));
         }
+        // Folded rounds: a concrete stamp names a real version. A `pending
+        // remint` stamp is legal mid-sequence (archive → fold → remint) and
+        // surfaces as a finding until the re-mint lands.
+        for f in &s.folded {
+            if let Some((c, line)) = &f.closed
+                && !c.is_empty()
+                && c != "pending remint"
+                && archive_readable
+                && !ids.contains(c.as_str())
+            {
+                diags.push(DocDiagnostic::new(
+                    "E_SESSION",
+                    format!("folded round `{}`: `{c}` names no archived version", f.label),
+                    &s.file,
+                    *line,
+                ));
+            }
+        }
     }
     let open: Vec<&Session> = tree.sessions.iter().filter(|s| s.open()).collect();
     for later in open.iter().skip(1) {
@@ -587,8 +670,10 @@ fn cross_check(
             DocDiagnostic::new(
                 "E_SESSION",
                 format!(
-                    "sessions `{}` and `{}` are both open — at most one stress session is open",
-                    first.slug, later.slug
+                    "sessions `{}` and `{}` are both open — at most one stress session is \
+                     open; fold them into one round (`archi session fold {} --into {} -m \
+                     <note>`) or close one before merging",
+                    first.slug, later.slug, later.slug, first.slug
                 ),
                 &later.file,
                 later.line,
@@ -763,6 +848,14 @@ fn findings(tree: &Tree) -> Vec<DocFinding> {
                 session: s.slug.clone(),
             });
         }
+        for f in &s.folded {
+            if f.closed.as_ref().is_some_and(|(c, _)| c == "pending remint") {
+                out.push(DocFinding::FoldedAwaitsRemint {
+                    session: s.slug.clone(),
+                    label: f.label.clone(),
+                });
+            }
+        }
     }
     out
 }
@@ -787,6 +880,12 @@ pub fn close_open_session(root: &Path, version_id: &str) -> Result<Option<String
         }
         let text = fs::read_to_string(&anchor)
             .map_err(|e| format!("cannot read `{}`: {e}", rel(root, &anchor)))?;
+        if conflict_marker_line(&text).is_some() {
+            return Err(format!(
+                "session `{slug}` holds merge conflict markers — a merge fused two rounds \
+                 into it; fold them (`archi session fold {slug} -m <note>`) before closing"
+            ));
+        }
         let doc = md::parse(&text).map_err(|e| {
             format!(
                 "session `{slug}` does not parse ({}:{}: {})",
@@ -835,6 +934,16 @@ pub fn closed_session_anchor(root: &Path, slug: &str) -> Result<PathBuf, String>
     }
     let text = fs::read_to_string(&anchor)
         .map_err(|e| format!("cannot read `{}`: {e}", anchor.display()))?;
+    if conflict_marker_line(&text).is_some() {
+        // The lab's remint-consumes-the-fused-record: a fused record parses
+        // as one round (markers pass for charter prose), so an unguarded
+        // remint re-stamps a seal two rounds share. The sequence is
+        // archive → fold → remint; refuse to skip its middle.
+        return Err(format!(
+            "session `{slug}` holds merge conflict markers — a merge fused two rounds into \
+             it; fold them first (`archi session fold {slug} -m <note>`), then remint"
+        ));
+    }
     let doc = md::parse(&text).map_err(|e| {
         format!(
             "session `{slug}` does not parse ({}:{}: {})",
@@ -863,10 +972,37 @@ pub fn closed_session_anchor(root: &Path, slug: &str) -> Result<PathBuf, String>
 
 /// Re-stamp a closed session's `closed:` onto a reminted version id — the
 /// round record follows its answers onto the merged lineage
-/// (requirements/multiplayer.md).
+/// (requirements/multiplayer.md). When the record carries a folded round
+/// whose stamp awaits the re-mint (`closed: pending remint`, the trace
+/// `session fold` leaves on a fused sealed pair), that stamp is the one the
+/// remint makes true — the main stamp already tells the lineage's truth and
+/// is never touched (rounds-fold-deliberately).
 pub fn restamp_session(root: &Path, slug: &str, version_id: &str) -> Result<PathBuf, String> {
     let anchor = closed_session_anchor(root, slug)?;
-    stamp_closed(&anchor, version_id)?;
+    let text = fs::read_to_string(&anchor)
+        .map_err(|e| format!("cannot read `{}`: {e}", anchor.display()))?;
+    let mut stamped_folded = false;
+    let mut in_frontmatter = false;
+    let mut out = String::with_capacity(text.len() + version_id.len());
+    for (i, line) in text.lines().enumerate() {
+        if line.trim_end() == "---" {
+            in_frontmatter = i == 0;
+            out.push_str(line);
+        } else if !in_frontmatter && !stamped_folded && line.trim_end() == "closed: pending remint"
+        {
+            out.push_str("closed: ");
+            out.push_str(version_id);
+            stamped_folded = true;
+        } else {
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+    if stamped_folded {
+        fs::write(&anchor, out).map_err(|e| format!("cannot write `{}`: {e}", anchor.display()))?;
+    } else {
+        stamp_closed(&anchor, version_id)?;
+    }
     Ok(anchor)
 }
 
@@ -1371,6 +1507,123 @@ mod tests {
                 .map(ToString::to_string)
                 .collect::<Vec<_>>()
         );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn fused_stress_docs_are_one_recipe_naming_diagnostic() {
+        let root = temp_project();
+        save_version(&root, "first");
+        // Markers in a charter, in frontmatter, and in a stressor: each is
+        // one E_SESSION naming its repair — never charter prose, never a
+        // bare parse error (fold-pressure: markers-pass-for-prose).
+        put(
+            &root,
+            "archi/stress/charter/charter.md",
+            "---\nversion: v0001\nclosed:\n---\n\n# Charter\n\n<<<<<<< HEAD\nOurs.\n=======\nTheirs.\n>>>>>>> abc\n",
+        );
+        put(
+            &root,
+            "archi/stress/pinned/pinned.md",
+            "---\n<<<<<<< HEAD\nversion: v0002\n=======\nversion: v0001\n>>>>>>> abc\nclosed:\n---\n\n# Pinned\n\nCharter.\n",
+        );
+        put(
+            &root,
+            "archi/stress/stressed/stressed.md",
+            "---\nversion: v0001\nclosed:\n---\n\n# Stressed\n\nCharter.\n",
+        );
+        put(
+            &root,
+            "archi/stress/stressed/racy.md",
+            "---\naffects: [AuthService]\noutcome: pending\n---\n\n# Racy\n\n<<<<<<< HEAD\nOurs.\n=======\nTheirs.\n>>>>>>> abc\n\n## Attractor\n\n## Resolution\n",
+        );
+        let report = check_at(&root);
+        assert_eq!(
+            codes(&report),
+            ["E_SESSION", "E_SESSION", "E_SESSION"],
+            "{:#?}",
+            report
+                .diagnostics
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        );
+        let all = report
+            .diagnostics
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(all.contains("archi session fold charter"), "{all}");
+        assert!(all.contains("archi session fold pinned"), "{all}");
+        assert!(all.contains("two branches wrote this stressor"), "{all}");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn folded_sections_validate_and_pending_surfaces() {
+        let root = temp_project();
+        let v1 = save_version(&root, "first");
+        // A sound folded record: concrete stamp naming a real version.
+        put(
+            &root,
+            "archi/stress/sound/sound.md",
+            &format!(
+                "---\nversion: {v1}\nclosed: {v1}\n---\n\n# Sound\n\nThe charter.\n\n\
+                 ## Folded: other-round\n\nThe folded charter.\n\npin: {v1}\nclosed: {v1}\nnote: one campaign\n"
+            ),
+        );
+        let report = check_at(&root);
+        assert!(
+            report.diagnostics.is_empty(),
+            "{:#?}",
+            report
+                .diagnostics
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        );
+
+        // A pending stamp is legal and surfaces as the half-done sequence.
+        put(
+            &root,
+            "archi/stress/sound/sound.md",
+            &format!(
+                "---\nversion: {v1}\nclosed: {v1}\n---\n\n# Sound\n\nThe charter.\n\n\
+                 ## Folded: other-round\n\nThe folded charter.\n\npin: {v1}\nclosed: pending remint\nnote: one campaign\n"
+            ),
+        );
+        let report = check_at(&root);
+        assert!(report.diagnostics.is_empty());
+        assert!(
+            rendered_findings(&report)
+                .iter()
+                .any(|f| f.contains("folded round awaits remint: `other-round`")),
+            "{:?}",
+            rendered_findings(&report)
+        );
+
+        // A trailer with no note, a stamp naming no version, and a stray
+        // section are each loud.
+        put(
+            &root,
+            "archi/stress/sound/sound.md",
+            &format!(
+                "---\nversion: {v1}\nclosed: {v1}\n---\n\n# Sound\n\nThe charter.\n\n\
+                 ## Folded: other-round\n\nThe folded charter.\n\npin: {v1}\nclosed: v9999\n\n\
+                 ## Notes\n\nStray.\n"
+            ),
+        );
+        let report = check_at(&root);
+        let rendered = report
+            .diagnostics
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(rendered.contains("`note:`"), "{rendered}");
+        assert!(rendered.contains("names no archived version"), "{rendered}");
+        assert!(rendered.contains("## Folded: <label>"), "{rendered}");
         fs::remove_dir_all(&root).unwrap();
     }
 }

@@ -44,6 +44,7 @@ mod docs;
 mod incidence;
 mod links;
 mod plans;
+mod sessions;
 mod versions;
 
 use std::fs;
@@ -74,6 +75,8 @@ const USAGE: &str = "usage:
   archi version show <id> [--project <dir>]
   archi version diff <a|live> <b|live> [--project <dir>]
   archi version current [--project <dir>]
+  archi session fold <slug> -m <note> [--keep theirs] [--project <dir>]
+  archi session fold <loser> --into <winner> -m <note> [--project <dir>]
   archi link add <spec[@ver]> <file[#symbol]> --kind literal|indirect [--project <dir>]
   archi link ls [--spec <ref>] [--evidence] [--json] [--project <dir>]
   archi link verify [--spec <ref>] [--since <rev>] [--json] [--project <dir>]
@@ -122,6 +125,8 @@ struct Args {
     spec: Option<String>,
     kind_flag: Option<String>,
     to: Option<String>,
+    into: Option<String>,
+    keep: Option<String>,
     task: Option<String>,
     desc: Option<String>,
     at: Option<String>,
@@ -176,6 +181,8 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         spec: None,
         kind_flag: None,
         to: None,
+        into: None,
+        keep: None,
         task: None,
         desc: None,
         at: None,
@@ -241,6 +248,8 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--prune" => args.prune = true,
             "--spec" => args.spec = Some(value(&mut it, "--spec")?),
             "--to" => args.to = Some(value(&mut it, "--to")?),
+            "--into" => args.into = Some(value(&mut it, "--into")?),
+            "--keep" => args.keep = Some(value(&mut it, "--keep")?),
             "--task" => args.task = Some(value(&mut it, "--task")?),
             "--desc" => args.desc = Some(value(&mut it, "--desc")?),
             // `link` reads the singular `--kind literal|indirect`; the
@@ -263,7 +272,11 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             }
             "-m" | "--message" => args.message = Some(value(&mut it, "-m")?),
             other if other.starts_with("--") => return Err(format!("unknown flag `{other}`")),
-            other if matches!(args.verb.as_str(), "version" | "link" | "plan" | "read") => {
+            other if matches!(
+                args.verb.as_str(),
+                "version" | "link" | "plan" | "read" | "session"
+            ) =>
+            {
                 args.positional.push(other.to_string())
             }
             other => return Err(format!("unexpected argument `{other}`")),
@@ -1404,6 +1417,55 @@ fn run_nkp(args: &Args) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// `archi session fold` — two concurrent rounds into one deliberate record;
+/// the verb-shaped repair for what a merge assembles
+/// (requirements/stressing.md, rounds-fold-deliberately).
+fn run_session(args: &Args) -> ExitCode {
+    let fail = |e: String| -> ExitCode {
+        eprintln!("archi: {e}");
+        ExitCode::from(1)
+    };
+    let root = match locate_project(args) {
+        Ok(r) => r,
+        Err(e) => return usage_err(&e),
+    };
+    match (
+        args.positional.first().map(String::as_str),
+        args.positional.get(1..).unwrap_or_default(),
+    ) {
+        (Some("fold"), [slug]) => {
+            let Some(note) = args.message.as_deref() else {
+                return usage_err("`session fold` records its why: -m <note>");
+            };
+            let keep_theirs = match args.keep.as_deref() {
+                None | Some("ours") => false,
+                Some("theirs") => true,
+                Some(other) => {
+                    return usage_err(&format!("--keep is `ours` or `theirs`, got `{other}`"));
+                }
+            };
+            match sessions::fold(&root, slug, args.into.as_deref(), note, keep_theirs) {
+                Ok(folded) => {
+                    println!("{}", folded.headline);
+                    for name in &folded.moved {
+                        println!("  moved {name}");
+                    }
+                    println!("commit as one: {}", folded.files.join(", "));
+                    if folded.pending_remint {
+                        println!(
+                            "the folded stamp awaits its re-mint: \
+                             `archi version remint -m <note> --session {slug}`"
+                        );
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        _ => usage_err("`session` verbs: fold <slug> [-m <note>] [--into <winner>] [--keep theirs]"),
+    }
+}
+
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let args = match parse_args(&argv) {
@@ -1416,6 +1478,7 @@ fn main() -> ExitCode {
         "nkp" => run_nkp(&args),
         "incidence" => run_incidence(&args),
         "version" => run_version(&args),
+        "session" => run_session(&args),
         "link" => run_link(&args),
         "plan" => run_plan(&args),
         "read" => run_read(&args),

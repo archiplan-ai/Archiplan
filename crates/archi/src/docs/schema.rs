@@ -96,6 +96,18 @@ pub struct Session {
     pub version: Option<(String, usize)>,
     /// The closing version id (empty while open) and its line.
     pub closed: Option<(String, usize)>,
+    /// Rounds folded into this record (`## Folded:` sections), in file order.
+    pub folded: Vec<Folded>,
+}
+
+/// One folded round inside a session file: the trace `archi session fold`
+/// writes and the schema validates forever.
+pub struct Folded {
+    /// The heading label — the folded round's slug or its merge-side label.
+    pub label: String,
+    /// The folded round's `closed:` trailer — empty for a round folded open,
+    /// an id for one folded sealed, `pending remint` awaiting the re-mint.
+    pub closed: Option<(String, usize)>,
 }
 
 impl Session {
@@ -260,13 +272,23 @@ pub fn requirement_file(
 /// Parse a session document.
 pub fn session(doc: &MdDoc, file: &str, stem: &str, diags: &mut Vec<DocDiagnostic>) -> Session {
     name_checks(doc, file, stem, "a session", diags);
-    if let Some(h) = doc.headings.first() {
-        diags.push(DocDiagnostic::new(
-            "E_DOC",
-            "a session file is its name and charter — it holds no sections",
-            file,
-            h.line,
-        ));
+    let mut folded = Vec::new();
+    for h in &doc.headings {
+        let label = (h.level == 2)
+            .then(|| h.text.strip_prefix("Folded: "))
+            .flatten()
+            .filter(|l| !l.trim().is_empty());
+        let Some(label) = label else {
+            diags.push(DocDiagnostic::new(
+                "E_DOC",
+                "a session file is its name and charter — its only sections are the \
+                 `## Folded: <label>` records `archi session fold` writes",
+                file,
+                h.line,
+            ));
+            continue;
+        };
+        folded.push(folded_section(h, label, file, diags));
     }
     let fm = frontmatter(doc, file, &["version", "closed"], "version, closed", diags);
     Session {
@@ -275,6 +297,49 @@ pub fn session(doc: &MdDoc, file: &str, stem: &str, diags: &mut Vec<DocDiagnosti
         line: doc.name_line,
         version: scalar(fm, "version", file, diags),
         closed: scalar(fm, "closed", file, diags),
+        folded,
+    }
+}
+
+/// Validate one `## Folded:` section: the folded charter's prose, then the
+/// `pin:` / `closed:` / `note:` trailer, each exactly once.
+fn folded_section(
+    h: &Heading,
+    label: &str,
+    file: &str,
+    diags: &mut Vec<DocDiagnostic>,
+) -> Folded {
+    let mut pin = None;
+    let mut closed: Option<(String, usize)> = None;
+    let mut note = None;
+    for (line, text) in &h.content {
+        match text.split_once(':').map(|(k, v)| (k, v.trim())) {
+            Some(("pin", v)) if pin.is_none() => pin = Some((v.to_string(), *line)),
+            Some(("closed", v)) if closed.is_none() => closed = Some((v.to_string(), *line)),
+            Some(("note", v)) if note.is_none() => note = Some((v.to_string(), *line)),
+            _ => {}
+        }
+    }
+    for (key, missing) in [
+        ("pin", pin.is_none()),
+        ("closed", closed.is_none()),
+        ("note", note.as_ref().is_none_or(|(n, _): &(String, usize)| n.is_empty())),
+    ] {
+        if missing {
+            diags.push(DocDiagnostic::new(
+                "E_DOC",
+                format!(
+                    "a folded round records its charter and a `{key}:` trailer — \
+                     `pin: <id>`, `closed: <id|pending remint|empty>`, `note: <why>`"
+                ),
+                file,
+                h.line,
+            ));
+        }
+    }
+    Folded {
+        label: label.to_string(),
+        closed,
     }
 }
 
