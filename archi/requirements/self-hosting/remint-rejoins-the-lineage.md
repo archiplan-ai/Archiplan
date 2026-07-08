@@ -1,7 +1,7 @@
 ---
 kind: non-functional
 origin: stressor(both-mint-the-next-id)
-satisfied-by:
+satisfied-by: [Archive]
 deferred:
 ---
 
@@ -22,3 +22,13 @@ span the manifest and the patch files, so a branch-parallel save collides in exa
 while the rest of both writers' work merges clean. Pressed for real by merge-pressure.
 
 ## Satisfy
+
+`Archive.remint` mints the merged tree like a save and re-stamps the named session's `closed:`
+to the new id, so the round record follows its answers onto the merged lineage. The archive's
+diagnostics name their recipes: conflict markers in the manifest point at the remint path
+instead of cascading through every session, and a manifest entry whose file is missing names
+the half-shipped save. Every mint prints its artifacts as one commit unit.
+
+- test — remint after a lineage collision mints and re-stamps the loser's session `closed:`
+- test — conflict markers in the manifest yield one recipe-naming error, not a session cascade
+- test — a manifest entry without its patch file names the half-shipped save at check

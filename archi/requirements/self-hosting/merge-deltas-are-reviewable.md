@@ -1,7 +1,7 @@
 ---
 kind: non-functional
 origin: stressor(clean-merge-broken-contract)
-satisfied-by:
+satisfied-by: [Archive]
 deferred:
 ---
 
@@ -19,3 +19,10 @@ compose into models that break loudly only post-merge, or drift silently under s
 Pressed for real by merge-pressure.
 
 ## Satisfy
+
+`version diff` accepts `live` on either side: the working tree compiles and renders canonical,
+and diffs against any archived version — the merge's semantic delta is reviewable before a save
+seals it, on any dirty tree, in CI.
+
+- test — `version diff <id> live` on a dirty tree shows exactly the unsaved semantic delta
+- test — `version diff live <id>` reverses the direction; two archived ids behave as before

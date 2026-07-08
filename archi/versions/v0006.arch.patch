@@ -1,0 +1,18 @@
+--- original
++++ modified
+@@ -5,6 +5,7 @@
+ def node Archive:
+   port anchor
+   port canonicalize
++  port remint
+   port save
+   port serve
+ def node Ast
+@@ -217,6 +218,7 @@
+ Cli.drive consult(->ModelGraph, <-IncidenceReport) Incidence.scan in harden_flow
+ Cli.drive consult(->ModelGraph, <-NkpReport) Nkp.scan in read_flow
+ Cli.drive consult(->ModelGraph, <-Report) Archive.anchor in harden_flow
++Cli.drive consult(->ModelGraph, <-Report) Archive.remint in harden_flow
+ Cli.drive consult(->ModelGraph, <-Report) Archive.save in harden_flow
+ Cli.exec execute(->StatementBatch, <-ModelGraph) Engine.execute in compile_flow
+ Compiler.Driver.bind resolve(->Ast, <-Resolution) Compiler.Resolver.bind_names in compile_flow
