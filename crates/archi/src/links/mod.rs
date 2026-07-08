@@ -1117,10 +1117,50 @@ fn scan_for_candidate(root: &Path, link: &Link) -> (State, Option<String>) {
     }
 }
 
+/// The project's scan-exclusion patterns: `[audit] exclude` in
+/// `archi.toml`. Read leniently — the manifest parser owns loud
+/// validation — and consulted by every tree scan (`code_files`,
+/// `delta_hunks`), never by verify or the fold: exclusion governs what
+/// the scans volunteer, not what links may claim.
+fn scan_exclusions(root: &Path) -> Vec<String> {
+    #[derive(serde::Deserialize)]
+    struct ScanConfig {
+        audit: Option<AuditConfig>,
+    }
+    #[derive(serde::Deserialize)]
+    struct AuditConfig {
+        #[serde(default)]
+        exclude: Vec<String>,
+    }
+    fs::read_to_string(root.join("archi.toml"))
+        .ok()
+        .and_then(|t| toml::from_str::<ScanConfig>(&t).ok())
+        .and_then(|c| c.audit)
+        .map(|a| a.exclude)
+        .unwrap_or_default()
+}
+
+/// One root-relative path against the exclusion patterns: a trailing `/`
+/// is a directory prefix, a leading `*` a suffix, anything else an exact
+/// path.
+fn excluded(file: &str, patterns: &[String]) -> bool {
+    patterns.iter().any(|p| {
+        if p.ends_with('/') {
+            file.starts_with(p.as_str())
+        } else if let Some(suffix) = p.strip_prefix('*') {
+            file.ends_with(suffix)
+        } else {
+            file == p
+        }
+    })
+}
+
 /// Every code file of the project, root-relative: the tree minus VCS and
-/// build dirs, the `archi/` tree (model, docs, archive, journal) and
-/// `.arch` sources — code is what the model is *about*, not the model.
+/// build dirs, the `archi/` tree (model, docs, archive, journal),
+/// `.arch` sources — code is what the model is *about*, not the model —
+/// and whatever the project's `[audit] exclude` patterns mute.
 fn code_files(root: &Path) -> Vec<String> {
+    let patterns = scan_exclusions(root);
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
@@ -1152,7 +1192,9 @@ fn code_files(root: &Path) -> Vec<String> {
                     .map(|c| c.as_os_str().to_string_lossy())
                     .collect::<Vec<_>>()
                     .join("/");
-                out.push(rel);
+                if !excluded(&rel, &patterns) {
+                    out.push(rel);
+                }
             }
         }
     }
@@ -1389,7 +1431,8 @@ fn latest_version_commit(root: &Path) -> Result<Option<String>, String> {
 }
 
 /// New-side hunks of the code delta since a rev: `git diff` plus untracked
-/// files, `archi/` and `.arch` sources excluded.
+/// files — `archi/`, `.arch` sources and the project's `[audit] exclude`
+/// patterns muted, the same boundary `code_files` walks.
 fn delta_hunks(root: &Path, rev: &str) -> Result<Vec<(String, usize, usize)>, String> {
     let git = |args: &[&str]| -> Result<String, String> {
         let out = Command::new("git")
@@ -1407,8 +1450,12 @@ fn delta_hunks(root: &Path, rev: &str) -> Result<Vec<(String, usize, usize)>, St
         }
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     };
+    let patterns = scan_exclusions(root);
     let is_code = |file: &str| {
-        !file.starts_with("archi/") && !file.ends_with(".arch") && file != "archi.toml"
+        !file.starts_with("archi/")
+            && !file.ends_with(".arch")
+            && file != "archi.toml"
+            && !excluded(file, &patterns)
     };
     let mut hunks = Vec::new();
     let diff = git(&["diff", "--unified=0", "--no-color", rev, "--", "."])?;
@@ -2084,6 +2131,99 @@ mod tests {
         // Bulk by spec.
         let retired = retire_spec(&root, "Vault").unwrap();
         assert_eq!(retired, vec!["l0003".to_string()]);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn scans_honor_audit_exclusions_and_code_stays_dark() {
+        let root = temp_project();
+        fs::write(
+            root.join("archi.toml"),
+            "[project]\nname = \"t\"\n\n[audit]\nexclude = [\"*.md\", \"notes/\", \"code/vendored.rs\"]\n",
+        )
+        .unwrap();
+        let git = |args: &[&str]| {
+            Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(args)
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+        };
+        if git(&["init", "-q"]).is_none() {
+            return; // no git in this environment: the delta source is optional
+        }
+        git(&["add", "."]).unwrap();
+        if git(&[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-qm",
+            "base",
+        ])
+        .is_none()
+        {
+            return;
+        }
+        // Prose, an excluded directory, an exactly excluded file — and one
+        // genuinely unclaimed code file beside them.
+        fs::write(root.join("README.md"), "# t\n\nprose\n").unwrap();
+        fs::create_dir_all(root.join("notes")).unwrap();
+        fs::write(root.join("notes/n.txt"), "scratch\n").unwrap();
+        fs::write(root.join("code/vendored.rs"), "pub fn vendored() {}\n").unwrap();
+        fs::write(root.join("code/rogue.rs"), "pub fn rogue() -> u8 { 42 }\n").unwrap();
+
+        let files = code_files(&root);
+        assert!(files.contains(&"code/rogue.rs".to_string()), "{files:?}");
+        assert!(files.contains(&"code/auth.rs".to_string()), "{files:?}");
+        assert!(!files.contains(&"README.md".to_string()), "{files:?}");
+        assert!(!files.contains(&"notes/n.txt".to_string()), "{files:?}");
+        assert!(!files.contains(&"code/vendored.rs".to_string()), "{files:?}");
+
+        let ws = model_of(&root);
+        let report = audit(
+            &root,
+            ws.model(),
+            &AuditOptions {
+                since: Some("HEAD".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let dark: Vec<String> = report
+            .findings
+            .iter()
+            .filter_map(|f| match f {
+                AuditFinding::UnaccountedDelta { file, .. } => Some(file.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            dark,
+            vec!["code/rogue.rs".to_string()],
+            "{}",
+            render_audit(&report)
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn excluded_files_keep_their_links() {
+        let root = temp_project();
+        fs::write(
+            root.join("archi.toml"),
+            "[project]\nname = \"t\"\n\n[audit]\nexclude = [\"*.md\"]\n",
+        )
+        .unwrap();
+        fs::write(root.join("README.md"), "# t\n\nAuth is the gate.\n").unwrap();
+        let ws = model_of(&root);
+        let link = add(&root, ws.model(), "Auth", "README.md", LinkKind::Indirect).unwrap();
+        let (state, failing) = state_of(&root, &ws, &link.id);
+        assert_eq!(state, State::Clean);
+        assert!(!failing, "exclusion scopes the scans, not the claims");
         fs::remove_dir_all(&root).unwrap();
     }
 }

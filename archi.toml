@@ -1,3 +1,6 @@
 [project]
 name = "archiplan"
 preset = "default"
+
+[audit]
+exclude = ["*.md"]

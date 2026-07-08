@@ -137,7 +137,15 @@ With deltas as the input, coverage inverts from "which links exist" to "what is 
 
 The delta source is the latest version's commit provenance — recorded on a clean-tree save, or post
 hoc by `archi version anchor` ([versioning.md](versioning.md#capabilities)) — or an explicit
-`--since <rev>`; without either, the audit says so instead of guessing. The aggregate view is
+`--since <rev>`; without either, the audit says so instead of guessing.
+
+Dark deltas are *code*: the scans exclude `archi/`, `.arch` sources and the manifest built-in, and the
+project may widen the boundary with `[audit] exclude` in `archi.toml` — directory prefixes
+(`"issues/"`), extension globs (`"*.md"`), exact paths. Repository prose is not code motion, and an
+unanswerable finding only trains the reader to skim. One setting moves one boundary everywhere: the
+audit's delta scan, capture's wave scan and the missing-link candidate search all consult it. Exclusion
+governs what the scans volunteer, never what links may claim — a link into an excluded file is added,
+verified and repinned like any other. The aggregate view is
 the **spec × code incidence matrix**, same shape as the stressor × component matrix of
 [scoring/incidence.md](scoring/incidence.md). Link fragility stops being silent rot and becomes a scored
 surface: visible until lifted, never blocking.

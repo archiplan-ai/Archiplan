@@ -1,0 +1,88 @@
+{
+  "name": "scope-the-scans",
+  "version": "v0004",
+  "created": "2026-07-08T08:09:49Z",
+  "state": "completed",
+  "closed_waves": 1,
+  "problem": "The link layer's tree scans exclude archi/ and .arch sources but nothing else that is not code, so repository prose — issues/*.md filed every round by the loop's own conventions, skills docs, READMEs — surfaces as unaccounted delta (issues/audit-counts-repo-prose-as-dark-delta.md, observed at its worst on this repository: eight findings, all prose, zero code). The findings are unanswerable — linking markdown to spec elements is not what code-links mean — so they persist, grow every round, and train the operator to skim the ratchet's one must-stay-loud finding. Per the boundary-pressure round: the project draws the boundary via [audit] exclude in archi.toml, one seam consulted by every scan — fenced by three survivors: unclaimed code stays dark beside any exclusion, links claiming excluded files keep verifying, and capture and audit read the same boundary.",
+  "technology_stack": [
+    {
+      "tech": "Rust 2024; crates/archi links module (one scan_exclusions seam inside code_files and delta_hunks — capture.rs reads the tree through code_files and needs no change) plus crates/modeling-lang source/project.rs (the manifest tolerates and strictly validates the [audit] section)",
+      "provenance": "both scans already take root and share code_files, so the exclusion reads at one seam with zero signature threading; ManifestFile is deny_unknown_fields, so the compiler must learn the section or every verb breaks on a configured project"
+    },
+    {
+      "tech": "cargo unit tests beside the scans (links/mod.rs fixture pattern with git-backed audit) and the manifest parser",
+      "provenance": "audit_sweeps_scope_coverage_and_dark_deltas sets the fixture pattern; the manifest already has inline parse validation to extend"
+    }
+  ],
+  "architecture_summary": [
+    {
+      "node": "Links",
+      "role": "every tree scan — audit delta hunks, capture wave scan, missing-link candidate search — consults one boundary: built-in exclusions (archi/, .arch, archi.toml) plus the project's [audit] exclude patterns (dir/ prefix, *.ext glob, exact path); verify and the fold never consult it, so links may claim excluded files and stay graded"
+    }
+  ],
+  "stack_mapping": [
+    {
+      "tech": "scan_exclusions(root) reading [audit] exclude leniently + excluded(file, patterns) matcher; consulted in code_files' walk and delta_hunks' is_code (crates/archi/src/links/mod.rs)",
+      "node": "Links"
+    },
+    {
+      "tech": "ManifestFile gains audit: Option<AuditSection { exclude }> with deny_unknown_fields so typos inside [audit] are E_PROJECT (crates/modeling-lang/src/source/project.rs); [audit] exclude = [\"*.md\"] lands in this repository's archi.toml; spec in requirements/code-link.md and requirements/modeling-lang/source-format.md",
+      "node": "Links"
+    }
+  ],
+  "scenarios": [
+    "cargo test --workspace green, including the new regressions: audit mutes excluded prose and dir prefixes while an unclaimed .rs hunk beside them stays dark; the walker honors all three pattern forms; a link claiming an excluded file verifies clean; a typo inside [audit] fails the manifest parse as E_PROJECT.",
+    "On this repository with [audit] exclude = [\"*.md\"]: archi link audit reports zero prose dark-deltas — the eight-finding wall is gone, and what it was burying surfaces: the remaining findings are honest code hunks from earlier rounds, the worklist the wall hid; this round's own delta is fully claimed. archi check compiles the project cleanly with the new manifest section.",
+    "The spec keeps up: requirements/code-link.md documents the exclusion at the audit section (capture shares it), and requirements/modeling-lang/source-format.md documents [audit] in the manifest."
+  ],
+  "scenarios_displayed": true,
+  "scenarios_closed": true,
+  "tasks": [
+    {
+      "id": "t1",
+      "node": "Links",
+      "description": "Draw the code/prose boundary at one seam: read [audit] exclude from archi.toml (lenient in archi, strictly validated by the manifest parser), honor it in code_files and delta_hunks so audit, capture and candidate search agree; exclude nothing from verify or the fold. Set this repository's exclusion to *.md, cover with regressions, document in the code-link and source-format specs.",
+      "spec_refs": [
+        "Links",
+        "Service type_of Links",
+        "Cli.drive consult(->Command, <-Report) Links.record",
+        "Cli.drive consult(->Command, <-Report) Links.verify",
+        "Cli.drive consult(->Command, <-Report) Links.sweep",
+        "Planner.run_capture consult(->ItemHashIndex, <-LinkEvent) Links.capture",
+        "Planner.coverage recall(<-LinkEvent) Links.serve_links"
+      ],
+      "stack_details": "scan_exclusions(root): parse archi.toml with a lenient wrapper (audit: Option<AuditSection>), return exclude patterns or empty on any error (the compiler owns loud validation). excluded(file, &patterns): trailing '/' is a path prefix, leading '*' is a suffix match, otherwise exact. code_files consults it per file (and prunes excluded dir prefixes); delta_hunks' is_code closure consults it after the built-ins. capture.rs:59 and the audit's coverage sweep both go through code_files — no change there. modeling-lang: ProjectSection stays; ManifestFile gains audit with its own deny_unknown_fields struct.",
+      "inputs": {},
+      "outputs": [
+        "crates/archi/src/links/mod.rs",
+        "crates/modeling-lang/src/source/project.rs",
+        "archi.toml",
+        "requirements/code-link.md",
+        "requirements/modeling-lang/source-format.md",
+        "skills/archi.md"
+      ],
+      "verifications": {
+        "capture-at-the-join": [
+          "capture keeps minting pre-attributed candidates from the wave delta — its tree read goes through the same code_files walk, so the only change is prose no longer volunteering; the existing capture tests stay green and this plan's own wave capture runs"
+        ],
+        "dark-deltas-are-code": [
+          "links test: audit mutes excluded prose and directory prefixes while an unclaimed code hunk beside them stays dark",
+          "links test: the excluded walker honors dir/ prefix, *.ext glob and exact path; capture reads the tree through it",
+          "links test: a link claiming an excluded file verifies clean — exclusion scopes the scans, not the claims",
+          "modeling-lang test: a typo inside [audit] is E_PROJECT; a valid exclude list parses",
+          "on this repository: [audit] exclude = [\"*.md\"] and archi link audit reports zero prose dark-deltas"
+        ],
+        "drift-graded-per-kind": [
+          "verify never consults the exclusion: links are graded by reading their pinned file directly, whatever the patterns say — pinned by the linked-prose regression and the untouched verify tests"
+        ],
+        "findings-never-block": [
+          "audit findings stay advisory and exit codes untouched: the exclusion changes what the scan volunteers, not how findings report — no exit-code path in this delta"
+        ],
+        "unchanged-saves-close-rounds": [
+          "untouched by this delta: no version/save path changes; the round itself closes via the unchanged save at the end, exercising the fix in anger"
+        ]
+      }
+    }
+  ]
+}

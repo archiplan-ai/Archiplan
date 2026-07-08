@@ -33,6 +33,11 @@ pub(crate) struct Manifest {
 #[serde(deny_unknown_fields)]
 struct ManifestFile {
     project: ProjectSection,
+    /// Settings for the link layer's tree scans, consumed by `archi` —
+    /// validated here so a typo inside the section is loud at compile
+    /// time instead of a silently ignored setting.
+    #[allow(dead_code)]
+    audit: Option<AuditSection>,
 }
 
 #[derive(Deserialize)]
@@ -41,6 +46,15 @@ struct ProjectSection {
     name: String,
     src: Option<String>,
     preset: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AuditSection {
+    /// Scan-exclusion patterns: `dir/` prefix, `*.ext` suffix, or exact
+    /// path. Governs what the scans volunteer, never what links may claim.
+    #[allow(dead_code)]
+    exclude: Option<Vec<String>>,
 }
 
 fn project_err(message: impl Into<String>) -> Diagnostic {
@@ -180,4 +194,45 @@ fn walk(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+    fn manifest_of(text: &str) -> Result<Manifest, Diagnostic> {
+        let dir = std::env::temp_dir().join(format!(
+            "archi-manifest-test-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::SeqCst)
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("archi.toml"), text).unwrap();
+        let out = read_manifest(&dir);
+        fs::remove_dir_all(&dir).unwrap();
+        out
+    }
+
+    #[test]
+    fn manifest_accepts_a_valid_audit_section() {
+        let m = manifest_of("[project]\nname = \"t\"\n\n[audit]\nexclude = [\"*.md\", \"notes/\"]\n")
+            .unwrap();
+        assert_eq!(m.name, "t");
+    }
+
+    #[test]
+    fn a_typo_inside_audit_is_loud() {
+        let e = manifest_of("[project]\nname = \"t\"\n\n[audit]\nexclud = [\"*.md\"]\n").unwrap_err();
+        assert_eq!(e.code, "E_PROJECT");
+        assert!(e.message.contains("exclud"), "{}", e.message);
+    }
+
+    #[test]
+    fn a_non_list_exclude_is_loud() {
+        let e = manifest_of("[project]\nname = \"t\"\n\n[audit]\nexclude = \"*.md\"\n").unwrap_err();
+        assert_eq!(e.code, "E_PROJECT");
+    }
 }

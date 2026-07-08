@@ -91,6 +91,10 @@ are authored from day one.
 - `link audit` notes no delta source → the last save happened on a dirty
   tree (every bootstrap does); commit, then `archi version anchor` records
   the commit as the latest version's provenance.
+- audit dark-deltas name prose (issues, READMEs, docs) → not code motion;
+  mute the boundary once with `[audit] exclude = ["*.md", …]` in
+  `archi.toml` — capture and the audit share it, links into excluded
+  files still verify.
 - `plan use` refuses → the model has unsaved changes; `version save` first.
 - `plan next` blocked on coverage → not an error, the loop: confirm or
   retire the candidates it just minted, re-run.

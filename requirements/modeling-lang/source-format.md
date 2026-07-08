@@ -35,7 +35,13 @@ myproject/
 name = "myproject"
 src = "src"        # optional, default "src"
 preset = "default" # optional: "core", "default", or a relative path to a JSON preset file
+
+[audit]                    # optional: settings for the link layer's tree scans
+exclude = ["*.md", "docs/"] # scan-exclusion patterns: dir/ prefix, *.ext glob, exact path
 ```
+
+The `[audit]` section is consumed by `archi`'s link layer ([code-link.md](../code-link.md#audit--dark-deltas-dark-spec));
+the compiler validates its shape so a typo inside it is an `E_PROJECT`, not a silently ignored setting.
 
 One file is one **module**; its module path is the dotted relative path under the source root
 (`src/auth/service.arch` is `auth.service`). Directory and file names must be identifiers. Discovery is a sorted
