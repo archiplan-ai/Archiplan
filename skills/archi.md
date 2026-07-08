@@ -117,4 +117,5 @@ are authored from day one.
 
 Depth: `requirements/tasks.md`, `requirements/code-link.md`,
 `requirements/requirements.md`, `requirements/stressing.md`,
-`requirements/versioning.md`.
+`requirements/versioning.md`. Merging parallel spec work:
+`skills/archi-merge.md`.
