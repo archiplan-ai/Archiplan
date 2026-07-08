@@ -16,7 +16,8 @@
 //!             [--all-terms] [--json | --matrix | --k-hyper | --findings] [--no-matrix]
 //!             [--kind <kind>]... [--min-severity info|warn|alert]
 //!             [--tau-j <f>] [--tau-d <f>] [--depth <n>] [--path-limit <n>]
-//! archi version save -m <note> | anchor | list | show <id> | diff <a> <b> | current
+//! archi version save -m <note> | anchor | remint -m <note> [--session <slug>] | list |
+//!   show <id> | diff <a|live> <b|live> | current
 //!             [--project <dir>]
 //! archi link add <spec[@ver]> <file[#symbol]> --kind literal|indirect
 //! archi link ls [--spec <ref>] [--evidence] [--json]
@@ -67,10 +68,11 @@ const USAGE: &str = "usage:
               [--kind <kind>]... [--min-severity info|warn|alert]
               [--tau-j <f>] [--tau-d <f>] [--depth <n>] [--path-limit <n>]
   archi version save -m <note> [--project <dir>]
+  archi version remint -m <note> [--session <slug>] [--project <dir>]
   archi version anchor [--project <dir>]
   archi version list [--project <dir>]
   archi version show <id> [--project <dir>]
-  archi version diff <a> <b> [--project <dir>]
+  archi version diff <a|live> <b|live> [--project <dir>]
   archi version current [--project <dir>]
   archi link add <spec[@ver]> <file[#symbol]> --kind literal|indirect [--project <dir>]
   archi link ls [--spec <ref>] [--evidence] [--json] [--project <dir>]
@@ -399,6 +401,14 @@ fn run_check(args: &Args) -> ExitCode {
     }
 }
 
+/// A path relative to the project root, for operator-facing prints.
+fn rel_display(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .display()
+        .to_string()
+}
+
 fn run_version(args: &Args) -> ExitCode {
     let fail = |e: String| -> ExitCode {
         eprintln!("archi: {e}");
@@ -434,15 +444,23 @@ fn run_version(args: &Args) -> ExitCode {
                         kind.describe(),
                         file.display()
                     );
+                    let mut unit = vec![
+                        "archi/versions/index.toml".to_string(),
+                        rel_display(&root, &file),
+                    ];
                     // Saving closes the active stress session, and the
                     // incidence report fires over the finished round
                     // (requirements/versioning.md#versioning--stressing).
                     match docs::close_open_session(&root, &id) {
                         Ok(Some(session)) => {
                             println!("closed stress session `{session}`");
+                            unit.push(format!("archi/stress/{session}/{session}.md"));
+                            println!("commit as one: {}", unit.join(", "));
                             fire_incidence(&root, ws.model(), &session);
                         }
-                        Ok(None) => {}
+                        Ok(None) => {
+                            println!("commit as one: {}", unit.join(", "));
+                        }
                         Err(e) => eprintln!("archi: warning: {e}"),
                     }
                     ExitCode::SUCCESS
@@ -469,6 +487,65 @@ fn run_version(args: &Args) -> ExitCode {
                         Err(e) => fail(e),
                     }
                 }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("remint"), []) => {
+            // The later writer's path back onto a merged lineage: mint the
+            // merged tree like a save, then re-stamp the named round's
+            // `closed:` so the record follows its answers. Never closes an
+            // open session — that is `version save`'s ceremony
+            // (requirements/multiplayer.md).
+            let Some(note) = args.message.as_deref() else {
+                return usage_err("`version remint` needs a note: -m <note>");
+            };
+            let session = match args.session.as_deref() {
+                Some(slug) => match docs::closed_session_anchor(&root, slug) {
+                    Ok(_) => Some(slug),
+                    Err(e) => return fail(e),
+                },
+                None => None,
+            };
+            let ws = match compile_or_report(&root, false) {
+                Ok(c) => c.workspace,
+                Err(code) => return code,
+            };
+            match versions::save(&root, ws.model(), note) {
+                Ok(versions::Saved::Written {
+                    id,
+                    kind,
+                    file,
+                    bytes,
+                }) => {
+                    println!(
+                        "reminted {id} ({}, {bytes} bytes, {}) — {note}",
+                        kind.describe(),
+                        file.display()
+                    );
+                    let mut unit = vec![
+                        "archi/versions/index.toml".to_string(),
+                        rel_display(&root, &file),
+                    ];
+                    match session {
+                        Some(slug) => match docs::restamp_session(&root, slug, &id) {
+                            Ok(path) => {
+                                println!("re-stamped session `{slug}` — closed: {id}");
+                                unit.push(rel_display(&root, &path));
+                            }
+                            Err(e) => return fail(e),
+                        },
+                        None => println!(
+                            "no --session named: the mint stands alone, no round re-stamped"
+                        ),
+                    }
+                    println!("commit as one: {}", unit.join(", "));
+                    ExitCode::SUCCESS
+                }
+                Ok(versions::Saved::Unchanged { latest }) => fail(format!(
+                    "nothing to remint: the model is unchanged since {latest} — remint carries \
+                     a merged tree's delta onto the lineage; with nothing unsaved there is \
+                     nothing to carry"
+                )),
                 Err(e) => fail(e),
             }
         }
@@ -519,22 +596,40 @@ fn run_version(args: &Args) -> ExitCode {
             },
             Err(e) => fail(e),
         },
-        (Some("diff"), [a, b]) => match versions::Archive::open(&root) {
-            Ok(None) => fail("no versions saved".into()),
-            Ok(Some(archive)) => {
-                match archive
-                    .reconstruct(a)
-                    .and_then(|from| archive.reconstruct(b).map(|to| (from, to)))
-                {
-                    Ok((from, to)) => {
-                        print!("{}", diffy::create_patch(&from, &to));
-                        ExitCode::SUCCESS
-                    }
-                    Err(e) => fail(e),
+        (Some("diff"), [a, b]) => {
+            // Either side may be `live`: the working tree compiles and
+            // renders canonical, so a merge's semantic delta is reviewable
+            // before any save seals it (requirements/multiplayer.md).
+            let live = if a == "live" || b == "live" {
+                let ws = match compile_or_report(&root, false) {
+                    Ok(c) => c.workspace,
+                    Err(code) => return code,
+                };
+                Some(ws.model().render_source())
+            } else {
+                None
+            };
+            let archive = match versions::Archive::open(&root) {
+                Ok(a) => a,
+                Err(e) => return fail(e),
+            };
+            let side = |s: &str| -> Result<String, String> {
+                if s == "live" {
+                    return Ok(live.clone().expect("live side compiled"));
                 }
+                archive
+                    .as_ref()
+                    .ok_or_else(|| "no versions saved".to_string())?
+                    .reconstruct(s)
+            };
+            match side(a).and_then(|from| side(b).map(|to| (from, to))) {
+                Ok((from, to)) => {
+                    print!("{}", diffy::create_patch(&from, &to));
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
             }
-            Err(e) => fail(e),
-        },
+        }
         (Some("current"), []) => {
             let ws = match compile_or_report(&root, false) {
                 Ok(c) => c.workspace,
@@ -551,7 +646,7 @@ fn run_version(args: &Args) -> ExitCode {
             ExitCode::SUCCESS
         }
         _ => usage_err(
-            "`version` takes: save -m <note> | anchor | list | show <id> | diff <a> <b> | current",
+            "`version` takes: save -m <note> | anchor | remint -m <note> [--session <slug>] | list | show <id> | diff <a|live> <b|live> | current",
         ),
     }
 }

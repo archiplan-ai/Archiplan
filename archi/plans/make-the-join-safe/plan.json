@@ -1,0 +1,120 @@
+{
+  "name": "make-the-join-safe",
+  "version": "v0006",
+  "created": "2026-07-08T10:29:28Z",
+  "state": "completed",
+  "closed_waves": 1,
+  "problem": "The merge-pressure round proved the join unsafe: branch-parallel link ops corrupt the journal (colliding dense ids, tombstone races decided by union line order) and every merge forces a hand edit of the hand-edit-banned file; colliding saves have no verb-shaped repair — the later writer retypes the note, closes nothing, and the round record silently claims the winner's version; and a merge's semantic delta is invisible until the next save seals it. Three of the round's four derived requirements land here (rounds-fold-deliberately stays open: session folding needs schema design).",
+  "technology_stack": [
+    {
+      "tech": "Rust 2024; crates/archi: links/mod.rs + links/capture.rs (content-suffixed link ids l<seq>-<hex6>, absorbing order-independent fold with surfaced notes, self-healed archi/links/.gitattributes merge=union), versions.rs (remint, diff with a live target, recipe-naming E_ARCHIVE messages, artifact list on mint), docs/mod.rs (restamp_session; session id validation skips only when the archive itself is unreadable), main.rs (dispatch + usage)",
+      "provenance": "every change extends a proven seam: fold(), save(), stamp_closed() and Model::render_source() already exist; sha2 already in the dependency tree for the id suffix; the versions .gitattributes self-heal is the precedent for the journal's"
+    }
+  ],
+  "architecture_summary": [
+    {
+      "node": "Links.Journal",
+      "role": "the append-only truth learns to fold concurrent histories instead of corrupting on them"
+    },
+    {
+      "node": "Archive",
+      "role": "grows remint (mint + re-stamp the round) and live diffs; its diagnostics name their recipes"
+    }
+  ],
+  "stack_mapping": [
+    {
+      "tech": "links/mod.rs, links/capture.rs, archi/links/.gitattributes",
+      "node": "Links.Journal"
+    },
+    {
+      "tech": "versions.rs, docs/mod.rs, main.rs, tests/multiplayer_e2e.rs",
+      "node": "Archive"
+    }
+  ],
+  "scenarios": [
+    "two clones each link add on their own branch; git merges the journal via the shipped union attribute with no conflict; link ls shows both links live and verify is green in either union order",
+    "two clones each version save v0007; the integrator keeps the first-lander, runs version remint -m <note> --session <slug>; the manifest stays dense and linear, version diff shows exactly the reminted delta, and the named session's closed: follows onto the new id",
+    "on the merged, still-unsaved tree, version diff v0006 live prints the semantic delta the merge composed — before any save seals it"
+  ],
+  "scenarios_displayed": true,
+  "scenarios_closed": true,
+  "tasks": [
+    {
+      "id": "t2",
+      "node": "Archive",
+      "description": "remint rejoins the lineage; merge deltas reviewable; diagnostics name recipes",
+      "spec_refs": [
+        "Archive",
+        "Storage type_of Archive",
+        "Cli.drive consult(->ModelGraph, <-Report) Archive.anchor",
+        "Cli.drive consult(->ModelGraph, <-Report) Archive.remint",
+        "Cli.drive consult(->ModelGraph, <-Report) Archive.save",
+        "DocsCompiler.pin_model recall(<-CanonicalRender) Archive.serve"
+      ],
+      "stack_details": "versions.rs: remint() (save + refuse-on-unchanged + named-session restamp), diff live rendering via Model::render_source(), open()/read_file() error text gains conflict-marker and half-shipped-save recipes, Saved carries the artifact list main prints as one commit unit; docs/mod.rs: restamp_session(root, slug, id) beside stamp_closed, session id-existence checks skip when Archive::open errors; main.rs: remint dispatch, diff accepts live on either side, usage strings",
+      "inputs": {},
+      "outputs": [
+        "crates/archi/src/versions.rs",
+        "crates/archi/src/docs/mod.rs",
+        "crates/archi/src/main.rs",
+        "crates/archi/tests/multiplayer_e2e.rs"
+      ],
+      "verifications": {
+        "docs-compile-with-the-model": [
+          "session id-existence validation skips only when the archive itself fails to open (E_ARCHIVE already reported by check); with a readable archive every E_SESSION check is byte-identical — docs tests stay green"
+        ],
+        "findings-never-block": [
+          "absorbed-event notes and recipe hints surface as advisory text; only genuine corruption, seal breaks and unreadable archives exit nonzero"
+        ],
+        "merge-deltas-are-reviewable": [
+          "e2e: on a dirty tree version diff v0006 live prints exactly the unsaved semantic delta; version diff live v0006 reverses it; two archived ids behave exactly as before"
+        ],
+        "provenance-anchors-post-hoc": [
+          "anchor is untouched; its e2e suite stays green; remint on a dirty tree mints without provenance exactly like save"
+        ],
+        "remint-rejoins-the-lineage": [
+          "e2e (multiplayer_e2e.rs): two clones save colliding v0007s; keep the first-lander, version remint -m note --session <slug> mints the merged tree, re-stamps that session's closed: to the new id, and version list stays dense and linear",
+          "unit: remint refuses an unchanged model, an unknown session, and an open session — the restamp targets closed rounds only"
+        ],
+        "stress-pins-versions": [
+          "restamp rewrites only the closed: field; no verb touches a session's pinned version:"
+        ],
+        "the-archive-is-sealed": [
+          "remint writes through the same save path — seal verification and tamper tests stay green; the new diagnostics rephrase E_ARCHIVE messages and never relax a seal check"
+        ],
+        "unchanged-saves-close-rounds": [
+          "save's close ceremony is untouched; remint's restamp names a closed session explicitly and never rides the open-session close path"
+        ],
+        "versions-mint-on-meaning": [
+          "remint hashes the render and refuses an unchanged model — no token mints; save's unchanged arm is untouched"
+        ]
+      }
+    },
+    {
+      "id": "t3",
+      "node": "Links.Journal",
+      "description": "the fold survives a merge: collision-free ids, absorbing fold, union attribute",
+      "spec_refs": [
+        "Links.Journal",
+        "Links.Capture.mint persist(LinkEvent) Links.Journal.append",
+        "Links.Grader.read_fold recall(<-LinkEvent) Links.Journal.serve_fold"
+      ],
+      "stack_details": "mod.rs: mint_id(seq, spec, anchor) -> l<seq>-<hex6> (sha256 over content + mint moment, first 6 hex), fold() absorbs identical replayed lines and events on tombstoned ids into Folded.absorbed notes (surfaced by verify/audit), refuses only ids the journal never minted and true duplicate-id adds; append() self-heals archi/links/.gitattributes with journal.jsonl merge=union; capture.rs mints through the same helper",
+      "inputs": {},
+      "outputs": [
+        "crates/archi/src/links/mod.rs",
+        "crates/archi/src/links/capture.rs",
+        "archi/links/.gitattributes"
+      ],
+      "verifications": {
+        "link-truth-is-append-only": [
+          "absorption is read-side only — no verb or fold path rewrites or drops a journal line; retire + re-add still mints a fresh id and keeps the tombstone; the existing fold and journal tests stay green"
+        ],
+        "the-fold-survives-a-merge": [
+          "unit tests: two branch segments unioned in both orders fold to the same live set; retire-then-repin absorbs with a surfaced note; an identical duplicated add line absorbs; an event naming an id never minted still refuses the fold",
+          "e2e: two clones each link add on branches; the union attribute merges the journal without conflict markers and link ls shows both links — the content suffix makes parallel mints collision-free"
+        ]
+      }
+    }
+  ]
+}

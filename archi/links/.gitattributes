@@ -1,0 +1,3 @@
+# The journal is append-only and its fold absorbs concurrent histories:
+# branch merges concatenate instead of conflicting (requirements/multiplayer.md).
+journal.jsonl merge=union

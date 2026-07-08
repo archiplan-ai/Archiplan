@@ -22,7 +22,9 @@ use std::fs::{self, OpenOptions};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use sha2::{Digest, Sha256};
 
 use modeling_lang::{Definition, Model, Statement, Workspace};
 use serde::{Deserialize, Serialize};
@@ -233,9 +235,11 @@ pub struct Pins {
 /// One code-link, as journaled and as folded.
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Link {
-    /// Dense id, `l0001` onward. Two branches minting the same id collide
-    /// as an ordinary git merge conflict in the journal — surfaced, not
-    /// silent, like colliding version ids.
+    /// Readable sequence plus a content suffix, `l0042-9f3ab1`. The suffix
+    /// hashes the link's content and mint moment, so two branches minting
+    /// in parallel cannot collide and their journals union-merge cleanly
+    /// (requirements/multiplayer.md). Bootstrap-era ids are bare `l0001`
+    /// onward — the fold treats ids as opaque.
     pub id: String,
     /// The spec element this code realizes.
     pub spec: SpecRef,
@@ -303,8 +307,13 @@ struct Folded {
     /// Retired links, folded state at retirement — capture's dedup memory:
     /// a subtracted candidate must stay subtracted across re-runs.
     retired: Vec<Link>,
-    /// Adds ever journaled — dense ids mint past retirements.
+    /// Adds ever journaled — the id sequence counts past retirements.
     adds: usize,
+    /// Events the fold absorbed instead of applying — identical replayed
+    /// lines and events landing on tombstones, the residue of merging
+    /// concurrent branch histories. Surfaced by verify and audit, never
+    /// silent, never corruption (requirements/multiplayer.md).
+    absorbed: Vec<String>,
 }
 
 impl Folded {
@@ -312,9 +321,23 @@ impl Folded {
         self.live.iter().find(|l| l.id == id)
     }
 
-    fn next_id(&self) -> String {
-        format!("l{:04}", self.adds + 1)
+    fn next_id(&self, salt: &str) -> String {
+        mint_id(self.adds + 1, salt)
     }
+}
+
+/// Mint a link id: a readable dense sequence plus a six-hex content suffix,
+/// so ids minted on parallel branches cannot collide when the journals
+/// union-merge (requirements/multiplayer.md).
+pub(crate) fn mint_id(seq: usize, salt: &str) -> String {
+    let mut h = Sha256::new();
+    h.update(salt.as_bytes());
+    if let Ok(t) = SystemTime::now().duration_since(UNIX_EPOCH) {
+        h.update(t.as_nanos().to_le_bytes());
+    }
+    h.update(std::process::id().to_le_bytes());
+    let hex = format!("{:x}", h.finalize());
+    format!("l{seq:04}-{}", &hex[..6])
 }
 
 fn journal_path(root: &Path) -> PathBuf {
@@ -345,17 +368,34 @@ fn read_journal(root: &Path) -> Result<Vec<Event>, String> {
     Ok(events)
 }
 
+/// Fold the event stream into the live set. Concurrent branch histories
+/// union-merge into interleaves the writers never saw; the fold stays
+/// order-independent over them by absorbing what a sequential history
+/// would forbid — an identical replayed line, an event landing on a
+/// tombstone — and surfacing every absorption as a note. Only an event
+/// naming an id the journal never minted, or two different links under one
+/// id, remains corruption (requirements/multiplayer.md).
 fn fold(events: Vec<Event>) -> Result<Folded, String> {
     let mut live: Vec<Link> = Vec::new();
     let mut retired: Vec<Link> = Vec::new();
     let mut adds = 0;
+    let mut absorbed: Vec<String> = Vec::new();
     let corrupt = |id: &str, what: &str| {
-        format!("journal corrupt: `{what}` names `{id}`, which is not a live link")
+        format!("journal corrupt: `{what}` names `{id}`, which was never minted")
     };
     for event in events {
         match event {
             Event::Add { link } => {
-                if live.iter().chain(&retired).any(|l| l.id == link.id) {
+                if let Some(existing) = live.iter().chain(&retired).find(|l| l.id == link.id) {
+                    let same = serde_json::to_value(existing).ok()
+                        == serde_json::to_value(&link).ok();
+                    if same {
+                        absorbed.push(format!(
+                            "add `{}` replayed identically — absorbed",
+                            link.id
+                        ));
+                        continue;
+                    }
                     return Err(format!("journal corrupt: `{}` is added twice", link.id));
                 }
                 live.push(link);
@@ -363,6 +403,9 @@ fn fold(events: Vec<Event>) -> Result<Folded, String> {
             }
             Event::Confirm { id, .. } => match live.iter_mut().find(|l| l.id == id) {
                 Some(l) => l.standing = Standing::Asserted,
+                None if retired.iter().any(|l| l.id == id) => {
+                    absorbed.push(format!("`confirm` on retired `{id}` — absorbed"));
+                }
                 None => return Err(corrupt(&id, "confirm")),
             },
             Event::Repin {
@@ -372,19 +415,28 @@ fn fold(events: Vec<Event>) -> Result<Folded, String> {
                     l.anchor = anchor;
                     l.pins = pins;
                 }
+                None if retired.iter().any(|l| l.id == id) => {
+                    absorbed.push(format!("`repin` on retired `{id}` — absorbed"));
+                }
                 None => return Err(corrupt(&id, "repin")),
             },
-            Event::Retire { id, .. } => {
-                let Some(at) = live.iter().position(|l| l.id == id) else {
-                    return Err(corrupt(&id, "retire"));
-                };
-                retired.push(live.remove(at));
-            }
+            Event::Retire { id, .. } => match live.iter().position(|l| l.id == id) {
+                Some(at) => {
+                    retired.push(live.remove(at));
+                }
+                None if retired.iter().any(|l| l.id == id) => {
+                    absorbed.push(format!("`retire` on retired `{id}` — absorbed"));
+                }
+                None => return Err(corrupt(&id, "retire")),
+            },
             Event::Touch { id, task, .. } => match live.iter_mut().find(|l| l.id == id) {
                 Some(l) => {
                     if !l.touches.contains(&task) {
                         l.touches.push(task);
                     }
+                }
+                None if retired.iter().any(|l| l.id == id) => {
+                    absorbed.push(format!("`touch` on retired `{id}` — absorbed"));
                 }
                 None => return Err(corrupt(&id, "touch")),
             },
@@ -394,6 +446,9 @@ fn fold(events: Vec<Event>) -> Result<Folded, String> {
                         l.decays.push(task);
                     }
                 }
+                None if retired.iter().any(|l| l.id == id) => {
+                    absorbed.push(format!("`decay` on retired `{id}` — absorbed"));
+                }
                 None => return Err(corrupt(&id, "decay")),
             },
         }
@@ -402,6 +457,7 @@ fn fold(events: Vec<Event>) -> Result<Folded, String> {
         live,
         retired,
         adds,
+        absorbed,
     })
 }
 
@@ -409,10 +465,21 @@ fn load(root: &Path) -> Result<Folded, String> {
     fold(read_journal(root)?)
 }
 
+const JOURNAL_GITATTRIBUTES: &str = "\
+# The journal is append-only and its fold absorbs concurrent histories:
+# branch merges concatenate instead of conflicting (requirements/multiplayer.md).
+journal.jsonl merge=union
+";
+
 fn append(root: &Path, events: &[Event]) -> Result<(), String> {
     let path = journal_path(root);
     let dir = path.parent().expect("journal has a directory");
     fs::create_dir_all(dir).map_err(|e| format!("cannot create `{}`: {e}", dir.display()))?;
+    let gitattributes = dir.join(".gitattributes");
+    if !gitattributes.exists() {
+        fs::write(&gitattributes, JOURNAL_GITATTRIBUTES)
+            .map_err(|e| format!("cannot write `{}`: {e}", gitattributes.display()))?;
+    }
     let mut out = String::new();
     for e in events {
         out.push_str(&serde_json::to_string(e).map_err(|e| format!("event serializes: {e}"))?);
@@ -663,7 +730,7 @@ pub fn add(
     let resolved = resolve_anchor(root, &anchor)?;
     let folded = load(root)?;
     let link = Link {
-        id: folded.next_id(),
+        id: folded.next_id(&format!("{spec_text}{code_text}")),
         spec,
         anchor,
         kind,
@@ -868,6 +935,9 @@ pub struct VerifyReport {
     pub checked: Vec<Checked>,
     /// Links skipped by `--since` — their anchor files did not change.
     pub skipped: usize,
+    /// Events the fold absorbed — merged-history residue, surfaced.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub absorbed: Vec<String>,
 }
 
 impl VerifyReport {
@@ -913,7 +983,11 @@ pub fn verify(root: &Path, model: &Model, opts: &VerifyOptions) -> Result<Verify
         }
         checked.push(check_link(root, model, &mut slots, link)?);
     }
-    Ok(VerifyReport { checked, skipped })
+    Ok(VerifyReport {
+        checked,
+        skipped,
+        absorbed: folded.absorbed,
+    })
 }
 
 /// Grade one link: spec side first, then the projection.
@@ -1338,7 +1412,11 @@ pub fn audit(root: &Path, model: &Model, opts: &AuditOptions) -> Result<AuditRep
             .filter(|l| l.standing == Standing::Evidence)
             .count(),
         findings: Vec::new(),
-        notes: Vec::new(),
+        notes: folded
+            .absorbed
+            .iter()
+            .map(|n| format!("journal: {n}"))
+            .collect(),
         pruned: Vec::new(),
     };
 
@@ -1549,6 +1627,9 @@ pub fn render_link(l: &Link) -> String {
 /// The verify report as human lines: one per link, then the tally.
 pub fn render_verify(report: &VerifyReport) -> String {
     let mut out = String::new();
+    for note in &report.absorbed {
+        out.push_str(&format!("journal: {note}\n"));
+    }
     for c in &report.checked {
         out.push_str(&format!(
             "{:22} {}{}\n",
@@ -1663,11 +1744,15 @@ mod tests {
             LinkKind::Indirect,
         )
         .unwrap();
-        assert_eq!((lit.id.as_str(), ind.id.as_str()), ("l0001", "l0002"));
+        // Ids: dense readable sequence, content-suffixed so parallel
+        // branches cannot mint the same id (requirements/multiplayer.md).
+        assert!(lit.id.starts_with("l0001-"), "{}", lit.id);
+        assert!(ind.id.starts_with("l0002-"), "{}", ind.id);
+        assert_ne!(lit.id, ind.id);
         assert_eq!(lit.standing, Standing::Asserted);
         assert_eq!(lit.birth.spans[0].file, "code/auth.rs");
 
-        assert_eq!(state_of(&root, &ws, "l0001"), (State::Clean, false));
+        assert_eq!(state_of(&root, &ws, &lit.id), (State::Clean, false));
 
         // Reformatting is not drift: canonical tokens are the identity.
         fs::write(
@@ -1678,7 +1763,7 @@ mod tests {
             ),
         )
         .unwrap();
-        assert_eq!(state_of(&root, &ws, "l0001"), (State::Clean, false));
+        assert_eq!(state_of(&root, &ws, &lit.id), (State::Clean, false));
 
         // A body edit drifts the literal link and fails it; the indirect
         // link's watched interface holds.
@@ -1687,8 +1772,8 @@ mod tests {
             AUTH_RS.replace("self.salted.extend(hash);", "self.salted = hash.to_vec();"),
         )
         .unwrap();
-        assert_eq!(state_of(&root, &ws, "l0001"), (State::Drifted, true));
-        assert_eq!(state_of(&root, &ws, "l0002"), (State::Clean, false));
+        assert_eq!(state_of(&root, &ws, &lit.id), (State::Drifted, true));
+        assert_eq!(state_of(&root, &ws, &ind.id), (State::Clean, false));
 
         // A signature edit drifts the indirect link too.
         fs::write(
@@ -1696,12 +1781,12 @@ mod tests {
             AUTH_RS.replace("persist(&mut self, hash: &[u8])", "persist(&mut self, hash: Vec<u8>)"),
         )
         .unwrap();
-        assert_eq!(state_of(&root, &ws, "l0002"), (State::Drifted, false));
+        assert_eq!(state_of(&root, &ws, &ind.id), (State::Drifted, false));
 
         // Repin accepts the drift: the projection rewrites, birth stands.
         let before = ls(&root, None, false).unwrap()[0].birth.clone();
-        repin(&root, "l0001", None).unwrap();
-        assert_eq!(state_of(&root, &ws, "l0001"), (State::Clean, false));
+        repin(&root, &lit.id, None).unwrap();
+        assert_eq!(state_of(&root, &ws, &lit.id), (State::Clean, false));
         assert_eq!(ls(&root, None, false).unwrap()[0].birth, before);
 
         fs::remove_dir_all(&root).unwrap();
@@ -1711,7 +1796,7 @@ mod tests {
     fn moves_are_candidates_and_deletions_are_missing() {
         let root = temp_project();
         let ws = model_of(&root);
-        add(
+        let l = add(
             &root,
             ws.model(),
             "Vault",
@@ -1728,19 +1813,19 @@ mod tests {
             format!("use super::Vault;\n\n{rest}"),
         )
         .unwrap();
-        let (state, failing) = state_of(&root, &ws, "l0001");
+        let (state, failing) = state_of(&root, &ws, &l.id);
         assert!(
             matches!(&state, State::Moved { file, exact: true, .. } if file == "code/store.rs"),
             "{state:?}"
         );
         assert!(!failing, "moved has a candidate; missing is what fails");
 
-        repin(&root, "l0001", Some("code/store.rs#Vault::persist")).unwrap();
-        assert_eq!(state_of(&root, &ws, "l0001"), (State::Clean, false));
+        repin(&root, &l.id, Some("code/store.rs#Vault::persist")).unwrap();
+        assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
 
         fs::remove_dir_all(root.join("code").join("store.rs")).ok();
         fs::remove_file(root.join("code").join("store.rs")).ok();
-        let (state, failing) = state_of(&root, &ws, "l0001");
+        let (state, failing) = state_of(&root, &ws, &l.id);
         assert_eq!(state, State::Missing);
         assert!(failing);
 
@@ -1757,7 +1842,7 @@ mod tests {
         assert!(err.contains("E_MODEL_REF"), "{err}");
 
         // An edge ref is the canonical surface text.
-        add(
+        let edge = add(
             &root,
             ws.model(),
             "Auth.store wire Vault.inn",
@@ -1769,8 +1854,9 @@ mod tests {
         // Pin a version, then rename the node in the live model: the pinned
         // ref still resolves (note only), the Working ref spec-drifts.
         versions::save(&root, ws.model(), "first").unwrap();
-        add(&root, ws.model(), "Vault@v0001", "code/auth.rs", LinkKind::Indirect).unwrap();
-        add(&root, ws.model(), "Vault", "code/auth.rs", LinkKind::Indirect).unwrap();
+        let pinned =
+            add(&root, ws.model(), "Vault@v0001", "code/auth.rs", LinkKind::Indirect).unwrap();
+        let working = add(&root, ws.model(), "Vault", "code/auth.rs", LinkKind::Indirect).unwrap();
         fs::write(
             root.join("src").join("model.arch"),
             MODEL.replace("Vault", "Safe"),
@@ -1779,11 +1865,11 @@ mod tests {
         let ws2 = model_of(&root);
         let report = verify(&root, ws2.model(), &VerifyOptions::default()).unwrap();
         let by_id = |id: &str| report.checked.iter().find(|c| c.link.id == id).unwrap();
-        assert_eq!(by_id("l0002").state, State::Clean, "pinned slot holds");
-        assert_eq!(by_id("l0003").state, State::SpecDrifted);
-        assert!(by_id("l0003").failing);
+        assert_eq!(by_id(&pinned.id).state, State::Clean, "pinned slot holds");
+        assert_eq!(by_id(&working.id).state, State::SpecDrifted);
+        assert!(by_id(&working.id).failing);
         // The edge ref names Vault too: drifted with it.
-        assert_eq!(by_id("l0001").state, State::SpecDrifted);
+        assert_eq!(by_id(&edge.id).state, State::SpecDrifted);
 
         fs::remove_dir_all(&root).unwrap();
     }
@@ -2119,18 +2205,18 @@ mod tests {
     fn rm_retires_and_the_journal_stays_dense() {
         let root = temp_project();
         let ws = model_of(&root);
-        add(&root, ws.model(), "Vault", "code/auth.rs", LinkKind::Literal).unwrap();
+        let first = add(&root, ws.model(), "Vault", "code/auth.rs", LinkKind::Literal).unwrap();
         add(&root, ws.model(), "Auth", "code/auth.rs", LinkKind::Literal).unwrap();
-        retire(&root, &["l0001".to_string()]).unwrap();
-        assert!(retire(&root, &["l0001".to_string()]).is_err(), "already retired");
+        retire(&root, &[first.id.clone()]).unwrap();
+        assert!(retire(&root, &[first.id.clone()]).is_err(), "already retired");
         let live = ls(&root, None, false).unwrap();
         assert_eq!(live.len(), 1);
-        // Ids mint past retirements: dense over adds, never reused.
+        // The sequence counts past retirements: never reused, still readable.
         let third = add(&root, ws.model(), "Vault", "code/auth.rs", LinkKind::Indirect).unwrap();
-        assert_eq!(third.id, "l0003");
+        assert!(third.id.starts_with("l0003-"), "{}", third.id);
         // Bulk by spec.
         let retired = retire_spec(&root, "Vault").unwrap();
-        assert_eq!(retired, vec!["l0003".to_string()]);
+        assert_eq!(retired, vec![third.id.clone()]);
         fs::remove_dir_all(&root).unwrap();
     }
 

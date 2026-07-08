@@ -537,8 +537,13 @@ fn cross_check(
     }
 
     // Sessions: pinned versions exist; at most one session is open. An
-    // unreadable archive is E_ARCHIVE territory, reported elsewhere.
-    let archive = versions::Archive::open(root).ok().flatten();
+    // unreadable archive is E_ARCHIVE territory, reported elsewhere — and
+    // while it is unreadable (a merge conflict, a half-shipped save) the
+    // id-existence checks stay quiet instead of cascading one archive
+    // error into an E_SESSION per session (requirements/multiplayer.md).
+    let opened = versions::Archive::open(root);
+    let archive_readable = opened.is_ok();
+    let archive = opened.ok().flatten();
     let ids: BTreeSet<&str> = archive
         .iter()
         .flat_map(|a| a.entries())
@@ -553,7 +558,7 @@ fn cross_check(
                     &s.file,
                     *line,
                 ));
-            } else if !ids.contains(v.as_str()) {
+            } else if archive_readable && !ids.contains(v.as_str()) {
                 diags.push(DocDiagnostic::new(
                     "E_SESSION",
                     format!("`{v}` names no archived version"),
@@ -564,6 +569,7 @@ fn cross_check(
         }
         if let Some((c, line)) = &s.closed
             && !c.is_empty()
+            && archive_readable
             && !ids.contains(c.as_str())
         {
             diags.push(DocDiagnostic::new(
@@ -812,6 +818,56 @@ pub fn close_open_session(root: &Path, version_id: &str) -> Result<Option<String
                 .join(", ")
         )),
     }
+}
+
+/// Validate that `slug` names a **closed** stress session and return its
+/// anchor file. Remint's precondition: the restamp targets a round whose
+/// save was discarded by a merge — an open session closes through
+/// `version save`, never through a remint (requirements/multiplayer.md).
+pub fn closed_session_anchor(root: &Path, slug: &str) -> Result<PathBuf, String> {
+    let anchor = root
+        .join("archi")
+        .join("stress")
+        .join(slug)
+        .join(format!("{slug}.md"));
+    if !anchor.is_file() {
+        return Err(format!("no session `{slug}` under archi/stress/"));
+    }
+    let text = fs::read_to_string(&anchor)
+        .map_err(|e| format!("cannot read `{}`: {e}", anchor.display()))?;
+    let doc = md::parse(&text).map_err(|e| {
+        format!(
+            "session `{slug}` does not parse ({}:{}: {})",
+            rel(root, &anchor),
+            e.line,
+            e.message
+        )
+    })?;
+    let closed = doc
+        .frontmatter
+        .as_deref()
+        .and_then(|fm| fm.iter().find(|f| f.key == "closed"))
+        .and_then(|f| match &f.value {
+            FieldValue::Scalar(s) => Some(s.clone()),
+            _ => None,
+        });
+    match closed {
+        None => Err(format!("session `{slug}` has no `closed:` field")),
+        Some(s) if s.is_empty() => Err(format!(
+            "session `{slug}` is open — an open round closes through `version save`; \
+             remint re-stamps a round whose closing save was discarded by a merge"
+        )),
+        Some(_) => Ok(anchor),
+    }
+}
+
+/// Re-stamp a closed session's `closed:` onto a reminted version id — the
+/// round record follows its answers onto the merged lineage
+/// (requirements/multiplayer.md).
+pub fn restamp_session(root: &Path, slug: &str, version_id: &str) -> Result<PathBuf, String> {
+    let anchor = closed_session_anchor(root, slug)?;
+    stamp_closed(&anchor, version_id)?;
+    Ok(anchor)
 }
 
 fn stamp_closed(path: &Path, id: &str) -> Result<(), String> {

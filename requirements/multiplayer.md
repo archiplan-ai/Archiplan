@@ -17,27 +17,30 @@ off a shared origin, real conflicts, real resolutions.
 text ([versioning.md](versioning.md)). Textually disjoint edits compose into unreviewed
 semantics: broken (an edge whose node the other branch deleted — loud, but only at the
 integrator's post-merge check) or silently drifted (a retyped carrier under a standing
-requirement claim — green everywhere). The join needs a semantic review surface before the
-seal: the live render diffed against any archived version (`merge-deltas-are-reviewable`),
-runnable in CI on merge commits.
+requirement claim — green everywhere). The review surface exists
+(`merge-deltas-are-reviewable`, landed): `archi version diff <id> live` renders the working
+tree canonical and diffs it against any archived version — the merge's semantic delta is
+reviewable, and CI-able, before any save seals it.
 
 **Version archive (`archi/versions/`).** Ids are a dense sequence minted from a branch-local
 view, so parallel saves collide in the manifest and the patch filename — loudly, in exactly two
 files, while everything else about both rounds merges clean. The collision is the design
-working; the repair is not yet designed. The later writer re-mints onto the merged lineage
-(`remint-rejoins-the-lineage`): the post-merge state detected and named with its recipe, the
-note carried over from the discarded entry, the round's `closed:` stamp moved to the reminted
-id. A save's artifacts — manifest entry, patch or keyframe, session stamps — travel as one
-commit, and check names a half-shipped save at its author rather than as a read error at every
-clone.
+working; the repair is a verb (`remint-rejoins-the-lineage`, landed): conflict markers in the
+manifest raise one `E_ARCHIVE` that names this exact state and its recipe — keep the
+first-landed entry, then `archi version remint -m <note> --session <slug>` — and the remint
+mints the merged tree and re-stamps the named round's `closed:` onto the new id, so the record
+follows its answers. Every mint prints its artifacts — manifest entry, patch or keyframe,
+session stamp — as one `commit as one:` unit, and a manifest entry whose file is missing names
+the half-shipped save instead of raising a bare read error.
 
-**Link journal (`archi/links/journal.jsonl`).** Append-only, sequential-replay truth — and any
-two branch-parallel link ops conflict at its tail, forcing by-hand resolution of the one file
-hand edits are banned from. The fold must accept concurrent histories
-(`the-fold-survives-a-merge`): a union in either order reaches one defined live set, parallel
-id mints don't collide (or a verb re-sequences them), events landing on tombstones are defined
-rather than corruption, and repairs are verbs that leave journal records. Until then the
-journal is single-writer per repository.
+**Link journal (`archi/links/journal.jsonl`).** Append-only, sequential-replay truth — and now
+it folds concurrent histories (`the-fold-survives-a-merge`, landed). Ids carry a content
+suffix (`l0428-ecef31`), so parallel mints cannot collide; a `.gitattributes` shipped beside
+the journal union-merges branch appends without conflict markers; and the fold absorbs what a
+sequential history would forbid — an identical replayed line, an event landing on a
+tombstone — surfacing every absorption through `link verify` and `link audit` as notes.
+Subtractions still stick, and an event naming an id the journal never minted is still
+corruption: tolerance extends exactly as far as merge residue.
 
 **Stress sessions (`archi/stress/`).** "At most one open session" is a repository invariant
 that parallel branches violate silently — git sees only unrelated folders. And same-name
@@ -53,14 +56,14 @@ often, keep `archi check` on merge commits.
 
 ## The integrator's position
 
-Whoever merges authored neither side, and today inherits every consequence: the compile break
-neither branch could see, the session worklist of both writers, the journal conflict with no
-legal resolution, and diagnostics that cascade (one manifest conflict reads as a corrupt
-archive plus an `E_SESSION` for every session in the repo). Every post-merge broken state must
-therefore be (a) detected by `archi check`, (b) named together with its repair recipe, and
-(c) repairable by verbs alone. Today (a) mostly holds; (b) and (c) mostly do not. The gap is
-tracked in `issues/multiplayer-is-a-stub.md` and carried by the four derived requirements of
-the merge-pressure round.
+Whoever merges authored neither side. Every post-merge broken state must therefore be
+(a) detected by `archi check`, (b) named together with its repair recipe, and (c) repairable
+by verbs alone. For the journal, the archive and the model-review surface all three now hold:
+the journal merges itself and its fold surfaces the residue, the manifest collision names the
+remint recipe in one diagnostic (session validation stays quiet while the archive is
+unreadable), and the live diff reviews the merge before the seal. The remaining gap is the
+session record: two open sessions and the same-name chimera are detected but folded only by
+hand (`rounds-fold-deliberately`, open — tracked in `issues/multiplayer-is-a-stub.md`).
 
 ## Non-goals
 

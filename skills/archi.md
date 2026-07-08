@@ -100,6 +100,14 @@ are authored from day one.
   `archi.toml` — capture and the audit share it, links into excluded
   files still verify.
 - `plan use` refuses → the model has unsaved changes; `version save` first.
+- post-merge `check` says the manifest holds conflict markers → two branches minted the same
+  version id; keep the first-landed entry and its patch file, then
+  `archi version remint -m <note> --session <slug>` re-mints the later round onto the merged
+  lineage and re-stamps its `closed:`. Review the merge's semantic delta first with
+  `archi version diff <latest> live`.
+- journal merges concatenate (union attribute) instead of conflicting; `link verify` surfaces
+  any absorbed merge residue as `journal:` notes — read them, they are one writer's op landing
+  on the other's tombstone.
 - `plan next` blocked on coverage → not an error, the loop: confirm or
   retire the candidates it just minted, re-run.
 - verify notes "no longer resolves at Working" → the spec advanced;

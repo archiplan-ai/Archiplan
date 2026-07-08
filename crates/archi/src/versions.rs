@@ -167,8 +167,20 @@ impl Archive {
         }
         let text = fs::read_to_string(&index)
             .map_err(|e| format!("cannot read `{}`: {e}", index.display()))?;
-        let manifest: ManifestFile = toml::from_str(&text)
-            .map_err(|e| format!("`{}` does not parse: {e}", index.display()))?;
+        let manifest: ManifestFile = toml::from_str(&text).map_err(|e| {
+            if text.contains("<<<<<<<") || text.contains(">>>>>>>") {
+                format!(
+                    "`{}` holds merge conflict markers — two branches minted the same version \
+                     id. Keep the first-landed entry and its patch file (both sides' model and \
+                     doc work is already merged), then re-mint the later round onto the lineage: \
+                     `archi version remint -m <note> --session <slug>` \
+                     (requirements/multiplayer.md)",
+                    index.display()
+                )
+            } else {
+                format!("`{}` does not parse: {e}", index.display())
+            }
+        })?;
         Ok(Some(Archive {
             dir,
             entries: manifest.versions,
@@ -200,7 +212,15 @@ impl Archive {
 
     fn read_file(&self, e: &Entry) -> Result<String, String> {
         let p = self.file_of(e);
-        fs::read_to_string(&p).map_err(|err| format!("cannot read `{}`: {err}", p.display()))
+        fs::read_to_string(&p).map_err(|err| {
+            format!(
+                "cannot read `{}`: {err} — the manifest names this file: a save's artifacts \
+                 (manifest entry, patch or keyframe, session stamp) travel as one commit; a \
+                 missing one is usually a half-committed save — recover it from the save \
+                 author's tree or git history (requirements/multiplayer.md)",
+                p.display()
+            )
+        })
     }
 
     /// Reconstruct a version's canonical render: nearest keyframe at or

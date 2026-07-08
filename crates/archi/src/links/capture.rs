@@ -420,7 +420,7 @@ pub(crate) fn capture_wave(
                 }
                 adds += 1;
                 let link = Link {
-                    id: format!("l{adds:04}"),
+                    id: super::mint_id(adds, &format!("{spec_ref}{}", anchor.file)),
                     spec: SpecRef {
                         path: spec_ref.clone(),
                         version: None,

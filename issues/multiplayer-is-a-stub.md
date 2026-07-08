@@ -3,6 +3,12 @@
 **Kind:** missing feature · opened by the bootstrap's first round (`parallel-rounds`), mapped
 store by store by the `merge-pressure` round (round 9, 2026-07-08)
 
+**Status:** three of four joins landed 2026-07-08 via plan `make-the-join-safe` (fold survives
+merges + collision-free link ids + union attribute; `version remint --session` with recipe-naming
+diagnostics and the commit-as-one unit; `version diff <id> live`) — verified by
+`crates/archi/tests/multiplayer_e2e.rs` and a two-clone lab replay of the round's scenarios.
+Remaining open: `rounds-fold-deliberately` (session fold verb, chimera guard).
+
 `requirements/multiplayer.md` now specifies the per-store merge contract. The merge-pressure
 round pressed every store through real branch-and-merge cycles; what the binary does today at
 each join:
@@ -33,15 +39,20 @@ each join:
 
 The four derived requirements of merge-pressure, roughly in dependency order:
 
-1. `the-fold-survives-a-merge` — journal: collision-free ids (or a re-sequencing verb), defined
-   tombstone races, order-independent union fold, repair verbs that leave records.
-2. `remint-rejoins-the-lineage` — the save collision recipe as a first-class path: detected
-   state named by `check` (no cascade), note preserved, `closed:` re-stamped, and a
-   save-artifacts-travel-together guard that names a half-shipped save at its author.
-3. `merge-deltas-are-reviewable` — semantic diff of the live render against any archived
-   version (`version diff` grows a live target), CI-able on merge commits.
-4. `rounds-fold-deliberately` — a session fold verb with a record; chimera guard (session
-   identity beyond the slug).
-
-Until these land the operating rule stays **one writer per repository**
-(`archi/requirements/self-hosting/parallel-editing-discipline.md`).
+1. ✅ `the-fold-survives-a-merge` — landed: content-suffixed ids (`l0428-ecef31`) cannot collide
+   across branches; `archi/links/.gitattributes` (self-healed on first append) union-merges the
+   journal without conflict markers; the fold absorbs identical replays and tombstone-landing
+   events and surfaces them through `link verify`/`link audit`; only never-minted ids and
+   two-links-one-id remain corruption. Note preserved from the round: `remint` takes `-m`, the
+   discarded note stays retrievable from the conflicted manifest in git history.
+2. ✅ `remint-rejoins-the-lineage` — landed: conflict markers in the manifest raise one
+   `E_ARCHIVE` naming the state and the recipe (session validation stays quiet while the archive
+   is unreadable); `archi version remint -m <note> --session <slug>` mints the merged tree,
+   refuses unchanged models and open or unknown sessions, and re-stamps the round's `closed:`;
+   every mint prints its `commit as one:` artifact unit; a manifest entry whose file is missing
+   names the half-shipped save.
+3. ✅ `merge-deltas-are-reviewable` — landed: `archi version diff <a|live> <b|live>` renders the
+   working tree canonical and diffs either direction against any archived version.
+4. `rounds-fold-deliberately` — **open**: a session fold verb with a record; chimera guard
+   (session identity beyond the slug). Until it lands, concurrent rounds merge detectably
+   (`E_SESSION` names both) but fold by hand, and same-name chimeras remain possible.

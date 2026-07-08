@@ -154,8 +154,10 @@ so "which versions touched scope X" is a manifest scan; deeper scopes reconstruc
 ## Versioning * Multiplayer
 
 Two branches that each mint `v0043` collide in the manifest and in filenames as an ordinary git merge
-conflict — surfaced, not silent. The later branch re-mints its save on top of the merged lineage.
-Concurrent-editing discipline lives in [multiplayer.md](multiplayer.md).
+conflict — surfaced, not silent, and named: the conflict-marker diagnostic carries the recipe. The
+later branch keeps the first-landed entry and re-mints onto the merged lineage with
+`archi version remint -m <note> --session <slug>`, which also re-stamps that round's `closed:` so the
+record follows its answers. Concurrent-editing discipline lives in [multiplayer.md](multiplayer.md).
 
 ## Compile
 
