@@ -23,11 +23,13 @@ An ontology ships as a **preset**: a named JSON array of creation statements (`d
 
 ## Default preset
 
-Nodes:
-- Data
-- Service
-- Function
-- Storage
+Nodes, each defined by its `doc` — the identity prose a query returns, so an agent reads what the types mean
+before classifying a single term:
+
+- **Data** — information at rest or in flight: the payloads connections carry and stores hold
+- **Service** — a long-lived active component: it waits, answers and coordinates
+- **Function** — a computation: input in, output out, no state of its own
+- **Storage** — a keeper of state: what it holds outlives the interactions that touch it
 
 As a preset:
 
@@ -35,9 +37,13 @@ As a preset:
 [
   { "stmt": "define", "rel": "type_of", "trans": true, "directed": true,
     "source": "*", "target": "*" },
-  { "stmt": "define", "node": "Data" },
-  { "stmt": "define", "node": "Service" },
-  { "stmt": "define", "node": "Function" },
-  { "stmt": "define", "node": "Storage" }
+  { "stmt": "define", "node": "Data",
+    "doc": "information at rest or in flight: the payloads connections carry and stores hold" },
+  { "stmt": "define", "node": "Service",
+    "doc": "a long-lived active component: it waits, answers and coordinates" },
+  { "stmt": "define", "node": "Function",
+    "doc": "a computation: input in, output out, no state of its own" },
+  { "stmt": "define", "node": "Storage",
+    "doc": "a keeper of state: what it holds outlives the interactions that touch it" }
 ]
 ```

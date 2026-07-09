@@ -39,6 +39,9 @@ pub struct GraphNode {
     pub id: String,
     /// The node's own name (the last path segment).
     pub name: String,
+    /// The node's definition — its identity prose; omitted when it has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doc: Option<String>,
     /// Absolute paths of the nodes classifying this one via `type_of`,
     /// following the transitive closure; omitted when unclassified.
     #[serde(skip_serializing_if = "Vec::is_empty")]

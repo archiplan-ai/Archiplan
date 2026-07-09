@@ -44,17 +44,22 @@ impl Preset {
 
     /// The default ontology preset of
     /// `requirements/modeling-lang/ontology.md`: `type_of` plus the ontology
-    /// type nodes `Data`, `Service`, `Function` and `Storage`.
+    /// type nodes `Data`, `Service`, `Function` and `Storage`, each carrying
+    /// its definition so a query shows an agent what the types mean.
     pub fn default_ontology() -> Self {
         Self::from_value(
             "default",
             &json!([
                 { "stmt": "define", "rel": "type_of", "trans": true, "directed": true,
                   "source": "*", "target": "*" },
-                { "stmt": "define", "node": "Data" },
-                { "stmt": "define", "node": "Service" },
-                { "stmt": "define", "node": "Function" },
-                { "stmt": "define", "node": "Storage" }
+                { "stmt": "define", "node": "Data",
+                  "doc": "information at rest or in flight: the payloads connections carry and stores hold" },
+                { "stmt": "define", "node": "Service",
+                  "doc": "a long-lived active component: it waits, answers and coordinates" },
+                { "stmt": "define", "node": "Function",
+                  "doc": "a computation: input in, output out, no state of its own" },
+                { "stmt": "define", "node": "Storage",
+                  "doc": "a keeper of state: what it holds outlives the interactions that touch it" }
             ]),
         )
         .expect("the default ontology preset is valid")

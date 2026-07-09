@@ -34,10 +34,14 @@ Ground rules, always:
    explicit state, absence an error; any other heading opens a
    subrequirement. Leave them open — `unsatisfied_requirement` findings
    are the worklist, not errors.
-4. **Draft the model** — nodes, ports, typed edges in `.arch`. As elements
-   land, fill each requirement's `satisfied-by`, Satisfy prose, and
-   verification bullets (`- test — …`, `- type-level — …`). Loop
-   `archi check` to zero errors; `archi nkp` for a landscape sanity read.
+4. **Draft the model** — read the ontology first: `archi query --top`.
+   The unclassified nodes are the preset's types, each carrying its
+   definition; classify every term against them (`Service type_of
+   AuthService`) or against types you define. Then nodes, ports, typed
+   edges in `.arch`. As elements land, fill each requirement's
+   `satisfied-by`, Satisfy prose, and verification bullets (`- test — …`,
+   `- type-level — …`). Loop `archi check` to zero errors; `archi nkp`
+   for a landscape sanity read.
 5. **Save** — `archi version save -m "<why>"` seals the render.
 6. **Stress** — an adversarial round against the version just saved. Open
    the session, `archi/stress/<session>/<session>.md`: frontmatter

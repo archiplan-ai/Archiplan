@@ -337,6 +337,7 @@ pub(crate) fn subgraph(model: &Model, filter: &SubgraphFilter) -> (Vec<GraphNode
         .map(|&n| GraphNode {
             id: model.node_path(n),
             name: model.nodes[&n].name.clone(),
+            doc: model.nodes[&n].doc.clone(),
             types: classifiers(model, n)
                 .iter()
                 .map(|&t| model.node_path(t))
