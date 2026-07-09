@@ -26,22 +26,66 @@ Ground rules, always:
 2. **Capture intent** — one folder per problem area:
    `archi/requirements/<intent>/<intent>.md`, a name and the problem
    statement in the user's own terms. No solutioning here.
-3. **Derive requirements** — one file per claim in the intent folder:
-   frontmatter (`kind`, `origin: intent`, `satisfied-by: []`, `deferred:`),
-   then `System Context` and `Satisfy`. Leave them open —
-   `unsatisfied_requirement` findings are the worklist, not errors.
+3. **Derive requirements** — one file per claim in the intent folder,
+   filename the slugged name: frontmatter (`kind: functional` |
+   `non-functional`, `origin: intent`, `satisfied-by: []`, `deferred:`),
+   summary-first prose, then the reserved sections `System Context` and
+   `Satisfy`. Every field and section present in every file — empty is an
+   explicit state, absence an error; any other heading opens a
+   subrequirement. Leave them open — `unsatisfied_requirement` findings
+   are the worklist, not errors.
 4. **Draft the model** — nodes, ports, typed edges in `.arch`. As elements
    land, fill each requirement's `satisfied-by`, Satisfy prose, and
-   verification bullets (`- test — …`). Loop `archi check` to zero errors;
-   `archi nkp` for a landscape sanity read.
+   verification bullets (`- test — …`, `- type-level — …`). Loop
+   `archi check` to zero errors; `archi nkp` for a landscape sanity read.
 5. **Save** — `archi version save -m "<why>"` seals the render.
-6. **Stress** — `archi/stress/<session>/<session>.md` pinned to that
-   version; one stressor file per pressure (`affects`, `outcome`). Breaking
-   stressors demand answers: new requirements (`origin: stressor(…)`) and
-   model edits. The next `version save` closes the session and prints the
-   incidence report — model changed or not: a behavior-only round closes
-   against the version it pressed, no mint, exit 0. Repeat 4–6 until a
-   round survives — that version is the hardened spec.
+6. **Stress** — an adversarial round against the version just saved. Open
+   the session, `archi/stress/<session>/<session>.md`: frontmatter
+   `version:` (the pinned id) and `closed:` (empty — the closing save
+   stamps it), then a name and one charter paragraph, what this round
+   presses and why now. At most one session is open at a time. Press with
+   one stressor file per pressure beside it — a hypothesized failure mode,
+   scale cliff, regulatory constraint, or hostile stakeholder view:
+
+   ```markdown
+   ---
+   affects: [AuthService, AuthService.Storage]
+   outcome: breaking
+   ---
+
+   # Credential stuffing burst
+
+   A botnet replays leaked credential pairs at 100× the organic login
+   rate; real users' logins are collateral.
+
+   ## Attractor
+
+   `AuthService` saturates on hash verification and the login path is
+   down while the rest of the system idles — an availability cliff
+   behind one choke point.
+
+   ## Resolution
+
+   Rate limiting and hash-cost isolation take the burst off the hot
+   path: derived `login-rate-limit` and `hash-offload`.
+   ```
+
+   `affects` — mandatory, non-empty: absolute paths naming terms or types
+   of the *pinned* version (a type covers every term it classifies);
+   `check` resolves them against that version, not the live tree, so later
+   edits never orphan a round. `outcome` — `pending` until the round
+   decides, then `surviving` or `breaking`; `Resolution` is non-empty
+   exactly when the outcome is decided — why it held, or the answer.
+   Affects stand either way: they record where pressure was applied, not
+   how it went. Breaking stressors demand answers: derived requirements
+   (`origin: stressor(<slug>)` — mid-session requirements answer pressure,
+   never new intents) and model edits in the live tree; a breaking
+   stressor no requirement records as origin is the `breaking_unanswered`
+   finding. The next `version save` mints the version carrying the
+   answers, closes the session, and prints the incidence report — model
+   changed or not: a behavior-only round closes against the version it
+   pressed, no mint, exit 0. Repeat 4–6 until a round survives — that
+   version is the hardened spec.
 7. **Plan** — `archi plan use <name>` (refuses on an unsaved model — save
    first). `archi plan task add <node>` per node to implement; spec_refs
    and requirements are derived, never retyped. Then edit `plan.json`:
@@ -126,7 +170,4 @@ are authored from day one.
 - Never hand-edit lifecycle state (`state`, `closed_waves`, latches), the
   version archive, or the link journal — verbs only.
 
-Depth: `requirements/tasks.md`, `requirements/code-link.md`,
-`requirements/requirements.md`, `requirements/stressing.md`,
-`requirements/versioning.md`. Merging parallel spec work:
-`skills/archi-merge.md`.
+Merging parallel spec work: the `archi-merge` skill.

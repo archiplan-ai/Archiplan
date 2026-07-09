@@ -5,8 +5,7 @@ description: Merge two branches that both mutated an archiplan spec — triage t
 
 # Archi merge
 
-Two writers, one lineage. Ground truth: `requirements/multiplayer.md`; the
-failure inventory is the `merge-pressure` round (`archi/stress/merge-pressure/`).
+Two writers, one lineage.
 
 Ground rules, always:
 
@@ -36,8 +35,8 @@ Ground rules, always:
      the same version id: the collision ceremony (next section). Session
      id-validation stays quiet while the archive is unreadable — that
      silence is by design, not more breakage.
-   - *`E_SESSION: … both open`* → two concurrent rounds: fold by hand
-     (below).
+   - *`E_SESSION`* — two rounds both open, or a marker-fused round —
+     → the fold recipes (below).
 3. **Review what the merge composed.** `archi version diff <latest> live`
    renders the merged working tree canonical and diffs it against the
    archive — the semantic delta neither author saw, readable *before* any
@@ -79,25 +78,29 @@ yours), an unknown session slug, and an open session (an open round closes
 through `version save`; remint re-stamps a round whose closing save the
 merge discarded). Without `--session` it mints and re-stamps nothing.
 
-## Folding concurrent rounds (the one by-hand join)
+## Folding concurrent rounds
 
-`rounds-fold-deliberately` is still open: sessions merge detectably but
-fold manually. Until the verb lands:
+Sessions merge as ordinary files, so a merge can assemble a round nobody
+authored. Never resolve by hand under `archi/stress/` — markers there are
+one recipe-naming `E_SESSION`, and the fold verb is the only path that
+merges round records:
 
-- **Different names, both open** (`E_SESSION` names both): pick the
-  surviving session; `git mv` the other's stressor files into its folder;
-  merge the two charters' prose into the survivor — both "why"s survive,
-  in words, not by picking a side; delete the other session's anchor file;
-  re-run `check`.
-- **Same name on both branches** (add/add conflict on the anchor file):
-  the conflict is your only warning — resolve by merging both charters by
-  hand. Taking one side silently adopts the other writer's stressors under
-  a charter they never wrote (the chimera round).
-- Stressor files themselves union cleanly — one pressure per file exists
-  exactly so parallel stress work lands as parallel files.
-- Team discipline until then: one *open* session at a time across
-  branches; closing rounds in parallel is safe (that collision has the
-  ceremony above).
+- **Same slug, marker-fused file**: `archi session fold <slug> -m <note>
+  [--keep theirs]` — the kept side's charter survives, the other lands
+  under `## Folded:` with the merge side's label.
+- **Two rounds both open**: `archi session fold <loser> --into <winner>
+  -m <note>` — stressor files move (name collisions refuse; a stressor is
+  one writer's pressure), the loser's charter, pin and stamp land under
+  `## Folded: <loser>`, the loser folder is deleted.
+- **A fused sealed pair** folds with the surviving stamp intact and the
+  folded stamp `pending remint` — a finding until `archi version remint
+  -m <note> --session <slug>` re-stamps it. The sequence is archive, then
+  fold, then remint; each step's diagnostic names the next.
+- A fold refuses across different pins and mixed open/sealed pairs —
+  those split by hand.
+
+Stressor files themselves union cleanly — one pressure per file exists
+exactly so parallel stress work lands as parallel files.
 
 ## Failure modes
 
@@ -120,5 +123,4 @@ fold manually. Until the verb lands:
   closing save lost the collision and nobody reminted; run the ceremony —
   the re-stamp is remint's job, never a hand edit.
 
-Depth: `requirements/multiplayer.md`, `requirements/versioning.md`
-(Versioning * Multiplayer), `skills/archi.md` (the loop this plugs into).
+The loop this plugs into is the `archi` skill.
