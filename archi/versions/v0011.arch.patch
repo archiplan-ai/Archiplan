@@ -1,0 +1,72 @@
+--- original
++++ modified
+@@ -1,6 +1,7 @@
+ def node Agent:
+   port author // edits sources: model, docs, plans, code
+   port drive // runs the verbs
++def node AgentBrief // the briefing archi installs beside a tree: the workflow skills and the CLAUDE.md block
+ def node ArchSource // .arch surface text — the model's only persistence
+ def node Archive:
+   port anchor // post-hoc commit provenance: clean tree, render-hash match
+@@ -18,6 +19,7 @@
+   port drive // consults every subsystem, one verb at a time
+   port exec // replays the lowered batch on the engine
+   port incidence // incidence analysis verb
++  port init // manifest + source dir + starter + briefing, create-only — the verb before a project exists
+   port link // add, ls, verify, confirm, rm, repin, capture, audit
+   port nkp // landscape analysis verb
+   port plan // use, task add, verify, start, next, close, reset
+@@ -129,6 +131,10 @@
+ def node Report // rendered output: human one-liners or the JSON envelope
+ def node RequirementDoc // intent + requirement markdown under archi/requirements/
+ def node Resolution // the absolute-path picture: nodes, edges, apps resolved
++def node Scaffold:
++  port emit // the missing artifacts, in an order that keeps every intermediate tree honest: manifest last
++  port read_tree // what the target already holds — manifest, modules, briefing — read before any write
++  port stand_up // one target directory in, the created/kept report out
+ def node Search:
+   port find // phrase in, ranked cards out: one scan per query, no second store
+   port read_docs // requirement and stress markdown out of the tree, best-effort
+@@ -164,6 +170,7 @@
+ def conn resolve := * ->Ast, <-Resolution *
+ def conn scan := * ->ArchSource, <-Tokens *
+ def conn seed := * ->, <-StatementBatch * // pull the stdlib
++Data type_of AgentBrief
+ Data type_of ArchSource
+ Data type_of Ast
+ Data type_of CanonicalRender
+@@ -201,6 +208,7 @@
+ Function type_of Preset
+ Function type_of Query
+ Function type_of Renderer
++Function type_of Scaffold
+ Function type_of Search
+ Service type_of Agent
+ Service type_of Cli
+@@ -217,6 +225,7 @@
+ Agent.drive invoke(->Command, <-Report) Cli.build in compile_flow
+ Agent.drive invoke(->Command, <-Report) Cli.check in compile_flow
+ Agent.drive invoke(->Command, <-Report) Cli.incidence in harden_flow
++Agent.drive invoke(->Command, <-Report) Cli.init in compile_flow
+ Agent.drive invoke(->Command, <-Report) Cli.link in trace_flow
+ Agent.drive invoke(->Command, <-Report) Cli.nkp in read_flow
+ Agent.drive invoke(->Command, <-Report) Cli.plan in trace_flow
+@@ -233,6 +242,7 @@
+ Cli.drive consult(->Command, <-Report) Links.verify in trace_flow
+ Cli.drive consult(->Command, <-Report) Planner.advance in trace_flow
+ Cli.drive consult(->Command, <-Report) Planner.author in trace_flow
++Cli.drive consult(->Command, <-Report) Scaffold.stand_up in compile_flow
+ Cli.drive consult(->Command, <-Report) Sessions.fold in harden_flow
+ Cli.drive consult(->ModelGraph, <-Diagnostics) DocsCompiler.compile_docs in harden_flow
+ Cli.drive consult(->ModelGraph, <-Findings) Query.audit in read_flow
+@@ -274,6 +284,10 @@
+ Planner.run_capture consult(->ItemHashIndex, <-LinkEvent) Links.capture in trace_flow
+ Planner.store_plan persist(ItemHashIndex) SourceTree.store in trace_flow
+ Planner.store_plan persist(PlanFile) SourceTree.store in trace_flow
++Scaffold.emit persist(AgentBrief) SourceTree.store in compile_flow
++Scaffold.emit persist(ArchSource) SourceTree.store in compile_flow
++Scaffold.read_tree recall(<-AgentBrief) SourceTree.serve in compile_flow
++Scaffold.read_tree recall(<-ArchSource) SourceTree.serve in compile_flow
+ Search.read_docs recall(<-RequirementDoc) SourceTree.serve in read_flow
+ Search.read_docs recall(<-StressDoc) SourceTree.serve in read_flow
+ Sessions.read_state recall(<-StressDoc) SourceTree.serve in harden_flow

@@ -21,6 +21,7 @@ def node Cli:
   port query       // one composed subgraph query
   port read        // the agent read envelope over stdin/argv
   port search      // ranked retrieval by phrase across model defs and doc objects
+  port init        // manifest + source dir + starter + briefing, create-only — the verb before a project exists
   port compile_src // drives the compiler
   port exec        // replays the lowered batch on the engine
   port ask         // read statements to the engine's envelope
@@ -36,6 +37,11 @@ def node DocsCompiler:
 def node Search:
   port find      // phrase in, ranked cards out: one scan per query, no second store
   port read_docs // requirement and stress markdown out of the tree, best-effort
+
+def node Scaffold:
+  port stand_up  // one target directory in, the created/kept report out
+  port emit      // the missing artifacts, in an order that keeps every intermediate tree honest: manifest last
+  port read_tree // what the target already holds — manifest, modules, briefing — read before any write
 
 def node Archive:
   port save         // canonical render in; keyframe or patch + manifest entry
@@ -108,6 +114,7 @@ Storage type_of Archive
 Service type_of Cli
 Function type_of DocsCompiler
 Function type_of Search
+Function type_of Scaffold
 Service type_of Links
 Service type_of Planner
 Service type_of Sessions
@@ -137,6 +144,13 @@ Cli.drive consult(->Command, <-Report) Planner.advance in trace_flow
 Cli.drive consult(->ModelGraph, <-SearchReport) Search.find in read_flow
 Search.read_docs recall(RequirementDoc) SourceTree.serve in read_flow
 Search.read_docs recall(StressDoc) SourceTree.serve in read_flow
+
+// init: read what exists, emit what is missing — the one verb with no project to locate
+Cli.drive consult(->Command, <-Report) Scaffold.stand_up in compile_flow
+Scaffold.read_tree recall(ArchSource) SourceTree.serve in compile_flow
+Scaffold.read_tree recall(AgentBrief) SourceTree.serve in compile_flow
+Scaffold.emit persist(ArchSource) SourceTree.store in compile_flow
+Scaffold.emit persist(AgentBrief) SourceTree.store in compile_flow
 
 // docs cross-check: markdown in, pinned models on demand
 DocsCompiler.load_docs recall(RequirementDoc) SourceTree.serve in harden_flow

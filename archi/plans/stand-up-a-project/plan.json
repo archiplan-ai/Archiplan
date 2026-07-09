@@ -1,0 +1,147 @@
+{
+  "name": "stand-up-a-project",
+  "version": "v0011",
+  "created": "2026-07-09T08:51:20Z",
+  "state": "completed",
+  "closed_waves": 2,
+  "problem": "Bootstrapping is hand work and the specs alone leave corners open: nothing scaffolds the manifest, the source dir, or the agent's briefing, and every new repository re-runs the write → check → fix gauntlet by hand. Cold-start-pressure fixed the shape before code: create-only per artifact (a re-run clobbers the tree), manifest last (a half init strands the tree), the briefing an init artifact (the agent arrives blind), the manifest read through the compiler's own reader (the manifest already speaks), drift visible instead of reconciled (the installed skill drifts), nesting allowed and named (a nested init shadows the root).",
+  "technology_stack": [
+    {
+      "tech": "Rust 2024; crates/archi: scaffold.rs (new: the emitter — fixed artifact order, create-only byte compare, fenced CLAUDE.md block, embedded skills, enclosing-root note), main.rs (the verb: positional target, report rendering, exit codes)",
+      "provenance": "the emitter is a pure file writer beside Search exactly where tool.arch places Scaffold; no compile in its loop — init runs where no project exists yet"
+    },
+    {
+      "tech": "skills embedded at build time via include_str! from skills/archi.md and skills/archi-merge.md, installed verbatim to .claude/skills/<name>/SKILL.md; the CLAUDE.md block fenced by <!-- archi:begin --> / <!-- archi:end --> markers",
+      "provenance": "the-agent-arrives-briefed: byte-equal installs make drift detectable (the-installed-skill-drifts reports `kept`); the fence marks the one region init may claim on a later day"
+    },
+    {
+      "tech": "manifest read via a new public modeling_lang::source::manifest_src — the compiler's own validated reader, returning [project] src",
+      "provenance": "init-honors-the-manifest: one parser for one file — a scaffolder with its own reading of src is free to disagree with build's"
+    }
+  ],
+  "architecture_summary": [
+    {
+      "node": "Scaffold",
+      "role": "the emitter: reads what the target already holds, compares it against what it would write, emits only the missing artifacts — source dir with starter, skills, CLAUDE.md block, manifest last — and reports created/appended/ok/kept per artifact plus the enclosing-root note"
+    },
+    {
+      "node": "Cli",
+      "role": "the init verb: positional target (default .), no --project and no compile, renders the report one line per artifact, exit 0 on success and on the nothing-to-do re-run, 1 when the manifest read or a write refuses, 2 on malformed invocations"
+    }
+  ],
+  "stack_mapping": [
+    {
+      "tech": "crates/archi/src/scaffold.rs — artifact order, compare, fence, embedded skills",
+      "node": "Scaffold"
+    },
+    {
+      "tech": "crates/archi/src/main.rs — run_init, positional parsing, usage",
+      "node": "Cli"
+    },
+    {
+      "tech": "crates/modeling-lang/src/source/mod.rs — manifest_src, the one manifest reading",
+      "node": "Scaffold"
+    }
+  ],
+  "scenarios": [
+    "archi init on an empty scratch dir stands up a project whose `archi build` passes compiling zero statements; the report names every artifact, archi.toml on the last created line",
+    "a second init on the same dir creates nothing, changes no bytes anywhere, and exits zero",
+    "init into a dir holding its own CLAUDE.md prose and a manifest with src = \"spec\": the starter lands under spec/, the prose keeps, the fenced block appends exactly once across two runs",
+    "a manifest that fails to parse stops init with the compiler's diagnostic and an untouched tree — no .claude/, no starter",
+    "init in a subdirectory of an existing project proceeds and its report names the enclosing root the new project now shadows"
+  ],
+  "scenarios_displayed": true,
+  "scenarios_closed": true,
+  "tasks": [
+    {
+      "id": "t1",
+      "node": "Scaffold",
+      "description": "the emitter: fixed artifact order with the manifest last, create-only compare-and-report, fenced CLAUDE.md block, embedded skills, manifest routing, enclosing-root note",
+      "spec_refs": [
+        "Scaffold",
+        "Function type_of Scaffold",
+        "Cli.drive consult(->Command, <-Report) Scaffold.stand_up"
+      ],
+      "stack_details": "new crates/archi/src/scaffold.rs: emission in fixed order — source dir + commented starter model.arch (only when no .arch exists under src), .claude/skills/archi/SKILL.md, .claude/skills/archi-merge/SKILL.md, the CLAUDE.md fence (absent file → create, no fence → append, fence → compare inner), archi.toml last (name from the directory, preset default); per artifact absent → write, present → byte-compare → ok/kept, never rewrite; skills embedded with include_str!; an existing manifest is read via new pub modeling_lang::source::manifest_src before any write — its src routes the starter and the block's text, a parse failure aborts with the diagnostic; the ancestor walk above the target notes the enclosing root; the outcome renders one line per artifact",
+      "inputs": {},
+      "outputs": [
+        "crates/archi/src/scaffold.rs",
+        "crates/modeling-lang/src/source/mod.rs"
+      ],
+      "verifications": {
+        "a-dark-corpus-stays-partial": [
+          "unit: the emitter never compiles the project — a target whose model would not compile scaffolds its missing briefing identically (search's degradation contract stays out of init's reach)"
+        ],
+        "findings-never-block": [
+          "unit: advisory state is invisible to the emitter — no doc is read, so a tree full of findings scaffolds exactly as a clean one"
+        ],
+        "init-changes-nothing-twice": [
+          "unit: two inits back to back — the second reports no created line and every artifact's bytes are identical; a hand-edited starter and CLAUDE.md re-run to `kept`, untouched; a tree holding everything but the manifest completes with archi.toml alone"
+        ],
+        "init-honors-the-manifest": [
+          "unit: a manifest with src = \"spec\" routes the starter to spec/model.arch and no archi/src/ appears; a garbage manifest errors before any write — the target dir stays empty"
+        ],
+        "one-verb-searches-everything": [
+          "unit: init writes only its five artifacts — nothing lands under archi/requirements/ or archi/stress/, so the search corpus gains no phantom cards"
+        ],
+        "one-verb-stands-a-project-up": [
+          "unit: a fresh emission creates source dir, both skills, CLAUDE.md, then the manifest as the final created artifact; the starter module is comment-only"
+        ],
+        "the-agent-arrives-briefed": [
+          "unit: installed SKILL.md bytes equal the embedded constants; the fenced block names the manifest's src dir; an existing CLAUDE.md keeps its prose above the appended fence"
+        ],
+        "unchanged-saves-close-rounds": [
+          "unit: the emitter writes no model bytes on an existing project — src untouched when modules exist — so the next version save still reports unchanged"
+        ]
+      }
+    },
+    {
+      "id": "t2",
+      "node": "Cli",
+      "description": "the init verb: positional target, usage, dispatch, report rendering, exit codes, spec and skill docs",
+      "spec_refs": [
+        "Cli",
+        "Service type_of Cli",
+        "Agent.drive invoke(->Command, <-Report) Cli.build",
+        "Agent.drive invoke(->Command, <-Report) Cli.check",
+        "Agent.drive invoke(->Command, <-Report) Cli.incidence",
+        "Agent.drive invoke(->Command, <-Report) Cli.init",
+        "Agent.drive invoke(->Command, <-Report) Cli.link",
+        "Agent.drive invoke(->Command, <-Report) Cli.nkp",
+        "Agent.drive invoke(->Command, <-Report) Cli.plan",
+        "Agent.drive invoke(->Command, <-Report) Cli.query",
+        "Agent.drive invoke(->Command, <-Report) Cli.read",
+        "Agent.drive invoke(->Command, <-Report) Cli.search",
+        "Agent.drive invoke(->Command, <-Report) Cli.session",
+        "Agent.drive invoke(->Command, <-Report) Cli.version"
+      ],
+      "stack_details": "main.rs: `init` joins the positional verbs — zero-or-one positional target (default .), a second is a usage error; run_init never calls locate_project; the usage text and the crate doc header gain the verb on their first line; requirements/cli.md documents init (create-only, manifest last, the one verb that takes its directory as an argument) and the locating-the-project section says every verb but init; skills/archi.md greenfield step 1 hands `archi init` the job it used to describe by hand; crates/archi/tests/init_e2e.rs drives the real binary over scratch directories",
+      "inputs": {
+        "t1": "the outcome type and the init(target) entry point: artifact order, act states, render lines, error shape"
+      },
+      "outputs": [
+        "crates/archi/src/main.rs",
+        "crates/archi/tests/init_e2e.rs",
+        "requirements/cli.md",
+        "skills/archi.md"
+      ],
+      "verifications": {
+        "a-dark-corpus-stays-partial": [
+          "e2e: on a fixture whose model does not compile, init exits zero and installs the briefing — the verb owes nothing to the compiler"
+        ],
+        "findings-never-block": [
+          "e2e: init over a fixture KB carrying advisory findings (a deferred requirement) exits zero — advisory state never reaches the verb"
+        ],
+        "one-verb-searches-everything": [
+          "e2e: archi search runs unchanged on a freshly initialized project — the dispatch gained a verb and lost none"
+        ],
+        "one-verb-stands-a-project-up": [
+          "e2e: archi init <dir> then archi build --project <dir> passes compiling zero statements; the fresh report names each created artifact with the manifest on its last created line; a second positional argument exits 2; the nothing-to-do re-run exits 0"
+        ],
+        "unchanged-saves-close-rounds": [
+          "e2e: on a fixture with a saved version, init then version save — the save still reports the model unchanged; init minted nothing"
+        ]
+      }
+    }
+  ]
+}

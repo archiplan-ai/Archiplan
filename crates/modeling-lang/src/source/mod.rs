@@ -72,6 +72,14 @@ pub fn project_preset(root: &Path) -> Result<Preset, Diagnostic> {
     project::resolve_preset(root, &manifest)
 }
 
+/// The manifest's source directory (`[project] src`, default `archi/src`),
+/// relative to the root — the compiler's own reading, exposed so a
+/// scaffolder never grows a second parser of the same file
+/// (`archi/requirements/cold-start/init-honors-the-manifest`).
+pub fn manifest_src(root: &Path) -> Result<String, Diagnostic> {
+    project::read_manifest(root).map(|m| m.src)
+}
+
 /// Compile the project rooted at `root` (the directory holding `archi.toml`).
 pub fn compile_project(root: &Path) -> Result<Compiled, CompileFailure> {
     let fail_project = |d: Diagnostic| CompileFailure {

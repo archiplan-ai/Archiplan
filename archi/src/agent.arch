@@ -16,6 +16,7 @@ def node Agent:
 
 Service type_of Agent
 
+Agent.drive invoke Cli.init in compile_flow
 Agent.drive invoke Cli.check in compile_flow
 Agent.drive invoke Cli.build in compile_flow
 Agent.drive invoke Cli.query in read_flow

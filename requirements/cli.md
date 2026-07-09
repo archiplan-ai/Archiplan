@@ -10,6 +10,21 @@ workflow.
 ## Commands
 
 ```
+archi init [<dir>]
+```
+
+Stands `<dir>` (default the working directory) up as an archiplan project: the source directory with a
+commented starter module, the agent briefing (`.claude/skills/archi/`, `.claude/skills/archi-merge/`, a fenced
+`archi` block in `CLAUDE.md`), and — written last, so a project root only ever appears over a whole tree —
+`archi.toml` with the directory's name and the default preset. Create-only and idempotent: what exists is read
+and reported (`ok` byte-equal, `kept` divergent), never rewritten, so an interrupted run completes on re-run and
+a repeated one changes no bytes. An existing manifest is honored, not guessed: its `src` routes the starter
+(read through the compiler's own reader), and a manifest that fails to parse stops the run with the diagnostic
+and an untouched tree. Inside another project, init proceeds — nesting is the monorepo shape — and the report
+names the enclosing root the new project shadows. The one verb that takes its directory as an argument: there is
+no project to locate yet, so `--project` is a usage error. Exit 0 on success and on the nothing-to-do re-run.
+
+```
 archi check [--project <dir>] [--json]
 ```
 
@@ -96,7 +111,8 @@ transport.
 
 ## Locating the project
 
-Every verb locates its project by precedence: `--project <dir>`, then the nearest `archi.toml` upward from the
-working directory; finding neither is a usage error. The project is compiled fresh on every run — the source is
+Every verb but `init` — which takes its target as an argument, there being no project yet — locates its project
+by precedence: `--project <dir>`, then the nearest `archi.toml` upward from the working directory; finding
+neither is a usage error. The project is compiled fresh on every run — the source is
 the model. Remote/workspace discovery beyond this is distribution territory:
 [saas](./distribution/saas.md), [on-prem](./distribution/on-prem.md).

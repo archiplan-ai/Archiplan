@@ -19,7 +19,9 @@ Ground rules, always:
 
 ## Greenfield
 
-1. **Init** — `archi.toml` (`[project]` name, preset) plus `archi/src/model.arch`.
+1. **Init** — `archi init` scaffolds it all: `archi.toml`, the source dir
+   with a starter module, this skill and the CLAUDE.md brief. Create-only
+   and safe to re-run — existing files are reported, never rewritten.
    `archi build` must pass before anything else.
 2. **Capture intent** — one folder per problem area:
    `archi/requirements/<intent>/<intent>.md`, a name and the problem

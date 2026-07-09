@@ -7,6 +7,7 @@
 //! `requirements/stressing.md`), compiled and cross-checked by `check`.
 //!
 //! ```text
+//! archi init  [<dir>]
 //! archi check [--project <dir>] [--json]
 //! archi build [--project <dir>] [--emit-batch <file|->]
 //! archi nkp   [--project <dir>] [--regime | --hotspots | --corridors] [--top | --scope <path>]
@@ -46,6 +47,7 @@ mod docs;
 mod incidence;
 mod links;
 mod plans;
+mod scaffold;
 mod search;
 mod sessions;
 mod versions;
@@ -62,6 +64,7 @@ use modeling_lang::{
 use serde_json::{Value, json};
 
 const USAGE: &str = "usage:
+  archi init  [<dir>]
   archi check [--project <dir>] [--json]
   archi build [--project <dir>] [--emit-batch <file|->]
   archi nkp   [--project <dir>] [--regime | --hotspots | --corridors] [--top | --scope <path>]
@@ -282,7 +285,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             other if other.starts_with("--") => return Err(format!("unknown flag `{other}`")),
             other if matches!(
                 args.verb.as_str(),
-                "version" | "link" | "plan" | "read" | "session" | "search"
+                "version" | "link" | "plan" | "read" | "session" | "search" | "init"
             ) =>
             {
                 args.positional.push(other.to_string())
@@ -1239,6 +1242,32 @@ fn run_plan(args: &Args) -> ExitCode {
     }
 }
 
+/// `archi init [<dir>]`: stand a directory up as an archiplan project
+/// (`requirements/cli.md`, `archi/requirements/cold-start/`) — the one
+/// verb that takes its target as an argument; there is no project to
+/// locate yet. Exit 0 covers the nothing-to-do re-run: create-only is the
+/// contract, not an error.
+fn run_init(args: &Args) -> ExitCode {
+    if args.project.is_some() {
+        return usage_err("`init` takes its target as an argument: archi init <dir>");
+    }
+    let target = match args.positional.as_slice() {
+        [] => Path::new("."),
+        [dir] => Path::new(dir),
+        _ => return usage_err("`init` takes one directory, or none for the working one"),
+    };
+    match scaffold::init(target) {
+        Ok(outcome) => {
+            print!("{}", scaffold::render(&outcome));
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("archi: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn run_build(args: &Args) -> ExitCode {
     let root = match locate_project(args) {
         Ok(r) => r,
@@ -1536,6 +1565,7 @@ fn main() -> ExitCode {
         Err(e) => return usage_err(&e),
     };
     match args.verb.as_str() {
+        "init" => run_init(&args),
         "check" => run_check(&args),
         "build" => run_build(&args),
         "nkp" => run_nkp(&args),
