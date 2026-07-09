@@ -17,9 +17,6 @@ Check what `archi` currently is: `archi --help`. If it mentions `activate`,
 it is the old fractal client — run the migration script:
 
 ```sh
-# from a checkout of archiplan-ai/Archiplan:
-sh release/migrate-fractal.sh
-# or standalone:
 curl -fsSL https://raw.githubusercontent.com/archiplan-ai/Archiplan/main/release/migrate-fractal.sh | sh
 ```
 

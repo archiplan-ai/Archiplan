@@ -14,7 +14,8 @@ archi init [<dir>]
 ```
 
 Stands `<dir>` (default the working directory) up as an archiplan project: the source directory with a
-commented starter module, the agent briefing (`.claude/skills/archi/`, `.claude/skills/archi-merge/`, a fenced
+commented starter module, the agent briefing (`.claude/skills/archi/`, `.claude/skills/archi-merge/`,
+`.claude/skills/archi-migrate-fractal/`, a fenced
 `archi` block in `CLAUDE.md`), and — written last, so a project root only ever appears over a whole tree —
 `archi.toml` with the directory's name and the default preset. Create-only and idempotent: what exists is read
 and reported (`ok` byte-equal, `kept` divergent), never rewritten, so an interrupted run completes on re-run and

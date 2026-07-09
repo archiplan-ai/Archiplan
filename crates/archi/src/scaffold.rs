@@ -16,9 +16,13 @@ use std::path::{Path, PathBuf};
 use modeling_lang::source::{find_project_root, manifest_src};
 
 /// The briefing, embedded at build time: skill name → SKILL.md text.
-const SKILLS: [(&str, &str); 2] = [
+const SKILLS: [(&str, &str); 3] = [
     ("archi", include_str!("../../../skills/archi.md")),
     ("archi-merge", include_str!("../../../skills/archi-merge.md")),
+    (
+        "archi-migrate-fractal",
+        include_str!("../../../skills/archi-migrate-fractal.md"),
+    ),
 ];
 
 const FENCE_OPEN: &str = "<!-- archi:begin -->";
@@ -105,7 +109,7 @@ pub fn init(target: &Path) -> Result<Outcome, String> {
         steps.push(step(Act::Created, &target, &path, None));
     }
 
-    // The briefing: both skills, verbatim from the binary.
+    // The briefing: every skill, verbatim from the binary.
     for (skill, text) in SKILLS {
         let path = target.join(".claude/skills").join(skill).join("SKILL.md");
         let act = match fs::read_to_string(&path) {
@@ -283,7 +287,8 @@ fn claude_block(src: &str) -> String {
          \x20 address.\n\
          - The full workflow (model, stress, version, plan, implement with link\n\
          \x20 capture) is the `archi` skill in `.claude/skills/archi/`; merging\n\
-         \x20 parallel spec work is `archi-merge`.\n\
+         \x20 parallel spec work is `archi-merge`, and crossing a project off the\n\
+         \x20 old fractal client is `archi-migrate-fractal`.\n\
          {FENCE_CLOSE}"
     )
 }

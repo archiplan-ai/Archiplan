@@ -14,6 +14,7 @@ static NEXT: AtomicUsize = AtomicUsize::new(0);
 /// This binary's embedded briefing sources, for byte-equality checks.
 const SKILL_ARCHI: &str = include_str!("../../../skills/archi.md");
 const SKILL_MERGE: &str = include_str!("../../../skills/archi-merge.md");
+const SKILL_MIGRATE: &str = include_str!("../../../skills/archi-migrate-fractal.md");
 
 fn temp_dir() -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -73,7 +74,7 @@ fn a_fresh_init_stands_up_a_building_project() {
     // The report: every artifact created, the manifest on the last created
     // line, the verdict naming the project.
     let created: Vec<&str> = out.lines().filter(|l| l.starts_with("created")).collect();
-    assert_eq!(created.len(), 5, "{out}");
+    assert_eq!(created.len(), 6, "{out}");
     assert!(created.last().unwrap().contains("archi.toml"), "{out}");
     assert!(out.contains("initialized `proj`"), "{out}");
 
@@ -139,7 +140,11 @@ fn the_briefing_lands_verbatim_and_the_fence_appends_once() {
     fs::write(root.join("CLAUDE.md"), "# House rules\n\nTabs are love.\n").unwrap();
     ok_in(&root, &["init", "."]);
 
-    for (skill, text) in [("archi", SKILL_ARCHI), ("archi-merge", SKILL_MERGE)] {
+    for (skill, text) in [
+        ("archi", SKILL_ARCHI),
+        ("archi-merge", SKILL_MERGE),
+        ("archi-migrate-fractal", SKILL_MIGRATE),
+    ] {
         let installed =
             fs::read_to_string(root.join(".claude/skills").join(skill).join("SKILL.md")).unwrap();
         assert_eq!(installed, text, "{skill} drifted on install");
