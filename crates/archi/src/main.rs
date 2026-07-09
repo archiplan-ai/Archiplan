@@ -35,6 +35,7 @@
 //!             [--carrier <path>]... [--edge-type <name>]... [--top] [--at <id>]
 //! archi search <phrase>... [--kind element|intent|requirement|stressor|session]...
 //!             [--limit <n>] [--json]
+//! archi --help | --version
 //! ```
 //!
 //! Every verb locates its project by precedence: `--project`, then the
@@ -97,7 +98,8 @@ const USAGE: &str = "usage:
   archi query [--scope <path>]... [--type <path>]... [--kind <k>]... [--view <v>]...
               [--carrier <path>]... [--edge-type <name>]... [--top] [--at <id>] [--project <dir>]
   archi search <phrase>... [--kind element|intent|requirement|stressor|session]...
-              [--limit <n>] [--json] [--project <dir>]";
+              [--limit <n>] [--json] [--project <dir>]
+  archi --help | --version";
 
 struct Args {
     verb: String,
@@ -1560,6 +1562,20 @@ fn run_session(args: &Args) -> ExitCode {
 
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
+    // The standalone meta flags answer before any parsing or project
+    // location — help is the asked-for output (stdout, exit 0), not the
+    // error trimming a bad invocation (stderr, exit 2).
+    match argv.first().map(String::as_str) {
+        Some("--help" | "-h") => {
+            println!("{USAGE}");
+            return ExitCode::SUCCESS;
+        }
+        Some("--version" | "-V") => {
+            println!("archi {}", env!("CARGO_PKG_VERSION"));
+            return ExitCode::SUCCESS;
+        }
+        _ => {}
+    }
     let args = match parse_args(&argv) {
         Ok(a) => a,
         Err(e) => return usage_err(&e),

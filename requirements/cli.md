@@ -94,6 +94,15 @@ carries its address (slug or model path, `file:line` for docs) and its kind's ne
 return, `dark` names the missing corpus, exit 0. Searching is always live-tree; there is no `--at` (the archive
 seals the model alone).
 
+```
+archi --help | --version
+```
+
+The standalone meta flags, honored in the leading position: `--help` (`-h`) prints the usage to stdout and
+`--version` (`-V`) prints `archi <semver>`, both exit 0, neither needing a project anywhere near the working
+directory. The same usage text printed to stderr with exit 2 is the malformed-invocation report — asked-for help
+is output, not an error.
+
 ## Output
 
 Human-readable by default: compile diagnostics as `file:line:col: CODE: message` lines, findings as one-liners
