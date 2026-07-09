@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 # GitHub Releases and installs it to %USERPROFILE%\.local\bin. Pin a version
 # with $env:ARCHI_VERSION; point at another asset host with $env:ARCHI_BASE_URL.
 
-$Repo = 'oskin1/Archiplan'
+$Repo = 'archiplan-ai/Archiplan'
 $Base = if ($env:ARCHI_BASE_URL) { $env:ARCHI_BASE_URL } else { "https://github.com/$Repo/releases/download" }
 
 $arch = $env:PROCESSOR_ARCHITECTURE

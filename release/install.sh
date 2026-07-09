@@ -5,7 +5,7 @@ set -eu
 # GitHub Releases and installs it to ~/.local/bin. Pin a version with
 # ARCHI_VERSION=x.y.z; point at another asset host with ARCHI_BASE_URL.
 
-REPO='oskin1/Archiplan'
+REPO='archiplan-ai/Archiplan'
 BASE="${ARCHI_BASE_URL:-https://github.com/$REPO/releases/download}"
 
 os=$(uname -s); arch=$(uname -m)

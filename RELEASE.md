@@ -4,7 +4,7 @@ A release is four tarballs — `archi-<version>-<platform>.tar.gz` for
 `macos-arm64`, `linux-x64`, `linux-arm64`, `windows-x64` — each carrying the
 `archi` binary, the platform installer, and `README.txt`, with a `.sha256`
 checksum file next to each. They are published as GitHub Release assets on
-`oskin1/Archiplan` under tag `v<version>`.
+`archiplan-ai/Archiplan` under tag `v<version>`.
 
 `VERSION` defaults to the version in `crates/archi/Cargo.toml`, so the tarball
 name always matches what `archi --version` prints. Never rebuild an
@@ -73,13 +73,13 @@ gh release view v$V
 ## Installing (what users run)
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/oskin1/Archiplan/main/release/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/archiplan-ai/Archiplan/main/release/install.sh | sh
 ```
 
 Windows (PowerShell):
 
 ```powershell
-irm https://raw.githubusercontent.com/oskin1/Archiplan/main/release/install.ps1 | iex
+irm https://raw.githubusercontent.com/archiplan-ai/Archiplan/main/release/install.ps1 | iex
 ```
 
 The installer resolves the latest release, verifies the checksum, and installs
@@ -90,7 +90,7 @@ While the repository is private, anonymous downloads 404. Authenticated users
 install with:
 
 ```sh
-gh release download v$V -R oskin1/Archiplan -p "archi-$V-macos-arm64.tar.gz"
+gh release download v$V -R archiplan-ai/Archiplan -p "archi-$V-macos-arm64.tar.gz"
 tar -xzf archi-$V-macos-arm64.tar.gz
 install -m 755 archi-$V-macos-arm64/archi "$HOME/.local/bin/archi"
 ```
