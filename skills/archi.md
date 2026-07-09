@@ -38,7 +38,8 @@ Ground rules, always:
    The unclassified nodes are the preset's types, each carrying its
    definition; classify every term against them (`Service type_of
    AuthService`) or against types you define. Then nodes, ports, typed
-   edges in `.arch`. As elements land, fill each requirement's
+   edges in `.arch` (syntax: *`.arch` in brief*, below). As elements
+   land, fill each requirement's
    `satisfied-by`, Satisfy prose, and verification bullets (`- test — …`,
    `- type-level — …`). Loop `archi check` to zero errors; `archi nkp`
    for a landscape sanity read.
@@ -139,6 +140,86 @@ are authored from day one.
    reporting leftovers.
 7. Audit is the ratchet: `unaccounted_delta` findings mean code moved with
    no architectural account — grow the model where they cluster.
+
+## `.arch` in brief
+
+One file is one module, its module path the dotted relative path under
+`archi/src/` (`archi/src/flows/login.arch` → `flows.login`). Offside
+rule: a line ending in `:` opens an indented block — spaces only, tabs
+reject; one statement per line. `//` comments; a comment trailing a
+`def` or `port` line (or a standalone block abutting a `def` from
+above) attaches as that element's **definition** — one sentence of
+identity prose, ≤240 chars, and obligation vocabulary (`must`,
+`should`, `shall`, `ensures`, `handles`) rejects: obligations belong in
+requirement docs. Comments on `open`, edge and application lines stay
+free. The whole surface:
+
+```
+def view login_flow
+
+def rel has_pii := (Service type_of *) -> (Data type_of *)
+def conn login := * ->LoginForm, <-Token *   // request/response: the forward lane carries LoginForm, the reverse lane Token
+def conn store := * ->(Data type_of *) *     // one-way; the payload is any Data-classified node
+
+// The service guarding the credential boundary.
+def node AuthService:
+  port handle_login // receives the submitted credential pair
+  def node Storage:
+    port save
+
+def node UI:        // the human-facing client
+  port login
+def node LoginForm  // the credential pair as submitted
+def node Token      // the session grant returned on success
+
+Service type_of AuthService    // rel edge: ends are whole node paths
+Data type_of LoginForm
+Data type_of Token
+AuthService has_pii LoginForm  // a user-defined rel edge, shaped by has_pii's patterns
+
+open AuthService:              // re-opens a scope, even from another file; no port decls here
+  def node Handler:            // the login work itself
+    port handle
+    port keep
+  Handler.keep store(LoginForm) Storage.save   // conn edge: an end's last segment is the port
+  handle_login = Handler.handle                // application: outer port realized by a direct child's port
+
+UI.login login AuthService.handle_login in login_flow   // carriers inferred: login's lanes are exact nodes
+```
+
+The rules the compiler holds you to:
+
+- **Modules** — cross-module references need `import mod` or
+  `import mod (A, B)`: visibility gates only, order-free, cycles legal.
+  One definition site per name project-wide (rel and conn share a
+  namespace); restating edges and applications is free.
+- **Ports** — declared only in the node's `def` block; `open` adds
+  children, edges and applications, never ports. Every port an edge or
+  application names must be declared; declared-but-unwired is the
+  `unused_port` finding, not an error.
+- **Conn lanes** — direction is initiation; payload slots ride the
+  lanes: `* -> *`, `* ->P *`, `* ->P, <-Q *` (request/response),
+  `* ->, <-Q *` (pull), `* <-> *`, `* <->P *`. No leading or lone `<-`,
+  no reverse lane on `<->`.
+- **Conn edges** — each end is `Node.port`, the last segment the port.
+  Carriers in parens after the type name: omit a lane whose pattern is
+  an exact node (inferred), name it when the pattern is `*` or
+  classified, bare only when exactly one lane carries — two carriers
+  tag their lanes (`->X, <-Y`).
+- **Rel edges** — ends are whole node paths, no ports. `def rel trans
+  r := …` marks r transitive; slot patterns are `*`, a path, or
+  classified `(Type type_of *)`. Any edge joins views with `in v1, v2`.
+- **Applications** — `outer = Child.port`: the right side a direct
+  child's port, the left bare inside the node's own block and
+  `Node.port` elsewhere; the outer port refuses to delegate until a
+  connection attaches to it (`E_NO_OUTER_PORT`).
+- **Resolution** — a path's first segment: the innermost block's
+  children (semantic — wherever in the project they are defined), then
+  enclosing blocks outward, then file scope (own defs ∪ imports ∪
+  preset). Everything lowers to absolute paths.
+- **Reserved** — `import def open node view rel conn port trans in`
+  are not names; preset names (`type_of`, the ontology types) are
+  ambient — never import, never redefine them.
 
 ## Failure modes
 
