@@ -95,6 +95,28 @@ tar -xzf archi-$V-macos-arm64.tar.gz
 install -m 755 archi-$V-macos-arm64/archi "$HOME/.local/bin/archi"
 ```
 
+## Migrating from the old fractal client
+
+The previous (fractal-era) client also installed as `archi`. On such machines
+users run:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/archiplan-ai/Archiplan/main/release/migrate-fractal.sh | sh
+```
+
+It renames every fractal-flavored `archi` on PATH to `old-archi` (same
+directory, config and license untouched), then installs the new `archi` over
+the freed name. Detection keys on the license-activation endpoint literal
+(`activate/start`) baked into every shipped fractal build and absent from the
+new binary — no execution needed. Old projects stay readable through
+`old-archi`, so an agent can migrate each one to the new Archiplan format
+using both binaries. If the install step fails, the old client is already
+preserved; re-run to retry, or roll back with `mv <dir>/old-archi <dir>/archi`.
+
+The agent-facing crossing guide — which script to run, then how to read the
+old project through `old-archi` and rebuild it as a checkable archiplan spec
+with an import brief — is `skills/archi-migrate-fractal.md`.
+
 ## Troubleshooting
 
 | Symptom | Fix |
