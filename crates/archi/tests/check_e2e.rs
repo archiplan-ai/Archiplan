@@ -1,5 +1,5 @@
 //! End to end through the real binary: a passing `check` closes on the
-//! landscape read (`requirements/cli.md`, `requirements/scoring/nkp.md`) —
+//! landscape read (`archi/requirements/cli/`, `archi/requirements/scoring/the-landscape-is-a-slice.md`) —
 //! the NKP scoring line and the refactoring directions it implies — while
 //! findings stay advisory and do not withhold it, an empty landscape earns
 //! no read, and an error (archive, compile) withholds it entirely.

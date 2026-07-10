@@ -3,7 +3,7 @@
 //! All node references render as absolute paths from the root; creations
 //! render as `define` statements, which are idempotent, so dumps replay
 //! safely. [`Model::render_source`] renders the whole model as canonical
-//! `.arch` source — the archived form of `requirements/versioning.md` — and
+//! `.arch` source — the archived form of `archi/requirements/versioning/` — and
 //! [`Model::scope_sources`] slices that render per root scope for
 //! scope-version hashing.
 
@@ -14,7 +14,7 @@ use crate::model::{ConnType, Edge, EdgePayload, Model, Pattern, RelType, ViewDef
 use crate::statement::{Definition, End, PatternExpr, Statement};
 
 /// Canonical source fragments of one root scope, for scope-version hashing
-/// (`requirements/versioning.md#versioning--scopes`).
+/// (`archi/requirements/versioning/scopes-version-by-hash.md`).
 #[derive(Clone, PartialEq, Debug)]
 pub struct ScopeSource {
     /// Name of the root node (a top-level scope).
@@ -158,7 +158,7 @@ impl Model {
 
     /// The whole model rendered as canonical `.arch` source: the statements
     /// of [`Model::dump`], one per line, in the surface syntax. This is the
-    /// canonical form of `requirements/versioning.md`: compiling the result
+    /// canonical form of `archi/requirements/versioning/`: compiling the result
     /// as a single module against the same preset recreates the identical
     /// model, and re-rendering that model reproduces the text byte for byte.
     pub fn render_source(&self) -> String {

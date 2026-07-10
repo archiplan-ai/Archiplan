@@ -1,4 +1,4 @@
-//! The worked example from `requirements/modeling-lang/modeling-lang.md`,
+//! The worked example from `archi/requirements/modeling-language/`,
 //! end to end: build, query, classify layers, round-trip through `dump`.
 
 mod common;

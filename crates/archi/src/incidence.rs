@@ -1,11 +1,11 @@
-//! Incidence analysis over stress sessions (`requirements/scoring/incidence.md`):
+//! Incidence analysis over stress sessions (`archi/requirements/scoring/the-matrix-joins-stress-to-structure.md`):
 //! session selection, per-version affects expansion, and rendering.
 //!
 //! The core matrix and findings live in [`modeling_lang::Model::incidence`];
 //! this module owns everything session-shaped. Each stressor's affects
 //! expand against *its own* session's pinned version — reconstructed from
 //! the archive, so closed sessions re-validate exactly as
-//! `requirements/stressing.md#compile` demands — and the expanded term
+//! `archi/requirements/self-hosting/stress-pins-versions.md` demands — and the expanded term
 //! paths join against the **frame**: the newest pinned version in scope.
 //! Invariants — the `satisfied-by` claims of intent-origin requirements —
 //! ride along for the compound-vulnerability findings.

@@ -1,6 +1,6 @@
 //! Task-close capture: the wave-open item-hash index and the delta scan
 //! that mints candidate links
-//! (`requirements/code-link.md#code-links--tasks`).
+//! (`archi/requirements/self-hosting/capture-at-the-join.md`).
 //!
 //! A wave opening records the tree as a **canonical item-hash index** —
 //! file → symbol → body hash, by the canonicalizer of [`super::code`] — so

@@ -2,7 +2,7 @@
 //!
 //! A query slices the model with composed filters — types, kinds, views,
 //! scopes — and returns the slice as plain nodes and edges
-//! (`requirements/modeling-lang/queries.md`). Views restrict to the edges of
+//! (`archi/requirements/modeling-language/queries-compose-filters.md`). Views restrict to the edges of
 //! the named views; applications are untagged plumbing and belong to the
 //! views of the connection edges they route.
 

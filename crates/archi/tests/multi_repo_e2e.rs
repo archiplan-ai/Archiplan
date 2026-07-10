@@ -116,7 +116,7 @@ fn qualified_refs_run_the_whole_link_loop_across_members() {
     )
     .unwrap();
     // Drifted fails only asserted literal links
-    // (requirements/code-link.md#verify-and-drift): the indirect drift is
+    // (archi/requirements/code-link/verify-grades-every-claim.md): the indirect drift is
     // reported, qualified, and exits 0.
     let (success, verify, _) = run(&spec, &["link", "verify"]);
     assert!(success, "{verify}");

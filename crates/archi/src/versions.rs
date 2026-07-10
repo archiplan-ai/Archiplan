@@ -1,5 +1,5 @@
 //! The version archive: `archi/versions/` under the project root
-//! (`requirements/versioning.md`).
+//! (`archi/requirements/versioning/`).
 //!
 //! A version is the compiled model's canonical render
 //! ([`Model::render_source`]), identified by the sha256 of its bytes and
@@ -42,7 +42,7 @@ impl Kind {
 }
 
 /// Merkle hashes of one root scope, recorded per version so scope history
-/// is a manifest scan (`requirements/versioning.md#versioning--scopes`).
+/// is a manifest scan (`archi/requirements/versioning/scopes-version-by-hash.md`).
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct ScopeHashes {
     /// Hash of everything under the node, in canonical order.
@@ -180,7 +180,7 @@ const GITATTRIBUTES: &str = "# Keyframes are generated renders; patches are the 
      v*.arch linguist-generated\n";
 
 const INDEX_HEADER: &str = "# Version archive: append-only, sealed by the hashes below.\n\
-     # See requirements/versioning.md; verified on `archi check`.\n\n";
+     # See archi/requirements/versioning/; verified on `archi check`.\n\n";
 
 impl Archive {
     /// The archive directory of a project root.
@@ -204,7 +204,7 @@ impl Archive {
                      id. Keep the first-landed entry and its patch file (both sides' model and \
                      doc work is already merged), then re-mint the later round onto the lineage: \
                      `archi version remint -m <note> --session <slug>` \
-                     (requirements/multiplayer.md)",
+                     (archi/requirements/self-hosting/parallel-editing-discipline.md)",
                     index.display()
                 )
             } else {
@@ -247,7 +247,7 @@ impl Archive {
                 "cannot read `{}`: {err} — the manifest names this file: a save's artifacts \
                  (manifest entry, patch or keyframe, session stamp) travel as one commit; a \
                  missing one is usually a half-committed save — recover it from the save \
-                 author's tree or git history (requirements/multiplayer.md)",
+                 author's tree or git history (archi/requirements/self-hosting/parallel-editing-discipline.md)",
                 p.display()
             )
         })
@@ -676,7 +676,7 @@ fn hash(text: &str) -> String {
 /// The commit a save happened on — recorded only when git is available and
 /// the project's working tree is clean, so the commit really contains the
 /// sources the render came from. Code-link birth records share the policy
-/// (`requirements/code-link.md#stored-as-files`).
+/// (`archi/requirements/self-hosting/link-truth-is-append-only.md`).
 pub(crate) fn provenance(root: &Path) -> Option<String> {
     clean_head(root).ok()
 }

@@ -138,7 +138,7 @@ pub(crate) struct Edge {
     pub views: BTreeSet<ViewId>,
 }
 
-/// Which layer a node belongs to, per `requirements/modeling-lang/layers.md`.
+/// Which layer a node belongs to, per `archi/requirements/modeling-language/terms-and-types-are-layers.md`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Layer {
     /// A type: the node appears at least once on the left side of `type_of`.
@@ -434,8 +434,8 @@ impl Model {
     }
 
     /// Whether an absolute dot path names a node of this model. The
-    /// doc-source layer (`requirements/requirements.md`,
-    /// `requirements/stressing.md`) validates its model references —
+    /// doc-source layer (`archi/requirements/spec-docs/`,
+    /// `archi/requirements/spec-docs/`) validates its model references —
     /// `satisfied-by` elements, stressor affects — through this.
     pub fn has_node(&self, path: &str) -> bool {
         let segs: Vec<String> = path.split('.').map(str::to_string).collect();
@@ -470,13 +470,13 @@ impl Model {
     }
 
     /// NKP landscape analysis over the slice picked by `config`
-    /// (`requirements/scoring/nkp.md`).
+    /// (`archi/requirements/scoring/the-landscape-is-a-slice.md`).
     pub fn nkp(&self, config: &NkpConfig) -> Result<NkpReport, LangError> {
         crate::nkp::analyze(self, config)
     }
 
     /// The pressure surface of an absolute path
-    /// (`requirements/scoring/incidence.md`): a term is the one-element
+    /// (`archi/requirements/scoring/the-matrix-joins-stress-to-structure.md`): a term is the one-element
     /// surface holding itself; a type expands to the user terms its
     /// `type_of` closure classifies. `None` when the path resolves to
     /// nothing. Stressor affects and `satisfied-by` entries expand through
@@ -486,7 +486,7 @@ impl Model {
     }
 
     /// Incidence analysis with this model as the frame: the stressor ×
-    /// component matrix and its findings (`requirements/scoring/incidence.md`).
+    /// component matrix and its findings (`archi/requirements/scoring/the-matrix-joins-stress-to-structure.md`).
     /// Rows carry term paths already expanded against their session's own
     /// version ([`Model::term_surface`]).
     pub fn incidence(

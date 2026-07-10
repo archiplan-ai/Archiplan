@@ -2,7 +2,7 @@
 //! change only, and the round ceremony — stamping the open stress session
 //! closed, firing the incidence report — finishes whether or not a
 //! version minted; the bare no-op is a success and genuine failures stay
-//! loud (`requirements/versioning.md#versioning--stressing`).
+//! loud (`archi/requirements/self-hosting/unchanged-saves-close-rounds.md`).
 
 use std::fs;
 use std::path::{Path, PathBuf};

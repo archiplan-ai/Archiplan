@@ -1,5 +1,5 @@
 //! Presets loaded as the stdlib: visibility, protection and round-trips
-//! (`requirements/modeling-lang/ontology.md`).
+//! (`archi/requirements/self-hosting/one-ontology-everywhere.md`).
 
 mod common;
 

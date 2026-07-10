@@ -1,6 +1,6 @@
 //! Doc sources: intents, requirements, stress sessions and stressors
-//! (`requirements/requirements.md`, `requirements/stressing.md`,
-//! `requirements/intent.md`) — structured markdown under
+//! (`archi/requirements/spec-docs/`, `archi/requirements/spec-docs/`,
+//! `archi/requirements/spec-docs/an-intent-is-a-problem-statement.md`) — structured markdown under
 //! `archi/requirements/` and `archi/stress/`, compiled and integrity-checked
 //! against the model on every `archi check`.
 //!
@@ -90,8 +90,8 @@ impl fmt::Display for DocDiagnostic {
     }
 }
 
-/// An advisory doc-layer finding (`requirements/requirements.md#compile`,
-/// `requirements/stressing.md#compile`). Kinds are append-only.
+/// An advisory doc-layer finding (`archi/requirements/self-hosting/docs-compile-with-the-model.md`,
+/// `archi/requirements/self-hosting/stress-pins-versions.md`). Kinds are append-only.
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DocFinding {
@@ -364,7 +364,7 @@ fn discover(root: &Path, diags: &mut Vec<DocDiagnostic>) -> Tree {
                         format!(
                             "session `{sslug}` is claimed by two charters — a merge fused two \
                              rounds into this file; fold them deliberately: `archi session fold \
-                             {sslug} -m <note> [--keep theirs]` (requirements/stressing.md)"
+                             {sslug} -m <note> [--keep theirs]` (archi/requirements/spec-docs/)"
                         ),
                         &rel(root, &anchor),
                         line,
@@ -494,7 +494,7 @@ fn cross_check(
     diags: &mut Vec<DocDiagnostic>,
 ) -> Vec<DocFinding> {
     // Slugs are the reference currency: unique project-wide across
-    // archiplan primitives (requirements/requirements.md#slugs).
+    // archiplan primitives (archi/requirements/spec-docs/slugs-are-the-reference-currency.md).
     let mut seen: BTreeMap<&str, (&str, usize, &'static str)> = BTreeMap::new();
     let everything = tree
         .intents
@@ -613,7 +613,7 @@ fn cross_check(
     // unreadable archive is E_ARCHIVE territory, reported elsewhere — and
     // while it is unreadable (a merge conflict, a half-shipped save) the
     // id-existence checks stay quiet instead of cascading one archive
-    // error into an E_SESSION per session (requirements/multiplayer.md).
+    // error into an E_SESSION per session (archi/requirements/self-hosting/parallel-editing-discipline.md).
     let opened = versions::Archive::open(root);
     let archive_readable = opened.is_ok();
     let archive = opened.ok().flatten();
@@ -691,7 +691,7 @@ fn cross_check(
     }
 
     // Affects of open sessions validate against their pinned version,
-    // reconstructed and compiled (requirements/stressing.md#compile).
+    // reconstructed and compiled (archi/requirements/self-hosting/stress-pins-versions.md).
     if let Some(archive) = &archive {
         for s in open {
             let Some((v, line)) = &s.version else {
@@ -872,7 +872,7 @@ fn findings(tree: &Tree) -> Vec<DocFinding> {
 
 /// Stamp the open session's `closed:` field with the just-minted version id
 /// — `archi version save` closes the active stress session
-/// (`requirements/versioning.md#versioning--stressing`). Returns the closed
+/// (`archi/requirements/self-hosting/unchanged-saves-close-rounds.md`). Returns the closed
 /// session's slug, or `None` when no session was open.
 pub fn close_open_session(root: &Path, version_id: &str) -> Result<Option<String>, String> {
     let base = root.join("archi").join("stress");
@@ -930,7 +930,7 @@ pub fn close_open_session(root: &Path, version_id: &str) -> Result<Option<String
 /// Validate that `slug` names a **closed** stress session and return its
 /// anchor file. Remint's precondition: the restamp targets a round whose
 /// save was discarded by a merge — an open session closes through
-/// `version save`, never through a remint (requirements/multiplayer.md).
+/// `version save`, never through a remint (archi/requirements/self-hosting/parallel-editing-discipline.md).
 pub fn closed_session_anchor(root: &Path, slug: &str) -> Result<PathBuf, String> {
     let anchor = root
         .join("archi")
@@ -980,7 +980,7 @@ pub fn closed_session_anchor(root: &Path, slug: &str) -> Result<PathBuf, String>
 
 /// Re-stamp a closed session's `closed:` onto a reminted version id — the
 /// round record follows its answers onto the merged lineage
-/// (requirements/multiplayer.md). When the record carries a folded round
+/// (archi/requirements/self-hosting/parallel-editing-discipline.md). When the record carries a folded round
 /// whose stamp awaits the re-mint (`closed: pending remint`, the trace
 /// `session fold` leaves on a fused sealed pair), that stamp is the one the
 /// remint makes true — the main stamp already tells the lineage's truth and

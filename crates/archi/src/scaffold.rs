@@ -1,5 +1,5 @@
 //! `archi init` — the cold start (`archi/requirements/cold-start/`,
-//! `requirements/cli.md`): stand a directory up as an archiplan project.
+//! `archi/requirements/cli/`): stand a directory up as an archiplan project.
 //!
 //! Create-only per artifact: what exists is read and reported — `ok` when
 //! it matches what init would write, `kept` when it differs — and never

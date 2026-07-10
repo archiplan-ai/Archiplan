@@ -1,6 +1,6 @@
 //! NKP landscape analysis: slicing the model into its epistatic coupling
 //! graph and reading where it sits on the order ↔ chaos spectrum
-//! (`requirements/scoring/nkp.md`, background in `kb/nkp.md`).
+//! (`archi/requirements/scoring/the-landscape-is-a-slice.md`, background in `kb/nkp.md`).
 //!
 //! The slice is configuration-driven rather than hardwired to an ontology:
 //!

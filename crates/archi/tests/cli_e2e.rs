@@ -1,5 +1,5 @@
 //! End to end through the real binary: the standalone meta flags
-//! (`requirements/cli.md`) — `--help`/`-h` and `--version`/`-V` answer on
+//! (`archi/requirements/cli/`) — `--help`/`-h` and `--version`/`-V` answer on
 //! stdout with exit zero and need no project anywhere, while the malformed
 //! invocation keeps its stderr-and-exit-2 contract.
 

@@ -2,7 +2,7 @@
 //!
 //! A preset is a named list of statements — relations, nodes and the edges
 //! wiring them — loaded into a fresh model before any user statements
-//! (`requirements/modeling-lang/ontology.md`). Everything a preset creates is
+//! (`archi/requirements/self-hosting/one-ontology-everywhere.md`). Everything a preset creates is
 //! stdlib: dumps omit it, tagging it into views is rejected
 //! (`E_STDLIB_PROTECTED`), and analyses treat it as scaffolding rather than
 //! model content.
@@ -43,7 +43,7 @@ impl Preset {
     }
 
     /// The default ontology preset of
-    /// `requirements/modeling-lang/ontology.md`: `type_of` plus the ontology
+    /// `archi/requirements/self-hosting/one-ontology-everywhere.md`: `type_of` plus the ontology
     /// type nodes `Data`, `Service`, `Function` and `Storage`, each carrying
     /// its definition so a query shows an agent what the types mean.
     pub fn default_ontology() -> Self {

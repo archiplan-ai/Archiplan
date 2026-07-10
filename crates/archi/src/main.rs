@@ -1,10 +1,10 @@
 //! `archi` — a thin runner for the `.arch` source-format compiler
-//! (`requirements/cli.md`, `requirements/modeling-lang/source-format.md`),
-//! the NKP landscape analysis (`requirements/scoring/nkp.md`), the incidence
-//! analysis (`requirements/scoring/incidence.md`), the version archive
-//! (`requirements/versioning.md`) and the doc sources — intents,
-//! requirements, stress sessions (`requirements/requirements.md`,
-//! `requirements/stressing.md`), compiled and cross-checked by `check`.
+//! (`archi/requirements/cli/`, `archi/requirements/source-format/`),
+//! the NKP landscape analysis (`archi/requirements/scoring/the-landscape-is-a-slice.md`), the incidence
+//! analysis (`archi/requirements/scoring/the-matrix-joins-stress-to-structure.md`), the version archive
+//! (`archi/requirements/versioning/`) and the doc sources — intents,
+//! requirements, stress sessions (`archi/requirements/spec-docs/`,
+//! `archi/requirements/spec-docs/`), compiled and cross-checked by `check`.
 //!
 //! ```text
 //! archi init  [<dir>]
@@ -374,17 +374,17 @@ fn run_check(args: &Args) -> ExitCode {
     };
     let findings: Vec<Finding> = ws.model().check();
     // The version archive is sealed: an edited keyframe, patch or manifest
-    // is a compile error, not a finding (requirements/versioning.md).
+    // is a compile error, not a finding (archi/requirements/versioning/).
     let archive_errors = versions::verify_at(&root);
     // Doc sources — intents, requirements, stress sessions — compile with
     // the model and cross-check against it; their errors fail the check,
-    // their findings are advisory (requirements/requirements.md#compile).
+    // their findings are advisory (archi/requirements/self-hosting/docs-compile-with-the-model.md).
     let doc = docs::check(&root, ws.model());
     let clean = archive_errors.is_empty() && doc.diagnostics.is_empty();
     // A check with no errors closes on the landscape read: the NKP scoring
     // and the refactoring directions it implies, over the default slice.
     // Findings are advisory and do not withhold it; an empty landscape earns
-    // no read (requirements/cli.md).
+    // no read (archi/requirements/cli/).
     let nkp = match clean.then(|| ws.model().nkp(&NkpConfig::default())) {
         Some(Ok(r)) if r.scope.node_count > 0 => Some(r),
         Some(Err(e)) => {
@@ -581,7 +581,7 @@ fn run_version(args: &Args) -> ExitCode {
                     ];
                     // Saving closes the active stress session, and the
                     // incidence report fires over the finished round
-                    // (requirements/versioning.md#versioning--stressing).
+                    // (archi/requirements/self-hosting/unchanged-saves-close-rounds.md).
                     match docs::close_open_session(&root, &id) {
                         Ok(Some(session)) => {
                             println!("closed stress session `{session}`");
@@ -601,7 +601,7 @@ fn run_version(args: &Args) -> ExitCode {
                     // finishes: an open round closes against the current
                     // version and its incidence report fires; the bare
                     // no-op is a success
-                    // (requirements/versioning.md#versioning--stressing).
+                    // (archi/requirements/self-hosting/unchanged-saves-close-rounds.md).
                     match docs::close_open_session(&root, &latest) {
                         Ok(Some(session)) => {
                             println!("nothing to mint: the model is unchanged since {latest}");
@@ -626,7 +626,7 @@ fn run_version(args: &Args) -> ExitCode {
             // merged tree like a save, then re-stamp the named round's
             // `closed:` so the record follows its answers. Never closes an
             // open session — that is `version save`'s ceremony
-            // (requirements/multiplayer.md).
+            // (archi/requirements/self-hosting/parallel-editing-discipline.md).
             let Some(note) = args.message.as_deref() else {
                 return usage_err("`version remint` needs a note: -m <note>");
             };
@@ -749,7 +749,7 @@ fn run_version(args: &Args) -> ExitCode {
         (Some("diff"), [a, b]) => {
             // Either side may be `live`: the working tree compiles and
             // renders canonical, so a merge's semantic delta is reviewable
-            // before any save seals it (requirements/multiplayer.md).
+            // before any save seals it (archi/requirements/self-hosting/parallel-editing-discipline.md).
             let live = if a == "live" || b == "live" {
                 let ws = match compile_or_report(&root, false) {
                     Ok(c) => c.workspace,
@@ -1068,7 +1068,7 @@ fn read_workspace(args: &Args, root: &Path) -> Result<Workspace, ExitCode> {
     }
 }
 
-/// `archi read`: the agent read envelope (`requirements/agent-interface.md`)
+/// `archi read`: the agent read envelope (`archi/requirements/self-hosting/agents-read-lowered-statements.md`)
 /// — one batch of read statements in, the response envelope out, verbatim.
 /// Exit codes: 0 ok, 1 a statement failed (`error.index` says which),
 /// 2 protocol error (the request itself is bad).
@@ -1130,7 +1130,7 @@ fn run_read(args: &Args) -> ExitCode {
 }
 
 /// `archi query`: one composed subgraph query — the read envelope's
-/// convenience spelling (`requirements/modeling-lang/queries.md`). An
+/// convenience spelling (`archi/requirements/modeling-language/queries-compose-filters.md`). An
 /// absent filter does not restrict; `--top` is the explicit empty scopes
 /// filter (the top level only).
 fn run_query(args: &Args) -> ExitCode {
@@ -1180,7 +1180,7 @@ fn run_query(args: &Args) -> ExitCode {
 }
 
 /// `archi search`: ranked retrieval by phrase across every KB object
-/// (`requirements/search.md`). The one verb that does not die with the
+/// (`archi/requirements/agent-retrieval/`). The one verb that does not die with the
 /// model: a failed compile darkens the element corpus alone — doc cards
 /// still answer, the report names what went dark, and the exit stays zero
 /// (a-dark-corpus-stays-partial). Diagnosing the breakage is `check`'s job.
@@ -1450,7 +1450,7 @@ fn run_plan(args: &Args) -> ExitCode {
 }
 
 /// `archi init [<dir>]`: stand a directory up as an archiplan project
-/// (`requirements/cli.md`, `archi/requirements/cold-start/`) — the one
+/// (`archi/requirements/cli/`, `archi/requirements/cold-start/`) — the one
 /// verb that takes its target as an argument; there is no project to
 /// locate yet. Exit 0 covers the nothing-to-do re-run: create-only is the
 /// contract, not an error.
@@ -1718,7 +1718,7 @@ fn run_nkp(args: &Args) -> ExitCode {
 
 /// `archi session fold` — two concurrent rounds into one deliberate record;
 /// the verb-shaped repair for what a merge assembles
-/// (requirements/stressing.md, rounds-fold-deliberately).
+/// (archi/requirements/spec-docs/, rounds-fold-deliberately).
 fn run_session(args: &Args) -> ExitCode {
     let fail = |e: String| -> ExitCode {
         eprintln!("archi: {e}");

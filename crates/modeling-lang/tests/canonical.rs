@@ -1,4 +1,4 @@
-//! The canonical render (`requirements/versioning.md#canonical-form`):
+//! The canonical render (`archi/requirements/self-hosting/versions-mint-on-meaning.md`):
 //! `render_source` is byte-for-byte deterministic and a fixed point under
 //! recompilation, and `scope_sources` slices it per root scope for
 //! scope-version hashing.

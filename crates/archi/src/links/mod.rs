@@ -1,4 +1,4 @@
-//! Code-links: spec ↔ code traceability (`requirements/code-link.md`).
+//! Code-links: spec ↔ code traceability (`archi/requirements/code-link/`).
 //!
 //! A link ties a **`SpecRef`** — a node path or a typed edge, at a version
 //! slot — to an **anchor** in the code tree: a file, optionally a symbol.
@@ -11,7 +11,7 @@
 //! Storage is an append-only journal, `archi/links/journal.jsonl` — events
 //! `add`, `confirm`, `repin`, `retire`; the live link set is its fold. A
 //! commit sha in a birth record is provenance, never a dependency, exactly
-//! as in the version archive (`requirements/versioning.md#why-this-shape`).
+//! as in the version archive (`archi/requirements/versioning/keyframes-bound-the-archive.md`).
 
 pub(crate) mod capture;
 pub(crate) mod code;
@@ -34,7 +34,7 @@ use crate::versions::{self, Archive};
 
 // ---- the link model --------------------------------------------------------
 
-/// Which hash the link watches (`requirements/code-link.md#kinds-and-standing`).
+/// Which hash the link watches (`archi/requirements/self-hosting/drift-graded-per-kind.md`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LinkKind {
@@ -280,7 +280,7 @@ pub struct Link {
     /// Readable sequence plus a content suffix, `l0042-9f3ab1`. The suffix
     /// hashes the link's content and mint moment, so two branches minting
     /// in parallel cannot collide and their journals union-merge cleanly
-    /// (requirements/multiplayer.md). Bootstrap-era ids are bare `l0001`
+    /// (archi/requirements/self-hosting/parallel-editing-discipline.md). Bootstrap-era ids are bare `l0001`
     /// onward — the fold treats ids as opaque.
     pub id: String,
     /// The spec element this code realizes.
@@ -354,7 +354,7 @@ struct Folded {
     /// Events the fold absorbed instead of applying — identical replayed
     /// lines and events landing on tombstones, the residue of merging
     /// concurrent branch histories. Surfaced by verify and audit, never
-    /// silent, never corruption (requirements/multiplayer.md).
+    /// silent, never corruption (archi/requirements/self-hosting/parallel-editing-discipline.md).
     absorbed: Vec<String>,
 }
 
@@ -370,7 +370,7 @@ impl Folded {
 
 /// Mint a link id: a readable dense sequence plus a six-hex content suffix,
 /// so ids minted on parallel branches cannot collide when the journals
-/// union-merge (requirements/multiplayer.md).
+/// union-merge (archi/requirements/self-hosting/parallel-editing-discipline.md).
 pub(crate) fn mint_id(seq: usize, salt: &str) -> String {
     let mut h = Sha256::new();
     h.update(salt.as_bytes());
@@ -416,7 +416,7 @@ fn read_journal(root: &Path) -> Result<Vec<Event>, String> {
 /// would forbid — an identical replayed line, an event landing on a
 /// tombstone — and surfacing every absorption as a note. Only an event
 /// naming an id the journal never minted, or two different links under one
-/// id, remains corruption (requirements/multiplayer.md).
+/// id, remains corruption (archi/requirements/self-hosting/parallel-editing-discipline.md).
 fn fold(events: Vec<Event>) -> Result<Folded, String> {
     let mut live: Vec<Link> = Vec::new();
     let mut retired: Vec<Link> = Vec::new();
@@ -509,7 +509,7 @@ fn load(root: &Path) -> Result<Folded, String> {
 
 const JOURNAL_GITATTRIBUTES: &str = "\
 # The journal is append-only and its fold absorbs concurrent histories:
-# branch merges concatenate instead of conflicting (requirements/multiplayer.md).
+# branch merges concatenate instead of conflicting (archi/requirements/self-hosting/parallel-editing-discipline.md).
 journal.jsonl merge=union
 ";
 
@@ -956,7 +956,7 @@ pub fn repin(root: &Path, id: &str, to: Option<&str>) -> Result<Link, String> {
 
 // ---- verify ----------------------------------------------------------------
 
-/// A projection's graded state (`requirements/code-link.md#verify-and-drift`).
+/// A projection's graded state (`archi/requirements/code-link/verify-grades-every-claim.md`).
 #[derive(Clone, PartialEq, Eq, Debug, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum State {
@@ -1006,7 +1006,7 @@ impl State {
 }
 
 /// The floor below which evidence reads as decayed — confirm or retire
-/// (`requirements/code-link.md#audit--dark-deltas-dark-spec`).
+/// (`archi/requirements/code-link/the-audit-inverts-coverage.md`).
 pub const CONFIDENCE_FLOOR: f64 = 0.25;
 
 /// Derived confidence of an evidence link — never stored. Born at 0.5;
@@ -1525,7 +1525,7 @@ fn changed_files(
 
 // ---- audit -----------------------------------------------------------------
 
-/// An advisory audit finding (`requirements/code-link.md#audit--dark-deltas-dark-spec`).
+/// An advisory audit finding (`archi/requirements/code-link/the-audit-inverts-coverage.md`).
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AuditFinding {
@@ -2065,7 +2065,7 @@ mod tests {
         )
         .unwrap();
         // Ids: dense readable sequence, content-suffixed so parallel
-        // branches cannot mint the same id (requirements/multiplayer.md).
+        // branches cannot mint the same id (archi/requirements/self-hosting/parallel-editing-discipline.md).
         assert!(lit.id.starts_with("l0001-"), "{}", lit.id);
         assert!(ind.id.starts_with("l0002-"), "{}", ind.id);
         assert_ne!(lit.id, ind.id);

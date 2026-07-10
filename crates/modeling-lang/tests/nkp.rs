@@ -1,4 +1,4 @@
-//! NKP slicing and metrics (`requirements/scoring/nkp.md`): the exclusion
+//! NKP slicing and metrics (`archi/requirements/scoring/the-landscape-is-a-slice.md`): the exclusion
 //! patterns, scope modes, delegation folding, and the landscape numbers.
 
 mod common;

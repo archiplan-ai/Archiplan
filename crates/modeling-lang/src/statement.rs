@@ -431,7 +431,7 @@ pub struct End {
 }
 
 /// The kind of an edge: the relation/connection/application trichotomy of
-/// `requirements/modeling-lang/modeling-lang.md#kinds`. Used as a `query`
+/// `archi/requirements/modeling-language/the-graph-is-free-but-distinguished.md`. Used as a `query`
 /// filter and as edge metadata in query results.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -454,7 +454,7 @@ impl EdgeKind {
 }
 
 /// One statement of the language. See
-/// `requirements/modeling-lang/modeling-lang.md#statements`.
+/// `archi/requirements/modeling-language/an-edge-is-its-statement.md`.
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(tag = "stmt", rename_all = "kebab-case")]
 #[allow(missing_docs)]
@@ -487,7 +487,7 @@ pub enum Statement {
         route: Option<PatternExpr>,
         inner: End,
     },
-    /// Subgraph query (`requirements/modeling-lang/queries.md`): composable
+    /// Subgraph query (`archi/requirements/modeling-language/queries-compose-filters.md`): composable
     /// filters, each optional; an absent filter does not restrict. An empty
     /// list is the most restrictive filter (matches nothing), not an absent
     /// one — `"scopes": []` means "the top level only". `carriers` keeps

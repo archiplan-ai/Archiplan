@@ -1,4 +1,4 @@
-//! The flow-query filters (`requirements/modeling-lang/queries.md`):
+//! The flow-query filters (`archi/requirements/modeling-language/queries-compose-filters.md`):
 //! `carriers` slices a datum's flow — connection edges carrying the named
 //! node, directly or via a classifying type, plus the nodes related to
 //! them; `edge_types` slices by rel/conn type name, and never passes an

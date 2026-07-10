@@ -1,5 +1,5 @@
 //! The `.arch` source format: a diffable textual surface language that
-//! compiles to the statement layer (`requirements/modeling-lang/source-format.md`).
+//! compiles to the statement layer (`archi/requirements/source-format/`).
 //!
 //! A project of `.arch` files *is* the stored model: [`compile_project`]
 //! parses every module under the source root, resolves imports and lexical
@@ -66,7 +66,7 @@ impl CompileFailure {
 /// Resolve the preset the project's manifest pins — what a fresh compile of
 /// this project loads as its stdlib. The doc-source layer recompiles
 /// archived versions against it to validate stressor affects
-/// (`requirements/stressing.md`).
+/// (`archi/requirements/spec-docs/`).
 pub fn project_preset(root: &Path) -> Result<Preset, Diagnostic> {
     let manifest = project::read_manifest(root)?;
     project::resolve_preset(root, &manifest)

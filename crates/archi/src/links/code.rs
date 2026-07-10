@@ -1,5 +1,5 @@
 //! The code side of a code-link: canonicalization and symbol anchors
-//! (`requirements/code-link.md#anchors`).
+//! (`archi/requirements/code-link/symbols-anchor-the-code.md`).
 //!
 //! A file canonicalizes to a token stream — comments and formatting are
 //! stripped, so canonical tokens differ iff the code differs, exactly as

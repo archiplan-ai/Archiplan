@@ -1,5 +1,5 @@
 //! Per-primitive schemas over [`super::md`] documents: intents, requirements,
-//! sessions and stressors as `requirements/{intent,requirements,stressing}.md`
+//! sessions and stressors as `archi/requirements/spec-docs/`
 //! define them. Parsing is best-effort — every deviation lands in the
 //! diagnostics and the parsed value keeps what was sound, with `Option`
 //! marking fields the cross-checks must not trust.
@@ -7,7 +7,7 @@
 use super::DocDiagnostic;
 use super::md::{Field, FieldValue, Heading, MdDoc, slugify};
 
-/// Where a requirement came from (`requirements/requirements.md#origin`).
+/// Where a requirement came from (`archi/requirements/spec-docs/origin-records-why-placement-records-where.md`).
 pub enum Origin {
     /// Derived directly from the enclosing intent.
     Intent,
@@ -19,7 +19,7 @@ pub enum Origin {
     Fusion(Vec<String>),
 }
 
-/// A stressor's outcome (`requirements/stressing.md#stressors`).
+/// A stressor's outcome (`archi/requirements/spec-docs/a-stressor-presses-one-hypothesis.md`).
 #[derive(Clone, Copy, PartialEq)]
 pub enum Outcome {
     /// The session has not decided yet.
@@ -32,7 +32,7 @@ pub enum Outcome {
 
 /// The machine fields a file-scale requirement owns. Section-scale
 /// requirements have none — they inherit
-/// (`requirements/requirements.md#stored-as-files`).
+/// (`archi/requirements/spec-docs/one-claim-one-file.md`).
 pub struct ReqFields {
     /// Parsed origin and its line; `None` when invalid (already reported).
     pub origin: Option<(Origin, usize)>,
@@ -74,7 +74,7 @@ pub struct Requirement {
     pub fields: Option<ReqFields>,
 }
 
-/// An intent — the anchor of a requirements area (`requirements/intent.md`).
+/// An intent — the anchor of a requirements area (`archi/requirements/spec-docs/an-intent-is-a-problem-statement.md`).
 pub struct Intent {
     /// The slug (= folder = filename).
     pub slug: String,
@@ -84,7 +84,7 @@ pub struct Intent {
     pub line: usize,
 }
 
-/// A stress session (`requirements/stressing.md#session-file`).
+/// A stress session (`archi/requirements/spec-docs/breaking-derives-requirements.md`).
 pub struct Session {
     /// The slug (= folder = filename).
     pub slug: String,
@@ -117,7 +117,7 @@ impl Session {
     }
 }
 
-/// A stressor (`requirements/stressing.md#stressor-file`).
+/// A stressor (`archi/requirements/spec-docs/a-stressor-presses-one-hypothesis.md`).
 pub struct Stressor {
     /// The slug (= filename).
     pub slug: String,
@@ -582,7 +582,7 @@ fn parse_origin(s: &str) -> Result<Origin, String> {
 }
 
 /// A verification entry: a trailing `Satisfy` bullet tagged by variant
-/// (`requirements/requirements.md#verification`).
+/// (`archi/requirements/spec-docs/satisfaction-is-a-checked-claim.md`).
 fn verification_bullet(line: &str) -> bool {
     let Some(rest) = line.trim_start().strip_prefix("- ") else {
         return false;

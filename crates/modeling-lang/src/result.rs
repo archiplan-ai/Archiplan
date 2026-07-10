@@ -1,5 +1,5 @@
 //! Statement results, findings, and the request/response envelope of the
-//! agent interface (`requirements/agent-interface.md`).
+//! agent interface (`archi/requirements/self-hosting/agents-read-lowered-statements.md`).
 
 use std::fmt;
 

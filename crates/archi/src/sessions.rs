@@ -1,5 +1,5 @@
 //! `archi session fold` — two concurrent stress rounds into one record,
-//! deliberately (`requirements/stressing.md`, rounds-fold-deliberately).
+//! deliberately (`archi/requirements/spec-docs/`, rounds-fold-deliberately).
 //!
 //! A merge can assemble a round nobody authored: two open folders after a
 //! different-slug merge, or one file claimed by two charters after a

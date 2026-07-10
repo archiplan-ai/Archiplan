@@ -1,4 +1,4 @@
-//! The incidence core (`requirements/scoring/incidence.md`): pressure-surface
+//! The incidence core (`archi/requirements/scoring/the-matrix-joins-stress-to-structure.md`): pressure-surface
 //! expansion, the S×N matrix, and the typed findings with their gates.
 
 mod common;

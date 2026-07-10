@@ -24,7 +24,7 @@ use crate::statement::{Definition, End, PatternExpr, Statement, parse_statement}
 /// A model plus the preset loaded as its standard library.
 ///
 /// [`Workspace::execute`] runs a parsed batch; [`Workspace::handle`] speaks
-/// the read-only request/response envelope of `requirements/agent-interface.md`.
+/// the read-only request/response envelope of `archi/requirements/self-hosting/agents-read-lowered-statements.md`.
 #[derive(Clone, Debug)]
 pub struct Workspace {
     model: Model,

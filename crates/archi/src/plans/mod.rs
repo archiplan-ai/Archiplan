@@ -1,5 +1,5 @@
 //! Plans: a hardened spec projected into an executable task graph
-//! (`requirements/tasks.md`).
+//! (`archi/requirements/planning/`).
 //!
 //! A plan pins one archived spec version and cuts **one task per node**;
 //! each task's `spec_refs` are seeded from the pinned model — the node plus
@@ -178,7 +178,7 @@ fn marker_path(root: &Path) -> PathBuf {
     plans_dir(root).join(".current")
 }
 
-/// Plan names are slugs (`requirements/slug.md`): they become directories
+/// Plan names are slugs (`archi/requirements/spec-docs/slugs-are-the-reference-currency.md`): they become directories
 /// and the `.current` marker's content.
 fn validate_name(name: &str) -> Result<(), String> {
     let slug_bytes = name
@@ -472,7 +472,7 @@ fn edge_endpoints(model: &Model) -> BTreeMap<String, (String, String)> {
     out
 }
 
-/// The reverse lookup (`requirements/tasks.md`): a requirement matches a
+/// The reverse lookup (`archi/requirements/planning/`): a requirement matches a
 /// task when its satisfied-by expansion against the pinned model
 /// ([`Model::term_surface`], the expansion stressor affects share)
 /// intersects the task's spec_refs; an edge ref matches through its

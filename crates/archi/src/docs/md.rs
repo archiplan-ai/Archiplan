@@ -1,5 +1,5 @@
 //! A reader for the structured markdown of doc sources
-//! (`requirements/requirements.md#file-schema`): a YAML-subset frontmatter
+//! (`archi/requirements/spec-docs/every-field-is-present.md`): a YAML-subset frontmatter
 //! block, one H1 name, and `#`-headed sections over free prose. Structure
 //! only — the reader never interprets prose, and a file yields at most one
 //! structural error; field- and schema-level validation happens in
@@ -180,8 +180,8 @@ fn parse_value(v: &str) -> Result<FieldValue, String> {
 }
 
 /// The slug a name derives to: lowercased, runs of non-alphanumerics
-/// collapsed to `-` (`requirements/slug.md`,
-/// `requirements/requirements.md#slugs`).
+/// collapsed to `-` (`archi/requirements/spec-docs/slugs-are-the-reference-currency.md`,
+/// `archi/requirements/spec-docs/slugs-are-the-reference-currency.md`).
 pub fn slugify(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
     let mut gap = false;

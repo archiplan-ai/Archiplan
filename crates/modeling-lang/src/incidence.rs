@@ -1,5 +1,5 @@
 //! Incidence analysis: the stressor × component matrix
-//! (`requirements/scoring/incidence.md`). Rows are stressors, columns are the
+//! (`archi/requirements/scoring/the-matrix-joins-stress-to-structure.md`). Rows are stressors, columns are the
 //! epistatic terms of one **frame** model, and a cell is 1 iff the term lies
 //! on the stressor's pressure surface. The matrix surfaces couplings the
 //! declared edges alone don't show.
@@ -37,7 +37,7 @@ use crate::nkp::{ends_of, reach};
 
 // ---- configuration ---------------------------------------------------------
 
-/// Incidence analysis tunables (`requirements/scoring/incidence.md`).
+/// Incidence analysis tunables (`archi/requirements/scoring/the-matrix-joins-stress-to-structure.md`).
 #[derive(Clone, Debug)]
 pub struct IncidenceConfig {
     /// Jaccard threshold over two columns' stressor sets for the coupling /
@@ -54,7 +54,7 @@ pub struct IncidenceConfig {
     /// Widen the under-stressed sweep to every zero column. Off, the sweep
     /// names behavior only: terms in the `type_of` closure of `Data` — the
     /// boundary NKP's default slice draws — emit no finding
-    /// (`requirements/scoring/incidence.md#findings`). The matrix and every
+    /// (`archi/requirements/scoring/findings-read-the-matrix.md`). The matrix and every
     /// other finding always see all columns.
     pub all_terms: bool,
 }
@@ -73,7 +73,7 @@ impl Default for IncidenceConfig {
 
 // ---- input -----------------------------------------------------------------
 
-/// A stressor's recorded outcome (`requirements/stressing.md#stressors`).
+/// A stressor's recorded outcome (`archi/requirements/spec-docs/a-stressor-presses-one-hypothesis.md`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum StressOutcome {
@@ -109,7 +109,7 @@ pub struct IncidenceRow {
 }
 
 /// An invariant of the initial problem statement: the satisfaction claim of
-/// an intent-origin requirement (`requirements/requirements.md#satisfy`).
+/// an intent-origin requirement (`archi/requirements/spec-docs/satisfaction-is-a-checked-claim.md`).
 /// Elements are raw `satisfied-by` paths — terms or types — expanded here
 /// against the frame; elements the frame does not know are ignored.
 #[derive(Clone, Debug)]
@@ -361,7 +361,7 @@ pub struct IncidenceReport {
 /// expands to the user terms its `type_of` closure classifies. `None` when
 /// the path resolves to nothing. Backs [`Model::term_surface`] — the one
 /// expansion rule stressor affects and `satisfied-by` entries share
-/// (`requirements/stressing.md`, `requirements/requirements.md#satisfy`).
+/// (`archi/requirements/spec-docs/`, `archi/requirements/spec-docs/satisfaction-is-a-checked-claim.md`).
 pub(crate) fn term_surface(model: &Model, path: &str) -> Option<Vec<String>> {
     let segs: Vec<String> = path.split('.').map(str::to_string).collect();
     let node = model.resolve_in(None, &segs)?;

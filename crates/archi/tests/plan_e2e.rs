@@ -1,7 +1,7 @@
 //! End to end through the real binary: a plan projects a hardened spec
 //! into tasks, waves gate on captured-then-asserted code-links, and the
-//! scenario latch closes the cycle (`requirements/tasks.md`,
-//! `requirements/code-link.md#code-links--tasks`).
+//! scenario latch closes the cycle (`archi/requirements/planning/`,
+//! `archi/requirements/self-hosting/capture-at-the-join.md`).
 
 use std::fs;
 use std::path::{Path, PathBuf};

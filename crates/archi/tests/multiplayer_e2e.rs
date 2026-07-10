@@ -1,5 +1,5 @@
 //! End to end through the real binary: the joins that merge-pressure broke
-//! (`requirements/multiplayer.md`). The journal folds concurrent branch
+//! (`archi/requirements/self-hosting/parallel-editing-discipline.md`). The journal folds concurrent branch
 //! histories in either union order; `version remint` re-mints a discarded
 //! save onto the merged lineage and re-stamps its round; `version diff`
 //! takes `live`; archive diagnostics name their recipes instead of

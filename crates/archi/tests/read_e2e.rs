@@ -1,5 +1,5 @@
 //! End to end through the real binary: the agent read envelope
-//! (`requirements/agent-interface.md`) — a batch of reads in, the response
+//! (`archi/requirements/self-hosting/agents-read-lowered-statements.md`) — a batch of reads in, the response
 //! envelope out; writes are protocol errors; `--at` reads a version
 //! reconstructed from the sealed archive.
 

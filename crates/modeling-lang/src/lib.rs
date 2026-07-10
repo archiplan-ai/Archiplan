@@ -1,17 +1,17 @@
 //! The Archiplan modeling language: a substrate to express arbitrary
 //! architectures in a structured way that can be transformed or queried later.
 //!
-//! Implements `requirements/modeling-lang/` — the free graph of nodes (with
+//! Implements `archi/requirements/modeling-language/` — the free graph of nodes (with
 //! ports and nested scopes) and distinguished edges (relations, connections,
 //! applications), views, the JSON statement API with its idempotent
 //! definitions and error contract, and the read statements (the subgraph
 //! `query` and `check`) — plus the `.arch` source format
-//! (`requirements/modeling-lang/source-format.md`), the read-only
-//! request/response envelope of `requirements/agent-interface.md`, ontology
+//! (`archi/requirements/source-format/`), the read-only
+//! request/response envelope of `archi/requirements/self-hosting/agents-read-lowered-statements.md`, ontology
 //! presets loaded as the standard library
-//! (`requirements/modeling-lang/ontology.md`), NKP landscape analysis
-//! (`requirements/scoring/nkp.md`), and the incidence analysis core
-//! (`requirements/scoring/incidence.md`).
+//! (`archi/requirements/self-hosting/one-ontology-everywhere.md`), NKP landscape analysis
+//! (`archi/requirements/scoring/the-landscape-is-a-slice.md`), and the incidence analysis core
+//! (`archi/requirements/scoring/the-matrix-joins-stress-to-structure.md`).
 //!
 //! # Quick start
 //!
@@ -69,7 +69,7 @@
 //!   and augment their scopes.
 //! - Names are `[A-Za-z_][A-Za-z0-9_]*`; paths join them with `.`.
 //!
-//! For the subgraph `query` (`requirements/modeling-lang/queries.md`):
+//! For the subgraph `query` (`archi/requirements/modeling-language/queries-compose-filters.md`):
 //!
 //! - Each filter is optional and absent means unrestricted; present filters
 //!   compose by intersection. An empty list is the most restrictive filter of

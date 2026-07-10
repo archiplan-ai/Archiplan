@@ -10,8 +10,8 @@ use std::fmt;
 use serde::Serialize;
 use serde_json::Value;
 
-/// Stable error codes from the catalog in `requirements/modeling-lang/errors.md`,
-/// plus the protocol-level code of `requirements/agent-interface.md`
+/// Stable error codes from the catalog in `archi/requirements/modeling-language/failure-is-machine-readable.md`,
+/// plus the protocol-level code of `archi/requirements/self-hosting/agents-read-lowered-statements.md`
 /// (`BadRequest`) which concerns the envelope rather than a statement.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ErrorCode {

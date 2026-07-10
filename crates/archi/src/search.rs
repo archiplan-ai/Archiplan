@@ -1,6 +1,6 @@
 //! `archi search`: ranked lexical retrieval across every KB object —
 //! model elements with their identity prose, intents, requirements,
-//! stressors and sessions (`requirements/search.md`).
+//! stressors and sessions (`archi/requirements/agent-retrieval/`).
 //!
 //! The scan keeps no persisted derivative of the corpus: every query walks
 //! the live doc tree and the compiled model it was handed, so a text edit
