@@ -67,4 +67,8 @@ NKP never runs on the raw graph; the landscape is a slice:
   simulation, which v1 skips (reported in the blob's `notes`, together
   with spectral clustering).
 
+A passing `archi check` closes on the summary read — the scoring line,
+hotspots and corridor directions over the default slice
+([cli.md](../cli.md)); the knobs and the full report stay here.
+
 Full conceptual background: `kb/nkp.md`.

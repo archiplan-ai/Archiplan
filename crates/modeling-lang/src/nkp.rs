@@ -208,6 +208,17 @@ pub enum Regime {
     Chaotic,
 }
 
+impl Regime {
+    /// The report label — the same string the serde rename emits.
+    pub fn describe(self) -> &'static str {
+        match self {
+            Regime::Ordered => "ORDERED",
+            Regime::Critical => "CRITICAL",
+            Regime::Chaotic => "CHAOTIC",
+        }
+    }
+}
+
 /// What the slice looked like.
 #[derive(Clone, Debug, Serialize)]
 pub struct NkpScopeInfo {
@@ -282,6 +293,16 @@ pub enum CorridorLabel {
     PartiallyNeutral,
 }
 
+impl CorridorLabel {
+    /// The report label — the same string the serde rename emits.
+    pub fn describe(self) -> &'static str {
+        match self {
+            CorridorLabel::Safe => "SAFE_CORRIDOR",
+            CorridorLabel::PartiallyNeutral => "PARTIALLY_NEUTRAL",
+        }
+    }
+}
+
 /// Suggested refactoring action for a corridor.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize)]
 pub enum CorridorAction {
@@ -294,6 +315,17 @@ pub enum CorridorAction {
     /// Moderate boundary exposure: shrink the interface first.
     #[serde(rename = "SIMPLIFY_INTERFACE")]
     SimplifyInterface,
+}
+
+impl CorridorAction {
+    /// The report label — the same string the serde rename emits.
+    pub fn describe(self) -> &'static str {
+        match self {
+            CorridorAction::Encapsulate => "ENCAPSULATE",
+            CorridorAction::ExtractModule => "EXTRACT_MODULE",
+            CorridorAction::SimplifyInterface => "SIMPLIFY_INTERFACE",
+        }
+    }
 }
 
 /// A maximal connected set of neutral nodes (P_i ≥ τ_P).

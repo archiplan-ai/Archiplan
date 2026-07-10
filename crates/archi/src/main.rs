@@ -59,8 +59,8 @@ use std::process::ExitCode;
 
 use modeling_lang::source::{Compiled, compile_project, find_project_root};
 use modeling_lang::{
-    ExcludePattern, Finding, IncidenceConfig, Model, Neutrality, NkpConfig, NkpScope, Severity,
-    Statement, Workspace,
+    ExcludePattern, Finding, IncidenceConfig, Model, Neutrality, NkpConfig, NkpCorridor, NkpReport,
+    NkpScope, Severity, Statement, Workspace,
 };
 use serde_json::{Value, json};
 
@@ -374,6 +374,19 @@ fn run_check(args: &Args) -> ExitCode {
     // the model and cross-check against it; their errors fail the check,
     // their findings are advisory (requirements/requirements.md#compile).
     let doc = docs::check(&root, ws.model());
+    let clean = archive_errors.is_empty() && doc.diagnostics.is_empty();
+    // A check with no errors closes on the landscape read: the NKP scoring
+    // and the refactoring directions it implies, over the default slice.
+    // Findings are advisory and do not withhold it; an empty landscape earns
+    // no read (requirements/cli.md).
+    let nkp = match clean.then(|| ws.model().nkp(&NkpConfig::default())) {
+        Some(Ok(r)) if r.scope.node_count > 0 => Some(r),
+        Some(Err(e)) => {
+            eprintln!("archi: warning: nkp report: {e}");
+            None
+        }
+        _ => None,
+    };
     if args.json {
         let mut all: Vec<Value> = findings
             .iter()
@@ -398,6 +411,15 @@ fn run_check(args: &Args) -> ExitCode {
             envelope["status"] = json!("error");
             envelope["docs"] = serde_json::to_value(&doc.diagnostics).expect("serializes");
         }
+        if let Some(report) = &nkp {
+            // The report minus its N×N matrix and implementation notes —
+            // the scoring and directions; `archi nkp` has the rest.
+            let mut v = serde_json::to_value(report).expect("serializes");
+            let o = v.as_object_mut().expect("a report is an object");
+            o.remove("matrix");
+            o.remove("notes");
+            envelope["nkp"] = v;
+        }
         println!(
             "{}",
             serde_json::to_string_pretty(&envelope).expect("serializes")
@@ -413,6 +435,9 @@ fn run_check(args: &Args) -> ExitCode {
                 println!("{f}");
             }
         }
+        if let Some(report) = &nkp {
+            print!("{}", render_nkp_summary(report));
+        }
         for e in &archive_errors {
             eprintln!("archi/versions: E_ARCHIVE: {e}");
         }
@@ -420,11 +445,81 @@ fn run_check(args: &Args) -> ExitCode {
             eprintln!("{d}");
         }
     }
-    if archive_errors.is_empty() && doc.diagnostics.is_empty() {
+    if clean {
         ExitCode::SUCCESS
     } else {
         ExitCode::from(1)
     }
+}
+
+/// The one-screen landscape read a passing `check` closes on: the scoring
+/// line, the coupling hotspots, and the corridor actions as refactoring
+/// directions — largest corridors first, capped so a sparse landscape's
+/// singleton corridors cannot flood the report. The line stays bare: its
+/// symbol legend rides the agent briefing (`skills/archi.md`), and
+/// `archi nkp` has the full report.
+fn render_nkp_summary(report: &NkpReport) -> String {
+    const CAP: usize = 6;
+    let m = &report.metrics;
+    let mut out = format!(
+        "\nnkp — N={} · E={} · K̄={:.2} (σ {:.2}) · P̄={:.2} · regime {}\n",
+        report.scope.node_count,
+        report.scope.edge_count,
+        m.k_bar,
+        m.k_std,
+        m.p_bar,
+        m.regime.describe()
+    );
+    if !report.hotspots.is_empty() {
+        let shown: Vec<String> = report
+            .hotspots
+            .iter()
+            .take(CAP)
+            .map(|h| format!("{} (K={})", h.node, h.k_in))
+            .collect();
+        let more = report.hotspots.len().saturating_sub(CAP);
+        out.push_str(&format!(
+            "highest-risk refactoring targets: {}{}\n",
+            shown.join(" · "),
+            if more > 0 {
+                format!(" · +{more} more")
+            } else {
+                String::new()
+            }
+        ));
+    }
+    let mut directed: Vec<&NkpCorridor> = report
+        .neutral_corridors
+        .iter()
+        .filter(|c| c.action.is_some())
+        .collect();
+    if !directed.is_empty() {
+        // A stable sort by size keeps creation order among equals, so the
+        // meatiest directions survive the cap deterministically.
+        directed.sort_by(|a, b| b.nodes.len().cmp(&a.nodes.len()));
+        out.push_str("refactoring directions\n");
+        for c in directed.iter().take(CAP) {
+            let mut nodes: Vec<String> = c.nodes.iter().take(CAP + 2).cloned().collect();
+            if c.nodes.len() > CAP + 2 {
+                nodes.push(format!("…+{}", c.nodes.len() - (CAP + 2)));
+            }
+            out.push_str(&format!(
+                "  {} {} — {} ({}, confidence {:.2})\n",
+                c.id,
+                c.action.expect("filtered on action").describe(),
+                nodes.join(", "),
+                c.label.describe(),
+                c.confidence
+            ));
+        }
+        if directed.len() > CAP {
+            out.push_str(&format!(
+                "  …and {} more — `archi nkp --corridors` has the full set\n",
+                directed.len() - CAP
+            ));
+        }
+    }
+    out
 }
 
 /// A path relative to the project root, for operator-facing prints.

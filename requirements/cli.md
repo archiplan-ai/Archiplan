@@ -34,6 +34,13 @@ Compiles the project and reports
 `file:line:col: CODE: message` and exit 1; findings are advisory and exit 0. `--json` emits a structured envelope
 (`{"status","findings"}` or `{"status","diagnostics"}`).
 
+A check with no errors closes on the landscape read: the [NKP](./scoring/nkp.md) scoring line (N, E, K̄, σ, P̄,
+regime — the line stays bare; its symbol legend rides the agent briefing, the `archi` skill) and the
+refactoring directions it implies — the highest-risk coupling targets and the corridor actions, largest
+corridors first, capped so a sparse landscape's singleton corridors cannot flood the report. Advisory findings do
+not withhold the read; an empty landscape (N = 0) earns none. The slice is the default one — `archi nkp` holds
+the knobs and the full report. `--json` carries it as `nkp`: the report without its matrix and notes.
+
 ```
 archi build [--project <dir>] [--emit-batch <file|->]
 ```

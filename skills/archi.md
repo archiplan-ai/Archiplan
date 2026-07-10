@@ -41,8 +41,21 @@ Ground rules, always:
    edges in `.arch` (syntax: *`.arch` in brief*, below). As elements
    land, fill each requirement's
    `satisfied-by`, Satisfy prose, and verification bullets (`- test — …`,
-   `- type-level — …`). Loop `archi check` to zero errors; `archi nkp`
-   for a landscape sanity read.
+   `- type-level — …`). Loop `archi check` to zero errors — a passing
+   check closes on the NKP scoring line and refactoring directions;
+   `archi nkp` for the full landscape report. Reading the scoring line:
+   - N components in the landscape · E couplings between them
+   - K̄ mean couplings per component — on average, how many components
+     one change touches
+   - σ the spread of that coupling — high against K̄ means a few nodes
+     hoard it; those surface as hotspots, the highest-risk refactoring
+     targets
+   - P̄ mean neutrality — the share of the design free to move with no
+     global ripple
+   - regime ORDERED — changes stay local; CRITICAL (K̄ 1–3) — the
+     evolvable edge of chaos, changes propagate without cascading (the
+     target); CHAOTIC — every change ripples, decompose hotspots before
+     refactoring
 5. **Save** — `archi version save -m "<why>"` seals the render.
 6. **Stress** — an adversarial round against the version just saved. Open
    the session, `archi/stress/<session>/<session>.md`: frontmatter
