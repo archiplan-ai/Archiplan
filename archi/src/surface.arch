@@ -1,0 +1,24 @@
+import data
+import conns
+import views
+import tool
+
+// Deferred product surfaces entering as intents — element-addressing and tradeoff-config,
+// migrated from the retired issues/ folder. Modeled so they can be planned; not yet built.
+// See archi/requirements/element-addressing and archi/requirements/tradeoff-configuration.
+
+// Every diagnostic, finding and rendered report line carries the id of the element it concerns,
+// so a reader can name the element instead of paraphrasing the spec.
+def node Addressing:
+  port stamp  // tags an emitted finding, diagnostic or report line with its element's id
+
+// The operator's up-front priorities — what to favor, what to spend — set explicitly or derived
+// by an auto mode, weighting the scoring read and stress-round prioritization.
+def node Tradeoffs:
+  port weigh  // operator priorities in, the weighting the scoring read consumes
+
+Function type_of Addressing
+Function type_of Tradeoffs
+
+Cli.drive consult(->Findings, <-Report) Addressing.stamp in read_flow
+Cli.drive consult(->Command, <-Report) Tradeoffs.weigh in read_flow

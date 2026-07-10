@@ -1,0 +1,172 @@
+{
+  "name": "migrate-the-issues",
+  "version": "v0013",
+  "created": "2026-07-10T14:05:36Z",
+  "state": "draft",
+  "closed_waves": 0,
+  "problem": "The retired issues/ folder's four open items, planned as one migration. Two are authoring-surface defects hardened behavior-only in the authoring-pressure round @ v0012 (verifications-forgive-the-dash: a Satisfy bullet must not void on the wrong dash; satisfaction-names-the-interface: satisfied-by and link SpecRefs must resolve ports and edges, not only whole nodes). Two are deferred product surfaces that entered as intents @ v0013 (reports-name-their-element: every finding and report line carries its element's id; priorities-weight-the-read: a trade-off configuration situates the scoring read). This plan projects v0013 and stops at authoring — no wave has started; the two new-node tasks (t3, t4) implement nodes already sealed in v0013, so execution adds code, never model.",
+  "technology_stack": [
+    {
+      "tech": "Rust 2024; crates/archi: docs/schema.rs (verification-bullet recognizer + tag-shaped-miss diagnostic), docs/mod.rs (satisfied-by cross-check), links/mod.rs (SpecRef parser); crates/modeling-lang: model.rs (the port/edge resolution the two reference layers share)",
+      "provenance": "the defects live exactly where tool.arch places DocsCompiler (parse + schema + cross-check) and Links (SpecRef resolution); the shared resolver is the modeling-lang Model both consult, so one primitive keeps satisfied-by and link refs from disagreeing about what an element is"
+    },
+    {
+      "tech": "new crates/archi/src/addressing.rs — stamps the element locus a finding/diagnostic already knows (located, coded) onto the human and json surface; main.rs renders the id and query/search resolve it back",
+      "provenance": "reports-name-their-element: the ids exist internally (absolute paths, slugs, located diagnostics); the work is carrying them out, so Addressing is a thin projection over existing loci, not new identity"
+    },
+    {
+      "tech": "new crates/archi/src/tradeoffs.rs — the configuration and the auto mode that polls the operator; crates/modeling-lang/src/nkp.rs and incidence.rs consult the weighting; main.rs adds the verb",
+      "provenance": "priorities-weight-the-read: the scoring layer is the natural consumer; the weighting rides into the existing Nkp/Incidence reads, and an absent configuration leaves them byte-identical to today so the change is additive"
+    }
+  ],
+  "architecture_summary": [
+    {
+      "node": "DocsCompiler",
+      "role": "the doc-authoring surface: its verification-bullet recognizer forgives the separator and speaks up on a tag-shaped miss; its satisfied-by cross-check resolves port paths and canonical edge text against the model"
+    },
+    {
+      "node": "Links",
+      "role": "the SpecRef parser accepts a port path exactly where it already accepts canonical edge text, so a link and a satisfaction name the same vocabulary"
+    },
+    {
+      "node": "Addressing",
+      "role": "the projection that stamps every emitted finding, diagnostic and report line with the id of the element it concerns, in human and json, round-tripping through query/search"
+    },
+    {
+      "node": "Tradeoffs",
+      "role": "the operator's up-front priorities, set or auto-derived, handed to the scoring read as a weighting; absent, the read is exactly today's"
+    }
+  ],
+  "stack_mapping": [
+    {
+      "tech": "crates/archi/src/docs/schema.rs — verification_bullet accepts -/–/—; a tag-shaped miss raises a located diagnostic",
+      "node": "DocsCompiler"
+    },
+    {
+      "tech": "crates/archi/src/docs/mod.rs + crates/modeling-lang/src/model.rs — satisfied-by cross-check and the shared port/edge resolver",
+      "node": "DocsCompiler"
+    },
+    {
+      "tech": "crates/archi/src/links/mod.rs — SpecRef parser extended to port paths",
+      "node": "Links"
+    },
+    {
+      "tech": "crates/archi/src/addressing.rs (new) + crates/archi/src/main.rs — id stamping and rendering",
+      "node": "Addressing"
+    },
+    {
+      "tech": "crates/archi/src/tradeoffs.rs (new) + crates/modeling-lang/src/nkp.rs + crates/archi/src/main.rs — configuration, auto mode, weighted read, the verb",
+      "node": "Tradeoffs"
+    }
+  ],
+  "scenarios": [
+    "a requirement whose Satisfy bullet uses an ASCII hyphen counts its verification; a `- tests —` typo or a `*` bullet draws the located diagnostic naming the canonical `- test — …`, never a silent zero — checked on a fixture and on this repository's own docs",
+    "`satisfied-by: [Engine.answer]` and a `satisfied-by` naming a conn edge both resolve and validate; `archi link add Engine.answer <file#symbol>` resolves the port instead of raising E_MODEL_REF — satisfaction and links accept one vocabulary",
+    "on this repository's own `archi check`, every finding and diagnostic line carries a resolvable element id in both the human and the --json surface; the id pasted into `archi query` or `archi search` lands on exactly the element the line fired on",
+    "with a trade-off configuration favouring simplicity over scalability, `archi nkp` weights the landscape read by it; the same model with no configuration reads byte-identically to today, and the auto mode derives a configuration from answered prompts",
+    "`archi check` stays green and `archi version current` reports v0013 unmoved after every task — the migration adds behavior and fills two sealed nodes with code, disturbing no canonical byte"
+  ],
+  "scenarios_displayed": false,
+  "scenarios_closed": false,
+  "tasks": [
+    {
+      "id": "t1",
+      "node": "DocsCompiler",
+      "description": "verification-bullet recognizer forgives -/–/— and warns on tag-shaped misses; satisfied-by cross-check resolves port paths and canonical edge text",
+      "spec_refs": [
+        "DocsCompiler",
+        "Function type_of DocsCompiler",
+        "Cli.drive consult(->ModelGraph, <-Diagnostics) DocsCompiler.compile_docs",
+        "Incidence.pin_model recall(<-ModelGraph) DocsCompiler.serve_pin",
+        "Links.pin_spec recall(<-ModelGraph) DocsCompiler.serve_pin",
+        "Planner.pin_model recall(<-ModelGraph) DocsCompiler.serve_pin"
+      ],
+      "stack_details": "docs/schema.rs: verification_bullet strips the tag then accepts any of -/–/— before the description; a line that opens with `test`/`type-level` but still fails the shape (wrong bullet char, tag typo, missing separator) raises a located E_DOC naming the canonical `- test — …` rather than falling through to prose. docs/mod.rs: the satisfied-by cross-check, today Model::has_node, calls a widened resolver that also matches a port path (Node.port) and canonical edge surface text against the pinned model. modeling-lang/src/model.rs: the shared resolver — resolve_element(path) returning node | port | edge — so satisfied-by (here) and the link SpecRef parser (t2) cannot disagree about what resolves. Inline unit tests for each dash form, the tag-shaped-miss diagnostic, and port/edge satisfied-by resolution.",
+      "inputs": {},
+      "outputs": [
+        "crates/archi/src/docs/schema.rs",
+        "crates/archi/src/docs/mod.rs",
+        "crates/modeling-lang/src/model.rs"
+      ],
+      "verifications": {
+        "verifications-forgive-the-dash": [
+          "unit: a Satisfy bullet written with an ASCII hyphen, an en-dash and an em-dash each count as one verification; a `test`/`type-level` line that misses the shape raises the located diagnostic naming `- test — …`; a `*` bullet or a mistyped tag stays ordinary prose"
+        ],
+        "satisfaction-names-the-interface": [
+          "unit: satisfied-by [Engine.answer] resolves and validates against a model that declares the port; satisfied-by naming canonical edge text resolves to that edge; a port path that names no declared port is a located E_DOC, not a silent pass"
+        ]
+      }
+    },
+    {
+      "id": "t2",
+      "node": "Links",
+      "description": "SpecRef parser accepts a port path, matching the canonical edge text it already resolves; a port-level ref resolves instead of raising E_MODEL_REF",
+      "spec_refs": [
+        "Links",
+        "Service type_of Links",
+        "Cli.drive consult(->Command, <-Report) Links.record",
+        "Cli.drive consult(->Command, <-Report) Links.sweep",
+        "Cli.drive consult(->Command, <-Report) Links.verify",
+        "Planner.coverage recall(<-LinkEvent) Links.serve_links",
+        "Planner.run_capture consult(->ItemHashIndex, <-LinkEvent) Links.capture"
+      ],
+      "stack_details": "links/mod.rs: the SpecRef parser gains a port-path arm beside the node-path and canonical-edge-text arms it already has, resolving through t1's Model::resolve_element so a port anchors a link exactly as an edge does. A link on a port grades, verifies and audits like any other — the projection is unchanged, only what can be named at the spec end widens. Inline unit tests for `link add` on a port path and its verify/audit round-trip.",
+      "inputs": {
+        "t1": "Model::resolve_element — the shared node/port/edge resolver satisfied-by and the SpecRef parser both consult, so the two layers accept one vocabulary"
+      },
+      "outputs": [
+        "crates/archi/src/links/mod.rs"
+      ],
+      "verifications": {
+        "satisfaction-names-the-interface": [
+          "unit: `link add Engine.answer <file#symbol>` resolves the port instead of raising E_MODEL_REF; the SpecRef parser accepts a port path exactly where it accepts canonical edge text; a link anchored on a port verifies and audits like any other"
+        ]
+      }
+    },
+    {
+      "id": "t3",
+      "node": "Addressing",
+      "description": "stamp element ids — node path, requirement slug, edge surface — onto every finding, diagnostic and report line in both human and json output; the stamped id round-trips through query/search",
+      "spec_refs": [
+        "Addressing",
+        "Function type_of Addressing",
+        "Cli.drive consult(->Findings, <-Report) Addressing.stamp"
+      ],
+      "stack_details": "new crates/archi/src/addressing.rs: a thin projection over the element locus a Diagnostics/Findings entry already carries (located and coded); it renders that locus as an id — absolute node path, requirement slug, or canonical edge surface text — into both the human one-liner and the --json envelope. main.rs threads it through the finding/diagnostic rendering path so `check`, `nkp` and `incidence` output carry ids. The id is the same string query/search resolve, so it round-trips by construction. Edge- and port-level ids lean on t2's resolution to land back on their element. e2e against this repository's own check.",
+      "inputs": {
+        "t2": "port/edge SpecRef resolution, so a stamped edge- or port-level id round-trips back to its element through query/search"
+      },
+      "outputs": [
+        "crates/archi/src/addressing.rs",
+        "crates/archi/src/main.rs"
+      ],
+      "verifications": {
+        "reports-name-their-element": [
+          "unit: every finding in a fixture check carries a resolvable element id in both the human and the json surface; a stamped id round-trips through query to exactly the element the finding fired on; a report line about an edge carries the edge's canonical surface text as its id"
+        ]
+      }
+    },
+    {
+      "id": "t4",
+      "node": "Tradeoffs",
+      "description": "hold the operator's up-front priorities, set or auto-derived by polling; hand the scoring read its weighting; an absent configuration reads exactly as today",
+      "spec_refs": [
+        "Tradeoffs",
+        "Function type_of Tradeoffs",
+        "Cli.drive consult(->Command, <-Report) Tradeoffs.weigh"
+      ],
+      "stack_details": "new crates/archi/src/tradeoffs.rs: the configuration (what to favor, what to spend) and the auto mode that polls the operator and derives one; a verb in main.rs sets or shows it. modeling-lang/src/nkp.rs consults the weighting when reading the landscape (and incidence.rs for stress-round prioritization); with no configuration present the weighting is identity, so every existing read is byte-identical. The configuration is a stored artifact under the tree, absent by default. e2e: a favouring configuration shifts the read, no configuration leaves it unmoved.",
+      "inputs": {},
+      "outputs": [
+        "crates/archi/src/tradeoffs.rs",
+        "crates/modeling-lang/src/nkp.rs",
+        "crates/archi/src/main.rs"
+      ],
+      "verifications": {
+        "priorities-weight-the-read": [
+          "unit: an explicit configuration weights the landscape read while the same model with no configuration reads byte-identically to today; the auto mode derives a configuration from operator answers and the derived weighting is the one applied; an absent or empty configuration is a valid state the read never fails on"
+        ]
+      }
+    }
+  ]
+}
