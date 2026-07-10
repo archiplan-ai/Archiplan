@@ -47,6 +47,7 @@
 mod docs;
 mod incidence;
 mod links;
+mod members;
 mod plans;
 mod scaffold;
 mod search;
@@ -77,7 +78,7 @@ const USAGE: &str = "usage:
               [--tau-j <f>] [--tau-d <f>] [--depth <n>] [--path-limit <n>]
   archi version save -m <note> [--project <dir>]
   archi version remint -m <note> [--session <slug>] [--project <dir>]
-  archi version anchor [--project <dir>]
+  archi version anchor [--repo <member>] [--project <dir>]
   archi version list [--project <dir>]
   archi version show <id> [--project <dir>]
   archi version diff <a|live> <b|live> [--project <dir>]
@@ -86,11 +87,13 @@ const USAGE: &str = "usage:
   archi session fold <loser> --into <winner> -m <note> [--project <dir>]
   archi link add <spec[@ver]> <file[#symbol]> --kind literal|indirect [--project <dir>]
   archi link ls [--spec <ref>] [--evidence] [--json] [--project <dir>]
-  archi link verify [--spec <ref>] [--since <rev>] [--json] [--project <dir>]
+  archi link verify [--spec <ref>] [--since [<member>=]<rev>] [--repo <member>] [--json] [--project <dir>]
   archi link confirm <id> | rm <id>... | rm --spec <ref> --yes [--project <dir>]
   archi link repin <id> [--to <file[#symbol]>] [--project <dir>]
   archi link capture --task <TASK> [--json] [--project <dir>]
-  archi link audit [--scope <path>] [--since <rev>] [--prune] [--json] [--project <dir>]
+  archi link audit [--scope <path>] [--since [<member>=]<rev>] [--repo <member>] [--prune] [--json] [--project <dir>]
+  archi repo ls [--json] [--project <dir>]
+  archi repo map <member> <dir> [--project <dir>]
   archi plan use <name> | repin | show [--json] | verify [--json] [--project <dir>]
   archi plan task add <node> [--desc <text>] [--project <dir>]
   archi plan start | next | current-wave | close | reset [--project <dir>]
@@ -138,6 +141,7 @@ struct Args {
     into: Option<String>,
     keep: Option<String>,
     task: Option<String>,
+    repo: Option<String>,
     desc: Option<String>,
     at: Option<String>,
     limit: Option<usize>,
@@ -195,6 +199,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         into: None,
         keep: None,
         task: None,
+        repo: None,
         desc: None,
         at: None,
         limit: None,
@@ -263,6 +268,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--into" => args.into = Some(value(&mut it, "--into")?),
             "--keep" => args.keep = Some(value(&mut it, "--keep")?),
             "--task" => args.task = Some(value(&mut it, "--task")?),
+            "--repo" => args.repo = Some(value(&mut it, "--repo")?),
             "--desc" => args.desc = Some(value(&mut it, "--desc")?),
             // `link` reads the singular `--kind literal|indirect`; the
             // incidence filter keeps the repeatable list.
@@ -287,7 +293,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             other if other.starts_with("--") => return Err(format!("unknown flag `{other}`")),
             other if matches!(
                 args.verb.as_str(),
-                "version" | "link" | "plan" | "read" | "session" | "search" | "init"
+                "version" | "link" | "plan" | "read" | "session" | "search" | "init" | "repo"
             ) =>
             {
                 args.positional.push(other.to_string())
@@ -559,7 +565,11 @@ fn run_version(args: &Args) -> ExitCode {
                     kind,
                     file,
                     bytes,
+                    baseline_notes,
                 }) => {
+                    for n in &baseline_notes {
+                        println!("{n}");
+                    }
                     println!(
                         "saved {id} ({}, {bytes} bytes, {}) — {note}",
                         kind.describe(),
@@ -637,7 +647,11 @@ fn run_version(args: &Args) -> ExitCode {
                     kind,
                     file,
                     bytes,
+                    baseline_notes,
                 }) => {
+                    for n in &baseline_notes {
+                        println!("{n}");
+                    }
                     println!(
                         "reminted {id} ({}, {bytes} bytes, {}) — {note}",
                         kind.describe(),
@@ -675,13 +689,28 @@ fn run_version(args: &Args) -> ExitCode {
                 Ok(c) => c.workspace,
                 Err(code) => return code,
             };
-            match versions::anchor(&root, ws.model()) {
+            let anchored = match args.repo.as_deref() {
+                Some(member) => versions::anchor_member(&root, ws.model(), member),
+                None => versions::anchor(&root, ws.model()),
+            };
+            match anchored {
                 Ok(versions::Anchored::Recorded { id, commit }) => {
-                    println!("anchored {id} at commit {commit}");
+                    match args.repo.as_deref() {
+                        Some(member) => println!(
+                            "anchored {id}: baseline {member} at {commit} (anchor-born — \
+                             the span since the save is unaudited)"
+                        ),
+                        None => println!("anchored {id} at commit {commit}"),
+                    }
                     ExitCode::SUCCESS
                 }
                 Ok(versions::Anchored::Already { id, commit }) => {
-                    println!("{id} is already anchored at commit {commit}");
+                    match args.repo.as_deref() {
+                        Some(member) => {
+                            println!("{id} already baselines {member} at {commit}")
+                        }
+                        None => println!("{id} is already anchored at commit {commit}"),
+                    }
                     ExitCode::SUCCESS
                 }
                 Err(e) => fail(e),
@@ -772,6 +801,85 @@ fn run_version(args: &Args) -> ExitCode {
     }
 }
 
+/// `archi repo` — the member registry: ls surveys, map writes the overlay.
+fn run_repo(args: &Args) -> ExitCode {
+    let fail = |e: String| -> ExitCode {
+        eprintln!("archi: {e}");
+        ExitCode::from(1)
+    };
+    let root = match locate_project(args) {
+        Ok(r) => r,
+        Err(e) => return usage_err(&e),
+    };
+    let sub = args.positional.first().map(String::as_str);
+    let rest = args.positional.get(1..).unwrap_or_default();
+    match (sub, rest) {
+        (Some("ls"), []) => {
+            let set = match members::MemberSet::resolve(&root) {
+                Ok(s) => s,
+                Err(e) => return fail(e),
+            };
+            let rows = members::survey(&set);
+            if args.json {
+                let v: Vec<Value> = rows
+                    .iter()
+                    .map(|r| {
+                        json!({
+                            "member": r.name,
+                            "url": r.url,
+                            "path": r.stated_path,
+                            "root": r.root.as_ref().map(|p| p.display().to_string()),
+                            "reachable": r.root.is_some(),
+                            "clean": r.clean,
+                            "head": r.head,
+                            "baseline": r.baseline,
+                        })
+                    })
+                    .collect();
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({ "members": v })).expect("serializes")
+                );
+                return ExitCode::SUCCESS;
+            }
+            let name_w = rows.iter().map(|r| r.display_name.len()).max().unwrap_or(4);
+            for r in &rows {
+                let place = match (&r.root, &r.stated_path) {
+                    (Some(p), _) => p.display().to_string(),
+                    (None, Some(s)) => format!("unreachable ({s}) — archi repo map {} <dir>", r.display_name),
+                    (None, None) => format!("unreachable (no path) — archi repo map {} <dir>", r.display_name),
+                };
+                let git = match (r.clean, &r.head) {
+                    (Some(true), Some(h)) => format!("clean  {}", &h[..h.len().min(7)]),
+                    (Some(false), Some(h)) => format!("dirty  {}", &h[..h.len().min(7)]),
+                    _ => "-".to_string(),
+                };
+                let base = match &r.baseline {
+                    Some(b) => format!("baseline {b}"),
+                    None => "baseline -".to_string(),
+                };
+                println!("{:name_w$}  {place}  {git}  {base}", r.display_name);
+            }
+            ExitCode::SUCCESS
+        }
+        (Some("map"), [member, dir]) => match members::map_member(&root, member, dir) {
+            Ok(m) => {
+                match &m.root {
+                    Some(p) => println!("mapped {} -> {}", m.display_name(), p.display()),
+                    None => println!(
+                        "mapped {} -> {} (unreachable here — the row is written, the checkout is not)",
+                        m.display_name(),
+                        m.mapped_path.as_deref().unwrap_or("?")
+                    ),
+                }
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e),
+        },
+        _ => usage_err("usage: archi repo ls [--json] | archi repo map <member> <dir>"),
+    }
+}
+
 fn run_link(args: &Args) -> ExitCode {
     let fail = |e: String| -> ExitCode {
         eprintln!("archi: {e}");
@@ -832,6 +940,7 @@ fn run_link(args: &Args) -> ExitCode {
             let opts = links::VerifyOptions {
                 spec: args.spec.clone(),
                 since: args.since.clone(),
+                repo: args.repo.clone(),
             };
             match links::verify(&root, ws.model(), &opts) {
                 Ok(report) => {
@@ -916,6 +1025,7 @@ fn run_link(args: &Args) -> ExitCode {
             let opts = links::AuditOptions {
                 since: args.since.clone(),
                 scope: args.scope.clone(),
+                repo: args.repo.clone(),
                 prune: args.prune,
             };
             match links::audit(&root, ws.model(), &opts) {
@@ -1684,6 +1794,7 @@ fn main() -> ExitCode {
         "version" => run_version(&args),
         "session" => run_session(&args),
         "link" => run_link(&args),
+        "repo" => run_repo(&args),
         "plan" => run_plan(&args),
         "read" => run_read(&args),
         "query" => run_query(&args),

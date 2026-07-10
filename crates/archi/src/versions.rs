@@ -74,9 +74,36 @@ pub struct Entry {
     /// tree was clean, as provenance; nothing depends on it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit: Option<String>,
+    /// Per-member code baselines: where each mapped member's code stood
+    /// when this version was agreed. Recorded at save for clean members,
+    /// post hoc by `anchor --repo`; provenance like `commit`, never a
+    /// dependency. Absent on memberless projects — the entry stays today's.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub commits: BTreeMap<String, Baseline>,
     /// Root-scope hashes, keyed by root node name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub scopes: BTreeMap<String, ScopeHashes>,
+}
+
+/// One member's code baseline, remembering how it was born — a save-time
+/// recording under the clean-tree guarantee, or a post-hoc anchor whose
+/// window the audit must word honestly
+/// (`archi/requirements/multi-repo/a-late-baseline-says-so`).
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub struct Baseline {
+    pub sha: String,
+    pub born: Born,
+}
+
+/// How a baseline came to be recorded.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Born {
+    /// At save, the member's tree clean.
+    Save,
+    /// Post hoc via `archi version anchor --repo` — the span between the
+    /// version and the anchor is unaudited, and reports say so.
+    Anchor,
 }
 
 #[derive(Default, Deserialize)]
@@ -107,6 +134,9 @@ pub enum Saved {
         file: PathBuf,
         /// Its size in bytes.
         bytes: usize,
+        /// Per-member baseline outcomes, one display line each — recorded
+        /// members and named omissions. Empty on memberless projects.
+        baseline_notes: Vec<String>,
     },
 }
 
@@ -396,6 +426,7 @@ pub fn save(root: &Path, model: &Model, note: &str) -> Result<Saved, String> {
             }
         }
     };
+    let (commits, baseline_notes) = member_baselines(root);
     let entry = Entry {
         id: id_of(archive.entries.len()),
         note: note.to_string(),
@@ -405,6 +436,7 @@ pub fn save(root: &Path, model: &Model, note: &str) -> Result<Saved, String> {
         kind,
         preset: model.preset_name().to_string(),
         commit: provenance(root),
+        commits,
         scopes: model
             .scope_sources()
             .into_iter()
@@ -436,7 +468,66 @@ pub fn save(root: &Path, model: &Model, note: &str) -> Result<Saved, String> {
         kind,
         file,
         bytes: content.len(),
+        baseline_notes,
     })
+}
+
+/// Each mapped member's baseline at save: recorded when its tree is clean,
+/// named as an omission otherwise — the report says what the entry could
+/// not, so a missing baseline is a choice the operator sees, not a silent
+/// gap (`archi/requirements/multi-repo/provenance-goes-per-member`).
+fn member_baselines(root: &Path) -> (BTreeMap<String, Baseline>, Vec<String>) {
+    let mut commits = BTreeMap::new();
+    let mut notes = Vec::new();
+    let set = match crate::members::MemberSet::resolve(root) {
+        Ok(s) => s,
+        Err(e) => {
+            notes.push(format!("member baselines skipped: {e}"));
+            return (commits, notes);
+        }
+    };
+    if set.is_single() {
+        // Today's project: no member machinery, no notes, the entry as
+        // written since v0001.
+        return (commits, notes);
+    }
+    for m in set.declared() {
+        let Some(mroot) = &m.root else {
+            notes.push(format!(
+                "no baseline for `{}`: unreachable here — map it and `archi version anchor --repo {}`",
+                m.name, m.name
+            ));
+            continue;
+        };
+        let Some(ctx) = crate::members::GitContext::of(mroot) else {
+            notes.push(format!(
+                "no baseline for `{}`: not a git work tree",
+                m.name
+            ));
+            continue;
+        };
+        match (ctx.clean(), ctx.head()) {
+            (Some(true), Some(sha)) => {
+                notes.push(format!("baseline {}: {}", m.name, &sha[..sha.len().min(7)]));
+                commits.insert(
+                    m.name.clone(),
+                    Baseline {
+                        sha,
+                        born: Born::Save,
+                    },
+                );
+            }
+            (Some(false), _) => notes.push(format!(
+                "no baseline for `{}`: its tree is dirty — commit it, then `archi version anchor --repo {}`",
+                m.name, m.name
+            )),
+            _ => notes.push(format!(
+                "no baseline for `{}`: the repository has no commits yet",
+                m.name
+            )),
+        }
+    }
+    (commits, notes)
 }
 
 /// Which version the live model is at, by hash comparison — "current" is
@@ -486,6 +577,71 @@ pub fn anchor(root: &Path, model: &Model) -> Result<Anchored, String> {
     }
     let sha = clean_head(root)?;
     entry.commit = Some(sha.clone());
+    archive.write_manifest()?;
+    Ok(Anchored::Recorded { id, commit: sha })
+}
+
+/// Record a member's baseline post hoc on the version the live model is
+/// at — the member-side counterpart of [`anchor`], for members dirty or
+/// unreachable at save time. The guarantee is the clean-tree half alone —
+/// the strength code provenance ever had — and the baseline is marked
+/// anchor-born so the audit words its window honestly. A recorded baseline
+/// is a birth fact: re-anchoring reports it, never rewrites.
+pub fn anchor_member(root: &Path, model: &Model, member: &str) -> Result<Anchored, String> {
+    let mut archive = Archive::open(root)?
+        .filter(|a| !a.entries.is_empty())
+        .ok_or("no versions saved: nothing to anchor")?;
+    let live = hash(&model.render_source());
+    let Some(pos) = archive.entries.iter().rposition(|e| e.model == live) else {
+        let latest = &archive.entries.last().expect("non-empty").id;
+        return Err(format!(
+            "the live model matches no saved version (dirty since {latest}): \
+             `archi version save` first, then anchor"
+        ));
+    };
+    let set = crate::members::MemberSet::resolve(root)?;
+    let Some(m) = set.get(member).filter(|m| m.name != crate::members::HOME) else {
+        return Err(format!(
+            "`{member}` is not a declared member — add its [[repo]] row to archi.toml; \
+             the home anchor is the bare `archi version anchor`"
+        ));
+    };
+    let Some(mroot) = &m.root else {
+        return Err(format!(
+            "`{member}` is unreachable here: `archi repo map {member} <dir>` first"
+        ));
+    };
+    let entry = &mut archive.entries[pos];
+    let id = entry.id.clone();
+    if let Some(existing) = entry.commits.get(member) {
+        return Ok(Anchored::Already {
+            id,
+            commit: existing.sha.clone(),
+        });
+    }
+    let ctx = crate::members::GitContext::of(mroot).ok_or_else(|| {
+        format!("`{member}` is not inside a git work tree: nothing to anchor to")
+    })?;
+    match ctx.clean() {
+        Some(true) => {}
+        Some(false) => {
+            return Err(format!(
+                "`{member}` is dirty: commit it first, so the anchored baseline really \
+                 contains the member's code"
+            ));
+        }
+        None => return Err(format!("cannot tell whether `{member}` is clean: `git status` failed")),
+    }
+    let sha = ctx
+        .head()
+        .ok_or_else(|| format!("`{member}` has no commits yet: nothing to anchor to"))?;
+    entry.commits.insert(
+        member.to_string(),
+        Baseline {
+            sha: sha.clone(),
+            born: Born::Anchor,
+        },
+    );
     archive.write_manifest()?;
     Ok(Anchored::Recorded { id, commit: sha })
 }
@@ -779,6 +935,131 @@ mod tests {
             .output()
             .unwrap();
         String::from_utf8(out.stdout).unwrap().trim().to_string()
+    }
+
+    /// A member checkout: a sibling git repo seeded with one commit.
+    fn member_repo(root: &Path, name: &str, dirty: bool) -> PathBuf {
+        let dir = root.join(name);
+        fs::create_dir_all(&dir).unwrap();
+        git(&dir, &["init", "-q"]);
+        fs::write(dir.join("code.rs"), "fn seed() {}\n").unwrap();
+        git(&dir, &["add", "-A"]);
+        git(&dir, &["commit", "-q", "-m", "seed"]);
+        if dirty {
+            fs::write(dir.join("wip.rs"), "fn wip() {}\n").unwrap();
+        }
+        dir
+    }
+
+    fn declare_members(root: &Path, decls: &str) {
+        fs::write(
+            root.join("archi.toml"),
+            format!("[project]\nname = \"t\"\n{decls}"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn save_baselines_clean_members_and_names_omissions() {
+        let root = temp_project(&v1());
+        member_repo(&root, "backend", false);
+        member_repo(&root, "web", true);
+        declare_members(
+            &root,
+            "[[repo]]\nname = \"backend\"\npath = \"backend\"\n\n[[repo]]\nname = \"web\"\npath = \"web\"\n\n[[repo]]\nname = \"gone\"\npath = \"nowhere\"\n",
+        );
+        let ws = compiled_model(&root);
+        let Saved::Written { baseline_notes, .. } = save(&root, ws.model(), "with members").unwrap()
+        else {
+            panic!("expected a save")
+        };
+        let archive = Archive::open(&root).unwrap().unwrap();
+        let entry = &archive.entries()[0];
+        // Exactly the clean member is baselined, save-born.
+        assert_eq!(entry.commits.len(), 1, "{:?}", entry.commits);
+        assert_eq!(entry.commits["backend"].born, Born::Save);
+        // The omissions are named, each with its recovery.
+        assert!(baseline_notes.iter().any(|n| n.contains("baseline backend")));
+        assert!(
+            baseline_notes
+                .iter()
+                .any(|n| n.contains("`web`") && n.contains("dirty")),
+            "{baseline_notes:?}"
+        );
+        assert!(
+            baseline_notes
+                .iter()
+                .any(|n| n.contains("`gone`") && n.contains("unreachable")),
+            "{baseline_notes:?}"
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn anchor_member_records_post_hoc_and_never_rewrites() {
+        let root = temp_project(&v1());
+        let backend = member_repo(&root, "backend", true);
+        declare_members(&root, "[[repo]]\nname = \"backend\"\npath = \"backend\"\n");
+        let ws = compiled_model(&root);
+        save(&root, ws.model(), "dirty member").unwrap();
+        let archive = Archive::open(&root).unwrap().unwrap();
+        assert!(archive.entries()[0].commits.is_empty(), "dirty at save: no baseline");
+
+        // Undeclared and home names refuse.
+        assert!(
+            anchor_member(&root, ws.model(), "ghost")
+                .unwrap_err()
+                .contains("not a declared member")
+        );
+        // Dirty member refuses; committed it records, anchor-born.
+        assert!(anchor_member(&root, ws.model(), "backend").unwrap_err().contains("dirty"));
+        git(&backend, &["add", "-A"]);
+        git(&backend, &["commit", "-q", "-m", "wip lands"]);
+        let sha = head(&backend);
+        match anchor_member(&root, ws.model(), "backend").unwrap() {
+            Anchored::Recorded { id, commit } => {
+                assert_eq!((id.as_str(), commit), ("v0001", sha.clone()))
+            }
+            Anchored::Already { .. } => panic!("first member anchor must record"),
+        }
+        let archive = Archive::open(&root).unwrap().unwrap();
+        let b = &archive.entries()[0].commits["backend"];
+        assert_eq!((b.sha.as_str(), b.born), (sha.as_str(), Born::Anchor));
+        // A birth fact: re-anchoring reports, never rewrites.
+        assert!(matches!(
+            anchor_member(&root, ws.model(), "backend").unwrap(),
+            Anchored::Already { .. }
+        ));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn baselines_stay_outside_identity_and_memberless_entries_stay_todays() {
+        // Two identical models, one memberless, one membered: same hash,
+        // and the memberless entry serializes without a commits table.
+        let plain = temp_project(&v1());
+        let ws = compiled_model(&plain);
+        save(&plain, ws.model(), "plain").unwrap();
+        let manifest = fs::read_to_string(Archive::dir_of(&plain).join("index.toml")).unwrap();
+        assert!(!manifest.contains("commits"), "no empty table serialized");
+        let plain_hash = Archive::open(&plain).unwrap().unwrap().entries()[0].model.clone();
+
+        let membered = temp_project(&v1());
+        member_repo(&membered, "backend", false);
+        declare_members(&membered, "[[repo]]\nname = \"backend\"\npath = \"backend\"\n");
+        let ws = compiled_model(&membered);
+        save(&membered, ws.model(), "membered").unwrap();
+        let archive = Archive::open(&membered).unwrap().unwrap();
+        assert_eq!(archive.entries()[0].model, plain_hash, "identity is the render alone");
+        assert!(!archive.entries()[0].commits.is_empty());
+        // The membered no-op save still mints nothing.
+        assert!(matches!(
+            save(&membered, ws.model(), "again").unwrap(),
+            Saved::Unchanged { .. }
+        ));
+
+        fs::remove_dir_all(&plain).unwrap();
+        fs::remove_dir_all(&membered).unwrap();
     }
 
     /// The adoption flow of `issues/audit-blind-without-clean-tree-provenance`:

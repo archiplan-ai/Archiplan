@@ -54,20 +54,31 @@ pub struct FileIndex {
     pub symbols: BTreeMap<String, String>,
 }
 
-/// A tree snapshot: every code file's canonical item hashes.
+/// A tree snapshot: every code file's canonical item hashes, across every
+/// member mapped at scan time. Keys are scan keys — `member//file`, bare
+/// for home — so a memberless project's index is byte-identical to
+/// yesterday's, and a pre-member index replays as home-only.
 #[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub struct TreeIndex {
-    /// File → its index, project-relative paths.
+    /// Scan key → its index.
     pub files: BTreeMap<String, FileIndex>,
+    /// The members this snapshot walked (home implied). Recorded at wave
+    /// open so capture diffs exactly what the open saw: a member mapped
+    /// afterwards is outside the set and skipped with a note, never diffed
+    /// against an index that never saw it
+    /// (`archi/stress/split-tree-pressure/the-wave-that-outlived-its-map`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scanned: Vec<String>,
 }
 
 impl TreeIndex {
-    /// Scan the working tree: every code file canonicalized and indexed.
-    pub fn scan(root: &Path) -> TreeIndex {
+    /// Scan the working trees: every code file of home and of the given
+    /// mapped members, canonicalized and indexed under scan keys.
+    pub fn scan(root: &Path, members: &[&crate::members::Member]) -> TreeIndex {
         let mut files = BTreeMap::new();
-        for file in super::code_files(root) {
-            let Ok(text) = fs::read_to_string(root.join(&file)) else {
-                continue;
+        let mut index_into = |member: Option<&str>, member_root: &Path, file: String| {
+            let Ok(text) = fs::read_to_string(member_root.join(&file)) else {
+                return;
             };
             let canonical = code::canonicalize(&file, &text);
             let mut symbols: BTreeMap<String, String> = BTreeMap::new();
@@ -80,14 +91,25 @@ impl TreeIndex {
                     .or_insert_with(|| item.body.clone());
             }
             files.insert(
-                file,
+                super::qualify(member, &file),
                 FileIndex {
                     hash: canonical.file_hash(),
                     symbols,
                 },
             );
+        };
+        for file in super::code_files(root) {
+            index_into(None, root, file);
         }
-        TreeIndex { files }
+        let mut scanned = Vec::new();
+        for m in members {
+            let Some(mroot) = &m.root else { continue };
+            scanned.push(m.name.clone());
+            for file in super::member_code_files(root, mroot, &m.name) {
+                index_into(Some(&m.name), mroot, file);
+            }
+        }
+        TreeIndex { files, scanned }
     }
 }
 
@@ -153,9 +175,13 @@ fn index_path(root: &Path, plan: &str, wave: usize) -> PathBuf {
 }
 
 /// Record the wave-open snapshot — `plan start` and each passing
-/// `plan next` write the index its wave's deltas diff against.
+/// `plan next` write the index its wave's deltas diff against. The scan
+/// covers every member mapped right now; the index remembers which.
 pub(crate) fn write_index(root: &Path, plan: &str, wave: usize) -> Result<(), String> {
-    let index = TreeIndex::scan(root);
+    let set = crate::members::MemberSet::resolve(root)?;
+    let mapped: Vec<&crate::members::Member> =
+        set.declared().iter().filter(|m| m.root.is_some()).collect();
+    let index = TreeIndex::scan(root, &mapped);
     let path = index_path(root, plan, wave);
     let dir = path.parent().expect("the index has a directory");
     fs::create_dir_all(dir).map_err(|e| format!("cannot create `{}`: {e}", dir.display()))?;
@@ -315,12 +341,34 @@ pub(crate) fn capture_wave(
     only: Option<&str>,
 ) -> Result<CaptureOutcome, String> {
     let opened = read_index(root, plan_name, wave)?;
-    let current = TreeIndex::scan(root);
+    let set = crate::members::MemberSet::resolve(root)?;
+    let mut out = CaptureOutcome::default();
+    // Diff exactly the scan set the open recorded: a member outside it has
+    // no baseline to diff against; one unreachable now cannot be read. Both
+    // narrow the capture and say so.
+    let mut rescanned = Vec::new();
+    for m in set.declared() {
+        let in_open = opened.scanned.contains(&m.name);
+        match (&m.root, in_open) {
+            (Some(_), true) => rescanned.push(m),
+            (Some(_), false) => out.notes.push(format!(
+                "`{}` was mapped after this wave opened — its delta is unattributed; it joins \
+                 at the next wave open",
+                m.name
+            )),
+            (None, true) => out.notes.push(format!(
+                "`{}` was scanned at wave open but is unreachable now — its delta is unseen \
+                 this close",
+                m.name
+            )),
+            (None, false) => {}
+        }
+    }
+    let current = TreeIndex::scan(root, &rescanned);
     let changes = delta(&opened, &current);
     let folded = super::load(root)?;
     let commit = versions::provenance(root);
 
-    let mut out = CaptureOutcome::default();
     let mut shared: BTreeSet<&str> = BTreeSet::new();
     let mut events: Vec<Event> = Vec::new();
     // The working link set: the fold plus this batch's mints, so the decay
@@ -343,19 +391,32 @@ pub(crate) fn capture_wave(
         if claimants.len() > 1 {
             shared.insert(change.file.as_str());
         }
+        let (member, bare) = super::split_qualified(&change.file);
         let anchor = Anchor {
-            file: change.file.clone(),
+            repo: member.map(str::to_string),
+            file: bare.to_string(),
             symbol: change.symbol.clone(),
         };
-        let resolved = match super::resolve_anchor(root, &anchor) {
+        let Some(member_root) = set.get(member.unwrap_or(crate::members::HOME)).and_then(|m| m.root.clone())
+        else {
+            out.notes.push(format!("skipped `{anchor}`: its member is unreachable"));
+            continue;
+        };
+        let resolved = match super::resolve_anchor(&member_root, &anchor) {
             Ok(r) => r,
             Err(e) => {
                 out.notes.push(format!("skipped `{anchor}`: {e}"));
                 continue;
             }
         };
-        let content = fs::read_to_string(root.join(&change.file)).unwrap_or_default();
-        let item = item_terms(change, &code::canonicalize(&change.file, &content));
+        // Terms come from the bare path and body: the member qualifier is
+        // identity, never signal.
+        let content = fs::read_to_string(member_root.join(bare)).unwrap_or_default();
+        let bare_change = Changed {
+            file: bare.to_string(),
+            symbol: change.symbol.clone(),
+        };
+        let item = item_terms(&bare_change, &code::canonicalize(bare, &content));
         for task in &claimants {
             if only.is_some_and(|o| o != task.id) {
                 continue;
@@ -452,8 +513,10 @@ pub(crate) fn capture_wave(
     // — a rewrite without reconfirmation, observed exactly when it happens.
     // Overlapping claims cross-press same-run mints: split confidence.
     for change in &changes {
+        let (member, bare) = super::split_qualified(&change.file);
         let anchor = Anchor {
-            file: change.file.clone(),
+            repo: member.map(str::to_string),
+            file: bare.to_string(),
             symbol: change.symbol.clone(),
         };
         for task in in_flight
@@ -613,7 +676,7 @@ mod tests {
             ),
         )
         .unwrap();
-        assert_eq!(delta(&opened, &TreeIndex::scan(&root)), Vec::<Changed>::new());
+        assert_eq!(delta(&opened, &TreeIndex::scan(&root, &[])), Vec::<Changed>::new());
 
         // A body edit registers that symbol; a new item appears; a text
         // file changes as a whole.
@@ -626,7 +689,7 @@ mod tests {
         )
         .unwrap();
         fs::write(root.join("code/schema.sql"), "CREATE TABLE t (id BIGINT);\n").unwrap();
-        let changed = delta(&opened, &TreeIndex::scan(&root));
+        let changed = delta(&opened, &TreeIndex::scan(&root, &[]));
         let texts: Vec<String> = changed.iter().map(ToString::to_string).collect();
         assert_eq!(
             texts,

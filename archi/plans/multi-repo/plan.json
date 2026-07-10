@@ -1,0 +1,311 @@
+{
+  "name": "multi-repo",
+  "version": "v0012",
+  "created": "2026-07-10T09:51:03Z",
+  "state": "completed",
+  "closed_waves": 2,
+  "problem": "Archi assumes spec and code share one repository: one tree scanned, one commit as the audit's delta source, bare root-relative anchors. Real projects spread code across repositories and the spec lives alone, where capture sees no code, the audit anchors a code-less tree, and a link cannot name a file outside the root. Split-tree-pressure fixed the failure shapes before code: absence must not decay the record (the checkout that stayed home), a post-hoc baseline must confess its window (the baseline recorded too late), git paths must be rebased into the member's frame (the monorepo that was already broken), identity keys survive remaps and collisions (the renamed member, two repos one path, the wave that outlived its map). The single-repo project stays the unmarked case, byte for byte.",
+  "technology_stack": [
+    {
+      "tech": "Rust 2024; crates/archi: members.rs (new — declarations via the compiler's manifest reader, local mapping overlay, resolution to roots + git top-levels, reachability survey), versions.rs (per-member baselines, anchor --repo), links/mod.rs (member-qualified anchors, Unreachable grade, per-member audit), links/capture.rs (mapped-set scan, scan set in the index), main.rs (repo verb, --repo flags)",
+      "provenance": "members.rs sits beside links and versions exactly where tool.arch places Members between SourceTree and its consumers; the manifest schema extends the one reader (init-honors-the-manifest precedent)"
+    },
+    {
+      "tech": "manifest: [[repo]] name/url/path in archi.toml; archi/repos.local.toml (gitignored) for machine mappings; version entries gain commits = {member = {sha, born}}; journal Anchor/Span gain optional repo field",
+      "provenance": "identity committed, mapping local — split-tree-pressure's renamed-member and checkout-that-stayed-home both press this seam; append-only journal forbids any rewrite (one-repo-stays-the-default)"
+    },
+    {
+      "tech": "git via std::process::Command as today, plus rev-parse --show-toplevel per consulted root and path rebasing into the member frame",
+      "provenance": "git-speaks-from-its-own-root: the rebase sits under every git read; home rides the same code path, fixing the nested-root mismatch"
+    }
+  ],
+  "architecture_summary": [
+    {
+      "node": "Members",
+      "role": "the one resolution: manifest declarations under local overrides to roots, git top-levels and reachability; home implicit; every scan and baseline consults it (Links.locate, Links.locate_scan, Archive.locate)"
+    },
+    {
+      "node": "Links",
+      "role": "the member dimension end to end: refs parse and render member//file#symbol with unqualified = home, the Grader grades Unreachable upstream of Missing and audits each member against its own baseline, Capture scans the mapped set and records it in the wave index"
+    },
+    {
+      "node": "Archive",
+      "role": "provenance as a set: save baselines every clean mapped member and reports omissions; anchor --repo records post hoc with its birth marked; entries without the table replay unchanged"
+    },
+    {
+      "node": "Cli",
+      "role": "the repo verb (ls, map) and --repo scoping on verify, audit, anchor; nothing above the trace layer learns about members"
+    }
+  ],
+  "stack_mapping": [
+    {
+      "tech": "crates/archi/src/members.rs; [[repo]] schema in crates/modeling-lang/src/source/project.rs; repo ls/map in main.rs",
+      "node": "Members"
+    },
+    {
+      "tech": "crates/archi/src/links/mod.rs (Anchor.repo, parse/render, Unreachable, per-member audit, exclude scoping), links/capture.rs (mapped-set scan, scan set in the index)",
+      "node": "Links"
+    },
+    {
+      "tech": "crates/archi/src/versions.rs (commits table, per-member clean-head through members' git context, anchor --repo)",
+      "node": "Archive"
+    }
+  ],
+  "scenarios": [
+    "two members: declare + map a second repo, link add backend//src/lib.rs#item, verify Clean, edit the item, verify Drifted — qualified end to end",
+    "spec-only home: a project whose code all lives in one member — save records the member baseline, capture attributes a wave's delta, audit tags findings backend//…",
+    "absence: unmap the member, verify grades its links Unreachable with no decay events journaled; verify --repo backend exits nonzero",
+    "late baseline: save with the member dirty, commit the member, anchor --repo — the entry marks the post-hoc birth and audit names the unaudited span",
+    "nested home: a project rooted below its git root audits with rebased paths (the pre-existing mismatch, fixed)",
+    "single-repo regression: the full existing suite green; a memberless project's verify/audit/save output byte-identical to v0011 behavior"
+  ],
+  "scenarios_displayed": true,
+  "scenarios_closed": true,
+  "tasks": [
+    {
+      "id": "t1",
+      "node": "Members",
+      "description": "the member registry: [[repo]] in the manifest through the compiler's reader, archi/repos.local.toml overlay, resolution to roots + git top-levels with reachability, the repo ls/map verbs",
+      "spec_refs": [
+        "Members",
+        "Function type_of Members",
+        "Archive.locate recall(<-MemberSet) Members.resolve",
+        "Cli.drive consult(->Command, <-Report) Members.survey",
+        "Links.locate recall(<-MemberSet) Members.resolve",
+        "Links.locate_scan recall(<-MemberSet) Members.resolve"
+      ],
+      "stack_details": "new crates/archi/src/members.rs: MemberSet::resolve(root) reads manifest [[repo]] (name/url/path, deny-unknown-fields in project.rs beside [project]) then overlays archi/repos.local.toml ({member = \"dir\"}); each member resolves to Option<root> (unreachable when the dir or its git top-level is absent); home is member \"\" with the project root; every member carries git_top: rev-parse --show-toplevel resolved lazily, paths rebased member-frame; survey() renders name/root/reachable/clean/head/baseline; repo ls prints it, repo map writes the overlay row; .gitignore gains archi/*.local.toml via init and this repo's own file",
+      "inputs": {},
+      "outputs": [
+        "crates/archi/src/members.rs",
+        "crates/modeling-lang/src/source/project.rs",
+        "crates/modeling-lang/src/source/mod.rs",
+        "crates/archi/src/main.rs",
+        ".gitignore",
+        "skills/archi.md"
+      ],
+      "verifications": {
+        "a-dark-corpus-stays-partial": [
+          "unit: resolution reads manifest and overlay alone — no doc corpus read, a tree with unreadable docs resolves identically"
+        ],
+        "a-late-baseline-says-so": [
+          "unit: survey renders the baseline column from the latest entry verbatim — birth shown as recorded, never recomputed"
+        ],
+        "absence-is-not-drift": [
+          "unit: resolve returns unreachable as a per-member value, never an error — no caller can panic on absence"
+        ],
+        "candidates-carry-signal": [
+          "unit: MemberSet keys are names and files stay bare in its API — the qualifier cannot leak into term extraction"
+        ],
+        "capture-at-the-join": [
+          "unit: resolution is a pure read — no members verb mutates plan state; the scan set is capture's to record"
+        ],
+        "dark-deltas-are-code": [
+          "unit: members exposes roots unfiltered — the exclusion boundary keeps one owner in the scans"
+        ],
+        "drift-graded-per-kind": [
+          "unit: resolution output is kind-blind — roots and reachability carry no link kind"
+        ],
+        "findings-never-block": [
+          "unit: repo ls on a half-mapped set exits 0 — absence is reported, never an error"
+        ],
+        "git-speaks-from-its-own-root": [
+          "unit: a member whose root sits below its git top-level carries the prefix and rebases a git-root-relative path into member frame; home nested below its git root rebases the same way"
+        ],
+        "members-are-declared": [
+          "unit: a declared member with no checkout resolves unreachable and repo ls says so; a local row overrides the manifest path; url never resolves anything"
+        ],
+        "merge-deltas-are-reviewable": [
+          "unit: the overlay is gitignored and never merged; [[repo]] rows are one line per member so manifest merges diff member-local"
+        ],
+        "one-repo-stays-the-default": [
+          "unit: no [[repo]] and no overlay resolves to home alone — the set is today's single root"
+        ],
+        "one-verb-searches-everything": [
+          "unit: member names mint no cards — search over a membered project returns the memberless corpus"
+        ],
+        "one-verb-stands-a-project-up": [
+          "unit: init scaffolds memberless and ignores archi/*.local.toml — the cold start never meets the registry"
+        ],
+        "parallel-editing-discipline": [
+          "unit: overlays are per-machine and resolution persists nothing — two mappings of one member cannot race in git"
+        ],
+        "provenance-anchors-post-hoc": [
+          "unit: the home anchor guarantee reads through members only for git context — clean + render-match inputs unchanged"
+        ],
+        "provenance-goes-per-member": [
+          "unit: resolve surfaces per member exactly what a save baselines on — mapped and clean, judged in that member's git context"
+        ],
+        "refs-carry-their-repo": [
+          "unit: a declared name must be ref-safe — separators, `#`, `//` and whitespace refuse at parse with the grammar named"
+        ],
+        "remint-rejoins-the-lineage": [
+          "unit: remint reads no member state — a membered project remints as before"
+        ],
+        "scans-see-every-mapped-member": [
+          "unit: resolve returns every declared member exactly once, mapped or not — an iterating scan cannot silently skip one"
+        ],
+        "stress-pins-versions": [
+          "unit: affects resolve against pinned versions untouched by [[repo]] — stress surfaces are registry-blind"
+        ],
+        "the-archive-is-sealed": [
+          "unit: members.rs writes only the overlay — nothing lands under archi/versions/, the seal untouched"
+        ],
+        "unchanged-saves-close-rounds": [
+          "unit: repo map changes no render — a following save still reports nothing to save and still closes a round"
+        ],
+        "versions-mint-on-meaning": [
+          "unit: registry and overlay live outside canonical(project) — identical models with different registries hash identical"
+        ]
+      }
+    },
+    {
+      "id": "t2",
+      "node": "Links",
+      "description": "the member dimension through links: qualified refs, Unreachable upstream of Missing, the mapped-set wave scan with its scan set recorded, the per-member audit and exclude boundary",
+      "spec_refs": [
+        "Links",
+        "Service type_of Links",
+        "Cli.drive consult(->Command, <-Report) Links.record",
+        "Cli.drive consult(->Command, <-Report) Links.sweep",
+        "Cli.drive consult(->Command, <-Report) Links.verify",
+        "Planner.coverage recall(<-LinkEvent) Links.serve_links",
+        "Planner.run_capture consult(->ItemHashIndex, <-LinkEvent) Links.capture"
+      ],
+      "stack_details": "links/mod.rs: Anchor/Span gain repo: Option<String> (serde default; None = home), Anchor::parse/display speak member//file#symbol; resolve_anchor and every root.join goes through MemberSet; check_link grades Unreachable before Missing — no touch/decay events for unscanned members, audit --prune skips them; verify/audit gain --repo <member> (absence inside the asked scope exits nonzero); delta_hunks/changed_files run per member via its git context, rebased; scan_exclusions: bare patterns all members, member//prefix scoped; capture.rs: TreeIndex::scan walks every mapped member into qualified keys, the index header records the scan set, capture diffs exactly that set and notes members outside it; candidate search and code_files take the member walk",
+      "inputs": {
+        "t1": "MemberSet resolution — roots, git contexts, reachability — consulted by every scan (Links.locate, Links.locate_scan)"
+      },
+      "outputs": [
+        "crates/archi/src/links/mod.rs",
+        "crates/archi/src/links/capture.rs",
+        "crates/archi/src/main.rs",
+        "crates/archi/tests/multi_repo_e2e.rs"
+      ],
+      "verifications": {
+        "a-dark-corpus-stays-partial": [
+          "unit: link scans read code trees, never the doc corpus — an unreadable requirement doc changes no grade"
+        ],
+        "absence-is-not-drift": [
+          "unit: verify with an unmapped member grades Unreachable, journals no decay, --prune retires nothing there; verify --repo of it exits nonzero"
+        ],
+        "candidates-carry-signal": [
+          "unit: signal gating unchanged under qualified keys — the member prefix itself never counts as a surface term"
+        ],
+        "capture-at-the-join": [
+          "unit: a member declared after wave open is skipped with a note naming the recovery — never diffed against an index that predates it"
+        ],
+        "dark-deltas-are-code": [
+          "unit: bare exclude pattern applies in every member, member//-prefixed in exactly its member; built-ins stay home-only and a nested archi.toml subtree in a member is skipped"
+        ],
+        "drift-graded-per-kind": [
+          "unit: Unreachable is orthogonal to kind — literal and indirect grade it identically"
+        ],
+        "findings-never-block": [
+          "unit: unreachable and recovery notes are findings — verify and audit exit 0 on them outside an explicit --repo scope"
+        ],
+        "gates-press-the-delta": [
+          "unit: pressed refs computed from a qualified delta match the same delta unqualified in a memberless project"
+        ],
+        "git-speaks-from-its-own-root": [
+          "e2e: a home rooted below its git root diffs and audits with rebased paths — the silent mismatch becomes a covered case"
+        ],
+        "one-repo-stays-the-default": [
+          "e2e: memberless project — bare keys, bare anchors, today's outputs byte for byte; the existing links/capture test suite green unchanged"
+        ],
+        "one-verb-searches-everything": [
+          "unit: qualified anchors render in cards without touching the corpus — search results unchanged in count and rank"
+        ],
+        "one-verb-stands-a-project-up": [
+          "unit: a scaffolded memberless project runs the whole link loop with bare paths — no qualifier in any output"
+        ],
+        "refs-carry-their-repo": [
+          "unit: backend//src/api.rs#serve round-trips parse→journal→render; the pre-member journal replays with anchors home; unqualified add folds identical to home-qualified"
+        ],
+        "scans-see-every-mapped-member": [
+          "e2e: two mapped members yield qualified index keys; audit reports per member — findings under a baseline, recovery note without one, unreachable note for an absent checkout"
+        ],
+        "unchanged-saves-close-rounds": [
+          "unit: capture and verify mint nothing — a round whose answers span members still closes by save alone"
+        ]
+      }
+    },
+    {
+      "id": "t3",
+      "node": "Archive",
+      "description": "provenance as a set: one baseline per clean mapped member at save, anchor --repo post hoc with its birth marked, the audit window worded per member",
+      "spec_refs": [
+        "Archive",
+        "Storage type_of Archive",
+        "Cli.drive consult(->ModelGraph, <-Report) Archive.anchor",
+        "Cli.drive consult(->ModelGraph, <-Report) Archive.remint",
+        "Cli.drive consult(->ModelGraph, <-Report) Archive.save",
+        "DocsCompiler.pin_model recall(<-CanonicalRender) Archive.serve"
+      ],
+      "stack_details": "versions.rs: Entry gains commits: BTreeMap<String, Baseline> {sha, born: save|anchor} (absent = today's entry; commit field untouched for home); save consults MemberSet, records each clean member's head through its git context and reports omissions; anchor keeps the home guarantee (clean + render-hash match) and --repo <member> records a missing member baseline under clean-tree alone, born=anchor, re-anchor reports no-op; latest_version_commit generalizes to per-member delta sources consumed by links' audit; main.rs wires --repo",
+      "inputs": {
+        "t1": "MemberSet — the clean/dirty and head reads at save and anchor go through each member's git context (Archive.locate)"
+      },
+      "outputs": [
+        "crates/archi/src/versions.rs",
+        "crates/archi/src/main.rs"
+      ],
+      "verifications": {
+        "a-dark-corpus-stays-partial": [
+          "unit: save and anchor read no docs — corpus state cannot gate a baseline"
+        ],
+        "a-late-baseline-says-so": [
+          "unit: anchor --repo marks born=anchor in the entry and the audit words that member's window as opening at the anchor, unaudited span named"
+        ],
+        "docs-compile-with-the-model": [
+          "unit: entries carrying commits tables reconstruct for pinned doc checks unchanged"
+        ],
+        "findings-never-block": [
+          "unit: the omitted-baseline report is a finding — save exits 0 with dirty members"
+        ],
+        "git-speaks-from-its-own-root": [
+          "unit: clean_head judges each member at its own top level — a nested home anchors with correct cleanliness"
+        ],
+        "merge-deltas-are-reviewable": [
+          "unit: commits serialize one member per line — an entry conflict stays member-local and readable"
+        ],
+        "one-repo-stays-the-default": [
+          "unit: a memberless save writes an entry byte-identical in shape to today's — no empty table serialized"
+        ],
+        "one-verb-searches-everything": [
+          "unit: baselines mint no cards — search unchanged by version entries"
+        ],
+        "one-verb-stands-a-project-up": [
+          "unit: a scaffolded project's first save writes no commits table — the bootstrap entry is today's"
+        ],
+        "parallel-editing-discipline": [
+          "unit: baselines add no shared file — concurrent mints conflict in index.toml exactly as today"
+        ],
+        "provenance-anchors-post-hoc": [
+          "unit: home anchor semantics untouched — clean tree + render-hash match, no-op on recorded provenance"
+        ],
+        "provenance-goes-per-member": [
+          "unit: save with one clean and one dirty member records exactly the clean baseline and names the omission; audit consumes each member's own baseline"
+        ],
+        "remint-rejoins-the-lineage": [
+          "unit: remint carries the original entry's baselines forward untouched — provenance is a birth fact"
+        ],
+        "rounds-fold-deliberately": [
+          "unit: folding reads no entry internals — rounds over membered saves fold as today"
+        ],
+        "stress-pins-versions": [
+          "unit: pinned reconstruction ignores commits — affects expand identically with or without baselines"
+        ],
+        "the-archive-is-sealed": [
+          "unit: entries with commits tables round-trip the manifest; the seal covers them; a pre-member index.toml parses unchanged"
+        ],
+        "unchanged-saves-close-rounds": [
+          "unit: a no-op save with clean mapped members mints nothing and still closes the round — baselines alone never force a mint"
+        ],
+        "versions-mint-on-meaning": [
+          "unit: baselines never enter version identity — same render with different member states hashes identical, save still refuses a no-op"
+        ]
+      }
+    }
+  ]
+}

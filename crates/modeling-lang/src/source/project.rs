@@ -29,6 +29,25 @@ pub(crate) struct Manifest {
     /// Preset selection: `core`, `default`, or a relative path to a JSON
     /// preset file.
     pub preset: String,
+    /// Declared member repositories, in declaration order.
+    pub repos: Vec<RepoDecl>,
+}
+
+/// One declared member repository: the name is the identity refs and journal
+/// events carry, the url is provenance for humans and CI, the path a layout
+/// convention relative to the project root.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RepoDecl {
+    /// The stable identity: refs (`name//file#symbol`) and journal events
+    /// carry it; renaming it is a journal migration.
+    pub name: String,
+    /// Where the repository lives remotely — provenance for humans and CI;
+    /// archi never fetches it and it keys nothing.
+    pub url: Option<String>,
+    /// The committed checkout convention, relative to the project root;
+    /// the machine-local overlay overrides it.
+    pub path: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -40,6 +59,9 @@ struct ManifestFile {
     /// time instead of a silently ignored setting.
     #[allow(dead_code)]
     audit: Option<AuditSection>,
+    /// `[[repo]]` member declarations, consumed by `archi` — validated
+    /// here for the same loud-typo reason as `[audit]`.
+    repo: Option<Vec<RepoDecl>>,
 }
 
 #[derive(Deserialize)]
@@ -83,6 +105,24 @@ pub(crate) fn read_manifest(root: &Path) -> Result<Manifest, Diagnostic> {
         .map_err(|e| project_err(format!("cannot read {}: {e}", path.display())))?;
     let parsed: ManifestFile =
         toml::from_str(&text).map_err(|e| project_err(format!("{}: {e}", path.display())))?;
+    let repos = parsed.repo.unwrap_or_default();
+    let mut seen = std::collections::BTreeSet::new();
+    for r in &repos {
+        if !is_member_name(&r.name) {
+            return Err(project_err(format!(
+                "{}: member name `{}` is not ref-safe — ascii letters, digits, `-` and `_`, starting alphanumeric",
+                path.display(),
+                r.name
+            )));
+        }
+        if !seen.insert(r.name.as_str()) {
+            return Err(project_err(format!(
+                "{}: member `{}` declared twice",
+                path.display(),
+                r.name
+            )));
+        }
+    }
     Ok(Manifest {
         name: parsed.project.name,
         src: parsed.project.src.unwrap_or_else(|| "archi/src".to_string()),
@@ -90,7 +130,16 @@ pub(crate) fn read_manifest(root: &Path) -> Result<Manifest, Diagnostic> {
             .project
             .preset
             .unwrap_or_else(|| "default".to_string()),
+        repos,
     })
+}
+
+/// A member name must be able to prefix a `member//file#symbol` ref: ascii
+/// letters, digits, `-` and `_`, first char alphanumeric.
+fn is_member_name(s: &str) -> bool {
+    let mut chars = s.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_alphanumeric())
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 /// Resolve the manifest's preset choice to a loaded [`Preset`].
@@ -236,5 +285,52 @@ mod tests {
     fn a_non_list_exclude_is_loud() {
         let e = manifest_of("[project]\nname = \"t\"\n\n[audit]\nexclude = \"*.md\"\n").unwrap_err();
         assert_eq!(e.code, "E_PROJECT");
+    }
+
+    #[test]
+    fn repo_sections_parse_in_order() {
+        let m = manifest_of(
+            "[project]\nname = \"t\"\n\n[[repo]]\nname = \"backend\"\npath = \"../backend\"\n\n[[repo]]\nname = \"web-ui\"\nurl = \"git@example.com:acme/web.git\"\n",
+        )
+        .unwrap();
+        assert_eq!(m.repos.len(), 2);
+        assert_eq!(m.repos[0].name, "backend");
+        assert_eq!(m.repos[0].path.as_deref(), Some("../backend"));
+        assert_eq!(m.repos[1].name, "web-ui");
+        assert_eq!(m.repos[1].url.as_deref(), Some("git@example.com:acme/web.git"));
+        assert_eq!(m.repos[1].path, None);
+    }
+
+    #[test]
+    fn a_memberless_manifest_yields_the_empty_list() {
+        let m = manifest_of("[project]\nname = \"t\"\n").unwrap();
+        assert!(m.repos.is_empty());
+    }
+
+    #[test]
+    fn a_ref_unsafe_member_name_is_loud() {
+        for bad in ["a/b", "a#b", "a b", "", "-lead", "café"] {
+            let text = format!("[project]\nname = \"t\"\n\n[[repo]]\nname = \"{bad}\"\n");
+            let e = manifest_of(&text).unwrap_err();
+            assert_eq!(e.code, "E_PROJECT");
+            assert!(e.message.contains("ref-safe"), "{}", e.message);
+        }
+    }
+
+    #[test]
+    fn a_duplicate_member_name_is_loud() {
+        let e = manifest_of(
+            "[project]\nname = \"t\"\n\n[[repo]]\nname = \"backend\"\n\n[[repo]]\nname = \"backend\"\n",
+        )
+        .unwrap_err();
+        assert!(e.message.contains("declared twice"), "{}", e.message);
+    }
+
+    #[test]
+    fn a_typo_inside_repo_is_loud() {
+        let e = manifest_of("[project]\nname = \"t\"\n\n[[repo]]\nname = \"backend\"\nurll = \"x\"\n")
+            .unwrap_err();
+        assert_eq!(e.code, "E_PROJECT");
+        assert!(e.message.contains("urll"), "{}", e.message);
     }
 }

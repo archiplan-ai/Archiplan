@@ -17,7 +17,9 @@ def node PlanFile        // plan.json — authored fields edited, lifecycle via 
 def node LinkEvent       // one append-only journal event: add, confirm, repin, retire…
 def node CodeItem        // a source item of the code tree, addressed by symbol
 def node SymbolHashes    // one item's interface + body hash over canonical tokens
-def node ItemHashIndex   // file → symbol → body hash snapshot taken at wave open
+def node ItemHashIndex   // member-qualified file → symbol → body hash snapshot taken at wave open
+def node MemberDecl      // one declared repository: name as identity, url as provenance, path as convention — plus its local mapping row
+def node MemberSet       // the resolved member picture: every declared repository with its root, reachability and cleanliness, home included
 def node Command         // one CLI invocation: verb + flags
 def node Report          // rendered output: human one-liners or the JSON envelope
 def node SubgraphResult  // a composed query's slice of the model
@@ -43,6 +45,8 @@ Data type_of LinkEvent
 Data type_of CodeItem
 Data type_of SymbolHashes
 Data type_of ItemHashIndex
+Data type_of MemberDecl
+Data type_of MemberSet
 Data type_of Command
 Data type_of Report
 Data type_of SubgraphResult

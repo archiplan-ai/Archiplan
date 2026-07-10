@@ -155,11 +155,18 @@ impl fmt::Display for SpecRef {
     }
 }
 
-/// Where the code lives: a project-relative file, optionally a symbol path
-/// inside it (`crates/auth/src/store.rs#Store::persist`).
+/// Where the code lives: a member-relative file, optionally a symbol path
+/// inside it (`crates/auth/src/store.rs#Store::persist`), optionally
+/// qualified by the member repository the file lives in
+/// (`backend//src/api.rs#serve`). Unqualified means home — every ref and
+/// journal event written before members keeps its meaning unchanged
+/// (`archi/requirements/multi-repo/refs-carry-their-repo`).
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Anchor {
-    /// Project-relative path, `/`-separated.
+    /// The declared member holding the file; `None` = home.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo: Option<String>,
+    /// Member-root-relative path, `/`-separated.
     pub file: String,
     /// `::`-joined item path; `None` anchors the whole file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -167,30 +174,65 @@ pub struct Anchor {
 }
 
 impl Anchor {
-    /// Parse `<file>[#<symbol>]`.
+    /// Parse `[<member>//]<file>[#<symbol>]`.
     pub fn parse(text: &str) -> Result<Anchor, String> {
         let text = text.trim();
         if text.is_empty() {
             return Err("the code ref is empty".into());
         }
-        let (file, symbol) = match text.split_once('#') {
-            None => (text, None),
+        let (repo, rest) = match text.split_once("//") {
+            Some((m, r)) if !m.is_empty() && !r.is_empty() => (Some(m.to_string()), r),
+            Some(_) => {
+                return Err(format!(
+                    "`{text}` is not `[<member>//]<file>[#<symbol>]`"
+                ));
+            }
+            None => (None, text),
+        };
+        let (file, symbol) = match rest.split_once('#') {
+            None => (rest, None),
             Some((f, s)) if !f.is_empty() && !s.is_empty() => (f, Some(s.to_string())),
-            Some(_) => return Err(format!("`{text}` is not `<file>[#<symbol>]`")),
+            Some(_) => return Err(format!("`{text}` is not `[<member>//]<file>[#<symbol>]`")),
         };
         Ok(Anchor {
+            repo,
             file: file.replace('\\', "/"),
             symbol,
         })
+    }
+
+    /// The anchor's file as a scan key: `member//file`, bare for home.
+    pub fn qualified_file(&self) -> String {
+        qualify(self.repo.as_deref(), &self.file)
     }
 }
 
 impl fmt::Display for Anchor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(m) = &self.repo {
+            write!(f, "{m}//")?;
+        }
         match &self.symbol {
             None => write!(f, "{}", self.file),
             Some(s) => write!(f, "{}#{s}", self.file),
         }
+    }
+}
+
+/// Join a member and a bare path into a scan key; home stays bare, so
+/// memberless projects' keys — and their stored indexes — are unchanged.
+pub(crate) fn qualify(member: Option<&str>, file: &str) -> String {
+    match member {
+        None | Some("") => file.to_string(),
+        Some(m) => format!("{m}//{file}"),
+    }
+}
+
+/// Split a scan key into its member and bare path.
+pub(crate) fn split_qualified(key: &str) -> (Option<&str>, &str) {
+    match key.split_once("//") {
+        Some((m, rest)) if !m.is_empty() => (Some(m), rest),
+        _ => (None, key),
     }
 }
 
@@ -608,15 +650,72 @@ fn node_paths(model: &Model) -> Vec<String> {
 
 // ---- anchoring -------------------------------------------------------------
 
+/// Where an anchor's member stands on this machine. Absence is a value,
+/// never a panic path (`archi/requirements/multi-repo/absence-is-not-drift`).
+pub(crate) enum MemberRoot {
+    /// The member resolves; anchors under it read from this root.
+    At(PathBuf),
+    /// Declared, but no checkout here.
+    Unmapped(String),
+    /// The journal names a member the manifest does not declare — the
+    /// renamed-member trap; the recovery is restoring the declaration.
+    Undeclared(String),
+}
+
+/// The member resolution every link operation reads through: home plus the
+/// declared members, resolved once per verb.
+pub(crate) struct Roots {
+    set: crate::members::MemberSet,
+}
+
+impl Roots {
+    pub(crate) fn resolve(root: &Path) -> Result<Roots, String> {
+        Ok(Roots {
+            set: crate::members::MemberSet::resolve(root)?,
+        })
+    }
+
+    pub(crate) fn set(&self) -> &crate::members::MemberSet {
+        &self.set
+    }
+
+    /// The root an anchor's files resolve under.
+    pub(crate) fn of(&self, repo: &Option<String>) -> MemberRoot {
+        let name = repo.as_deref().unwrap_or(crate::members::HOME);
+        match self.set.get(name) {
+            None => MemberRoot::Undeclared(name.to_string()),
+            Some(m) => match &m.root {
+                Some(r) => MemberRoot::At(r.clone()),
+                None => MemberRoot::Unmapped(name.to_string()),
+            },
+        }
+    }
+
+    /// The root, or a loud error naming the recovery — for verbs that
+    /// cannot proceed on absence (`link add`, `repin --to`).
+    pub(crate) fn require(&self, repo: &Option<String>) -> Result<PathBuf, String> {
+        match self.of(repo) {
+            MemberRoot::At(r) => Ok(r),
+            MemberRoot::Unmapped(m) => Err(format!(
+                "member `{m}` is unreachable here: `archi repo map {m} <dir>` first"
+            )),
+            MemberRoot::Undeclared(m) => Err(format!(
+                "`{m}` is not a declared member — add its [[repo]] row to archi.toml"
+            )),
+        }
+    }
+}
+
 /// A freshly resolved anchor: its pins and the span it occupies right now.
 struct Resolved {
     pins: Pins,
     span: Span,
 }
 
-/// Resolve an anchor against the working tree: read, canonicalize, index.
-fn resolve_anchor(root: &Path, anchor: &Anchor) -> Result<Resolved, String> {
-    let path = root.join(&anchor.file);
+/// Resolve an anchor against its member's working tree: read, canonicalize,
+/// index. `member_root` is the anchor's member root, already resolved.
+fn resolve_anchor(member_root: &Path, anchor: &Anchor) -> Result<Resolved, String> {
+    let path = member_root.join(&anchor.file);
     let text = fs::read_to_string(&path)
         .map_err(|e| format!("cannot read `{}`: {e}", anchor.file))?;
     let canonical = code::canonicalize(&anchor.file, &text);
@@ -631,7 +730,7 @@ fn resolve_anchor(root: &Path, anchor: &Anchor) -> Result<Resolved, String> {
                     body: hash,
                 },
                 span: Span {
-                    file: anchor.file.clone(),
+                    file: anchor.qualified_file(),
                     start: 1,
                     end: lines,
                     hash: code::hash_bytes(text.as_bytes()),
@@ -672,7 +771,7 @@ fn resolve_anchor(root: &Path, anchor: &Anchor) -> Result<Resolved, String> {
                     body: item.body.clone(),
                 },
                 span: Span {
-                    file: anchor.file.clone(),
+                    file: anchor.qualified_file(),
                     start: item.start_line,
                     end: item.end_line,
                     hash: code::hash_bytes(line_bytes(&text, item.start_line, item.end_line)),
@@ -727,7 +826,9 @@ pub fn add(
         ));
     }
     let anchor = Anchor::parse(code_text)?;
-    let resolved = resolve_anchor(root, &anchor)?;
+    let roots = Roots::resolve(root)?;
+    let member_root = roots.require(&anchor.repo)?;
+    let resolved = resolve_anchor(&member_root, &anchor)?;
     let folded = load(root)?;
     let link = Link {
         id: folded.next_id(&format!("{spec_text}{code_text}")),
@@ -835,7 +936,9 @@ pub fn repin(root: &Path, id: &str, to: Option<&str>) -> Result<Link, String> {
         None => link.anchor.clone(),
         Some(t) => Anchor::parse(t)?,
     };
-    let resolved = resolve_anchor(root, &anchor)?;
+    let roots = Roots::resolve(root)?;
+    let member_root = roots.require(&anchor.repo)?;
+    let resolved = resolve_anchor(&member_root, &anchor)?;
     append(
         root,
         &[Event::Repin {
@@ -874,6 +977,14 @@ pub enum State {
     },
     /// Nothing resolves.
     Missing,
+    /// The anchor's member has no checkout here — a state of its own,
+    /// upstream of Missing: the code is not gone, this machine cannot see
+    /// it. No observation, no decay, no prune
+    /// (`archi/requirements/multi-repo/absence-is-not-drift`).
+    Unreachable {
+        /// The member with no local root.
+        member: String,
+    },
     /// The stored canonicalizer is unknown to this verifier.
     CanonicalizerMismatch,
     /// The spec side moved: the ref no longer resolves at Working.
@@ -887,6 +998,7 @@ impl State {
             State::Drifted => "drifted",
             State::Moved { .. } => "moved",
             State::Missing => "missing",
+            State::Unreachable { .. } => "unreachable",
             State::CanonicalizerMismatch => "canonicalizer-mismatch",
             State::SpecDrifted => "spec-drifted",
         }
@@ -905,7 +1017,10 @@ pub fn confidence(link: &Link, state: &State) -> f64 {
     if matches!(state, State::Missing) {
         return 0.0;
     }
-    let drift = if matches!(state, State::Clean) { 0.0 } else { -0.25 };
+    // An unreachable member is no observation at all: confidence holds
+    // exactly where the last actual read left it.
+    let unread = matches!(state, State::Unreachable { .. });
+    let drift = if matches!(state, State::Clean) || unread { 0.0 } else { -0.25 };
     let accrued = 0.15 * link.touches.len() as f64;
     let eroded = 0.25 * link.decays.len() as f64;
     (0.5 + accrued - eroded + drift).clamp(0.0, 1.0)
@@ -952,19 +1067,48 @@ impl VerifyReport {
 pub struct VerifyOptions {
     /// Check only links on this spec ref.
     pub spec: Option<String>,
-    /// Check only links whose anchor file changed since this git rev.
+    /// Check only links whose anchor file changed since this git rev —
+    /// `[<member>=]<rev>`, bare rev meaning home.
     pub since: Option<String>,
+    /// Check only links into this member (`home` for the project's own
+    /// repository). Inside this explicit scope, absence is the error it is:
+    /// an unreachable member fails instead of reporting.
+    pub repo: Option<String>,
+}
+
+/// A `[<member>=]<rev>` delta-source override, bare rev meaning home.
+fn parse_since(text: &str) -> (String, String) {
+    match text.split_once('=') {
+        Some((m, r)) if !m.is_empty() && !r.is_empty() => (m.to_string(), r.to_string()),
+        _ => (crate::members::HOME.to_string(), text.to_string()),
+    }
+}
+
+/// A `--repo` value as the member name it scopes to: `home` (or the empty
+/// string) is the project's own repository.
+fn scope_member(text: &str) -> &str {
+    if text == "home" { crate::members::HOME } else { text }
 }
 
 /// Verify the live links: recompute every projection in scope, grade it.
 pub fn verify(root: &Path, model: &Model, opts: &VerifyOptions) -> Result<VerifyReport, String> {
     let folded = load(root)?;
     let filter = opts.spec.as_deref().map(SpecRef::parse).transpose()?;
-    let changed = opts
-        .since
-        .as_deref()
-        .map(|rev| changed_files(root, rev))
-        .transpose()?;
+    let roots = Roots::resolve(root)?;
+    let scope = opts.repo.as_deref().map(scope_member);
+    if let Some(member) = scope {
+        // The explicit ask: the member must exist here to be verified.
+        roots.require(&Some(member.to_string()).filter(|m| !m.is_empty()))?;
+    }
+    let changed = match opts.since.as_deref().map(parse_since) {
+        None => None,
+        Some((member, rev)) => {
+            let mroot = roots.require(&Some(member.clone()).filter(|m| !m.is_empty()))?;
+            let ctx = crate::members::GitContext::of(&mroot)
+                .ok_or_else(|| format!("--since needs git: no work tree at `{}`", mroot.display()))?;
+            Some((member, changed_files(&ctx, &rev)?))
+        }
+    };
     let mut slots = Slots::new(root);
     let mut checked = Vec::new();
     let mut skipped = 0;
@@ -975,13 +1119,20 @@ pub fn verify(root: &Path, model: &Model, opts: &VerifyOptions) -> Result<Verify
         {
             continue;
         }
-        if let Some(changed) = &changed
-            && !changed.contains(&link.anchor.file)
+        if let Some(member) = scope
+            && link.anchor.repo.as_deref().unwrap_or(crate::members::HOME) != member
         {
             skipped += 1;
             continue;
         }
-        checked.push(check_link(root, model, &mut slots, link)?);
+        if let Some((member, changed)) = &changed {
+            let link_member = link.anchor.repo.as_deref().unwrap_or(crate::members::HOME);
+            if link_member != member || !changed.contains(&link.anchor.file) {
+                skipped += 1;
+                continue;
+            }
+        }
+        checked.push(check_link(root, model, &roots, &mut slots, link)?);
     }
     Ok(VerifyReport {
         checked,
@@ -990,10 +1141,11 @@ pub fn verify(root: &Path, model: &Model, opts: &VerifyOptions) -> Result<Verify
     })
 }
 
-/// Grade one link: spec side first, then the projection.
+/// Grade one link: spec side first, then reachability, then the projection.
 fn check_link(
     root: &Path,
     model: &Model,
+    roots: &Roots,
     slots: &mut Slots,
     link: Link,
 ) -> Result<Checked, String> {
@@ -1044,12 +1196,42 @@ fn check_link(
         });
     }
 
+    // Reachability precedes resolution: an absent checkout is not a lost
+    // anchor, and grades — and observes — nothing.
+    let member_root = match roots.of(&link.anchor.repo) {
+        MemberRoot::At(r) => r,
+        MemberRoot::Unmapped(member) => {
+            let note = format!(
+                "member `{member}` has no checkout here — `archi repo map {member} <dir>`; \
+                 the code is not gone, this machine cannot see it"
+            );
+            return Ok(Checked {
+                failing: false,
+                note: Some(note),
+                link,
+                state: State::Unreachable { member },
+            });
+        }
+        MemberRoot::Undeclared(member) => {
+            let note = format!(
+                "the journal names member `{member}`, which archi.toml does not declare — \
+                 restore its [[repo]] row (a rename orphans every ref carrying the old name)"
+            );
+            return Ok(Checked {
+                failing: false,
+                note: Some(note),
+                link,
+                state: State::Unreachable { member },
+            });
+        }
+    };
+
     // The projection.
-    let path = root.join(&link.anchor.file);
+    let path = member_root.join(&link.anchor.file);
     let text = match fs::read_to_string(&path) {
         Ok(t) => t,
         Err(_) => {
-            let (state, note) = scan_for_candidate(root, &link);
+            let (state, note) = scan_for_candidate(root, &member_root, &link);
             return Ok(Checked {
                 failing: link.standing == Standing::Asserted
                     && matches!(state, State::Missing),
@@ -1079,7 +1261,7 @@ fn check_link(
         }
         Some(symbol) => match canonical.find(symbol).as_slice() {
             [] => {
-                let (state, note) = scan_for_candidate(root, &link);
+                let (state, note) = scan_for_candidate(root, &member_root, &link);
                 return Ok(Checked {
                     failing: link.standing == Standing::Asserted
                         && matches!(state, State::Missing),
@@ -1131,21 +1313,30 @@ fn check_link(
     })
 }
 
-/// The anchor is gone: sweep the tree for a candidate — an item with the
-/// same symbol (or a file with the same canonical hash), body-equality
-/// ranking exact moves first.
-fn scan_for_candidate(root: &Path, link: &Link) -> (State, Option<String>) {
+/// The anchor is gone: sweep the anchor's own member tree for a candidate —
+/// an item with the same symbol (or a file with the same canonical hash),
+/// body-equality ranking exact moves first. Moves never cross members: a
+/// candidate in another repository is a new residence, asserted by hand.
+fn scan_for_candidate(
+    project_root: &Path,
+    member_root: &Path,
+    link: &Link,
+) -> (State, Option<String>) {
     let extension = Path::new(&link.anchor.file)
         .extension()
         .map(|e| e.to_string_lossy().into_owned());
+    let files = match link.anchor.repo.as_deref() {
+        None => code_files(project_root),
+        Some(member) => member_code_files(project_root, member_root, member),
+    };
     let mut candidate: Option<(String, Option<String>, bool)> = None;
-    for file in code_files(root) {
+    for file in files {
         if file == link.anchor.file
             || Path::new(&file).extension().map(|e| e.to_string_lossy().into_owned()) != extension
         {
             continue;
         }
-        let Ok(text) = fs::read_to_string(root.join(&file)) else {
+        let Ok(text) = fs::read_to_string(member_root.join(&file)) else {
             continue;
         };
         let canonical = code::canonicalize(&file, &text);
@@ -1174,7 +1365,8 @@ fn scan_for_candidate(root: &Path, link: &Link) -> (State, Option<String>) {
     match candidate {
         Some((file, symbol, exact)) => {
             let note = format!(
-                "candidate: `{file}{}`{} — confirm with `link repin <id> --to`",
+                "candidate: `{}{}`{} — confirm with `link repin <id> --to`",
+                qualify(link.anchor.repo.as_deref(), &file),
                 symbol.as_deref().map(|s| format!("#{s}")).unwrap_or_default(),
                 if exact { " (verbatim move)" } else { "" },
             );
@@ -1214,20 +1406,27 @@ fn scan_exclusions(root: &Path) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// One root-relative path against the exclusion patterns: a trailing `/`
+/// One member-relative path against the exclusion patterns: a trailing `/`
 /// is a directory prefix, a leading `*` a suffix, anything else an exact
-/// path.
-fn excluded(file: &str, patterns: &[String]) -> bool {
-    patterns.iter().any(|p| {
-        if p.ends_with('/') {
-            file.starts_with(p.as_str())
-        } else if let Some(suffix) = p.strip_prefix('*') {
+/// path. A bare pattern applies in every member; a `member//`-qualified
+/// pattern in exactly its member — one boundary, optionally scoped
+/// (`archi/requirements/multi-repo/scans-see-every-mapped-member`).
+fn excluded_in(member: Option<&str>, file: &str, patterns: &[String]) -> bool {
+    let one = |pattern: &str| {
+        if pattern.ends_with('/') {
+            file.starts_with(pattern)
+        } else if let Some(suffix) = pattern.strip_prefix('*') {
             file.ends_with(suffix)
         } else {
-            file == p
+            file == pattern
         }
+    };
+    patterns.iter().any(|p| match split_qualified(p) {
+        (None, bare) => one(bare),
+        (Some(m), scoped) => member == Some(m) && one(scoped),
     })
 }
+
 
 /// Every code file of the project, root-relative: the tree minus VCS and
 /// build dirs, the `archi/` tree (model, docs, archive, journal),
@@ -1235,9 +1434,30 @@ fn excluded(file: &str, patterns: &[String]) -> bool {
 /// and whatever the project's `[audit] exclude` patterns mute.
 fn code_files(root: &Path) -> Vec<String> {
     let patterns = scan_exclusions(root);
+    walk_code_files(root, None, &patterns, false)
+}
+
+/// A member's code files, member-root-relative: the same walk with the
+/// boundary scoped to the member — and any subtree holding an
+/// `archi.toml` skipped whole: that is someone else's project, not this
+/// one's code.
+fn member_code_files(project_root: &Path, member_root: &Path, member: &str) -> Vec<String> {
+    let patterns = scan_exclusions(project_root);
+    walk_code_files(member_root, Some(member), &patterns, true)
+}
+
+fn walk_code_files(
+    root: &Path,
+    member: Option<&str>,
+    patterns: &[String],
+    guard_nested_projects: bool,
+) -> Vec<String> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
+        if guard_nested_projects && dir != *root && dir.join("archi.toml").is_file() {
+            continue;
+        }
         let Ok(rd) = fs::read_dir(&dir) else {
             continue;
         };
@@ -1266,7 +1486,7 @@ fn code_files(root: &Path) -> Vec<String> {
                     .map(|c| c.as_os_str().to_string_lossy())
                     .collect::<Vec<_>>()
                     .join("/");
-                if !excluded(&rel, &patterns) {
+                if !excluded_in(member, &rel, patterns) {
                     out.push(rel);
                 }
             }
@@ -1276,12 +1496,19 @@ fn code_files(root: &Path) -> Vec<String> {
     out
 }
 
-/// The files git says changed since a rev — the `--since` fast path.
-fn changed_files(root: &Path, rev: &str) -> Result<BTreeSet<String>, String> {
+/// The files git says changed since a rev, rebased into the member's
+/// frame — the `--since` fast path. Git speaks top-level-relative paths;
+/// every comparison crosses through the rebase
+/// (`archi/requirements/multi-repo/git-speaks-from-its-own-root`).
+fn changed_files(
+    ctx: &crate::members::GitContext,
+    rev: &str,
+) -> Result<BTreeSet<String>, String> {
+    let scope = if ctx.prefix.is_empty() { "." } else { ctx.prefix.as_str() };
     let out = Command::new("git")
         .arg("-C")
-        .arg(root)
-        .args(["diff", "--name-only", rev, "--", "."])
+        .arg(&ctx.top)
+        .args(["diff", "--name-only", rev, "--", scope])
         .output()
         .map_err(|e| format!("--since needs git: {e}"))?;
     if !out.status.success() {
@@ -1292,7 +1519,7 @@ fn changed_files(root: &Path, rev: &str) -> Result<BTreeSet<String>, String> {
     }
     Ok(String::from_utf8_lossy(&out.stdout)
         .lines()
-        .map(str::to_string)
+        .filter_map(|l| ctx.rebase(l))
         .collect())
 }
 
@@ -1370,11 +1597,14 @@ impl fmt::Display for AuditFinding {
 /// Options of `archi link audit`.
 #[derive(Default)]
 pub struct AuditOptions {
-    /// Delta source override; defaults to the latest version's commit
-    /// provenance.
+    /// Delta source override, `[<member>=]<rev>` with bare rev meaning
+    /// home; defaults to each member's baseline in the latest version.
     pub since: Option<String>,
     /// Sweep this scope's nodes for asserted-link coverage.
     pub scope: Option<String>,
+    /// Audit only this member's delta (`home` for the project's own
+    /// repository).
+    pub repo: Option<String>,
     /// Retire decayed evidence instead of only reporting it.
     pub prune: bool,
 }
@@ -1420,23 +1650,72 @@ pub fn audit(root: &Path, model: &Model, opts: &AuditOptions) -> Result<AuditRep
         pruned: Vec::new(),
     };
 
-    // Dark deltas: every hunk since the delta source either lands on a
-    // linked span or is unaccounted for.
-    let rev = match &opts.since {
-        Some(r) => Some(r.clone()),
-        None => latest_version_commit(root)?,
-    };
-    match rev {
-        None => report.notes.push(
-            "no delta source: commit the tree and run `archi version anchor` so the latest \
-             version gains commit provenance, or pass --since <rev>"
-                .to_string(),
-        ),
-        Some(rev) => {
-            for (file, start, end) in delta_hunks(root, &rev)? {
-                if let Some(finding) = unaccounted(root, &folded.live, &file, start, end) {
-                    report.findings.push(finding);
+    // Dark deltas, per member: every hunk since that member's delta source
+    // either lands on a linked span or is unaccounted for. Each member
+    // degrades alone — a missing baseline or absent checkout narrows the
+    // scan and says so, never silently
+    // (`archi/requirements/multi-repo/scans-see-every-mapped-member`).
+    let roots = Roots::resolve(root)?;
+    let scope_repo = opts.repo.as_deref().map(scope_member);
+    let over = opts.since.as_deref().map(parse_since);
+    let baselines = latest_version_baselines(root)?;
+    let patterns = scan_exclusions(root);
+    for m in &roots.set().members {
+        if scope_repo.is_some_and(|s| s != m.name) {
+            continue;
+        }
+        let is_home = m.name == crate::members::HOME;
+        let label = if is_home { "home" } else { m.name.as_str() };
+        let member = (!is_home).then_some(m.name.as_str());
+        let Some(mroot) = &m.root else {
+            report.notes.push(format!(
+                "`{label}` is unreachable here — its delta is unaudited on this machine \
+                 (`archi repo map {label} <dir>`)"
+            ));
+            continue;
+        };
+        let rev = match &over {
+            Some((om, rev)) if *om == m.name => Some(rev.clone()),
+            _ => match baselines.get(&m.name) {
+                Some((sha, born)) => {
+                    if *born == versions::Born::Anchor {
+                        report.notes.push(format!(
+                            "`{label}`'s baseline is anchor-born — the span between the save \
+                             and the anchor is unaudited"
+                        ));
+                    }
+                    Some(sha.clone())
                 }
+                None => None,
+            },
+        };
+        let Some(rev) = rev else {
+            report.notes.push(if is_home && roots.set().is_single() {
+                // The memberless project: today's note, byte for byte.
+                "no delta source: commit the tree and run `archi version anchor` so the latest \
+                 version gains commit provenance, or pass --since <rev>"
+                    .to_string()
+            } else if is_home {
+                "no delta source for home: commit the tree and run `archi version anchor` so \
+                 the latest version gains commit provenance, or pass --since <rev>"
+                    .to_string()
+            } else {
+                format!(
+                    "no delta source for `{label}`: commit it and run `archi version anchor \
+                     --repo {label}`, or pass --since {label}=<rev>"
+                )
+            });
+            continue;
+        };
+        let Some(ctx) = crate::members::GitContext::of(mroot) else {
+            report.notes.push(format!("`{label}` is not a git work tree — its delta is unaudited"));
+            continue;
+        };
+        for (file, start, end) in delta_hunks(&ctx, member, &patterns, &rev)? {
+            if let Some(finding) =
+                unaccounted(mroot, member, &folded.live, &file, start, end)
+            {
+                report.findings.push(finding);
             }
         }
     }
@@ -1479,11 +1758,15 @@ pub fn audit(root: &Path, model: &Model, opts: &AuditOptions) -> Result<AuditRep
         }
     }
 
-    // Decayed evidence: derived confidence below the floor.
+    // Decayed evidence: derived confidence below the floor. An unreachable
+    // member is no observation — its links are neither graded nor pruned.
     let mut slots = Slots::new(root);
     let mut decayed = Vec::new();
     for link in folded.live.iter().filter(|l| l.standing == Standing::Evidence) {
-        let checked = check_link(root, model, &mut slots, link.clone())?;
+        let checked = check_link(root, model, &roots, &mut slots, link.clone())?;
+        if matches!(checked.state, State::Unreachable { .. }) {
+            continue;
+        }
         let confidence = confidence(link, &checked.state);
         if confidence < CONFIDENCE_FLOOR {
             decayed.push(link.id.clone());
@@ -1502,20 +1785,44 @@ pub fn audit(root: &Path, model: &Model, opts: &AuditOptions) -> Result<AuditRep
     Ok(report)
 }
 
-/// The latest archived version's commit provenance, when recorded.
-fn latest_version_commit(root: &Path) -> Result<Option<String>, String> {
-    Ok(Archive::open(root)?
-        .and_then(|a| a.entries().last().and_then(|e| e.commit.clone())))
+/// The latest archived version's delta sources, per member: home's
+/// `commit` field beside the `commits` baselines, each with how it was
+/// born — the audit words an anchor-born window honestly.
+fn latest_version_baselines(
+    root: &Path,
+) -> Result<BTreeMap<String, (String, versions::Born)>, String> {
+    let mut out = BTreeMap::new();
+    if let Some(archive) = Archive::open(root)?
+        && let Some(entry) = archive.entries().last()
+    {
+        if let Some(c) = &entry.commit {
+            out.insert(
+                crate::members::HOME.to_string(),
+                (c.clone(), versions::Born::Save),
+            );
+        }
+        for (member, b) in &entry.commits {
+            out.insert(member.clone(), (b.sha.clone(), b.born));
+        }
+    }
+    Ok(out)
 }
 
-/// New-side hunks of the code delta since a rev: `git diff` plus untracked
-/// files — `archi/`, `.arch` sources and the project's `[audit] exclude`
-/// patterns muted, the same boundary `code_files` walks.
-fn delta_hunks(root: &Path, rev: &str) -> Result<Vec<(String, usize, usize)>, String> {
+/// New-side hunks of one member's code delta since a rev: `git diff` plus
+/// untracked files, every path rebased from git's top level into the
+/// member's frame before any boundary test — `archi/` (home), `.arch`
+/// sources and the `[audit] exclude` patterns muted, the same boundary
+/// `code_files` walks. Member-relative paths out.
+fn delta_hunks(
+    ctx: &crate::members::GitContext,
+    member: Option<&str>,
+    patterns: &[String],
+    rev: &str,
+) -> Result<Vec<(String, usize, usize)>, String> {
     let git = |args: &[&str]| -> Result<String, String> {
         let out = Command::new("git")
             .arg("-C")
-            .arg(root)
+            .arg(&ctx.top)
             .args(args)
             .output()
             .map_err(|e| format!("the delta source needs git: {e}"))?;
@@ -1528,19 +1835,25 @@ fn delta_hunks(root: &Path, rev: &str) -> Result<Vec<(String, usize, usize)>, St
         }
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     };
-    let patterns = scan_exclusions(root);
+    let scope = if ctx.prefix.is_empty() { "." } else { ctx.prefix.as_str() };
     let is_code = |file: &str| {
-        !file.starts_with("archi/")
+        let manifest = match member {
+            // Home: today's boundary, byte for byte.
+            None => file == "archi.toml",
+            // A member: any nested manifest marks someone else's project.
+            Some(_) => file == "archi.toml" || file.ends_with("/archi.toml"),
+        };
+        (member.is_some() || !file.starts_with("archi/"))
             && !file.ends_with(".arch")
-            && file != "archi.toml"
-            && !excluded(file, &patterns)
+            && !manifest
+            && !excluded_in(member, file, patterns)
     };
     let mut hunks = Vec::new();
-    let diff = git(&["diff", "--unified=0", "--no-color", rev, "--", "."])?;
+    let diff = git(&["diff", "--unified=0", "--no-color", rev, "--", scope])?;
     let mut current: Option<String> = None;
     for line in diff.lines() {
         if let Some(path) = line.strip_prefix("+++ b/") {
-            current = Some(path.to_string());
+            current = ctx.rebase(path);
         } else if line.starts_with("+++ ") {
             current = None; // deletion: no new side
         } else if let Some(rest) = line.strip_prefix("@@ ")
@@ -1556,32 +1869,39 @@ fn delta_hunks(root: &Path, rev: &str) -> Result<Vec<(String, usize, usize)>, St
             }
         }
     }
-    let status = git(&["status", "--porcelain=v1", "--untracked-files=all"])?;
+    let status = git(&["status", "--porcelain=v1", "--untracked-files=all", "--", scope])?;
     for line in status.lines() {
-        if let Some(file) = line.strip_prefix("?? ")
-            && is_code(file)
-            && let Ok(text) = fs::read_to_string(root.join(file))
+        if let Some(top_relative) = line.strip_prefix("?? ")
+            && let Some(file) = ctx.rebase(top_relative)
+            && is_code(&file)
+            && let Ok(text) = fs::read_to_string(ctx.top.join(top_relative))
         {
-            hunks.push((file.to_string(), 1, text.lines().count().max(1)));
+            hunks.push((file, 1, text.lines().count().max(1)));
         }
     }
     Ok(hunks)
 }
 
 /// Whether a hunk is claimed by some live link: a file anchor claims the
-/// whole file; a symbol anchor claims its item's current span.
+/// whole file; a symbol anchor claims its item's current span. `file` is
+/// member-relative; links match within the member and findings render the
+/// qualified path.
 fn unaccounted(
-    root: &Path,
+    member_root: &Path,
+    member: Option<&str>,
     live: &[Link],
     file: &str,
     start: usize,
     end: usize,
 ) -> Option<AuditFinding> {
-    let on_file: Vec<&Link> = live.iter().filter(|l| l.anchor.file == file).collect();
+    let on_file: Vec<&Link> = live
+        .iter()
+        .filter(|l| l.anchor.repo.as_deref() == member && l.anchor.file == file)
+        .collect();
     if on_file.iter().any(|l| l.anchor.symbol.is_none()) {
         return None;
     }
-    let canonical = fs::read_to_string(root.join(file))
+    let canonical = fs::read_to_string(member_root.join(file))
         .ok()
         .map(|text| code::canonicalize(file, &text));
     if let Some(canonical) = &canonical {
@@ -1602,7 +1922,7 @@ fn unaccounted(
             .map(|i| i.symbol.clone())
     });
     Some(AuditFinding::UnaccountedDelta {
-        file: file.to_string(),
+        file: qualify(member, file),
         start,
         end,
         symbol,
@@ -2311,5 +2631,46 @@ mod tests {
         assert_eq!(state, State::Clean);
         assert!(!failing, "exclusion scopes the scans, not the claims");
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn refs_parse_their_member_and_render_it_back() {
+        let a = Anchor::parse("backend//src/api.rs#Handler::serve").unwrap();
+        assert_eq!(
+            (a.repo.as_deref(), a.file.as_str(), a.symbol.as_deref()),
+            (Some("backend"), "src/api.rs", Some("Handler::serve"))
+        );
+        assert_eq!(a.to_string(), "backend//src/api.rs#Handler::serve");
+        assert_eq!(a.qualified_file(), "backend//src/api.rs");
+
+        // Unqualified stays home — and folds identically to yesterday's parse.
+        let bare = Anchor::parse("src/api.rs#serve").unwrap();
+        assert_eq!(bare.repo, None);
+        assert_eq!(bare.to_string(), "src/api.rs#serve");
+
+        // A pre-member journal event replays with its anchor at home.
+        let old: Anchor =
+            serde_json::from_str(r#"{"file":"src/api.rs","symbol":"serve"}"#).unwrap();
+        assert_eq!(old.repo, None);
+        assert_eq!(old, bare);
+
+        for bad in ["//src/api.rs", "backend//", "backend//src/api.rs#"] {
+            assert!(Anchor::parse(bad).is_err(), "`{bad}` must refuse");
+        }
+    }
+
+    #[test]
+    fn exclusion_patterns_scope_bare_everywhere_and_qualified_to_one_member() {
+        let patterns = vec!["*.md".to_string(), "backend//vendor/".to_string()];
+        // Bare patterns hold in every member.
+        assert!(excluded_in(None, "README.md", &patterns));
+        assert!(excluded_in(Some("backend"), "docs/x.md", &patterns));
+        assert!(excluded_in(Some("web"), "notes.md", &patterns));
+        // A qualified pattern holds in exactly its member.
+        assert!(excluded_in(Some("backend"), "vendor/dep.rs", &patterns));
+        assert!(!excluded_in(Some("web"), "vendor/dep.rs", &patterns));
+        assert!(!excluded_in(None, "vendor/dep.rs", &patterns));
+        // The member prefix never leaks into the path test.
+        assert!(!excluded_in(Some("backend"), "src/vendor.rs", &patterns));
     }
 }

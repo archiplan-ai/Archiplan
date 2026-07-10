@@ -17,6 +17,7 @@ def node Cli:
   port version     // save, anchor, remint, list, show, diff (archived or live), current
   port session     // fold: two concurrent rounds into one deliberate record
   port link        // add, ls, verify, confirm, rm, repin, capture, audit
+  port repo        // ls, map: the member registry and its local mappings
   port plan        // use, task add, verify, start, next, close, reset
   port query       // one composed subgraph query
   port read        // the agent read envelope over stdin/argv
@@ -43,9 +44,16 @@ def node Scaffold:
   port emit      // the missing artifacts, in an order that keeps every intermediate tree honest: manifest last
   port read_tree // what the target already holds — manifest, modules, briefing — read before any write
 
+// The member registry: declared repositories resolved to local roots, home implicit.
+def node Members:
+  port resolve    // manifest defaults under local overrides: member names to roots, absent checkouts reported unreachable
+  port survey     // the doctor's read per member: mapped, reachable, clean, head, baseline
+  port read_decls // declarations and local mapping rows out of the tree
+
 def node Archive:
-  port save         // canonical render in; keyframe or patch + manifest entry
-  port anchor       // post-hoc commit provenance: clean tree, render-hash match
+  port save         // canonical render in; keyframe or patch + manifest entry, one baseline per clean mapped member
+  port anchor       // post-hoc commit provenance: clean tree, render-hash match; per member, the clean-tree half alone
+  port locate       // the member roots a save or anchor baselines against
   port remint       // re-mint a round's save onto the merged lineage; re-stamps the session's closed:
   port serve        // reconstructs any version, verified against its seal
   port canonicalize // consults the renderer for the canonical bytes
@@ -62,6 +70,8 @@ def node Links:
   port capture     // wave delta to candidate links, pre-attributed by task
   port read_code   // code items out of the tree: candidate and wave scans
   port read_index  // wave-open indexes out of the tree
+  port locate      // member roots for grading and the audit
+  port locate_scan // member roots for the wave scan
   port journal     // appends link events to the journal in the tree
   port pin_spec    // resolves pinned spec refs via reconstructed versions
   port serve_links // the folded live set, read by the plan's coverage gate
@@ -73,18 +83,20 @@ def node Links:
     port serve_fold
   def node Canonizer: // rust-tok-v1 / text-v1: the versioned hash contract
     port hash
-  def node Grader:    // recomputes projections, grades states, audits
+  def node Grader:    // recomputes projections, grades states — unreachable distinct from missing — and audits per member
     port grade
     port audit
     port resolve_pins
     port canon
     port read_fold
     port scan_code
-  def node Capture:   // wave-open index vs the tree: mints, touches, decays
+    port locate
+  def node Capture:   // wave-open index vs the mapped trees: mints, touches, decays; the scan set recorded at open
     port diff_wave
     port load_index
     port canon
     port mint
+    port locate
 
   Grader.canon canonize Canonizer.hash in trace_flow
   Capture.canon canonize Canonizer.hash in trace_flow
@@ -99,6 +111,8 @@ def node Links:
   serve_links = Journal.serve_fold
   read_code = Grader.scan_code
   read_index = Capture.load_index
+  locate = Grader.locate
+  locate_scan = Capture.locate
 
 def node Planner:
   port author      // use, task add: pins a version, seeds spec_refs
@@ -111,6 +125,7 @@ def node Planner:
 
 Storage type_of SourceTree
 Storage type_of Archive
+Function type_of Members
 Service type_of Cli
 Function type_of DocsCompiler
 Function type_of Search
@@ -139,6 +154,13 @@ Cli.drive consult(->Command, <-Report) Links.verify in trace_flow
 Cli.drive consult(->Command, <-Report) Links.sweep in trace_flow
 Cli.drive consult(->Command, <-Report) Planner.author in trace_flow
 Cli.drive consult(->Command, <-Report) Planner.advance in trace_flow
+Cli.drive consult(->Command, <-Report) Members.survey in trace_flow
+
+// members: declarations from the tree, one resolution serving every scan and baseline
+Members.read_decls recall(MemberDecl) SourceTree.serve in trace_flow
+Links.locate recall(MemberSet) Members.resolve in trace_flow
+Links.locate_scan recall(MemberSet) Members.resolve in trace_flow
+Archive.locate recall(MemberSet) Members.resolve in harden_flow
 
 // search: one scan over the docs and the model it was handed, ranked cards out
 Cli.drive consult(->ModelGraph, <-SearchReport) Search.find in read_flow

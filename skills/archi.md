@@ -234,6 +234,27 @@ The rules the compiler holds you to:
   are not names; preset names (`type_of`, the ontology types) are
   ambient — never import, never redefine them.
 
+## Multi-repo
+
+Code spread across repositories, spec in its own: declare each code repo as
+a **member** in `archi.toml` —
+
+```toml
+[[repo]]
+name = "backend"          # the identity refs carry: backend//src/api.rs#serve
+url  = "…"                # provenance for humans and CI; archi never fetches
+path = "../backend"       # committed convention; archi repo map overrides per machine
+```
+
+`archi repo ls` is the doctor (resolved root, reachable, clean, head,
+baseline); `archi repo map <member> <dir>` writes the gitignored
+machine-local overlay. Unqualified refs stay the project's own repo — a
+memberless project is today's, byte for byte. An absent checkout is
+*Unreachable*, reported and never decayed; only `verify --repo <member>`
+turns absence into failure. Save baselines every clean mapped member;
+`version anchor --repo <member>` records a missed one post hoc, marked as
+anchor-born.
+
 ## Failure modes
 
 - `link audit` notes no delta source → the last save happened on a dirty

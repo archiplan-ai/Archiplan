@@ -80,6 +80,15 @@ pub fn manifest_src(root: &Path) -> Result<String, Diagnostic> {
     project::read_manifest(root).map(|m| m.src)
 }
 
+/// The manifest's `[[repo]]` member declarations, in declaration order —
+/// the compiler's own reading, exposed for the same one-parser reason as
+/// [`manifest_src`]. A memberless manifest yields the empty list.
+pub fn manifest_repos(root: &Path) -> Result<Vec<project::RepoDecl>, Diagnostic> {
+    project::read_manifest(root).map(|m| m.repos)
+}
+
+pub use project::RepoDecl;
+
 /// Compile the project rooted at `root` (the directory holding `archi.toml`).
 pub fn compile_project(root: &Path) -> Result<Compiled, CompileFailure> {
     let fail_project = |d: Diagnostic| CompileFailure {

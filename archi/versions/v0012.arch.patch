@@ -1,0 +1,130 @@
+--- original
++++ modified
+@@ -4,10 +4,11 @@
+ def node AgentBrief // the briefing archi installs beside a tree: the workflow skills and the CLAUDE.md block
+ def node ArchSource // .arch surface text — the model's only persistence
+ def node Archive:
+-  port anchor // post-hoc commit provenance: clean tree, render-hash match
++  port anchor // post-hoc commit provenance: clean tree, render-hash match; per member, the clean-tree half alone
+   port canonicalize // consults the renderer for the canonical bytes
++  port locate // the member roots a save or anchor baselines against
+   port remint // re-mint a round's save onto the merged lineage; re-stamps the session's closed:
+-  port save // canonical render in; keyframe or patch + manifest entry
++  port save // canonical render in; keyframe or patch + manifest entry, one baseline per clean mapped member
+   port serve // reconstructs any version, verified against its seal
+ def node Ast // parsed modules, names still relative
+ def node CanonicalRender // canonical(project): the render that versions hash and archive
+@@ -25,6 +26,7 @@
+   port plan // use, task add, verify, start, next, close, reset
+   port query // one composed subgraph query
+   port read // the agent read envelope over stdin/argv
++  port repo // ls, map: the member registry and its local mappings
+   port search // ranked retrieval by phrase across model defs and doc objects
+   port session // fold: two concurrent rounds into one deliberate record
+   port version // save, anchor, remint, list, show, diff (archived or live), current
+@@ -77,11 +79,13 @@
+   port read_sessions // pulls session and stressor docs
+   port scan // stressor × component matrix and its typed findings
+ def node IncidenceReport // stressor × component matrix and its typed findings
+-def node ItemHashIndex // file → symbol → body hash snapshot taken at wave open
++def node ItemHashIndex // member-qualified file → symbol → body hash snapshot taken at wave open
+ def node LinkEvent // one append-only journal event: add, confirm, repin, retire…
+ def node Links:
+   port capture // wave delta to candidate links, pre-attributed by task
+   port journal // appends link events to the journal in the tree
++  port locate // member roots for grading and the audit
++  port locate_scan // member roots for the wave scan
+   port pin_spec // resolves pinned spec refs via reconstructed versions
+   port read_code // code items out of the tree: candidate and wave scans
+   port read_index // wave-open indexes out of the tree
+@@ -91,15 +95,17 @@
+   port verify // recomputes projections, grades drift per link kind
+ def node Links.Canonizer: // rust-tok-v1 / text-v1: the versioned hash contract
+   port hash
+-def node Links.Capture: // wave-open index vs the tree: mints, touches, decays
++def node Links.Capture: // wave-open index vs the mapped trees: mints, touches, decays; the scan set recorded at open
+   port canon
+   port diff_wave
+   port load_index
++  port locate
+   port mint
+-def node Links.Grader: // recomputes projections, grades states, audits
++def node Links.Grader: // recomputes projections, grades states — unreachable distinct from missing — and audits per member
+   port audit
+   port canon
+   port grade
++  port locate
+   port read_fold
+   port resolve_pins
+   port scan_code
+@@ -108,6 +114,12 @@
+   port flush
+   port record_events
+   port serve_fold
++def node MemberDecl // one declared repository: name as identity, url as provenance, path as convention — plus its local mapping row
++def node MemberSet // the resolved member picture: every declared repository with its root, reachability and cleanliness, home included
++def node Members: // The member registry: declared repositories resolved to local roots, home implicit.
++  port read_decls // declarations and local mapping rows out of the tree
++  port resolve // manifest defaults under local overrides: member names to roots, absent checkouts reported unreachable
++  port survey // the doctor's read per member: mapped, reachable, clean, head, baseline
+ def node ModelGraph // the compiled model: nodes, ports, typed edges, views
+ def node Nkp:
+   port scan // the landscape read: regime, hotspots, corridors
+@@ -182,6 +194,8 @@
+ Data type_of IncidenceReport
+ Data type_of ItemHashIndex
+ Data type_of LinkEvent
++Data type_of MemberDecl
++Data type_of MemberSet
+ Data type_of ModelGraph
+ Data type_of NkpReport
+ Data type_of PlanFile
+@@ -204,6 +218,7 @@
+ Function type_of DocsCompiler
+ Function type_of Engine
+ Function type_of Incidence
++Function type_of Members
+ Function type_of Nkp
+ Function type_of Preset
+ Function type_of Query
+@@ -231,15 +246,18 @@
+ Agent.drive invoke(->Command, <-Report) Cli.plan in trace_flow
+ Agent.drive invoke(->Command, <-Report) Cli.query in read_flow
+ Agent.drive invoke(->Command, <-Report) Cli.read in read_flow
++Agent.drive invoke(->Command, <-Report) Cli.repo in trace_flow
+ Agent.drive invoke(->Command, <-Report) Cli.search in read_flow
+ Agent.drive invoke(->Command, <-Report) Cli.session in harden_flow
+ Agent.drive invoke(->Command, <-Report) Cli.version in harden_flow
+ Archive.canonicalize render(->ModelGraph, <-CanonicalRender) Renderer.emit_source in harden_flow
++Archive.locate recall(<-MemberSet) Members.resolve in harden_flow
+ Cli.ask interrogate(->StatementBatch, <-SubgraphResult) Engine.answer in read_flow
+ Cli.compile_src compile(->ArchSource, <-StatementBatch) Compiler.compile in compile_flow
+ Cli.drive consult(->Command, <-Report) Links.record in trace_flow
+ Cli.drive consult(->Command, <-Report) Links.sweep in trace_flow
+ Cli.drive consult(->Command, <-Report) Links.verify in trace_flow
++Cli.drive consult(->Command, <-Report) Members.survey in trace_flow
+ Cli.drive consult(->Command, <-Report) Planner.advance in trace_flow
+ Cli.drive consult(->Command, <-Report) Planner.author in trace_flow
+ Cli.drive consult(->Command, <-Report) Scaffold.stand_up in compile_flow
+@@ -275,9 +293,12 @@
+ Links.Grader.canon canonize(->CodeItem, <-SymbolHashes) Links.Canonizer.hash in trace_flow
+ Links.Grader.read_fold recall(<-LinkEvent) Links.Journal.serve_fold in trace_flow
+ Links.journal persist(LinkEvent) SourceTree.store in trace_flow
++Links.locate recall(<-MemberSet) Members.resolve in trace_flow
++Links.locate_scan recall(<-MemberSet) Members.resolve in trace_flow
+ Links.pin_spec recall(<-ModelGraph) DocsCompiler.serve_pin in trace_flow
+ Links.read_code recall(<-CodeItem) SourceTree.serve in trace_flow
+ Links.read_index recall(<-ItemHashIndex) SourceTree.serve in trace_flow
++Members.read_decls recall(<-MemberDecl) SourceTree.serve in trace_flow
+ Planner.coverage recall(<-LinkEvent) Links.serve_links in trace_flow
+ Planner.load_plan recall(<-PlanFile) SourceTree.serve in trace_flow
+ Planner.pin_model recall(<-ModelGraph) DocsCompiler.serve_pin in trace_flow
+@@ -298,6 +319,8 @@
+ Compiler.load_sources = Driver.discover
+ Links.capture = Capture.diff_wave
+ Links.journal = Journal.flush
++Links.locate = Grader.locate
++Links.locate_scan = Capture.locate
+ Links.pin_spec = Grader.resolve_pins
+ Links.read_code = Grader.scan_code
+ Links.read_index = Capture.load_index
