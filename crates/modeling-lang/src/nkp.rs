@@ -174,6 +174,11 @@ pub struct NkpConfig {
     pub tau_p: f64,
     /// Boundary-exposure threshold for a SAFE corridor.
     pub tau_b: f64,
+    /// How heavily coupling weighs on degree-derived neutrality — the
+    /// operator's trade-off situates the read (`Tradeoffs`,
+    /// `archi/requirements/tradeoff-configuration/priorities-weight-the-read.md`).
+    /// `1.0` is unweighted: the read is byte-identical to an unsituated one.
+    pub coupling_emphasis: f64,
 }
 
 impl Default for NkpConfig {
@@ -188,6 +193,7 @@ impl Default for NkpConfig {
             neutrality: Neutrality::DegreeDerived,
             tau_p: 0.6,
             tau_b: 0.3,
+            coupling_emphasis: 1.0,
         }
     }
 }
@@ -644,7 +650,9 @@ pub(crate) fn analyze(model: &Model, config: &NkpConfig) -> Result<NkpReport, La
                 if k_max == 0 {
                     1.0
                 } else {
-                    1.0 - ki as f64 / k_max as f64
+                    // Coupling weighs on neutrality by the operator's emphasis;
+                    // at 1.0 this is exactly `1 − K_i/K_max` (`1.0 * x == x`).
+                    (1.0 - config.coupling_emphasis * (ki as f64 / k_max as f64)).max(0.0)
                 }
             })
             .collect(),

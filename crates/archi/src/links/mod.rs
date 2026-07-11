@@ -140,10 +140,6 @@ impl SpecRef {
             }
         }
     }
-
-    fn is_edge(&self) -> bool {
-        self.path.contains(' ')
-    }
 }
 
 impl fmt::Display for SpecRef {
@@ -579,14 +575,13 @@ impl<'a> Slots<'a> {
     }
 }
 
-/// Whether a ref names an element of a model: a node by path, an edge by
-/// its canonical surface text (views stripped, whitespace collapsed).
+/// Whether a ref names an element of a model — a node by path, a port by
+/// `Node.port`, or an edge by its canonical surface text. A link and a
+/// requirement's `satisfied-by` consult the one shared resolver, so an element
+/// means the same thing whether the journal or a doc names it
+/// (`archi/requirements/element-addressing/satisfaction-names-the-interface.md`).
 pub(crate) fn resolves_in(model: &Model, spec: &SpecRef) -> bool {
-    if spec.is_edge() {
-        edge_pseudos(model).contains(&spec.path)
-    } else {
-        model.has_node(&spec.path)
-    }
+    model.resolve_element(&spec.path).is_some()
 }
 
 pub(crate) fn normalize_ref(text: &str) -> String {
@@ -627,12 +622,6 @@ pub(crate) fn edge_pseudo(s: &Statement) -> Option<String> {
         _ => return None,
     };
     Some(normalize_ref(&stripped.pseudo()))
-}
-
-/// Every typed edge of the model in canonical surface form — the vocabulary
-/// edge SpecRefs are checked against. Views are presentation, not identity.
-fn edge_pseudos(model: &Model) -> BTreeSet<String> {
-    model.dump().iter().filter_map(edge_pseudo).collect()
 }
 
 /// Every node path of the model, for audit's coverage sweep. Dumps exclude
@@ -2190,6 +2179,31 @@ mod tests {
         assert!(by_id(&working.id).failing);
         // The edge ref names Vault too: drifted with it.
         assert_eq!(by_id(&edge.id).state, State::SpecDrifted);
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_spec_ref_resolves_a_port_path() {
+        let root = temp_project();
+        let ws = model_of(&root);
+
+        // A port path resolves where E_MODEL_REF was raised before, exactly
+        // where a canonical edge already does — a link and a satisfaction name
+        // one vocabulary (satisfaction-names-the-interface).
+        let port = add(&root, ws.model(), "Auth.store", "code/auth.rs", LinkKind::Indirect)
+            .expect("a declared port resolves");
+        assert_eq!(port.spec.path, "Auth.store");
+
+        // It verifies and grades like any other link.
+        let report = verify(&root, ws.model(), &VerifyOptions::default()).unwrap();
+        let checked = report.checked.iter().find(|c| c.link.id == port.id).unwrap();
+        assert_eq!(checked.state, State::Clean);
+
+        // An undeclared port still refuses to mint.
+        let err = add(&root, ws.model(), "Auth.nope", "code/auth.rs", LinkKind::Indirect)
+            .unwrap_err();
+        assert!(err.contains("E_MODEL_REF"), "{err}");
 
         fs::remove_dir_all(&root).unwrap();
     }

@@ -44,6 +44,7 @@
 //! the only source of truth: the CLI offers no JSON editing of the model;
 //! mutation is a text edit and a recompile.
 
+mod addressing;
 mod docs;
 mod incidence;
 mod links;
@@ -52,6 +53,7 @@ mod plans;
 mod scaffold;
 mod search;
 mod sessions;
+mod tradeoffs;
 mod versions;
 
 use std::fs;
@@ -102,6 +104,8 @@ const USAGE: &str = "usage:
               [--carrier <path>]... [--edge-type <name>]... [--top] [--at <id>] [--project <dir>]
   archi search <phrase>... [--kind element|intent|requirement|stressor|session]...
               [--limit <n>] [--json] [--project <dir>]
+  archi tradeoffs [show] | set <favor,…> <spend,…> | auto <concern=high|low>... | clear
+              [--project <dir>]
   archi --help | --version";
 
 struct Args {
@@ -293,7 +297,15 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             other if other.starts_with("--") => return Err(format!("unknown flag `{other}`")),
             other if matches!(
                 args.verb.as_str(),
-                "version" | "link" | "plan" | "read" | "session" | "search" | "init" | "repo"
+                "version"
+                    | "link"
+                    | "plan"
+                    | "read"
+                    | "session"
+                    | "search"
+                    | "init"
+                    | "repo"
+                    | "tradeoffs"
             ) =>
             {
                 args.positional.push(other.to_string())
@@ -385,7 +397,13 @@ fn run_check(args: &Args) -> ExitCode {
     // and the refactoring directions it implies, over the default slice.
     // Findings are advisory and do not withhold it; an empty landscape earns
     // no read (archi/requirements/cli/).
-    let nkp = match clean.then(|| ws.model().nkp(&NkpConfig::default())) {
+    // The scoring read consults the operator's trade-off configuration, so a
+    // passing check's landscape verdict is situated in the project's own
+    // priorities; absent a configuration the emphasis is 1.0 and the read is
+    // byte-identical (archi/requirements/tradeoff-configuration/).
+    let mut nkp_config = NkpConfig::default();
+    nkp_config.coupling_emphasis = tradeoffs::TradeoffConfig::load(&root).coupling_emphasis();
+    let nkp = match clean.then(|| ws.model().nkp(&nkp_config)) {
         Some(Ok(r)) if r.scope.node_count > 0 => Some(r),
         Some(Err(e)) => {
             eprintln!("archi: warning: nkp report: {e}");
@@ -394,15 +412,22 @@ fn run_check(args: &Args) -> ExitCode {
         _ => None,
     };
     if args.json {
+        // Every finding carries the id of the element it concerns, so a
+        // consumer names the element instead of paraphrasing it
+        // (archi/requirements/element-addressing/reports-name-their-element.md).
         let mut all: Vec<Value> = findings
             .iter()
-            .map(|f| serde_json::to_value(f).expect("serializes"))
+            .map(|f| {
+                let mut v = serde_json::to_value(f).expect("serializes");
+                addressing::of_finding(f).stamp(&mut v);
+                v
+            })
             .collect();
-        all.extend(
-            doc.findings
-                .iter()
-                .map(|f| serde_json::to_value(f).expect("serializes")),
-        );
+        all.extend(doc.findings.iter().map(|f| {
+            let mut v = serde_json::to_value(f).expect("serializes");
+            addressing::of_doc_finding(f).stamp(&mut v);
+            v
+        }));
         let mut envelope = json!({ "status": "ok", "findings": all });
         if !archive_errors.is_empty() {
             envelope["status"] = json!("error");
@@ -435,10 +460,10 @@ fn run_check(args: &Args) -> ExitCode {
             println!("no findings");
         } else {
             for f in &findings {
-                println!("{f}");
+                println!("{f}  [{}]", addressing::of_finding(f).id);
             }
             for f in &doc.findings {
-                println!("{f}");
+                println!("{f}  [{}]", addressing::of_doc_finding(f).id);
             }
         }
         if let Some(report) = &nkp {
@@ -1685,6 +1710,11 @@ fn run_nkp(args: &Args) -> ExitCode {
             ));
         }
     }
+    // The read is situated in the operator's priorities; absent a
+    // configuration the emphasis stays 1.0 and the read is byte-identical.
+    if let Ok(root) = locate_project(args) {
+        config.coupling_emphasis = tradeoffs::TradeoffConfig::load(&root).coupling_emphasis();
+    }
 
     let report = match ws.model().nkp(&config) {
         Ok(r) => r,
@@ -1765,6 +1795,83 @@ fn run_session(args: &Args) -> ExitCode {
     }
 }
 
+/// Print a configuration and the emphasis its weighting carries.
+fn print_tradeoffs(cfg: &tradeoffs::TradeoffConfig) {
+    if cfg.is_empty() {
+        println!("no trade-off configuration — the scoring read is unweighted");
+    } else {
+        println!("favor: {}", cfg.favor.join(", "));
+        println!("spend: {}", cfg.spend.join(", "));
+        println!("coupling emphasis: {:.2}", cfg.coupling_emphasis());
+    }
+}
+
+fn persist_tradeoffs(root: &Path, cfg: &tradeoffs::TradeoffConfig) -> ExitCode {
+    match cfg.write(root) {
+        Ok(()) => {
+            print_tradeoffs(cfg);
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("archi: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+/// `archi tradeoffs` — read or set the operator's priorities weighting the
+/// scoring read (`archi/requirements/tradeoff-configuration/`). `set` takes an
+/// explicit favour/spend stance; `auto` derives one from the operator's
+/// answers (the poll a driving agent conducts); `clear` removes it. Absent a
+/// configuration the read is unweighted.
+fn run_tradeoffs(args: &Args) -> ExitCode {
+    let root = match locate_project(args) {
+        Ok(r) => r,
+        Err(e) => return usage_err(&e),
+    };
+    let csv = |s: &str| {
+        s.split(',')
+            .map(str::trim)
+            .filter(|x| !x.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    };
+    match args.positional.first().map(String::as_str).unwrap_or("show") {
+        "show" => {
+            print_tradeoffs(&tradeoffs::TradeoffConfig::load(&root));
+            ExitCode::SUCCESS
+        }
+        "set" => {
+            let rest = &args.positional[1..];
+            if rest.is_empty() {
+                return usage_err("tradeoffs set <favor,…> <spend,…>");
+            }
+            let cfg = tradeoffs::TradeoffConfig {
+                favor: rest.first().map(|s| csv(s)).unwrap_or_default(),
+                spend: rest.get(1).map(|s| csv(s)).unwrap_or_default(),
+            };
+            persist_tradeoffs(&root, &cfg)
+        }
+        "auto" => {
+            let answers: Vec<(String, String)> = args.positional[1..]
+                .iter()
+                .filter_map(|a| {
+                    a.split_once('=')
+                        .map(|(c, l)| (c.trim().to_string(), l.trim().to_string()))
+                })
+                .collect();
+            if answers.is_empty() {
+                return usage_err("tradeoffs auto <concern=high|low>...");
+            }
+            persist_tradeoffs(&root, &tradeoffs::TradeoffConfig::derive(&answers))
+        }
+        "clear" => persist_tradeoffs(&root, &tradeoffs::TradeoffConfig::default()),
+        other => usage_err(&format!(
+            "tradeoffs takes: show | set | auto | clear, got `{other}`"
+        )),
+    }
+}
+
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     // The standalone meta flags answer before any parsing or project
@@ -1799,6 +1906,7 @@ fn main() -> ExitCode {
         "read" => run_read(&args),
         "query" => run_query(&args),
         "search" => run_search(&args),
+        "tradeoffs" => run_tradeoffs(&args),
         other => usage_err(&format!("unknown command `{other}`")),
     }
 }

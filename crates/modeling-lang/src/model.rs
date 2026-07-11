@@ -442,6 +442,52 @@ impl Model {
         self.resolve_in(None, &segs).is_some()
     }
 
+    /// Whether an absolute dot path names a declared port — `Node.port`, the
+    /// last segment the port. The reference layers resolve a port-level claim
+    /// through this (`archi/requirements/element-addressing/satisfaction-names-the-interface.md`).
+    pub fn has_port(&self, path: &str) -> bool {
+        self.resolve_port(path).is_some()
+    }
+
+    /// Resolve a `Node.port` path to its port; `None` when the node does not
+    /// resolve or declares no such port.
+    pub(crate) fn resolve_port(&self, path: &str) -> Option<PortId> {
+        let segs: Vec<String> = path.split('.').map(str::to_string).collect();
+        let (name, node_segs) = segs.split_last()?;
+        if node_segs.is_empty() {
+            return None;
+        }
+        let node = self.resolve_in(None, node_segs)?;
+        self.nodes[&node].ports.get(name).copied()
+    }
+
+    /// Every typed edge in canonical surface form — views stripped, whitespace
+    /// collapsed — the vocabulary a canonical-edge-text reference resolves
+    /// against.
+    pub(crate) fn edge_pseudos(&self) -> BTreeSet<String> {
+        self.dump().iter().filter_map(edge_pseudo).collect()
+    }
+
+    /// Resolve a reference string to the kind of element it names, or `None`.
+    /// The one vocabulary `satisfied-by` and link SpecRefs share: an absolute
+    /// node path (`Engine`), a port path (`Engine.answer`), or canonical edge
+    /// surface text (`A.p conn B.q`)
+    /// (`archi/requirements/element-addressing/satisfaction-names-the-interface.md`).
+    /// A node takes precedence over a like-named port.
+    pub fn resolve_element(&self, spec: &str) -> Option<ElementKind> {
+        let spec = normalize_ws(spec);
+        if spec.contains(' ') {
+            return self
+                .edge_pseudos()
+                .contains(&spec)
+                .then_some(ElementKind::Edge);
+        }
+        if self.has_node(&spec) {
+            return Some(ElementKind::Node);
+        }
+        self.resolve_port(&spec).map(|_| ElementKind::Port)
+    }
+
     /// Which layer a node belongs to; `None` if the path does not resolve.
     /// The path is absolute, from the root scope.
     pub fn layer_of(&self, path: &str) -> Option<Layer> {
@@ -497,4 +543,57 @@ impl Model {
     ) -> IncidenceReport {
         crate::incidence::analyze(self, rows, invariants, config)
     }
+}
+
+/// The kind of element a reference resolves to
+/// (`archi/requirements/element-addressing/satisfaction-names-the-interface.md`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ElementKind {
+    /// A node, addressed by its absolute dot path.
+    Node,
+    /// A declared port, addressed by `Node.port`.
+    Port,
+    /// A typed edge, addressed by its canonical surface text.
+    Edge,
+}
+
+/// Collapse internal whitespace runs to single spaces — the canonical edge
+/// surface spacing, so a reference matches however it was typed.
+fn normalize_ws(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The canonical surface text of an edge statement — views stripped — or
+/// `None` for a non-edge. Views are presentation, not identity.
+fn edge_pseudo(s: &Statement) -> Option<String> {
+    let stripped = match s {
+        Statement::RelEdge {
+            rel,
+            source,
+            target,
+            ..
+        } => Statement::RelEdge {
+            rel: rel.clone(),
+            source: source.clone(),
+            target: target.clone(),
+            views: Vec::new(),
+        },
+        Statement::ConnEdge {
+            conn,
+            source,
+            carrier,
+            rev_carrier,
+            target,
+            ..
+        } => Statement::ConnEdge {
+            conn: conn.clone(),
+            source: source.clone(),
+            carrier: carrier.clone(),
+            rev_carrier: rev_carrier.clone(),
+            target: target.clone(),
+            views: Vec::new(),
+        },
+        _ => return None,
+    };
+    Some(normalize_ws(&stripped.pseudo()))
 }

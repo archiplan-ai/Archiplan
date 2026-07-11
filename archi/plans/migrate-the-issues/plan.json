@@ -2,8 +2,8 @@
   "name": "migrate-the-issues",
   "version": "v0013",
   "created": "2026-07-10T14:05:36Z",
-  "state": "draft",
-  "closed_waves": 0,
+  "state": "completed",
+  "closed_waves": 3,
   "problem": "The retired issues/ folder's four open items, planned as one migration. Two are authoring-surface defects hardened behavior-only in the authoring-pressure round @ v0012 (verifications-forgive-the-dash: a Satisfy bullet must not void on the wrong dash; satisfaction-names-the-interface: satisfied-by and link SpecRefs must resolve ports and edges, not only whole nodes). Two are deferred product surfaces that entered as intents @ v0013 (reports-name-their-element: every finding and report line carries its element's id; priorities-weight-the-read: a trade-off configuration situates the scoring read). This plan projects v0013 and stops at authoring — no wave has started; the two new-node tasks (t3, t4) implement nodes already sealed in v0013, so execution adds code, never model.",
   "technology_stack": [
     {
@@ -60,14 +60,14 @@
     }
   ],
   "scenarios": [
-    "a requirement whose Satisfy bullet uses an ASCII hyphen counts its verification; a `- tests —` typo or a `*` bullet draws the located diagnostic naming the canonical `- test — …`, never a silent zero — checked on a fixture and on this repository's own docs",
+    "a Satisfy bullet whose separator is an ASCII hyphen (or en-/em-dash) counts its verification; a `- test:` line that opens the tag but misses the shape draws the located diagnostic naming the canonical `- test — …`, while a `*` bullet or a mistyped `- tests —` tag stays ordinary prose — never a silent zero, checked on a fixture and on this repository's own docs",
     "`satisfied-by: [Engine.answer]` and a `satisfied-by` naming a conn edge both resolve and validate; `archi link add Engine.answer <file#symbol>` resolves the port instead of raising E_MODEL_REF — satisfaction and links accept one vocabulary",
     "on this repository's own `archi check`, every finding and diagnostic line carries a resolvable element id in both the human and the --json surface; the id pasted into `archi query` or `archi search` lands on exactly the element the line fired on",
     "with a trade-off configuration favouring simplicity over scalability, `archi nkp` weights the landscape read by it; the same model with no configuration reads byte-identically to today, and the auto mode derives a configuration from answered prompts",
     "`archi check` stays green and `archi version current` reports v0013 unmoved after every task — the migration adds behavior and fills two sealed nodes with code, disturbing no canonical byte"
   ],
-  "scenarios_displayed": false,
-  "scenarios_closed": false,
+  "scenarios_displayed": true,
+  "scenarios_closed": true,
   "tasks": [
     {
       "id": "t1",
@@ -89,11 +89,137 @@
         "crates/modeling-lang/src/model.rs"
       ],
       "verifications": {
-        "verifications-forgive-the-dash": [
-          "unit: a Satisfy bullet written with an ASCII hyphen, an en-dash and an em-dash each count as one verification; a `test`/`type-level` line that misses the shape raises the located diagnostic naming `- test — …`; a `*` bullet or a mistyped tag stays ordinary prose"
+        "a-dark-corpus-stays-partial": [
+          "e2e: archi search degrades per-corpus on a broken tree — element cards darken with a dark note (model corpus + first diagnostic), unparseable docs fall to raw-text cards, and the verb exits zero while archi check still exits one"
+        ],
+        "a-link-is-fact-plus-projection": [
+          "unit: a link stays an immutable birth record — spans, content hash, resolved symbol, canonicalizer version — in the journal as its one store, while verify recomputes the derived projection and never writes it back"
+        ],
+        "a-passing-check-ends-on-the-landscape": [
+          "e2e: a passing archi check closes on the default-slice NKP read — the bare scoring line plus coupling directions; an empty landscape (N=0) earns none, --json carries the same read without the matrix, and advisory findings never withhold it"
+        ],
+        "a-plan-projects-a-pinned-spec": [
+          "unit: plan use/repin pins the live model's saved version and refuses a dirty or unversioned model, validates the envelope (problem, stack, summary, mapping), and re-derives task obligations against the pin so verify flags drift"
+        ],
+        "a-stressor-presses-one-hypothesis": [
+          "unit: DocsCompiler holds the stressor schema — a non-empty affects list (E_AFFECTS_EMPTY), outcome/resolution coupled (a bare verdict or bare argument is E_DOC), affects resolved per pinned version with types expanding to their terms"
+        ],
+        "absence-is-not-drift": [
+          "e2e: a link into an unmapped member grades Unreachable (upstream of Missing) — verify emits no decay, audit --prune leaves it untouched, and only verify --repo <member> turns that absence into a nonzero exit"
+        ],
+        "an-intent-is-a-problem-statement": [
+          "unit: DocsCompiler parses each folder-named file as its intent and walks the folder as its requirement tree, checking schema/slug/placement and rejecting any requirement that sits outside an intent folder"
+        ],
+        "breaking-derives-requirements": [
+          "unit: DocsCompiler derives a breaking stressor's requirements by querying origins (never a stored field), enforces one open session (E_SESSION), validates closed: stamps, and emits breaking_unanswered/pending_stressor/empty_session"
+        ],
+        "candidates-carry-signal": [
+          "unit: capture.mint mints a candidate only where the changed item's tokens overlap the ref's surface terms; no-signal pairs are suppressed not subtracted (counted, in --json, mintable via link add), and leftover reporting is unchanged"
+        ],
+        "capture-at-the-join": [
+          "e2e: the plan loop captures traceability at the task — spec_refs precede code, the wave-open item index pre-attributes changed symbols as candidates, confirm raises load-bearing ones to asserted, and only asserted links gate the next wave"
+        ],
+        "coupling-is-measured": [
+          "unit: Nkp computes K/P, regime, hotspots and corridors over the epistatic slice and Incidence joins pinned stressor affects with the invariant surface into the matrix and typed findings — both reading the compiled model only"
+        ],
+        "dark-deltas-are-code": [
+          "unit: one seam reads [audit] exclude from the manifest so capture, candidate search and the audit's delta scan share the built-in code boundary; verify and the fold ignore it — a link into an excluded file still verifies clean"
+        ],
+        "deferral-is-explicit": [
+          "unit: DocsCompiler derives the tri-state from satisfied-by + deferred — satisfied, deferred-with-reason, or open — rejects satisfied-and-deferred as E_DOC, and emits deferred_requirement (info) vs unsatisfied_requirement per state"
+        ],
+        "docs-compile-with-the-model": [
+          "unit: DocsCompiler validates every machine field against the live model and project-wide slugs — a renamed node a requirement names surfaces as E_MODEL_REF at its file, a slug collision as E_SLUG at both sites, on the next check"
+        ],
+        "drift-graded-per-kind": [
+          "unit: verify recomputes projections and grades each link Clean/Drifted/Moved/Missing against the watched hash — body for literal, interface for indirect — so reformatting drifts neither and evidence links never fail the gate"
+        ],
+        "every-field-is-present": [
+          "unit: DocsCompiler still schema-checks every doc — a missing, unknown, or misordered field, malformed frontmatter, or half-present satisfaction record stays E_DOC at the offending file:line (docs::schema_violations_are_e_doc)."
+        ],
+        "every-verb-finds-its-project": [
+          "e2e: every verb but init still resolves its project by --project else nearest archi.toml upward (neither = usage error), init takes its positional target, and each run compiles fresh through load_sources — no leftover artifact trusted."
+        ],
+        "exit-codes-are-the-contract": [
+          "e2e: the three exits hold across every verb — 0 clean (findings advisory, benign no-ops succeed), 1 compile/schema/seal failure as file:line:col: CODE, 2 malformed usage; --help/--version answer on stdout exit 0 with no project."
+        ],
+        "findings-never-block": [
+          "e2e: check still exits 0 on any clean compile whatever the findings (open reqs, unwired ports, decayed evidence advise, never fail) and non-zero only when a source fails to compile, a doc violates schema, or the archive fails its seal."
+        ],
+        "findings-read-the-matrix": [
+          "unit: Incidence still emits its five typed, severity-tagged matrix findings, the declared-path walk splitting corroboration from contradiction within its --depth/--path-limit budget and auto-firing on the closing save."
+        ],
+        "gates-press-the-delta": [
+          "e2e: the wave-close gate still demands asserted links only for spec_refs the delta presses (by capture's term test), closes unpressed deltas without links, and renders uncovered pressed refs as archi link add checklist suggestions."
+        ],
+        "git-speaks-from-its-own-root": [
+          "e2e: every git read still resolves the repo's real top level and rebases output into the consulted member's frame before comparison, so a project below its git root audits/verifies correctly and out-of-frame paths drop with a note."
+        ],
+        "one-claim-one-file": [
+          "unit: DocsCompiler still walks intent folders into requirement trees across all three scales (section/file/folder), deriving each parent from the path alone and opening a subrequirement on any non-reserved heading."
+        ],
+        "one-repo-stays-the-default": [
+          "unit: a memberless project stays byte-identical — the member qualifier remains an optional field in every schema, resolves to home when absent, and this project's own journal and version archive replay unchanged under the new parsers."
+        ],
+        "one-verb-searches-everything": [
+          "e2e: archi search <phrase> still returns one ranked list across every KB object (elements, intents, requirements, stressors, sessions) with --kind, --limit (10 default) and --json honored — search \"fold\" still surfaces the fold round."
+        ],
+        "one-verb-stands-a-project-up": [
+          "e2e: archi init [<dir>] still scaffolds source + briefing then writes archi.toml last, a following archi build passes compiling zero statements, and exits stay 0 (incl. no-op re-run) / 1 refused write / 2 malformed."
+        ],
+        "origin-records-why-placement-records-where": [
+          "unit: DocsCompiler still parses the origin grammar and keeps the two axes orthogonal — positional kinds cross-checked against placement (E_PLACEMENT), slug kinds against existence (E_DOC_REF) (docs::placement_is_meaning)."
+        ],
+        "plans-revalidate-on-every-verb": [
+          "unit: Planner still re-reads and re-validates plan.json on every verb load — authored fields edited in place, lifecycle state moved only through verbs — so a hand edit is accepted whole or named, never trusted from the last write."
+        ],
+        "refs-carry-their-repo": [
+          "e2e: a member//file#symbol ref still round-trips through link add, ls and the journal, the unqualified form keeps meaning home and folds identically to its home twin, and a pre-members journal replays every anchor home."
+        ],
+        "rounds-fold-deliberately": [
+          "e2e: conflict markers under archi/stress/ still raise one E_SESSION naming the session and fold verb ahead of any parse error, and session fold merges two rounds keeping both charters under ## Folded while refusing folds across pins."
+        ],
+        "satisfaction-is-a-checked-claim": [
+          "unit: DocsCompiler still resolves each satisfied-by path against the live compile — a renamed node breaks with E_MODEL_REF at the requirement's line, ancestor transitivity holds, a bullet-less record stays unverified_satisfaction."
         ],
         "satisfaction-names-the-interface": [
           "unit: satisfied-by [Engine.answer] resolves and validates against a model that declares the port; satisfied-by naming canonical edge text resolves to that edge; a port path that names no declared port is a located E_DOC, not a silent pass"
+        ],
+        "scans-see-every-mapped-member": [
+          "unit: Capture/Grader still walk every mapped member and key items by qualified path — an absent checkout is reported unreachable, never silently dropped, and a bare exclude applies in every member, a qualified one only in its own."
+        ],
+        "scenarios-close-the-plan": [
+          "unit: Planner's advance verb still rides the scenario latch pair — plan next prints the block and latches scenarios_displayed, the next latches scenarios_closed to DONE, reset clears both, and an empty scenarios set skips the step."
+        ],
+        "slugs-are-the-reference-currency": [
+          "unit: DocsCompiler still derives each primitive's slug from its H1 (kebab), flags E_SLUG when name and filename diverge, and de-duplicates project-wide across every kind — a collision reports both sites."
+        ],
+        "stress-pins-versions": [
+          "unit: open-session affects still validate against the model Archive reconstructs for the session's pinned id, not the live tree — renaming an affected node keeps the check green until the pin moves, and closed sessions stay re-analyzable."
+        ],
+        "tasks-derive-never-retype": [
+          "unit: plan task add still seeds spec_refs with the node plus its incoming edges and pulls requirements by recomputing the reverse lookup per read — matches carry matched_refs and a slot_id, never a stored copy of the spec."
+        ],
+        "the-matrix-joins-stress-to-structure": [
+          "unit: Incidence still expands each affects entry against its session's pinned version and joins to the frame — terms the frame lost surface under scope.dropped with DROPPED_AFFECTS, and --session/--since/--exclude-pending scope as before."
+        ],
+        "the-timeline-reads-back": [
+          "e2e: the version read verbs still answer from the archive without git — list/show/diff render sealed versions (diff live compares the working tree) and current is derived by on-demand hashing, so it cannot lie about a dirty tree."
+        ],
+        "unchanged-saves-close-rounds": [
+          "e2e: archi version save on an unchanged model still exits 0 — an open session closes against the current id with its incidence report, a bare no-op writes nothing, and only real failures like two open sessions exit nonzero."
+        ],
+        "under-stressed-names-behavior": [
+          "unit: the under_stressed emission still mutes zero columns inside the type_of closure of Data while the matrix, hotspots and coupling see every term — --all-terms restores them, and a Data-less preset filters nothing."
+        ],
+        "verifications-forgive-the-dash": [
+          "unit: a Satisfy bullet written with an ASCII hyphen, an en-dash and an em-dash each count as one verification; a `test`/`type-level` line that misses the shape raises the located diagnostic naming `- test — …`; a `*` bullet or a mistyped tag stays ordinary prose"
+        ],
+        "verifications-gate-the-start": [
+          "unit: Planner's shared gate still blocks plan start until the plan is structurally clean and every matched requirement carries at least one verification keyed by its slug — plan verify runs the same validator on demand."
+        ],
+        "waves-close-on-captured-coverage": [
+          "e2e: plan next still closes a wave in one motion — capture mints each closing task's delta into candidate links, then the structural and pressed-coverage gates fire on the fold; a blocked gate is reviewed and retried, never forced."
         ]
       }
     },
@@ -118,8 +244,86 @@
         "crates/archi/src/links/mod.rs"
       ],
       "verifications": {
+        "a-dark-corpus-stays-partial": [
+          "e2e: archi search degrades per-corpus on a broken tree — element cards darken with a dark note (model corpus + first diagnostic), unparseable docs fall to raw-text cards, and the verb exits zero while archi check still exits one"
+        ],
+        "a-link-is-fact-plus-projection": [
+          "unit: a link stays an immutable birth record — spans, content hash, resolved symbol, canonicalizer version — in the journal as its one store, while verify recomputes the derived projection and never writes it back"
+        ],
+        "a-passing-check-ends-on-the-landscape": [
+          "e2e: a passing archi check closes on the default-slice NKP read — the bare scoring line plus coupling directions; an empty landscape (N=0) earns none, --json carries the same read without the matrix, and advisory findings never withhold it"
+        ],
+        "a-plan-projects-a-pinned-spec": [
+          "unit: plan use/repin pins the live model's saved version and refuses a dirty or unversioned model, validates the envelope (problem, stack, summary, mapping), and re-derives task obligations against the pin so verify flags drift"
+        ],
+        "absence-is-not-drift": [
+          "e2e: a link into an unmapped member grades Unreachable (upstream of Missing) — verify emits no decay, audit --prune leaves it untouched, and only verify --repo <member> turns that absence into a nonzero exit"
+        ],
+        "candidates-carry-signal": [
+          "unit: capture.mint mints a candidate only where the changed item's tokens overlap the ref's surface terms; no-signal pairs are suppressed not subtracted (counted, in --json, mintable via link add), and leftover reporting is unchanged"
+        ],
+        "capture-at-the-join": [
+          "e2e: the plan loop captures traceability at the task — spec_refs precede code, the wave-open item index pre-attributes changed symbols as candidates, confirm raises load-bearing ones to asserted, and only asserted links gate the next wave"
+        ],
+        "dark-deltas-are-code": [
+          "unit: one seam reads [audit] exclude from the manifest so capture, candidate search and the audit's delta scan share the built-in code boundary; verify and the fold ignore it — a link into an excluded file still verifies clean"
+        ],
+        "drift-graded-per-kind": [
+          "unit: verify recomputes projections and grades each link Clean/Drifted/Moved/Missing against the watched hash — body for literal, interface for indirect — so reformatting drifts neither and evidence links never fail the gate"
+        ],
+        "every-verb-finds-its-project": [
+          "e2e: every verb but init still resolves its project by --project else nearest archi.toml upward (neither = usage error), init takes its positional target, and each run compiles fresh through load_sources — no leftover artifact trusted."
+        ],
+        "exit-codes-are-the-contract": [
+          "e2e: the three exits hold across every verb — 0 clean (findings advisory, benign no-ops succeed), 1 compile/schema/seal failure as file:line:col: CODE, 2 malformed usage; --help/--version answer on stdout exit 0 with no project."
+        ],
+        "findings-never-block": [
+          "e2e: check still exits 0 on any clean compile whatever the findings (open reqs, unwired ports, decayed evidence advise, never fail) and non-zero only when a source fails to compile, a doc violates schema, or the archive fails its seal."
+        ],
+        "gates-press-the-delta": [
+          "e2e: the wave-close gate still demands asserted links only for spec_refs the delta presses (by capture's term test), closes unpressed deltas without links, and renders uncovered pressed refs as archi link add checklist suggestions."
+        ],
+        "git-speaks-from-its-own-root": [
+          "e2e: every git read still resolves the repo's real top level and rebases output into the consulted member's frame before comparison, so a project below its git root audits/verifies correctly and out-of-frame paths drop with a note."
+        ],
+        "one-repo-stays-the-default": [
+          "unit: a memberless project stays byte-identical — the member qualifier remains an optional field in every schema, resolves to home when absent, and this project's own journal and version archive replay unchanged under the new parsers."
+        ],
+        "one-verb-searches-everything": [
+          "e2e: archi search <phrase> still returns one ranked list across every KB object (elements, intents, requirements, stressors, sessions) with --kind, --limit (10 default) and --json honored — search \"fold\" still surfaces the fold round."
+        ],
+        "one-verb-stands-a-project-up": [
+          "e2e: archi init [<dir>] still scaffolds source + briefing then writes archi.toml last, a following archi build passes compiling zero statements, and exits stay 0 (incl. no-op re-run) / 1 refused write / 2 malformed."
+        ],
+        "plans-revalidate-on-every-verb": [
+          "unit: Planner still re-reads and re-validates plan.json on every verb load — authored fields edited in place, lifecycle state moved only through verbs — so a hand edit is accepted whole or named, never trusted from the last write."
+        ],
+        "refs-carry-their-repo": [
+          "e2e: a member//file#symbol ref still round-trips through link add, ls and the journal, the unqualified form keeps meaning home and folds identically to its home twin, and a pre-members journal replays every anchor home."
+        ],
         "satisfaction-names-the-interface": [
           "unit: `link add Engine.answer <file#symbol>` resolves the port instead of raising E_MODEL_REF; the SpecRef parser accepts a port path exactly where it accepts canonical edge text; a link anchored on a port verifies and audits like any other"
+        ],
+        "scans-see-every-mapped-member": [
+          "unit: Capture/Grader still walk every mapped member and key items by qualified path — an absent checkout is reported unreachable, never silently dropped, and a bare exclude applies in every member, a qualified one only in its own."
+        ],
+        "scenarios-close-the-plan": [
+          "unit: Planner's advance verb still rides the scenario latch pair — plan next prints the block and latches scenarios_displayed, the next latches scenarios_closed to DONE, reset clears both, and an empty scenarios set skips the step."
+        ],
+        "tasks-derive-never-retype": [
+          "unit: plan task add still seeds spec_refs with the node plus its incoming edges and pulls requirements by recomputing the reverse lookup per read — matches carry matched_refs and a slot_id, never a stored copy of the spec."
+        ],
+        "the-timeline-reads-back": [
+          "e2e: the version read verbs still answer from the archive without git — list/show/diff render sealed versions (diff live compares the working tree) and current is derived by on-demand hashing, so it cannot lie about a dirty tree."
+        ],
+        "unchanged-saves-close-rounds": [
+          "e2e: archi version save on an unchanged model still exits 0 — an open session closes against the current id with its incidence report, a bare no-op writes nothing, and only real failures like two open sessions exit nonzero."
+        ],
+        "verifications-gate-the-start": [
+          "unit: Planner's shared gate still blocks plan start until the plan is structurally clean and every matched requirement carries at least one verification keyed by its slug — plan verify runs the same validator on demand."
+        ],
+        "waves-close-on-captured-coverage": [
+          "e2e: plan next still closes a wave in one motion — capture mints each closing task's delta into candidate links, then the structural and pressed-coverage gates fire on the fold; a blocked gate is reviewed and retried, never forced."
         ]
       }
     },
@@ -141,8 +345,35 @@
         "crates/archi/src/main.rs"
       ],
       "verifications": {
+        "a-dark-corpus-stays-partial": [
+          "e2e: archi search degrades per-corpus on a broken tree — element cards darken with a dark note (model corpus + first diagnostic), unparseable docs fall to raw-text cards, and the verb exits zero while archi check still exits one"
+        ],
+        "a-passing-check-ends-on-the-landscape": [
+          "e2e: a passing archi check closes on the default-slice NKP read — the bare scoring line plus coupling directions; an empty landscape (N=0) earns none, --json carries the same read without the matrix, and advisory findings never withhold it"
+        ],
+        "every-verb-finds-its-project": [
+          "e2e: every verb but init still resolves its project by --project else nearest archi.toml upward (neither = usage error), init takes its positional target, and each run compiles fresh through load_sources — no leftover artifact trusted."
+        ],
+        "exit-codes-are-the-contract": [
+          "e2e: the three exits hold across every verb — 0 clean (findings advisory, benign no-ops succeed), 1 compile/schema/seal failure as file:line:col: CODE, 2 malformed usage; --help/--version answer on stdout exit 0 with no project."
+        ],
+        "findings-never-block": [
+          "e2e: check still exits 0 on any clean compile whatever the findings (open reqs, unwired ports, decayed evidence advise, never fail) and non-zero only when a source fails to compile, a doc violates schema, or the archive fails its seal."
+        ],
+        "one-verb-searches-everything": [
+          "e2e: archi search <phrase> still returns one ranked list across every KB object (elements, intents, requirements, stressors, sessions) with --kind, --limit (10 default) and --json honored — search \"fold\" still surfaces the fold round."
+        ],
+        "one-verb-stands-a-project-up": [
+          "e2e: archi init [<dir>] still scaffolds source + briefing then writes archi.toml last, a following archi build passes compiling zero statements, and exits stay 0 (incl. no-op re-run) / 1 refused write / 2 malformed."
+        ],
         "reports-name-their-element": [
           "unit: every finding in a fixture check carries a resolvable element id in both the human and the json surface; a stamped id round-trips through query to exactly the element the finding fired on; a report line about an edge carries the edge's canonical surface text as its id"
+        ],
+        "the-timeline-reads-back": [
+          "e2e: the version read verbs still answer from the archive without git — list/show/diff render sealed versions (diff live compares the working tree) and current is derived by on-demand hashing, so it cannot lie about a dirty tree."
+        ],
+        "unchanged-saves-close-rounds": [
+          "e2e: archi version save on an unchanged model still exits 0 — an open session closes against the current id with its incidence report, a bare no-op writes nothing, and only real failures like two open sessions exit nonzero."
         ]
       }
     },
@@ -163,8 +394,35 @@
         "crates/archi/src/main.rs"
       ],
       "verifications": {
+        "a-dark-corpus-stays-partial": [
+          "e2e: archi search degrades per-corpus on a broken tree — element cards darken with a dark note (model corpus + first diagnostic), unparseable docs fall to raw-text cards, and the verb exits zero while archi check still exits one"
+        ],
+        "a-passing-check-ends-on-the-landscape": [
+          "e2e: a passing archi check closes on the default-slice NKP read — the bare scoring line plus coupling directions; an empty landscape (N=0) earns none, --json carries the same read without the matrix, and advisory findings never withhold it"
+        ],
+        "every-verb-finds-its-project": [
+          "e2e: every verb but init still resolves its project by --project else nearest archi.toml upward (neither = usage error), init takes its positional target, and each run compiles fresh through load_sources — no leftover artifact trusted."
+        ],
+        "exit-codes-are-the-contract": [
+          "e2e: the three exits hold across every verb — 0 clean (findings advisory, benign no-ops succeed), 1 compile/schema/seal failure as file:line:col: CODE, 2 malformed usage; --help/--version answer on stdout exit 0 with no project."
+        ],
+        "findings-never-block": [
+          "e2e: check still exits 0 on any clean compile whatever the findings (open reqs, unwired ports, decayed evidence advise, never fail) and non-zero only when a source fails to compile, a doc violates schema, or the archive fails its seal."
+        ],
+        "one-verb-searches-everything": [
+          "e2e: archi search <phrase> still returns one ranked list across every KB object (elements, intents, requirements, stressors, sessions) with --kind, --limit (10 default) and --json honored — search \"fold\" still surfaces the fold round."
+        ],
+        "one-verb-stands-a-project-up": [
+          "e2e: archi init [<dir>] still scaffolds source + briefing then writes archi.toml last, a following archi build passes compiling zero statements, and exits stay 0 (incl. no-op re-run) / 1 refused write / 2 malformed."
+        ],
         "priorities-weight-the-read": [
           "unit: an explicit configuration weights the landscape read while the same model with no configuration reads byte-identically to today; the auto mode derives a configuration from operator answers and the derived weighting is the one applied; an absent or empty configuration is a valid state the read never fails on"
+        ],
+        "the-timeline-reads-back": [
+          "e2e: the version read verbs still answer from the archive without git — list/show/diff render sealed versions (diff live compares the working tree) and current is derived by on-demand hashing, so it cannot lie about a dirty tree."
+        ],
+        "unchanged-saves-close-rounds": [
+          "e2e: archi version save on an unchanged model still exits 0 — an open session closes against the current id with its incidence report, a bare no-op writes nothing, and only real failures like two open sessions exit nonzero."
         ]
       }
     }

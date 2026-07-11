@@ -114,7 +114,7 @@ pub use incidence::{
     IncidenceConfig, IncidenceFinding, IncidenceKind, IncidenceMatrix, IncidenceReport,
     IncidenceRow, IncidenceScope, IncidenceWarning, Invariant, Severity, StressOutcome,
 };
-pub use model::{Layer, Model};
+pub use model::{ElementKind, Layer, Model};
 pub use nkp::{
     CorridorAction, CorridorLabel, ExcludePattern, Hotspot, Neutrality, NkpConfig, NkpCorridor,
     NkpMatrix, NkpMetrics, NkpReport, NkpScope, NkpScopeInfo, NkpWarning, Regime, Slot,

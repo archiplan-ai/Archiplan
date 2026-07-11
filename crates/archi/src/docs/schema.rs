@@ -204,11 +204,19 @@ pub fn requirement_file(
     let mut verifications = 0;
     if let Some((satisfy, subs)) = requirement_sections(doc, file, diags) {
         let satisfy_content = !satisfy.content.is_empty();
-        verifications = satisfy
-            .content
-            .iter()
-            .filter(|(_, l)| verification_bullet(l))
-            .count();
+        for (bullet_line, text) in &satisfy.content {
+            match verification_bullet(text) {
+                BulletShape::Verification => verifications += 1,
+                BulletShape::TagShapedMiss => diags.push(DocDiagnostic::new(
+                    "E_DOC",
+                    "a verification bullet reads `- test — …` or `- type-level — …` \
+                     (separator `-`, `–` or `—`); this opens with the tag but misses the shape",
+                    file,
+                    *bullet_line,
+                )),
+                BulletShape::Prose => {}
+            }
+        }
         if let Some((entries, line)) = &satisfied_by
             && entries.is_empty() == satisfy_content
         {
@@ -581,16 +589,52 @@ fn parse_origin(s: &str) -> Result<Origin, String> {
     }
 }
 
+/// How a `Satisfy` line reads against the verification-bullet shape
+/// (`archi/requirements/self-hosting/verifications-forgive-the-dash.md`).
+enum BulletShape {
+    /// Ordinary prose: a `*` bullet, a non-bullet, or a line whose opening
+    /// token is not a verification tag (a mistyped `tests` stays here).
+    Prose,
+    /// A counted verification — `- <tag> <sep> …`, `<sep>` any of `-`/`–`/`—`.
+    Verification,
+    /// Opens with a verification tag yet misses the shape: a located
+    /// diagnostic, never a silent slide into prose.
+    TagShapedMiss,
+}
+
 /// A verification entry: a trailing `Satisfy` bullet tagged by variant
-/// (`archi/requirements/spec-docs/satisfaction-is-a-checked-claim.md`).
-fn verification_bullet(line: &str) -> bool {
+/// (`archi/requirements/spec-docs/satisfaction-is-a-checked-claim.md`). The
+/// separator after the tag is forgiven — ASCII hyphen, en-dash and em-dash
+/// all count the same — and a bullet that opens with a tag yet still misses
+/// the shape reads as a diagnostic, not prose
+/// (`archi/requirements/self-hosting/verifications-forgive-the-dash.md`).
+fn verification_bullet(line: &str) -> BulletShape {
     let Some(rest) = line.trim_start().strip_prefix("- ") else {
-        return false;
+        return BulletShape::Prose;
     };
-    ["test", "type-level"].iter().any(|v| {
-        rest.strip_prefix(v)
-            .is_some_and(|r| r.trim_start().starts_with('—'))
-    })
+    for tag in ["test", "type-level"] {
+        let Some(after) = rest.strip_prefix(tag) else {
+            continue;
+        };
+        // A word-continuation character means a longer word — `tests`,
+        // `test-driven` — which stays prose; anything else (space, end of
+        // line, or punctuation) opens with the bare tag, so a would-be
+        // verification can no longer void in silence.
+        if after
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            continue;
+        }
+        let sep = after.trim_start();
+        return if matches!(sep.chars().next(), Some('-' | '\u{2013}' | '\u{2014}')) {
+            BulletShape::Verification
+        } else {
+            BulletShape::TagShapedMiss
+        };
+    }
+    BulletShape::Prose
 }
 
 /// Subrequirement headings paired with their parent section's slug (`None`
@@ -655,4 +699,49 @@ fn requirement_sections<'a>(
         stack.push((h.level, slugify(&h.text)));
     }
     Some((&hs[1], subs))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn shape(line: &str) -> &'static str {
+        match verification_bullet(line) {
+            BulletShape::Verification => "verification",
+            BulletShape::TagShapedMiss => "miss",
+            BulletShape::Prose => "prose",
+        }
+    }
+
+    #[test]
+    fn the_separator_is_forgiven() {
+        // ASCII hyphen, en-dash and em-dash after the tag each count as one.
+        assert_eq!(shape("- test - registers a burst, logins stay fast"), "verification");
+        assert_eq!(shape("- test \u{2013} en-dash counts"), "verification");
+        assert_eq!(shape("- test \u{2014} em-dash counts"), "verification");
+        assert_eq!(shape("- type-level - the port is declared"), "verification");
+        assert_eq!(shape("- type-level \u{2014} the type checks"), "verification");
+    }
+
+    #[test]
+    fn a_tag_shaped_miss_is_a_diagnostic_not_prose() {
+        // Opens with a verification tag but misses the shape — never a silent
+        // slide into prose (`verifications-forgive-the-dash`).
+        assert_eq!(shape("- test the store never holds plaintext"), "miss");
+        assert_eq!(shape("- test: the store never holds plaintext"), "miss");
+        assert_eq!(shape("- test"), "miss");
+        assert_eq!(shape("- type-level checks the port"), "miss");
+    }
+
+    #[test]
+    fn a_mistyped_tag_or_star_bullet_stays_prose() {
+        // A `*` bullet, a non-bullet, or a word that merely starts with the
+        // tag letters stays ordinary prose, unaffected.
+        assert_eq!(shape("* test \u{2014} a star bullet is prose"), "prose");
+        assert_eq!(shape("- tests \u{2014} a mistyped tag is prose"), "prose");
+        assert_eq!(shape("- tested \u{2014} still prose"), "prose");
+        assert_eq!(shape("- testing the boundaries here"), "prose");
+        assert_eq!(shape("plain prose, no bullet"), "prose");
+        assert_eq!(shape("- a plain requirement note"), "prose");
+    }
 }

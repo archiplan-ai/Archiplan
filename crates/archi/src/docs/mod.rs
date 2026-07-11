@@ -597,7 +597,11 @@ fn cross_check(
         }
         if let Some((entries, line)) = &f.satisfied_by {
             for p in entries {
-                if !model.has_node(p) {
+                // A claim resolves against one vocabulary — a node path, a port
+                // path (`Engine.answer`), or canonical edge surface text — so a
+                // requirement names exactly the element it pins, not only the
+                // hub around it (`archi/requirements/element-addressing/satisfaction-names-the-interface.md`).
+                if model.resolve_element(p).is_none() {
                     diags.push(DocDiagnostic::new(
                         "E_MODEL_REF",
                         format!("satisfied-by names no element `{p}` of the current model"),
@@ -1632,6 +1636,96 @@ mod tests {
         assert!(rendered.contains("`note:`"), "{rendered}");
         assert!(rendered.contains("names no archived version"), "{rendered}");
         assert!(rendered.contains("## Folded: <label>"), "{rendered}");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A `satisfied-by` naming a declared port resolves — the claim pins the
+    /// interface point, not the hub around it
+    /// (`satisfaction-names-the-interface`).
+    #[test]
+    fn satisfied_by_resolves_a_declared_port() {
+        let root = temp_project();
+        put(&root, "archi/requirements/secure-auth/secure-auth.md", INTENT);
+        put(
+            &root,
+            "archi/requirements/secure-auth/guard-the-port.md",
+            &named(
+                &requirement(
+                    "intent",
+                    "AuthService.handle_login",
+                    "",
+                    "\n`AuthService.handle_login` takes the credential pair.\n\n- test — the port carries the pair\n",
+                ),
+                "Guard the port",
+            ),
+        );
+        let report = check_at(&root);
+        assert!(
+            !codes(&report).contains(&"E_MODEL_REF"),
+            "a declared port resolves: {:?}",
+            codes(&report)
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A `satisfied-by` naming an undeclared port is a located E_MODEL_REF, not
+    /// a silent laundering through the owning node.
+    #[test]
+    fn satisfied_by_rejects_an_undeclared_port() {
+        let root = temp_project();
+        put(&root, "archi/requirements/secure-auth/secure-auth.md", INTENT);
+        put(
+            &root,
+            "archi/requirements/secure-auth/guard-the-port.md",
+            &named(
+                &requirement(
+                    "intent",
+                    "AuthService.no_such_port",
+                    "",
+                    "\nClaims a port that is not declared.\n\n- test — never resolves\n",
+                ),
+                "Guard the port",
+            ),
+        );
+        let report = check_at(&root);
+        assert!(
+            codes(&report).contains(&"E_MODEL_REF"),
+            "an undeclared port is E_MODEL_REF: {:?}",
+            codes(&report)
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A `satisfied-by` naming canonical edge surface text resolves to that
+    /// edge — satisfaction speaks the link layer's vocabulary.
+    #[test]
+    fn satisfied_by_resolves_canonical_edge_text() {
+        let root = temp_project();
+        put(
+            &root,
+            "archi/src/model.arch",
+            "def node Alpha\ndef node Beta\ndef rel links := * -> *\nAlpha links Beta\n",
+        );
+        put(&root, "archi/requirements/wiring/wiring.md", "# Wiring\n\nAlpha reaches Beta.\n");
+        put(
+            &root,
+            "archi/requirements/wiring/alpha-links-beta.md",
+            &named(
+                &requirement(
+                    "intent",
+                    "Alpha links Beta",
+                    "",
+                    "\nThe `Alpha links Beta` edge carries the call.\n\n- test — the edge exists\n",
+                ),
+                "Alpha links Beta",
+            ),
+        );
+        let report = check_at(&root);
+        assert!(
+            !codes(&report).contains(&"E_MODEL_REF"),
+            "canonical edge text resolves: {:?}",
+            codes(&report)
+        );
         fs::remove_dir_all(&root).unwrap();
     }
 }
