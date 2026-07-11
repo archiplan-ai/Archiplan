@@ -11,6 +11,15 @@ Ground rules, always:
   requirements and stressors = markdown under `archi/`, plan = `plan.json`. Mutate by editing files;
   lifecycle moves only through verbs. Run `archi check` after every editing
   round — errors block, findings are the worklist.
+- Search, don't grep. `archi search <phrase>` is ranked retrieval over
+  every archi object — model elements with their identity prose, intents,
+  requirements, stressors, sessions — and each hit carries its addresses
+  (file:line, satisfied-by, affects, state) so the next verb starts there.
+  Grep misses the model: definitions live in the compiled graph, not on
+  disk as prose. Narrow with `--kind`, machine-read with `--json`. Reach
+  for it before deriving a requirement (does a claim like this exist?),
+  before defining an element (is this concept already modeled?), and when
+  a finding names something unfamiliar.
 - Never invent references. Requirements name model elements by absolute
   path, stressors pin versions, tasks pin nodes — `check` and `plan verify`
   verify every one; a broken reference is a bug you just created.
