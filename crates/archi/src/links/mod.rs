@@ -1512,6 +1512,22 @@ fn changed_files(
         .collect())
 }
 
+/// Whether `rev` names a commit present in this member's object database.
+/// A baseline is a bare SHA archi holds no ref for, so a member can collect it
+/// (gc after a deleted branch, a rewrite, a shallow clone that never fetched
+/// it); the audit probes before it diffs so a gone floor degrades one member
+/// instead of aborting the scan
+/// (`archi/requirements/multi-repo/an-unresolvable-baseline-says-so`).
+fn commit_present(ctx: &crate::members::GitContext, rev: &str) -> bool {
+    Command::new("git")
+        .arg("-C")
+        .arg(&ctx.top)
+        .args(["cat-file", "-e", &format!("{rev}^{{commit}}")])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 // ---- audit -----------------------------------------------------------------
 
 /// An advisory audit finding (`archi/requirements/code-link/the-audit-inverts-coverage.md`).
@@ -1663,8 +1679,8 @@ pub fn audit(root: &Path, model: &Model, opts: &AuditOptions) -> Result<AuditRep
             ));
             continue;
         };
-        let rev = match &over {
-            Some((om, rev)) if *om == m.name => Some(rev.clone()),
+        let (rev, from_baseline) = match &over {
+            Some((om, rev)) if *om == m.name => (Some(rev.clone()), false),
             _ => match baselines.get(&m.name) {
                 Some((sha, born)) => {
                     if *born == versions::Born::Anchor {
@@ -1673,9 +1689,9 @@ pub fn audit(root: &Path, model: &Model, opts: &AuditOptions) -> Result<AuditRep
                              and the anchor is unaudited"
                         ));
                     }
-                    Some(sha.clone())
+                    (Some(sha.clone()), true)
                 }
-                None => None,
+                None => (None, false),
             },
         };
         let Some(rev) = rev else {
@@ -1700,6 +1716,27 @@ pub fn audit(root: &Path, model: &Model, opts: &AuditOptions) -> Result<AuditRep
             report.notes.push(format!("`{label}` is not a git work tree — its delta is unaudited"));
             continue;
         };
+        // The delta floor must still be an object here. A baseline is a bare
+        // SHA the record holds no ref for, so a member is free to collect it —
+        // gc after a deleted branch, a rewrite, a shallow clone that never
+        // fetched it. Probe before the diff: a gone floor narrows this member's
+        // scan and says so, never a `git diff` failure that aborts the others
+        // (`archi/requirements/multi-repo/an-unresolvable-baseline-says-so`).
+        if !commit_present(&ctx, &rev) {
+            let short = &rev[..rev.len().min(7)];
+            report.notes.push(if from_baseline {
+                format!(
+                    "`{label}`'s baseline `{short}` does not resolve here — the commit is absent \
+                     (collected, rewritten, or a shallow clone); its delta is unaudited"
+                )
+            } else {
+                format!(
+                    "`{label}`'s `--since` rev `{short}` does not resolve here — its delta is \
+                     unaudited"
+                )
+            });
+            continue;
+        }
         for (file, start, end) in delta_hunks(&ctx, member, &patterns, &rev)? {
             if let Some(finding) =
                 unaccounted(mroot, member, &folded.live, &file, start, end)

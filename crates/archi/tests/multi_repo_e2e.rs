@@ -262,3 +262,48 @@ fn a_memberless_project_is_todays_byte_for_byte() {
     let index = fs::read_to_string(spec.join("archi/versions/index.toml")).unwrap();
     assert!(!index.contains("commits"), "{index}");
 }
+
+#[test]
+fn a_dangling_baseline_degrades_alone() {
+    let ws = scratch("dangling");
+    let spec = ws.join("spec");
+    let backend = ws.join("backend");
+    let frontend = ws.join("frontend");
+    spec_project(
+        &spec,
+        "[[repo]]\nname = \"backend\"\npath = \"../backend\"\n\
+         [[repo]]\nname = \"frontend\"\npath = \"../frontend\"\n",
+    );
+    member_repo(&backend);
+    member_repo(&frontend);
+
+    // Both baselines land on clean members.
+    let saved = ok(&spec, &["version", "save", "-m", "first"]);
+    assert!(saved.contains("baseline backend:"), "{saved}");
+    assert!(saved.contains("baseline frontend:"), "{saved}");
+
+    // backend collects its baseline commit out from under the record: an amend
+    // orphans it, gc prunes it — the same object-database hole a shallow clone
+    // or a rebase leaves. frontend stays whole and gains a dark delta.
+    fs::write(backend.join("src/lib.rs"), "pub fn serve_gate(x: u8) -> u8 { x + 9 }\n").unwrap();
+    git(&backend, &["add", "-A"]);
+    git(&backend, &["commit", "--amend", "--no-edit", "-q"]);
+    git(&backend, &["reflog", "expire", "--expire=now", "--all"]);
+    git(&backend, &["gc", "--prune=now", "-q"]);
+    fs::write(frontend.join("src/extra.rs"), "pub fn extra() {}\n").unwrap();
+
+    // The audit no longer aborts on the missing object: it names backend's
+    // unresolvable baseline and still surfaces frontend's dark delta — each
+    // member degrades alone (`multi-repo/an-unresolvable-baseline-says-so`).
+    let (success, audit, err) = run(&spec, &["link", "audit"]);
+    assert!(success, "audit aborted instead of degrading:\n{audit}\n{err}");
+    assert!(!err.contains("bad object"), "raw git error leaked to stderr: {err}");
+    assert!(
+        audit.contains("backend") && audit.contains("does not resolve"),
+        "backend's unresolvable baseline was not named:\n{audit}"
+    );
+    assert!(
+        audit.contains("frontend//src/extra.rs"),
+        "frontend's delta was lost to backend's failure:\n{audit}"
+    );
+}
