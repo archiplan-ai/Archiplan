@@ -166,6 +166,37 @@ delta source, bare `--since <rev>` means home. Account for findings with a quali
 archi link add Gateway backend//src/hotfix.rs#retry_budget --kind indirect
 ```
 
+## Branches
+
+Archi is branch-blind. No surface records a branch name: baselines are commit shas, capture
+and verify read working trees, and the journal carries neither. To every command a branch
+switch in a member is just "the tree changed" — what that costs depends entirely on when.
+
+**Between rounds — reversible.** `repo ls` shows clean at the new HEAD, which is true.
+`link verify` grades whatever is checked out, so symbols the other branch lacks grade Drifted
+or Missing (asserted links fail the gate; evidence only reports) — nothing is written, and
+switching back recovers every grade. `link audit` reads the whole inter-branch diff as
+unaccounted delta: noisy, read-only. But archi cannot tell "wrong branch" from "code deleted"
+— a reachable member is an observation, unlike an absent one — so a wall of drift you didn't
+write means *check the branch first*. And never `--prune` it: a Missing anchor zeroes
+confidence, so `link audit --prune` on the wrong branch retires evidence for real.
+
+**Mid-wave — the trap.** `plan start` snapshotted the member's tree; `plan next` diffs the
+tree it finds. Switch the branch between the two and every symbol the branches disagree on
+reads as changed this wave: what matches a task's `outputs` mints as that task's evidence,
+and capture writes decay on existing evidence anchored at those items in claimed files. The
+journal is append-only — switching back does not unwrite it. Switch back *before* `plan next`
+and nothing happened; after it, `link rm` the drive-by mints and `link confirm` what decay
+dragged below the floor (confirmation promotes evidence to asserted, out of the confidence
+regime entirely).
+
+**At save and anchor.** The baseline records the member's HEAD, whichever branch holds it —
+a member parked on a feature branch gets its baseline there, and every later audit measures
+that member's delta from that commit. Clean is clean on any branch, so nothing warns: put
+each member on the branch the round was agreed against *before* the save. Provenance is a
+birth fact and is never rewritten, so the recovery for a baseline on the wrong branch is
+`--since <member>=<rev>` per audit, until the next save records a better one.
+
 ## Absence, precisely
 
 | situation | behavior |
@@ -226,6 +257,9 @@ itself never touches the network — the `url` is for the clone script.
   Do it before implementing, or the audit's window opens late (and says so).
 - capture notes *mapped after this wave opened* → the member joins at the next wave open; its
   delta this wave is unattributed — keep it out of the wave's outputs or reopen.
+- a member's branch switched mid-wave → the inter-branch diff reads as the wave's delta: false
+  mints, real decay. Switch back before `plan next`; after it, `link rm` the mints and
+  `link confirm` the decayed.
 - verify's wall of *unreachable* on a laptop with one checkout → correct and calm: exit 0, no
   decay. Scope with `--repo` to the member you actually have.
 - a member renamed in the manifest → every old ref grades Unreachable with the
