@@ -283,8 +283,8 @@ fn claude_block(src: &str) -> String {
          - After any model or doc edit run `archi check`: errors block, findings are\n\
          \x20 the worklist.\n\
          - Find anything by phrase: `archi search <phrase>` — ranked hits across\n\
-         \x20 elements, intents, requirements, stressors and sessions, each with its\n\
-         \x20 address.\n\
+         \x20 elements, intents, requirements, stressors, sessions and decisions,\n\
+         \x20 each with its address.\n\
          - The full workflow (model, stress, version, plan, implement with link\n\
          \x20 capture) is the `archi` skill in `.claude/skills/archi/`; merging\n\
          \x20 parallel spec work is `archi-merge`, and crossing a project off the\n\

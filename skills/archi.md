@@ -8,7 +8,7 @@ description: Drive the archiplan workflow end to end — capture intent, derive 
 Ground rules, always:
 
 - Everything is text. Model = `.arch` sources under `archi/src/`,
-  requirements and stressors = markdown under `archi/`, plan = `plan.json`. Mutate by editing files;
+  requirements, stressors and decisions = markdown under `archi/`, plan = `plan.json`. Mutate by editing files;
   lifecycle moves only through verbs. Run `archi check` after every editing
   round — errors block, findings are the worklist.
 - Search, don't grep. `archi search <phrase>` is ranked retrieval over
@@ -38,7 +38,10 @@ Ground rules, always:
    `archi build` must pass before anything else.
 2. **Capture intent** — one folder per problem area:
    `archi/requirements/<intent>/<intent>.md`, a name and the problem
-   statement in the user's own terms. No solutioning here.
+   statement in the user's own terms. No solutioning here. One question
+   does belong here: what is this project willing to be bad at? Seed the
+   answers as decisions under `archi/decisions/` with `prefer`/`over` —
+   the revealed priority profile's first entries.
 3. **Derive requirements** — one file per claim in the intent folder,
    filename the slugged name: frontmatter (`kind: functional` |
    `non-functional`, `origin: intent`, `satisfied-by: []`, `deferred:`),
@@ -104,21 +107,76 @@ Ground rules, always:
    of the *pinned* version (a type covers every term it classifies);
    `check` resolves them against that version, not the live tree, so later
    edits never orphan a round. `outcome` — `pending` until the round
-   decides, then `surviving` or `breaking`; `Resolution` is non-empty
-   exactly when the outcome is decided — why it held, or the answer.
-   Affects stand either way: they record where pressure was applied, not
-   how it went. Breaking stressors demand answers: derived requirements
-   (`origin: stressor(<slug>)` — mid-session requirements answer pressure,
-   never new intents) and model edits in the live tree; a breaking
-   stressor no requirement records as origin is the `breaking_unanswered`
-   finding. The next `version save` mints the version carrying the
+   decides, then `surviving`, `breaking` or `accepted`; `Resolution` is
+   non-empty exactly when the outcome is decided — why it held, the
+   answer, or the consequence being kept. Affects stand either way: they
+   record where pressure was applied, not how it went.
+
+   Only breaking stressors fork — a survivor teaches nothing about
+   priorities. When a stressor breaks, present both branches, both costed
+   in axis labels, and let the user pick the direction:
+
+   `Fix <solution> costs <axes>; Accept <consequence> sacrifices <axes>,
+   preserves <axes>.`
+
+   You articulate the axes on each side — fixing is not free virtue: it
+   pays in new operational surface, higher K̄, spent budget — and the
+   user's pick is a revealed priority, never auto-derived. The axes are a
+   fixed nine (`archi axes` lists them with definitions); any other label
+   is legal, kept verbatim, and surfaced by `check` as `off_list_axis` —
+   recurring off-list labels mean the set no longer fits the project. The
+   fork exists to price real trade-offs, not to add ceremony: a cheap fix
+   advancing an axis the project already keeps needs no fork — make it
+   and report it.
+
+   *Fix* → `outcome: breaking`, and the break demands answers: derived
+   requirements (`origin: stressor(<slug>)` — mid-session requirements
+   answer pressure, never new intents) and model edits in the live tree;
+   a breaking stressor no requirement records as origin is the
+   `breaking_unanswered` finding. A fix that paid something real earns a
+   decision recording its price.
+
+   *Accept* → `outcome: accepted`, and nothing derives — an origin naming
+   an accepted stressor is an error; `Resolution` states what is being
+   lived with. The sacrifice lives entirely on a linked decision:
+   accepting without one is the `accepted_unjustified` finding — a break
+   is never accepted silently. One decision may sign several accepted
+   stressors.
+
+   A decision is one file under `archi/decisions/` (flat, filename = the
+   slugged name), the sole carrier of axes:
+
+   ```markdown
+   ---
+   links: [<stressor-slug>, <element-or-slug>, …]
+   prefer: [simplicity, cost]
+   over: [reliability]
+   ---
+
+   # <Decision title>
+
+   <the rationale — why this trade, in the user's terms>
+   ```
+
+   `links` name what the trade is about in both reference currencies —
+   doc slugs and live model elements, every entry checked; `prefer`/`over`
+   are zero-or-more (empty is a valid non-comparative record); the same
+   axis on both sides is an error. Everything is correctable after the
+   fact — edit the file, re-run `check`. `archi search --kind decision`
+   retrieves them; `archi tradeoffs show` tallies the revealed profile
+   (what the recorded trades actually chose) beside the declared stance.
+
+   The next `version save` mints the version carrying the
    answers, closes the session, and prints the incidence report — model
    changed or not: a behavior-only round closes against the version it
-   pressed, no mint, exit 0. Reading its findings (`archi incidence`
-   replays them), severest first:
-   - `compound_vulnerability` (alert) — two surviving stressors together
-     cover everything satisfying an intent requirement: a promise that
-     breaks only in combination
+   pressed, no mint, exit 0. An accepted break is still a break there:
+   the row stands in the matrix and presses on. Reading its findings
+   (`archi incidence` replays them), severest first:
+   - `compound_vulnerability` (alert) — two still-standing stressors
+     (surviving or accepted) together cover everything satisfying an
+     intent requirement: a promise that breaks only in combination; a
+     pair with an accepted member is flagged louder — part of the joint
+     break was signed off
    - `density_alert` (alert) — the matrix denser than τ_K: stress is
      landing everywhere at once
    - `boundary_crossing_stressor` (warn) — one stressor presses far more

@@ -11,8 +11,9 @@ One stressor file carries one pressure: a summary-first description of what pres
 mandatory, non-empty `affects` list — the epistatic pressure surface, absolute paths
 naming terms or types of the session's pinned version, types expanding to the terms they
 classify when analyses run; an `Attractor` section for the state the stressor pulls the
-system toward — what broken would look like; an `outcome` of `pending`, `surviving` or
-`breaking`; and a `Resolution` that is non-empty exactly when the outcome is decided — a
+system toward — what broken would look like; an `outcome` of `pending`, `surviving`,
+`breaking` or `accepted` (`accept-is-a-signed-break`); and a `Resolution` that is
+non-empty exactly when the outcome is decided — a
 verdict without its argument, or an argument without a verdict, is `E_DOC`. An affects
 list can never be emptied (`E_AFFECTS_EMPTY`): a stressor that affects nothing is not a
 stressor — delete the file instead. Affects stand whatever the outcome: they record where

@@ -206,6 +206,66 @@ fn compound_vulnerabilities_take_two_surviving_partial_covers() {
 }
 
 #[test]
+fn accepted_breaks_stand_and_compound_louder() {
+    let mut ws = ontology_ws();
+    outcomes(
+        &mut ws,
+        json!([
+            { "stmt": "define", "node": "A" },
+            { "stmt": "define", "node": "B" }
+        ]),
+    );
+    let invariants = [Invariant {
+        id: "promise".to_string(),
+        elements: vec!["A".to_string(), "B".to_string()],
+    }];
+    // An accepted break derived nothing — it stands as pressed, so it
+    // compounds with a survivor, and the finding names the signed-off
+    // member: flagged louder than two survivals.
+    let rows = [
+        row("held", &["A"], StressOutcome::Surviving),
+        row("signed", &["B"], StressOutcome::Accepted),
+    ];
+    let r = incidence(ws.model(), &rows, &invariants);
+    assert_eq!(r.matrix.outcomes[1].describe(), "accepted");
+    let (pair, accepted, line) = r
+        .findings
+        .iter()
+        .find_map(|f| match &f.kind {
+            IncidenceKind::CompoundVulnerability {
+                stressors,
+                accepted,
+                ..
+            } => Some((stressors.clone(), accepted.clone(), f.to_string())),
+            _ => None,
+        })
+        .expect("the pair compounds");
+    assert_eq!(pair, ["held".to_string(), "signed".to_string()]);
+    assert_eq!(accepted, ["signed"]);
+    assert!(line.contains("`signed` accepted"), "{line}");
+
+    // An all-surviving pair keeps its surface: the human line reads as
+    // before and the JSON carries no `accepted` field.
+    let rows = [
+        row("left", &["A"], StressOutcome::Surviving),
+        row("right", &["B"], StressOutcome::Surviving),
+    ];
+    let r = incidence(ws.model(), &rows, &invariants);
+    let f = r
+        .findings
+        .iter()
+        .find(|f| f.kind.name() == "compound_vulnerability")
+        .expect("the pair compounds");
+    assert!(
+        f.to_string()
+            .starts_with("[alert] compound vulnerability: surviving"),
+        "{f}"
+    );
+    let v = serde_json::to_value(f).unwrap();
+    assert!(v.get("accepted").is_none(), "{v}");
+}
+
+#[test]
 fn hotspots_zero_columns_and_the_degenerate_warnings() {
     let mut ws = ontology_ws();
     outcomes(

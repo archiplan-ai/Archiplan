@@ -18,7 +18,7 @@ use crate::docs::DocFinding;
 /// it resolves back: a `node`/`port`/`edge` through the shared element
 /// resolver (and, for a node, `query --scope`); a `view` through
 /// `query --view`, an `edge-type` through `query --edge-type`; a
-/// `requirement`/`stressor`/`session` slug through `search`.
+/// `requirement`/`stressor`/`session`/`decision` slug through `search`.
 pub struct Address {
     /// The element id — the string a reader quotes back.
     pub id: String,
@@ -65,9 +65,11 @@ pub fn of_doc_finding(f: &DocFinding) -> Address {
             Address::of(requirement.clone(), "requirement")
         }
         DocFinding::PendingStressor { stressor, .. }
-        | DocFinding::BreakingUnanswered { stressor, .. } => {
+        | DocFinding::BreakingUnanswered { stressor, .. }
+        | DocFinding::AcceptedUnjustified { stressor, .. } => {
             Address::of(stressor.clone(), "stressor")
         }
+        DocFinding::OffListAxis { decision, .. } => Address::of(decision.clone(), "decision"),
         DocFinding::EmptySession { session } | DocFinding::FoldedAwaitsRemint { session, .. } => {
             Address::of(session.clone(), "session")
         }

@@ -24,9 +24,12 @@
 //! - **boundary-crossing stressor** — a row pressing ≥ 2 terms and far
 //!   more of the frame than typical (w > w̄ + σ; alert past 2σ): likely
 //!   crossing a boundary the architecture should make explicit.
-//! - **compound vulnerability** — two *surviving* stressors, neither of
-//!   which alone covers an invariant, whose union of affected terms does:
-//!   individually answered, jointly a broken initial promise.
+//! - **compound vulnerability** — two still-standing stressors — surviving,
+//!   or accepted by a signed trade — neither of which alone covers an
+//!   invariant, whose union of affected terms does: individually answered
+//!   (or deliberately left unanswered), jointly a broken initial promise.
+//!   A pair with an accepted member names it: part of the joint violation
+//!   was signed off.
 //! - **under-stressed** — a zero column: no stressor has touched the term.
 //!
 //! Determinism: every collection is ordered, columns come in node-creation
@@ -91,6 +94,9 @@ pub enum StressOutcome {
     Surviving,
     /// The architecture bent; requirements were derived.
     Breaking,
+    /// The architecture bent and the break was accepted: a decision records
+    /// the trade, no requirements were derived — the pressure stands.
+    Accepted,
 }
 
 impl StressOutcome {
@@ -100,6 +106,7 @@ impl StressOutcome {
             StressOutcome::Pending => "pending",
             StressOutcome::Surviving => "surviving",
             StressOutcome::Breaking => "breaking",
+            StressOutcome::Accepted => "accepted",
         }
     }
 }
@@ -197,8 +204,8 @@ pub enum IncidenceKind {
         /// The pressing stressors.
         stressors: Vec<String>,
     },
-    /// Two surviving stressors, neither covering the invariant alone, whose
-    /// union of affected terms does.
+    /// Two still-standing stressors — surviving or accepted — neither
+    /// covering the invariant alone, whose union of affected terms does.
     CompoundVulnerability {
         /// The pair, in row order.
         stressors: [String; 2],
@@ -206,6 +213,11 @@ pub enum IncidenceKind {
         invariant: String,
         /// The invariant's terms, all affected by the union.
         covered: Vec<String>,
+        /// The pair's accepted members: breaks already signed off by a
+        /// decision, flagged louder — the trade now joins a violated
+        /// founding promise.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        accepted: Vec<String>,
     },
     /// A zero column: no stressor in scope has touched the term.
     UnderStressed {
@@ -297,13 +309,31 @@ impl std::fmt::Display for IncidenceFinding {
                 stressors,
                 invariant,
                 covered,
-            } => write!(
-                f,
-                "compound vulnerability: surviving `{}` + `{}` together cover every element satisfying `{invariant}` ({})",
-                stressors[0],
-                stressors[1],
-                covered.join(", ")
-            ),
+                accepted,
+            } => {
+                if accepted.is_empty() {
+                    write!(
+                        f,
+                        "compound vulnerability: surviving `{}` + `{}` together cover every element satisfying `{invariant}` ({})",
+                        stressors[0],
+                        stressors[1],
+                        covered.join(", ")
+                    )
+                } else {
+                    let signed = accepted
+                        .iter()
+                        .map(|s| format!("`{s}`"))
+                        .collect::<Vec<_>>()
+                        .join(" and ");
+                    write!(
+                        f,
+                        "compound vulnerability: `{}` + `{}` together cover every element satisfying `{invariant}` ({}); {signed} accepted — a signed-off break joins the violation",
+                        stressors[0],
+                        stressors[1],
+                        covered.join(", ")
+                    )
+                }
+            }
             IncidenceKind::UnderStressed { node } => {
                 write!(f, "under-stressed: `{node}` — no stressor touches it")
             }
@@ -704,9 +734,12 @@ pub(crate) fn analyze(
         }
     }
 
-    // Compound vulnerabilities: over surviving pairs only — a breaking
-    // stressor already bent the architecture and derived its requirements;
-    // a pending one has no verdict to compound.
+    // Compound vulnerabilities: over pairs still standing as pressed —
+    // surviving (the architecture answered alone) and accepted (the break
+    // stands by a signed trade, nothing was derived). A breaking stressor
+    // already bent the architecture and derived its requirements; a pending
+    // one has no verdict to compound. Accepted members ride the finding:
+    // a signed-off break compounding a promise is flagged louder.
     let expanded: Vec<(&Invariant, BTreeSet<usize>)> = invariants
         .iter()
         .map(|inv| {
@@ -721,11 +754,16 @@ pub(crate) fn analyze(
         })
         .filter(|(_, set)| !set.is_empty())
         .collect();
-    let surviving: Vec<usize> = (0..s)
-        .filter(|&i| rows[i].outcome == StressOutcome::Surviving)
+    let standing: Vec<usize> = (0..s)
+        .filter(|&i| {
+            matches!(
+                rows[i].outcome,
+                StressOutcome::Surviving | StressOutcome::Accepted
+            )
+        })
         .collect();
-    for (x, &i) in surviving.iter().enumerate() {
-        for &j in &surviving[x + 1..] {
+    for (x, &i) in standing.iter().enumerate() {
+        for &j in &standing[x + 1..] {
             for (inv, set) in &expanded {
                 let alone = |c: &BTreeSet<usize>| set.iter().all(|t| c.contains(t));
                 if !alone(&cells[i])
@@ -738,6 +776,11 @@ pub(crate) fn analyze(
                             stressors: [rows[i].id.clone(), rows[j].id.clone()],
                             invariant: inv.id.clone(),
                             covered: set.iter().map(|&t| paths[t].clone()).collect(),
+                            accepted: [i, j]
+                                .into_iter()
+                                .filter(|&r| rows[r].outcome == StressOutcome::Accepted)
+                                .map(|r| rows[r].id.clone())
+                                .collect(),
                         },
                     });
                 }
@@ -784,7 +827,7 @@ pub(crate) fn analyze(
             ),
         });
     }
-    if surviving.len() >= 2 && expanded.is_empty() {
+    if standing.len() >= 2 && expanded.is_empty() {
         warnings.push(IncidenceWarning {
             code: "NO_INVARIANTS",
             message:

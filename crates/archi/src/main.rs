@@ -34,7 +34,7 @@
 //! archi query [--scope <path>]... [--type <path>]... [--kind <k>]... [--view <v>]...
 //!             [--carrier <path>]... [--edge-type <name>]... [--top] [--at <id>]
 //! archi viz   [<graph.json> | -] [--depth <n>] [--max-nodes <n>] [--details]
-//! archi search <phrase>... [--kind element|intent|requirement|stressor|session]...
+//! archi search <phrase>... [--kind element|intent|requirement|stressor|session|decision]...
 //!             [--limit <n>] [--json]
 //! archi --help | --version
 //! ```
@@ -46,6 +46,7 @@
 //! mutation is a text edit and a recompile.
 
 mod addressing;
+mod axes;
 mod docs;
 mod incidence;
 mod links;
@@ -105,10 +106,11 @@ const USAGE: &str = "usage:
   archi query [--scope <path>]... [--type <path>]... [--kind <k>]... [--view <v>]...
               [--carrier <path>]... [--edge-type <name>]... [--top] [--at <id>] [--project <dir>]
   archi viz   [<graph.json> | -] [--depth <n>] [--max-nodes <n>] [--details]
-  archi search <phrase>... [--kind element|intent|requirement|stressor|session]...
+  archi search <phrase>... [--kind element|intent|requirement|stressor|session|decision]...
               [--limit <n>] [--json] [--project <dir>]
   archi tradeoffs [show] | set <favor,…> <spend,…> | auto <concern=high|low>... | clear
               [--project <dir>]
+  archi axes  [--json]
   archi --help | --version";
 
 struct Args {
@@ -1292,7 +1294,7 @@ fn run_search(args: &Args) -> ExitCode {
             Some(kind) => kinds.push(kind),
             None => {
                 return usage_err(&format!(
-                    "--kind is element, intent, requirement, stressor or session; got `{k}`"
+                    "--kind is element, intent, requirement, stressor, session or decision; got `{k}`"
                 ));
             }
         }
@@ -1868,8 +1870,10 @@ fn run_session(args: &Args) -> ExitCode {
     }
 }
 
-/// Print a configuration and the emphasis its weighting carries.
-fn print_tradeoffs(cfg: &tradeoffs::TradeoffConfig) {
+/// Print a configuration and the emphasis its weighting carries, then the
+/// revealed profile — the axes the project's recorded decisions actually
+/// preferred and sacrificed. Declared weights the read; revealed mirrors it.
+fn print_tradeoffs(root: &Path, cfg: &tradeoffs::TradeoffConfig) {
     if cfg.is_empty() {
         println!("no trade-off configuration — the scoring read is unweighted");
     } else {
@@ -1877,12 +1881,28 @@ fn print_tradeoffs(cfg: &tradeoffs::TradeoffConfig) {
         println!("spend: {}", cfg.spend.join(", "));
         println!("coupling emphasis: {:.2}", cfg.coupling_emphasis());
     }
+    let revealed = tradeoffs::revealed(root);
+    if revealed.decisions > 0 {
+        println!(
+            "revealed by {} decision(s) — descriptive, the declared stance weights the read:",
+            revealed.decisions
+        );
+        let width = revealed
+            .tallies
+            .iter()
+            .map(|(n, _, _)| n.len())
+            .max()
+            .unwrap_or(0);
+        for (name, p, o) in &revealed.tallies {
+            println!("  {name:width$}  preferred {p} · sacrificed {o}");
+        }
+    }
 }
 
 fn persist_tradeoffs(root: &Path, cfg: &tradeoffs::TradeoffConfig) -> ExitCode {
     match cfg.write(root) {
         Ok(()) => {
-            print_tradeoffs(cfg);
+            print_tradeoffs(root, cfg);
             ExitCode::SUCCESS
         }
         Err(e) => {
@@ -1911,7 +1931,7 @@ fn run_tradeoffs(args: &Args) -> ExitCode {
     };
     match args.positional.first().map(String::as_str).unwrap_or("show") {
         "show" => {
-            print_tradeoffs(&tradeoffs::TradeoffConfig::load(&root));
+            print_tradeoffs(&root, &tradeoffs::TradeoffConfig::load(&root));
             ExitCode::SUCCESS
         }
         "set" => {
@@ -1943,6 +1963,40 @@ fn run_tradeoffs(args: &Args) -> ExitCode {
             "tradeoffs takes: show | set | auto | clear, got `{other}`"
         )),
     }
+}
+
+/// `archi axes` — the fixed trade-off vocabulary a decision's `prefer:` /
+/// `over:` fields speak (`archi/requirements/spec-docs/a-decision-prices-the-fork.md`).
+/// Code-defined and project-independent: no project is located. Any other
+/// label is legal and recorded verbatim as off-list — `check` surfaces it,
+/// this verb teaches the set.
+fn run_axes(args: &Args) -> ExitCode {
+    if args.json {
+        let list: Vec<Value> = axes::Axis::KNOWN
+            .iter()
+            .map(|name| json!({ "axis": name, "definition": axes::Axis::parse(name).definition() }))
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "axes": list,
+                "other": "any other label is recorded verbatim as an off-list axis — legal, \
+                          surfaced by `check`",
+            }))
+            .expect("serializes")
+        );
+    } else {
+        println!("the fixed trade-off axes — what a decision prefers or sacrifices:");
+        let width = axes::Axis::KNOWN.iter().map(|n| n.len()).max().unwrap_or(0);
+        for name in axes::Axis::KNOWN {
+            println!("  {name:width$}  {}", axes::Axis::parse(name).definition());
+        }
+        println!(
+            "any other label is recorded verbatim as an off-list axis — legal, surfaced by \
+             `check`; recurring off-list labels mean the set no longer fits the project."
+        );
+    }
+    ExitCode::SUCCESS
 }
 
 fn main() -> ExitCode {
@@ -1981,6 +2035,7 @@ fn main() -> ExitCode {
         "viz" => run_viz(&args),
         "search" => run_search(&args),
         "tradeoffs" => run_tradeoffs(&args),
+        "axes" => run_axes(&args),
         other => usage_err(&format!("unknown command `{other}`")),
     }
 }

@@ -152,6 +152,7 @@ pub fn analyze(root: &Path, model: &Model, opts: &Options) -> Result<Analysis, S
                 schema::Outcome::Pending => StressOutcome::Pending,
                 schema::Outcome::Surviving => StressOutcome::Surviving,
                 schema::Outcome::Breaking => StressOutcome::Breaking,
+                schema::Outcome::Accepted => StressOutcome::Accepted,
             };
             if opts.exclude_pending && outcome == StressOutcome::Pending {
                 continue;
@@ -543,6 +544,57 @@ mod tests {
             })
             .collect();
         assert_eq!(compounds, [("guarded", "press-a")]);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// An accepted break is still a break: the row stands in the matrix
+    /// under its own outcome, presses on, and a compound pair carrying it
+    /// is flagged louder (`accept-is-a-signed-break`).
+    #[test]
+    fn accepted_stressors_press_on_and_compound_louder() {
+        let root = temp_project();
+        let v1 = save_version(&root, "first");
+        put(
+            root.as_path(),
+            "archi/requirements/area/area.md",
+            "# Area\n\nThe problem.\n",
+        );
+        put(
+            root.as_path(),
+            "archi/requirements/area/guarded.md",
+            "---\nkind: functional\norigin: intent\nsatisfied-by: [AuthService, CredStore]\ndeferred:\n---\n\n# Guarded\n\nA claim.\n\n## System Context\n\n## Satisfy\n\nHeld by the named elements.\n",
+        );
+        put(
+            root.as_path(),
+            "archi/decisions/accept-store-lag.md",
+            "---\nlinks: [signed]\nprefer: [cost]\nover: [reliability]\n---\n\n# Accept store lag\n\nThe cold store may lag under pressure.\n",
+        );
+        session(&root, "round", &v1, "");
+        stressor(&root, "round", "held", "AuthService", "surviving");
+        stressor(&root, "round", "signed", "CredStore", "accepted");
+        let a = analyze_with(&root, &Options::default()).unwrap();
+        let findings = filter(&a.report.findings, &[], None);
+        let text = render_human(&a, false, &findings);
+        assert!(text.contains("signed  ·■·  accepted"), "{text}");
+        assert!(
+            text.contains("`signed` accepted — a signed-off break joins the violation"),
+            "{text}"
+        );
+        let compound = a
+            .report
+            .findings
+            .iter()
+            .find_map(|f| match &f.kind {
+                IncidenceKind::CompoundVulnerability {
+                    stressors,
+                    accepted,
+                    ..
+                } => Some((stressors.clone(), accepted.clone())),
+                _ => None,
+            })
+            .expect("the standing pair compounds");
+        assert_eq!(compound.0, ["held".to_string(), "signed".to_string()]);
+        assert_eq!(compound.1, ["signed"]);
         fs::remove_dir_all(&root).unwrap();
     }
 

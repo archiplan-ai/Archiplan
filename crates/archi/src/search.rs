@@ -1,6 +1,6 @@
 //! `archi search`: ranked lexical retrieval across every KB object —
 //! model elements with their identity prose, intents, requirements,
-//! stressors and sessions (`archi/requirements/agent-retrieval/`).
+//! stressors, sessions and decisions (`archi/requirements/agent-retrieval/`).
 //!
 //! The scan keeps no persisted derivative of the corpus: every query walks
 //! the live doc tree and the compiled model it was handed, so a text edit
@@ -38,6 +38,8 @@ pub enum Kind {
     Stressor,
     /// A stress session's round record.
     Session,
+    /// A decision — the priced record of one trade.
+    Decision,
 }
 
 impl Kind {
@@ -49,6 +51,7 @@ impl Kind {
             Kind::Requirement => "requirement",
             Kind::Stressor => "stressor",
             Kind::Session => "session",
+            Kind::Decision => "decision",
         }
     }
 
@@ -60,6 +63,7 @@ impl Kind {
             "requirement" => Kind::Requirement,
             "stressor" => Kind::Stressor,
             "session" => Kind::Session,
+            "decision" => Kind::Decision,
             _ => return None,
         })
     }
@@ -82,6 +86,9 @@ pub struct Refs {
     /// Element: nodes sharing an edge with it.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub neighbors: Vec<String>,
+    /// Element: decisions whose `links` name it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub decisions: Vec<String>,
     /// Requirement: its origin, in the frontmatter surface syntax.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub origin: Option<String>,
@@ -97,9 +104,18 @@ pub struct Refs {
     /// Stressor: the elements it presses.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub affects: Vec<String>,
-    /// Stressor: `pending`, `surviving` or `breaking`.
+    /// Stressor: `pending`, `surviving`, `breaking` or `accepted`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub outcome: Option<&'static str>,
+    /// Decision: what it links — doc slugs and model elements.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub links: Vec<String>,
+    /// Decision: the axis labels it favours.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub prefer: Vec<String>,
+    /// Decision: the axis labels it sacrifices.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub over: Vec<String>,
     /// Session: the version it presses on.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
@@ -312,6 +328,7 @@ fn walk_md(root: &Path, base: &Path, out: &mut Vec<(String, Kind)>, docs_root: &
                     }
                 }
                 ("requirements", false) => Kind::Requirement,
+                ("decisions", _) => Kind::Decision,
                 (_, true) => Kind::Session,
                 (_, false) => Kind::Stressor,
             };
@@ -393,7 +410,27 @@ fn corpus(root: &Path, model: Option<&Model>) -> Vec<Card> {
             Outcome::Pending => "pending",
             Outcome::Surviving => "surviving",
             Outcome::Breaking => "breaking",
+            Outcome::Accepted => "accepted",
         });
+        cards.push(c);
+    }
+    for d in &tree.decisions {
+        let mut c = Card::new(Kind::Decision, d.slug.clone(), Some(d.file.clone()), d.line);
+        if !fill_doc_text(root, &mut c) {
+            c = raw_card(root, d.file.clone(), Kind::Decision, d.slug.clone());
+        }
+        if let Some((entries, line)) = &d.links {
+            c.push(2, *line, entries.join(" "));
+            c.refs.links = entries.clone();
+        }
+        if let Some((entries, line)) = &d.prefer {
+            c.push(2, *line, entries.join(" "));
+            c.refs.prefer = entries.clone();
+        }
+        if let Some((entries, line)) = &d.over {
+            c.push(2, *line, entries.join(" "));
+            c.refs.over = entries.clone();
+        }
         cards.push(c);
     }
 
@@ -408,6 +445,12 @@ fn corpus(root: &Path, model: Option<&Model>) -> Vec<Card> {
         "requirements",
     );
     walk_md(root, &root.join("archi").join("stress"), &mut found, "stress");
+    walk_md(
+        root,
+        &root.join("archi").join("decisions"),
+        &mut found,
+        "decisions",
+    );
     for (file, kind) in found {
         if !covered.contains(file.as_str()) {
             let slug = file
@@ -482,6 +525,7 @@ fn corpus(root: &Path, model: Option<&Model>) -> Vec<Card> {
         }
         let mut stamped: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
         let mut pressed: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+        let mut decided: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
         for r in &tree.requirements {
             if let Some((entries, _)) = r.fields.as_ref().and_then(|f| f.satisfied_by.as_ref()) {
                 for e in entries {
@@ -496,6 +540,13 @@ fn corpus(root: &Path, model: Option<&Model>) -> Vec<Card> {
                 }
             }
         }
+        for d in &tree.decisions {
+            if let Some((entries, _)) = &d.links {
+                for e in entries {
+                    decided.entry(e.as_str()).or_default().insert(&d.slug);
+                }
+            }
+        }
         for c in &mut elements {
             if let Some(n) = neighbors.get(&c.slug) {
                 c.refs.neighbors = n.iter().filter(|p| **p != c.slug).cloned().collect();
@@ -505,6 +556,9 @@ fn corpus(root: &Path, model: Option<&Model>) -> Vec<Card> {
             }
             if let Some(sts) = pressed.get(c.slug.as_str()) {
                 c.refs.stressors = sts.iter().map(|s| s.to_string()).collect();
+            }
+            if let Some(ds) = decided.get(c.slug.as_str()) {
+                c.refs.decisions = ds.iter().map(|s| s.to_string()).collect();
             }
         }
         cards.extend(elements);
@@ -711,6 +765,9 @@ pub(crate) fn render_refs(r: &Refs) -> String {
     if !r.neighbors.is_empty() {
         parts.push(format!("neighbors: {}", cap(&r.neighbors)));
     }
+    if !r.decisions.is_empty() {
+        parts.push(format!("decided-by: {}", cap(&r.decisions)));
+    }
     if let Some(o) = &r.origin {
         parts.push(format!("origin: {o}"));
     }
@@ -728,6 +785,15 @@ pub(crate) fn render_refs(r: &Refs) -> String {
     }
     if let Some(o) = r.outcome {
         parts.push(format!("outcome: {o}"));
+    }
+    if !r.links.is_empty() {
+        parts.push(format!("links: {}", cap(&r.links)));
+    }
+    if !r.prefer.is_empty() {
+        parts.push(format!("prefer: {}", cap(&r.prefer)));
+    }
+    if !r.over.is_empty() {
+        parts.push(format!("over: {}", cap(&r.over)));
     }
     if let Some(v) = &r.version {
         parts.push(format!("pins: {v}"));
@@ -1014,6 +1080,50 @@ mod tests {
         let ses = &ses.hits[0];
         assert_eq!(ses.refs.version.as_deref(), Some("v0001"));
         assert_eq!(ses.refs.closed.as_deref(), Some("v0002"));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn decisions_are_cards_carrying_their_trade() {
+        let root = temp_project();
+        full_kb(&root);
+        put(
+            &root,
+            "archi/decisions/accept-throttle-lag.md",
+            "---\nlinks: [credential-stuffing, RateLimiter]\nprefer: [simplicity]\nover: [performance]\n---\n\n# Accept throttle lag\n\nThe limiter adds latency under attack; organic traffic keeps headroom.\n",
+        );
+        let r = run(&root, "throttle lag", &[Kind::Decision], 10);
+        assert_eq!(kinds_of(&r), ["decision"].into());
+        let hit = &r.hits[0];
+        assert_eq!(hit.slug, "accept-throttle-lag");
+        assert_eq!(hit.refs.links, ["credential-stuffing", "RateLimiter"]);
+        assert_eq!(hit.refs.prefer, ["simplicity"]);
+        assert_eq!(hit.refs.over, ["performance"]);
+        assert!(
+            hit.file
+                .as_deref()
+                .unwrap()
+                .ends_with("accept-throttle-lag.md")
+        );
+
+        // The element card carries the inversion: the trades that touch it.
+        let el = run(&root, "replay burst", &[], 10);
+        let limiter = el
+            .hits
+            .iter()
+            .find(|h| h.kind == "element" && h.slug == "RateLimiter")
+            .expect("the element card");
+        assert_eq!(limiter.refs.decisions, ["accept-throttle-lag"]);
+
+        // An unparseable decision degrades to raw text, kind intact.
+        put(
+            &root,
+            "archi/decisions/broken.md",
+            "---\nnever closed\n\n# Broken\n\nAn okapi hides in the raw text.\n",
+        );
+        let r = run(&root, "okapi", &[], 10);
+        assert_eq!(slugs_of(&r), ["broken"]);
+        assert_eq!(r.hits[0].kind, "decision");
         fs::remove_dir_all(&root).unwrap();
     }
 

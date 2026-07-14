@@ -61,6 +61,34 @@ fn help_and_version_answer_on_stdout_without_a_project() {
     fs::remove_dir_all(&dir).unwrap();
 }
 
+/// `archi axes` answers without a project: the vocabulary is code-defined.
+#[test]
+fn axes_list_the_fixed_vocabulary_without_a_project() {
+    let dir = bare_dir();
+    let (code, stdout, stderr) = run_in(&dir, &["axes"]);
+    assert_eq!(code, Some(0), "{stderr}");
+    for name in [
+        "simplicity",
+        "performance",
+        "scalability",
+        "reliability",
+        "security",
+        "correctness",
+        "evolvability",
+        "operability",
+        "cost",
+    ] {
+        assert!(stdout.contains(name), "{stdout}");
+    }
+    assert!(stdout.contains("off-list"), "{stdout}");
+
+    let (code, stdout, _) = run_in(&dir, &["axes", "--json"]);
+    assert_eq!(code, Some(0));
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
+    assert_eq!(v["axes"].as_array().map(Vec::len), Some(9));
+    fs::remove_dir_all(&dir).unwrap();
+}
+
 #[test]
 fn the_malformed_invocation_keeps_its_contract() {
     let dir = bare_dir();

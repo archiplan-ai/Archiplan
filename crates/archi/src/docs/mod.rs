@@ -1,16 +1,18 @@
-//! Doc sources: intents, requirements, stress sessions and stressors
-//! (`archi/requirements/spec-docs/`, `archi/requirements/spec-docs/`,
-//! `archi/requirements/spec-docs/an-intent-is-a-problem-statement.md`) — structured markdown under
-//! `archi/requirements/` and `archi/stress/`, compiled and integrity-checked
-//! against the model on every `archi check`.
+//! Doc sources: intents, requirements, stress sessions, stressors and
+//! decisions (`archi/requirements/spec-docs/`,
+//! `archi/requirements/spec-docs/an-intent-is-a-problem-statement.md`,
+//! `archi/requirements/spec-docs/a-decision-prices-the-fork.md`) — structured
+//! markdown under `archi/requirements/`, `archi/stress/` and
+//! `archi/decisions/`, compiled and integrity-checked against the model on
+//! every `archi check`.
 //!
 //! Errors carry the shared doc catalog (`E_DOC`, `E_SLUG`, `E_DOC_REF`,
 //! `E_MODEL_REF`, `E_PLACEMENT`, plus `E_AFFECTS_EMPTY` and `E_SESSION`) as
 //! `file:line:col`-located diagnostics; advisory states — open requirements,
-//! deferrals, unanswered breaking stressors — are findings, never blocking.
-//! Stressor affects validate against the *pinned* version of their session,
-//! reconstructed from the archive; `satisfied-by` validates against the live
-//! model.
+//! deferrals, unanswered breaking stressors, unjustified accepted ones —
+//! are findings, never blocking. Stressor affects validate against the
+//! *pinned* version of their session, reconstructed from the archive;
+//! `satisfied-by` and decision links validate against the live model.
 
 pub(crate) mod md;
 pub(crate) mod schema;
@@ -26,7 +28,7 @@ use serde::Serialize;
 
 use crate::versions;
 use md::FieldValue;
-use schema::{Intent, Origin, Outcome, Requirement, Session, Stressor};
+use schema::{Decision, Intent, Origin, Outcome, Requirement, Session, Stressor};
 
 /// A doc-source compile error, located like a model compile diagnostic.
 #[derive(Serialize)]
@@ -126,6 +128,21 @@ pub enum DocFinding {
         /// Its session's slug.
         session: String,
     },
+    /// An accepted stressor no decision records in its links — a break
+    /// cannot be accepted silently (`archi/requirements/spec-docs/accept-is-a-signed-break.md`).
+    AcceptedUnjustified {
+        /// The stressor's slug.
+        stressor: String,
+        /// Its session's slug.
+        session: String,
+    },
+    /// A decision's axis label outside the fixed nine, recorded verbatim.
+    OffListAxis {
+        /// The decision's slug.
+        decision: String,
+        /// The raw label.
+        axis: String,
+    },
     /// A session with no stressors.
     EmptySession {
         /// The session's slug.
@@ -164,6 +181,16 @@ impl fmt::Display for DocFinding {
                 f,
                 "breaking stressor unanswered: {stressor} — no requirement records it as origin"
             ),
+            DocFinding::AcceptedUnjustified { stressor, .. } => write!(
+                f,
+                "accepted stressor unjustified: {stressor} — no decision links it; an accepted \
+                 break is a signed trade (archi/decisions/)"
+            ),
+            DocFinding::OffListAxis { decision, axis } => write!(
+                f,
+                "off-list axis on decision `{decision}`: `{axis}` — recorded verbatim; recurring \
+                 off-list labels mean the fixed nine no longer fit (`archi axes`)"
+            ),
             DocFinding::EmptySession { session } => write!(f, "empty session: {session}"),
             DocFinding::FoldedAwaitsRemint { session, label } => write!(
                 f,
@@ -189,6 +216,7 @@ pub(crate) struct Tree {
     pub(crate) requirements: Vec<Requirement>,
     pub(crate) sessions: Vec<Session>,
     pub(crate) stressors: Vec<Stressor>,
+    pub(crate) decisions: Vec<Decision>,
 }
 
 /// Compile and cross-check the doc sources of a project against its
@@ -427,6 +455,25 @@ fn discover(root: &Path, diags: &mut Vec<DocDiagnostic>) -> Tree {
         }
     }
 
+    // Decisions are a flat area: one file per trade, no anchors, no groups
+    // (archi/requirements/spec-docs/a-decision-prices-the-fork.md).
+    let base = root.join("archi").join("decisions");
+    for path in sorted_entries(&base) {
+        if path.is_dir() {
+            diags.push(DocDiagnostic::new(
+                "E_PLACEMENT",
+                "decisions are flat — archi/decisions/ holds decision files only",
+                &rel(root, &path),
+                1,
+            ));
+        } else if is_md(&path)
+            && let Some((file, doc)) = read_doc(root, &path, diags)
+        {
+            tree.decisions
+                .push(schema::decision(&doc, &file, &stem(&path), diags));
+        }
+    }
+
     tree
 }
 
@@ -514,6 +561,11 @@ fn cross_check(
             tree.stressors
                 .iter()
                 .map(|s| (s.slug.as_str(), s.file.as_str(), s.line, "stressor")),
+        )
+        .chain(
+            tree.decisions
+                .iter()
+                .map(|d| (d.slug.as_str(), d.file.as_str(), d.line, "decision")),
         );
     for (slug, file, line, what) in everything {
         if slug.is_empty() {
@@ -541,8 +593,33 @@ fn cross_check(
         }
     }
 
+    // A decision's links speak both reference currencies at once: a doc
+    // primitive's slug or a live model element — the trade names exactly
+    // what it prices (archi/requirements/spec-docs/a-decision-prices-the-fork.md).
+    for d in &tree.decisions {
+        let Some((entries, line)) = &d.links else {
+            continue;
+        };
+        for p in entries {
+            if !seen.contains_key(p.as_str()) && model.resolve_element(p).is_none() {
+                diags.push(DocDiagnostic::new(
+                    "E_DOC_REF",
+                    format!("links names no doc primitive or model element `{p}`"),
+                    &d.file,
+                    *line,
+                ));
+            }
+        }
+    }
+
     let req_slugs: BTreeSet<&str> = tree.requirements.iter().map(|r| r.slug.as_str()).collect();
     let stressor_slugs: BTreeSet<&str> = tree.stressors.iter().map(|s| s.slug.as_str()).collect();
+    let accepted_slugs: BTreeSet<&str> = tree
+        .stressors
+        .iter()
+        .filter(|s| s.outcome == Some(Outcome::Accepted))
+        .map(|s| s.slug.as_str())
+        .collect();
 
     // Origin placement and references; satisfied-by against the live model.
     for r in &tree.requirements {
@@ -567,6 +644,21 @@ fn cross_check(
                             diags.push(DocDiagnostic::new(
                                 "E_DOC_REF",
                                 format!("origin names no stressor `{s}`"),
+                                &r.file,
+                                *line,
+                            ));
+                        } else if accepted_slugs.contains(s.as_str()) {
+                            // Fix and accept are the fork's two arms: a
+                            // derived requirement answers a breaking
+                            // stressor, an accepted one derives nothing —
+                            // its record is the linked decision
+                            // (archi/requirements/spec-docs/accept-is-a-signed-break.md).
+                            diags.push(DocDiagnostic::new(
+                                "E_DOC_REF",
+                                format!(
+                                    "origin names accepted stressor `{s}` — an accepted break \
+                                     derives no requirements; its record is the linked decision"
+                                ),
                                 &r.file,
                                 *line,
                             ));
@@ -839,6 +931,16 @@ fn findings(tree: &Tree) -> Vec<DocFinding> {
         })
         .flatten()
         .collect();
+    // Accept requires a decision: the sacrifice lives entirely on a linked
+    // decision, so an accepted stressor no decision links is the half-done
+    // trade — mirrored on `breaking_unanswered`
+    // (archi/requirements/spec-docs/accept-is-a-signed-break.md).
+    let justified: BTreeSet<&str> = tree
+        .decisions
+        .iter()
+        .filter_map(|d| d.links.as_ref())
+        .flat_map(|(entries, _)| entries.iter().map(String::as_str))
+        .collect();
     for st in &tree.stressors {
         let Some(outcome) = st.outcome else { continue };
         if closed.contains(st.session.as_str()) && outcome == Outcome::Pending {
@@ -852,6 +954,23 @@ fn findings(tree: &Tree) -> Vec<DocFinding> {
                 stressor: st.slug.clone(),
                 session: st.session.clone(),
             });
+        }
+        if outcome == Outcome::Accepted && !justified.contains(st.slug.as_str()) {
+            out.push(DocFinding::AcceptedUnjustified {
+                stressor: st.slug.clone(),
+                session: st.session.clone(),
+            });
+        }
+    }
+    for d in &tree.decisions {
+        for field in [&d.prefer, &d.over] {
+            let Some((entries, _)) = field else { continue };
+            for label in schema::off_list(entries) {
+                out.push(DocFinding::OffListAxis {
+                    decision: d.slug.clone(),
+                    axis: label,
+                });
+            }
         }
     }
     for s in &tree.sessions {
@@ -1725,6 +1844,224 @@ mod tests {
             !codes(&report).contains(&"E_MODEL_REF"),
             "canonical edge text resolves: {:?}",
             codes(&report)
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A stressor pinned on an open round, accepted: the break stands only
+    /// with a decision linking it — until then the half-done trade is a
+    /// finding, mirroring `breaking_unanswered`
+    /// (`accept-is-a-signed-break`).
+    #[test]
+    fn accept_requires_a_decision() {
+        let root = temp_project();
+        let v1 = save_version(&root, "first");
+        put(
+            &root,
+            "archi/stress/hardening/hardening.md",
+            &format!("---\nversion: {v1}\nclosed:\n---\n\n# Hardening\n\nA round.\n"),
+        );
+        put(
+            &root,
+            "archi/stress/hardening/burst-loss.md",
+            "---\naffects: [AuthService]\noutcome: accepted\n---\n\n# Burst loss\n\nSpikes drop logins.\n\n## Attractor\n\nThe queue sheds under load.\n\n## Resolution\n\nDropped logins under spike are tolerable for the MVP tier.\n",
+        );
+        let report = check_at(&root);
+        assert!(
+            report.diagnostics.is_empty(),
+            "{:#?}",
+            report
+                .diagnostics
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            rendered_findings(&report)
+                .iter()
+                .any(|f| f.contains("accepted stressor unjustified: burst-loss")),
+            "{:?}",
+            rendered_findings(&report)
+        );
+        // The linked decision signs the trade — links speak both reference
+        // currencies at once — and the finding clears.
+        put(
+            &root,
+            "archi/decisions/accept-burst-loss.md",
+            "---\nlinks: [burst-loss, AuthService]\nprefer: [simplicity, cost]\nover: [reliability]\n---\n\n# Accept burst loss\n\nAn MVP queue that sheds under spike keeps the login path simple.\n",
+        );
+        let report = check_at(&root);
+        assert!(
+            report.diagnostics.is_empty(),
+            "{:#?}",
+            report
+                .diagnostics
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            !rendered_findings(&report)
+                .iter()
+                .any(|f| f.contains("unjustified")),
+            "{:?}",
+            rendered_findings(&report)
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// An accepted break derives no requirements: an origin naming one is
+    /// the contradiction between the fork's two arms, located and loud.
+    #[test]
+    fn an_accepted_break_derives_no_requirements() {
+        let root = temp_project();
+        let v1 = save_version(&root, "first");
+        put(
+            &root,
+            "archi/stress/hardening/hardening.md",
+            &format!("---\nversion: {v1}\nclosed:\n---\n\n# Hardening\n\nA round.\n"),
+        );
+        put(
+            &root,
+            "archi/stress/hardening/burst-loss.md",
+            "---\naffects: [AuthService]\noutcome: accepted\n---\n\n# Burst loss\n\nSpikes drop logins.\n\n## Attractor\n\nThe queue sheds under load.\n\n## Resolution\n\nTolerable for the MVP tier.\n",
+        );
+        put(&root, "archi/requirements/a/a.md", "# A\n\nArea.\n");
+        put(
+            &root,
+            "archi/requirements/a/shed-politely.md",
+            &named(
+                &requirement("stressor(burst-loss)", "", "", ""),
+                "Shed politely",
+            ),
+        );
+        let report = check_at(&root);
+        let refs: Vec<&DocDiagnostic> = report
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == "E_DOC_REF")
+            .collect();
+        assert_eq!(refs.len(), 1, "{:?}", codes(&report));
+        assert!(
+            refs[0].message.contains("accepted stressor `burst-loss`"),
+            "{}",
+            refs[0].message
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The decision schema: empty lists are explicit states; sections,
+    /// half-present frontmatter, dangling links, a two-sided axis and a
+    /// nested folder are each one located deviation.
+    #[test]
+    fn a_decision_prices_the_fork_and_deviations_are_loud() {
+        let root = temp_project();
+        save_version(&root, "first");
+        put(
+            &root,
+            "archi/decisions/keep-the-monolith.md",
+            "---\nlinks: [AuthService]\nprefer: []\nover: []\n---\n\n# Keep the monolith\n\nOne deployable until the seams are proven.\n",
+        );
+        let report = check_at(&root);
+        assert!(
+            report.diagnostics.is_empty(),
+            "{:#?}",
+            report
+                .diagnostics
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        );
+
+        put(
+            &root,
+            "archi/decisions/sectioned.md",
+            "---\nlinks: []\nprefer: []\nover: []\n---\n\n# Sectioned\n\nProse.\n\n## Context\n\nStray.\n",
+        );
+        put(
+            &root,
+            "archi/decisions/half.md",
+            "---\nlinks: []\nprefer: []\n---\n\n# Half\n\nProse.\n",
+        );
+        put(
+            &root,
+            "archi/decisions/dangling.md",
+            "---\nlinks: [ghost-slug]\nprefer: []\nover: []\n---\n\n# Dangling\n\nProse.\n",
+        );
+        put(
+            &root,
+            "archi/decisions/two-sided.md",
+            "---\nlinks: []\nprefer: [simplicity]\nover: [Simplicity]\n---\n\n# Two sided\n\nProse.\n",
+        );
+        fs::create_dir_all(root.join("archi/decisions/nested")).unwrap();
+        let report = check_at(&root);
+        let by_code = |c: &str| codes(&report).iter().filter(|x| **x == c).count();
+        assert_eq!(
+            (
+                by_code("E_DOC"),
+                by_code("E_DOC_REF"),
+                by_code("E_PLACEMENT")
+            ),
+            (3, 1, 1),
+            "{:#?}",
+            report
+                .diagnostics
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        );
+        let all = report
+            .diagnostics
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(all.contains("holds no sections"), "{all}");
+        assert!(all.contains("missing frontmatter field `over`"), "{all}");
+        assert!(
+            all.contains("names no doc primitive or model element `ghost-slug`"),
+            "{all}"
+        );
+        assert!(all.contains("both preferred and sacrificed"), "{all}");
+        assert!(all.contains("decisions are flat"), "{all}");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Decision slugs join the project-wide reference currency.
+    #[test]
+    fn decision_slugs_join_the_currency_and_off_list_axes_surface() {
+        let root = temp_project();
+        save_version(&root, "first");
+        put(&root, "archi/requirements/a/a.md", "# A\n\nArea.\n");
+        put(
+            &root,
+            "archi/requirements/a/clash.md",
+            &named(&requirement("intent", "", "", ""), "Clash"),
+        );
+        put(
+            &root,
+            "archi/decisions/clash.md",
+            "---\nlinks: []\nprefer: []\nover: []\n---\n\n# Clash\n\nProse.\n",
+        );
+        // An off-list axis is legal — recorded verbatim, surfaced as a
+        // finding; the fixed nine stay silent.
+        put(
+            &root,
+            "archi/decisions/log-everything.md",
+            "---\nlinks: []\nprefer: [audit-trail]\nover: [cost]\n---\n\n# Log everything\n\nThe journal is the account.\n",
+        );
+        let report = check_at(&root);
+        assert_eq!(codes(&report), ["E_SLUG"], "{:#?}", codes(&report));
+        let findings = rendered_findings(&report);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.contains("off-list axis on decision `log-everything`: `audit-trail`")),
+            "{findings:?}"
+        );
+        assert!(
+            !findings.iter().any(|f| f.contains("`cost`")),
+            "{findings:?}"
         );
         fs::remove_dir_all(&root).unwrap();
     }

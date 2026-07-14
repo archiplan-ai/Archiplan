@@ -1,11 +1,12 @@
 //! Per-primitive schemas over [`super::md`] documents: intents, requirements,
-//! sessions and stressors as `archi/requirements/spec-docs/`
+//! sessions, stressors and decisions as `archi/requirements/spec-docs/`
 //! define them. Parsing is best-effort — every deviation lands in the
 //! diagnostics and the parsed value keeps what was sound, with `Option`
 //! marking fields the cross-checks must not trust.
 
 use super::DocDiagnostic;
 use super::md::{Field, FieldValue, Heading, MdDoc, slugify};
+use crate::axes::{self, Axis};
 
 /// Where a requirement came from (`archi/requirements/spec-docs/origin-records-why-placement-records-where.md`).
 pub enum Origin {
@@ -19,7 +20,8 @@ pub enum Origin {
     Fusion(Vec<String>),
 }
 
-/// A stressor's outcome (`archi/requirements/spec-docs/a-stressor-presses-one-hypothesis.md`).
+/// A stressor's outcome (`archi/requirements/spec-docs/a-stressor-presses-one-hypothesis.md`,
+/// `archi/requirements/spec-docs/accept-is-a-signed-break.md`).
 #[derive(Clone, Copy, PartialEq)]
 pub enum Outcome {
     /// The session has not decided yet.
@@ -28,6 +30,9 @@ pub enum Outcome {
     Surviving,
     /// The architecture bends; requirements are derived.
     Breaking,
+    /// The architecture bends and the break is kept: a linked decision
+    /// records the trade, no requirements are derived.
+    Accepted,
 }
 
 /// The machine fields a file-scale requirement owns. Section-scale
@@ -131,6 +136,26 @@ pub struct Stressor {
     pub affects: Option<(Vec<String>, usize)>,
     /// The outcome; `None` when invalid.
     pub outcome: Option<Outcome>,
+}
+
+/// A decision — the priced record of one trade
+/// (`archi/requirements/spec-docs/a-decision-prices-the-fork.md`). The sole
+/// carrier of trade-off axes: `prefer` names what it buys, `over` what it
+/// pays, both zero-or-more (empty is a valid non-comparative record).
+pub struct Decision {
+    /// The slug (= filename).
+    pub slug: String,
+    /// Project-relative path.
+    pub file: String,
+    /// 1-based line of the name.
+    pub line: usize,
+    /// What the decision is about — doc slugs and model elements — with the
+    /// field's line; `None` when invalid.
+    pub links: Option<(Vec<String>, usize)>,
+    /// Axis labels the decision favours; `None` when invalid.
+    pub prefer: Option<(Vec<String>, usize)>,
+    /// Axis labels it sacrifices; `None` when invalid.
+    pub over: Option<(Vec<String>, usize)>,
 }
 
 const RESERVED: [&str; 2] = ["System Context", "Satisfy"];
@@ -382,10 +407,13 @@ pub fn stressor(
         "pending" => Some(Outcome::Pending),
         "surviving" => Some(Outcome::Surviving),
         "breaking" => Some(Outcome::Breaking),
+        "accepted" => Some(Outcome::Accepted),
         other => {
             diags.push(DocDiagnostic::new(
                 "E_DOC",
-                format!("`outcome` is `pending`, `surviving` or `breaking`, got `{other}`"),
+                format!(
+                    "`outcome` is `pending`, `surviving`, `breaking` or `accepted`, got `{other}`"
+                ),
                 file,
                 line,
             ));
@@ -426,6 +454,65 @@ pub fn stressor(
         affects,
         outcome,
     }
+}
+
+/// Parse a decision document: `links`, `prefer` and `over` in frontmatter,
+/// then the name and the rationale prose — a decision is atomic, it holds
+/// no sections. An axis on both sides of one trade is a contradiction;
+/// off-list labels are legal here and surface as findings, never errors.
+pub fn decision(doc: &MdDoc, file: &str, stem: &str, diags: &mut Vec<DocDiagnostic>) -> Decision {
+    name_checks(doc, file, stem, "a decision", diags);
+    if let Some(h) = doc.headings.first() {
+        diags.push(DocDiagnostic::new(
+            "E_DOC",
+            "a decision is its name, its rationale and its trade — it holds no sections",
+            file,
+            h.line,
+        ));
+    }
+    let fm = frontmatter(
+        doc,
+        file,
+        &["links", "prefer", "over"],
+        "links, prefer, over",
+        diags,
+    );
+    let links = list(fm, "links", file, diags);
+    let prefer = list(fm, "prefer", file, diags);
+    let over = list(fm, "over", file, diags);
+    if let (Some((p, _)), Some((o, line))) = (&prefer, &over) {
+        let preferred = axes::parse_list(p);
+        for (raw, axis) in o.iter().zip(axes::parse_list(o)) {
+            if preferred.contains(&axis) {
+                diags.push(DocDiagnostic::new(
+                    "E_DOC",
+                    format!("`{raw}` is both preferred and sacrificed — a trade has two sides"),
+                    file,
+                    *line,
+                ));
+            }
+        }
+    }
+    Decision {
+        slug: stem.to_string(),
+        file: file.to_string(),
+        line: doc.name_line,
+        links,
+        prefer,
+        over,
+    }
+}
+
+/// The off-list labels of a parsed axis list: everything [`Axis::parse`]
+/// keeps as `Other` — legal, recorded verbatim, surfaced as findings.
+pub fn off_list(entries: &[String]) -> Vec<String> {
+    axes::parse_list(entries)
+        .into_iter()
+        .filter_map(|a| match a {
+            Axis::Other(label) => Some(label),
+            _ => None,
+        })
+        .collect()
 }
 
 /// The name derives to the filename, and a summary paragraph follows it.
