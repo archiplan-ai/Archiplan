@@ -264,6 +264,114 @@ fn hotspots_zero_columns_and_the_degenerate_warnings() {
     assert_eq!(r.scope.k_hyper, 0.0);
 }
 
+#[test]
+fn density_and_boundary_crossing_read_scope_wide_pressure() {
+    let mut ws = ontology_ws();
+    outcomes(
+        &mut ws,
+        json!([
+            { "stmt": "define", "node": "A" },
+            { "stmt": "define", "node": "B" },
+            { "stmt": "define", "node": "C" },
+            { "stmt": "define", "node": "D" },
+            { "stmt": "define", "node": "E" },
+            { "stmt": "define", "node": "F" }
+        ]),
+    );
+    let model = ws.model();
+
+    // One row pressing most of the frame while its peers stay narrow:
+    // weights [5,1,1,1] put `wide` past w̄ + σ = 3.732 (warn — 2σ sits at
+    // 5.464), while K_hyper = 8/24 stays under τ_K.
+    let rows = [
+        row("wide", &["A", "B", "C", "D", "E"], StressOutcome::Surviving),
+        row("n1", &["A"], StressOutcome::Surviving),
+        row("n2", &["B"], StressOutcome::Surviving),
+        row("n3", &["C"], StressOutcome::Surviving),
+    ];
+    let r = incidence(model, &rows, &[]);
+    let crossings: Vec<(&str, usize, f64, usize, Severity)> = r
+        .findings
+        .iter()
+        .filter_map(|f| match &f.kind {
+            IncidenceKind::BoundaryCrossingStressor {
+                stressor,
+                touches,
+                typical,
+                terms,
+            } => Some((stressor.as_str(), *touches, *typical, terms.len(), f.severity)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(crossings, [("wide", 5, 3.732, 5, Severity::Warn)]);
+    assert!(!kinds(&r).contains(&"density_alert"), "{:?}", kinds(&r));
+
+    // Past w̄ + 2σ the crossing escalates to an alert.
+    let rows = [
+        row("wide", &["A", "B", "C", "D", "E", "F"], StressOutcome::Surviving),
+        row("n1", &["A"], StressOutcome::Surviving),
+        row("n2", &["B"], StressOutcome::Surviving),
+        row("n3", &["C"], StressOutcome::Surviving),
+        row("n4", &["D"], StressOutcome::Surviving),
+        row("n5", &["E"], StressOutcome::Surviving),
+    ];
+    let r = incidence(model, &rows, &[]);
+    let crossing = r
+        .findings
+        .iter()
+        .find(|f| matches!(&f.kind, IncidenceKind::BoundaryCrossingStressor { .. }))
+        .expect("the wide row crosses");
+    assert_eq!(crossing.severity, Severity::Alert);
+
+    // Broad rows everywhere: K_hyper = 1.0 clears τ_K and alerts, while
+    // the uniform weights (σ = 0) cross nothing.
+    let broad = [
+        row("b1", &["A", "B", "C", "D", "E", "F"], StressOutcome::Surviving),
+        row("b2", &["A", "B", "C", "D", "E", "F"], StressOutcome::Breaking),
+        row("b3", &["A", "B", "C", "D", "E", "F"], StressOutcome::Pending),
+    ];
+    let r = incidence(model, &broad, &[]);
+    let density: Vec<(f64, Severity)> = r
+        .findings
+        .iter()
+        .filter_map(|f| match &f.kind {
+            IncidenceKind::DensityAlert { k_hyper } => Some((*k_hyper, f.severity)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(density, [(1.0, Severity::Alert)]);
+    assert!(!kinds(&r).contains(&"boundary_crossing_stressor"), "{:?}", kinds(&r));
+    // The finding serializes with the scope's spelling of K_hyper.
+    let v = serde_json::to_value(&r.findings).expect("serializes");
+    assert_eq!(v[0]["kind"], "density_alert", "{v}");
+    assert_eq!(v[0]["K_hyper"], 1.0);
+
+    // Two rows are a pattern too small for either scope-wide finding…
+    let r = incidence(model, &broad[..2], &[]);
+    assert!(!kinds(&r).contains(&"density_alert"), "{:?}", kinds(&r));
+    // …and τ_K is a knob with a strict gate: at 1.0 it stays shut.
+    let config = IncidenceConfig {
+        tau_k: 1.0,
+        ..IncidenceConfig::default()
+    };
+    let r = model.incidence(&broad, &[], &config);
+    assert!(!kinds(&r).contains(&"density_alert"), "{:?}", kinds(&r));
+
+    // A row left with one joined term never crosses — even when drift
+    // empties its peers and the arithmetic alone would flag it.
+    let rows = [
+        row("one", &["A"], StressOutcome::Surviving),
+        row("gone1", &["Ghost"], StressOutcome::Surviving),
+        row("gone2", &["Ghost"], StressOutcome::Surviving),
+    ];
+    let r = incidence(model, &rows, &[]);
+    assert!(
+        !kinds(&r).contains(&"boundary_crossing_stressor"),
+        "{:?}",
+        kinds(&r)
+    );
+}
+
 /// The under-stressed sweep names behavior
 /// (`archi/requirements/self-hosting/under-stressed-names-behavior.md`):
 /// zero columns in `Data`'s closure are muted by default, `all_terms`

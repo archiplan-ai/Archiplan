@@ -19,6 +19,11 @@
 //!   path: two nodes that may really be one, or share an extractable concern.
 //! - **stress hotspot** — a column pressed by ≥ 2 stressors making up a
 //!   τ_D fraction of the scope: disproportionate pressure.
+//! - **density alert** — the matrix denser than τ_K over ≥ 3 stressors:
+//!   stress is landing everywhere at once.
+//! - **boundary-crossing stressor** — a row pressing ≥ 2 terms and far
+//!   more of the frame than typical (w > w̄ + σ; alert past 2σ): likely
+//!   crossing a boundary the architecture should make explicit.
 //! - **compound vulnerability** — two *surviving* stressors, neither of
 //!   which alone covers an invariant, whose union of affected terms does:
 //!   individually answered, jointly a broken initial promise.
@@ -45,6 +50,8 @@ pub struct IncidenceConfig {
     pub tau_j: f64,
     /// Column density (hits / S) threshold for a stress hotspot.
     pub tau_d: f64,
+    /// Matrix density (ones / S×N) threshold for the density alert.
+    pub tau_k: f64,
     /// How many declared-edge hops still count as "really connected" when
     /// splitting coupling findings from merge candidates.
     pub depth: usize,
@@ -64,6 +71,7 @@ impl Default for IncidenceConfig {
         IncidenceConfig {
             tau_j: 0.8,
             tau_d: 0.5,
+            tau_k: 0.5,
             depth: 2,
             path_limit: 4096,
             all_terms: false,
@@ -216,6 +224,25 @@ pub enum IncidenceKind {
         /// The shared stressors.
         shared: Vec<String>,
     },
+    /// The matrix is denser than τ_K: stress is landing everywhere at
+    /// once.
+    DensityAlert {
+        /// Matrix density, ones / (S×N).
+        #[serde(rename = "K_hyper")]
+        k_hyper: f64,
+    },
+    /// A row pressing far more of the frame than typical: the stressor
+    /// likely crosses a boundary the architecture should make explicit.
+    BoundaryCrossingStressor {
+        /// The stressor's slug.
+        stressor: String,
+        /// How many frame terms it presses.
+        touches: usize,
+        /// The bar it cleared: w̄ + σ over the scope's row weights.
+        typical: f64,
+        /// The pressed terms.
+        terms: Vec<String>,
+    },
 }
 
 impl IncidenceKind {
@@ -227,6 +254,8 @@ impl IncidenceKind {
             IncidenceKind::CompoundVulnerability { .. } => "compound_vulnerability",
             IncidenceKind::UnderStressed { .. } => "under_stressed",
             IncidenceKind::MergeCandidate { .. } => "merge_candidate",
+            IncidenceKind::DensityAlert { .. } => "density_alert",
+            IncidenceKind::BoundaryCrossingStressor { .. } => "boundary_crossing_stressor",
         }
     }
 }
@@ -288,6 +317,19 @@ impl std::fmt::Display for IncidenceFinding {
                 "merge candidate: `{a}` and `{b}` — near-identical stress response (J = {jaccard:.2}, {} shared stressor(s)) over a declared path",
                 shared.len()
             ),
+            IncidenceKind::DensityAlert { k_hyper } => write!(
+                f,
+                "density alert: stress is landing everywhere (K_hyper = {k_hyper:.3})"
+            ),
+            IncidenceKind::BoundaryCrossingStressor {
+                stressor,
+                touches,
+                typical,
+                ..
+            } => write!(
+                f,
+                "boundary-crossing stressor: `{stressor}` — presses {touches} term(s) (w̄+σ = {typical:.2})"
+            ),
         }
     }
 }
@@ -320,6 +362,8 @@ pub struct IncidenceScope {
     pub tau_j: f64,
     /// Hotspot density threshold used.
     pub tau_d: f64,
+    /// Density-alert threshold used.
+    pub tau_k: f64,
     /// Connectivity hop bound used.
     pub depth: usize,
     /// Connectivity node budget used.
@@ -565,6 +609,48 @@ pub(crate) fn analyze(
         }
     }
 
+    // Scope-wide pressure, over ≥ 3 rows — three make a distribution. A
+    // matrix denser than τ_K alarms: stress is landing everywhere at once.
+    // A row pressing far more of the frame than typical — w > w̄ + σ, the
+    // NKP hotspot gate turned sideways, alert past 2σ — likely crosses a
+    // boundary the architecture should make explicit; the floor mirrors
+    // the hotspot's, since a row pressing one term crosses nothing.
+    // Weights read the matrix, so dropped affects never widen a row.
+    if s >= 3 {
+        if k_hyper > config.tau_k {
+            findings.push(IncidenceFinding {
+                severity: Severity::Alert,
+                kind: IncidenceKind::DensityAlert { k_hyper },
+            });
+        }
+        let weights: Vec<usize> = cells.iter().map(BTreeSet::len).collect();
+        let mean = weights.iter().sum::<usize>() as f64 / s as f64;
+        let sigma = (weights
+            .iter()
+            .map(|&w| (w as f64 - mean).powi(2))
+            .sum::<f64>()
+            / s as f64)
+            .sqrt();
+        for (i, &w) in weights.iter().enumerate() {
+            if w >= 2 && w as f64 > mean + sigma {
+                let severity = if w as f64 > mean + 2.0 * sigma {
+                    Severity::Alert
+                } else {
+                    Severity::Warn
+                };
+                findings.push(IncidenceFinding {
+                    severity,
+                    kind: IncidenceKind::BoundaryCrossingStressor {
+                        stressor: rows[i].id.clone(),
+                        touches: w,
+                        typical: round3(mean + sigma),
+                        terms: cells[i].iter().map(|&j| paths[j].clone()).collect(),
+                    },
+                });
+            }
+        }
+    }
+
     // Column pairs: near-identical stress response, split by declared-path
     // connectivity into hidden coupling vs merge candidates.
     let column_set: BTreeSet<NodeId> = columns.iter().copied().collect();
@@ -714,6 +800,7 @@ pub(crate) fn analyze(
             k_hyper,
             tau_j: config.tau_j,
             tau_d: config.tau_d,
+            tau_k: config.tau_k,
             depth: config.depth,
             path_limit: config.path_limit,
             dropped,
@@ -752,5 +839,7 @@ fn sort_key(kind: &IncidenceKind) -> String {
             invariant,
             ..
         } => format!("{} {} {invariant}", stressors[0], stressors[1]),
+        IncidenceKind::DensityAlert { .. } => String::new(),
+        IncidenceKind::BoundaryCrossingStressor { stressor, .. } => stressor.clone(),
     }
 }

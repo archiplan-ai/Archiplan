@@ -16,7 +16,7 @@
 //! archi incidence [--project <dir>] [--session <slug> | --since <id>] [--exclude-pending]
 //!             [--all-terms] [--json | --matrix | --k-hyper | --findings] [--no-matrix]
 //!             [--kind <kind>]... [--min-severity info|warn|alert]
-//!             [--tau-j <f>] [--tau-d <f>] [--depth <n>] [--path-limit <n>]
+//!             [--tau-j <f>] [--tau-d <f>] [--tau-k <f>] [--depth <n>] [--path-limit <n>]
 //! archi version save -m <note> | anchor | remint -m <note> [--session <slug>] | list |
 //!   show <id> | diff <a|live> <b|live> | current
 //!             [--project <dir>]
@@ -79,7 +79,7 @@ const USAGE: &str = "usage:
   archi incidence [--project <dir>] [--session <slug> | --since <id>] [--exclude-pending]
               [--all-terms] [--json | --matrix | --k-hyper | --findings] [--no-matrix]
               [--kind <kind>]... [--min-severity info|warn|alert]
-              [--tau-j <f>] [--tau-d <f>] [--depth <n>] [--path-limit <n>]
+              [--tau-j <f>] [--tau-d <f>] [--tau-k <f>] [--depth <n>] [--path-limit <n>]
   archi version save -m <note> [--project <dir>]
   archi version remint -m <note> [--session <slug>] [--project <dir>]
   archi version anchor [--repo <member>] [--project <dir>]
@@ -139,6 +139,7 @@ struct Args {
     min_severity: Option<String>,
     tau_j: Option<f64>,
     tau_d: Option<f64>,
+    tau_k: Option<f64>,
     depth: Option<usize>,
     path_limit: Option<usize>,
     message: Option<String>,
@@ -199,6 +200,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         min_severity: None,
         tau_j: None,
         tau_d: None,
+        tau_k: None,
         depth: None,
         path_limit: None,
         message: None,
@@ -294,6 +296,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--tau-b" => args.tau_b = Some(float(value(&mut it, "--tau-b")?, "--tau-b")?),
             "--tau-j" => args.tau_j = Some(float(value(&mut it, "--tau-j")?, "--tau-j")?),
             "--tau-d" => args.tau_d = Some(float(value(&mut it, "--tau-d")?, "--tau-d")?),
+            "--tau-k" => args.tau_k = Some(float(value(&mut it, "--tau-k")?, "--tau-k")?),
             "--limit" => args.limit = Some(int(value(&mut it, "--limit")?, "--limit")?),
             "--depth" => args.depth = Some(int(value(&mut it, "--depth")?, "--depth")?),
             "--path-limit" => {
@@ -1637,12 +1640,14 @@ fn run_incidence(args: &Args) -> ExitCode {
     if args.session.is_some() && args.since.is_some() {
         return usage_err("--session and --since are mutually exclusive");
     }
-    const KINDS: [&str; 5] = [
+    const KINDS: [&str; 7] = [
         "hyperliminal_coupling",
         "stress_hotspot",
         "compound_vulnerability",
         "under_stressed",
         "merge_candidate",
+        "density_alert",
+        "boundary_crossing_stressor",
     ];
     for k in &args.kind {
         if !KINDS.contains(&k.as_str()) {
@@ -1674,6 +1679,9 @@ fn run_incidence(args: &Args) -> ExitCode {
     }
     if let Some(t) = args.tau_d {
         config.tau_d = t;
+    }
+    if let Some(t) = args.tau_k {
+        config.tau_k = t;
     }
     if let Some(d) = args.depth {
         config.depth = d;

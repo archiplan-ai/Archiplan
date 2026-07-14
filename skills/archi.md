@@ -74,9 +74,12 @@ Ground rules, always:
    the session, `archi/stress/<session>/<session>.md`: frontmatter
    `version:` (the pinned id) and `closed:` (empty — the closing save
    stamps it), then a name and one charter paragraph, what this round
-   presses and why now. At most one session is open at a time. Press with
-   one stressor file per pressure beside it — a hypothesized failure mode,
-   scale cliff, regulatory constraint, or hostile stakeholder view:
+   presses and why now. At most one session is open at a time. 
+   Iteratively discover stressors. 
+   *For each one:*
+   a. Identify. Think hyperliminarily — pick a stakeholder, failure mode, scale concern, or regulatory constraint the happy path ignores. `affects` is required and must resolve to epistatic nodes. Stressor description is a markdown body — same rule as requirements (single-quoted, imperative first line, then any structure a reader needs). One stressor = one file.
+   b. Attractor. What configuration does the system get pushed toward? Attractor description is a markdown body.
+
 
    ```markdown
    ---
@@ -84,21 +87,17 @@ Ground rules, always:
    outcome: breaking
    ---
 
-   # Credential stuffing burst
+   # <Stressor title>
 
-   A botnet replays leaked credential pairs at 100× the organic login
-   rate; real users' logins are collateral.
+   <stressor_description>
 
    ## Attractor
 
-   `AuthService` saturates on hash verification and the login path is
-   down while the rest of the system idles — an availability cliff
-   behind one choke point.
+   <attractor_description>
 
    ## Resolution
 
-   Rate limiting and hash-cost isolation take the burst off the hot
-   path: derived `login-rate-limit` and `hash-offload`.
+   <description_of_solution>: derived `<requirement_1>` and `<requirement_2>`.
    ```
 
    `affects` — mandatory, non-empty: absolute paths naming terms or types
@@ -115,8 +114,27 @@ Ground rules, always:
    finding. The next `version save` mints the version carrying the
    answers, closes the session, and prints the incidence report — model
    changed or not: a behavior-only round closes against the version it
-   pressed, no mint, exit 0. Repeat 4–6 until a round survives — that
-   version is the hardened spec.
+   pressed, no mint, exit 0. Reading its findings (`archi incidence`
+   replays them), severest first:
+   - `compound_vulnerability` (alert) — two surviving stressors together
+     cover everything satisfying an intent requirement: a promise that
+     breaks only in combination
+   - `density_alert` (alert) — the matrix denser than τ_K: stress is
+     landing everywhere at once
+   - `boundary_crossing_stressor` (warn) — one stressor presses far more
+     terms than typical: it crosses a boundary worth making explicit
+   - `hyperliminal_coupling` (warn) — two terms co-react with no declared
+     path between them: a hidden dependency — add the edge or split the
+     shared concern
+   - `stress_hotspot` (warn) — one term soaks a τ_D share of the round:
+     a decomposition candidate
+   - `merge_candidate` (info) — the same co-reaction over a declared
+     path: two nodes may be one, or share an extractable concern
+   - `under_stressed` (info) — no stressor touches it: aim the next
+     round there
+
+   Repeat 4–6 until a round survives — that version is the hardened
+   spec.
 7. **Plan** — `archi plan use <name>` (refuses on an unsaved model — save
    first). `archi plan task add <node>` per node to implement; spec_refs
    and requirements are derived, never retyped. Then edit `plan.json`:
