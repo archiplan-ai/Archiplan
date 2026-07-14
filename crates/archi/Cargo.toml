@@ -11,3 +11,4 @@ serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 sha2 = "0.10"
 diffy = "0.4"
+ascii-dag = "0.9"

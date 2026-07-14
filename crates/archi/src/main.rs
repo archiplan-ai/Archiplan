@@ -33,6 +33,7 @@
 //! archi read  [<request.json> | -] [--at <id>]
 //! archi query [--scope <path>]... [--type <path>]... [--kind <k>]... [--view <v>]...
 //!             [--carrier <path>]... [--edge-type <name>]... [--top] [--at <id>]
+//! archi viz   [<graph.json> | -] [--depth <n>] [--max-nodes <n>] [--details]
 //! archi search <phrase>... [--kind element|intent|requirement|stressor|session]...
 //!             [--limit <n>] [--json]
 //! archi --help | --version
@@ -55,6 +56,7 @@ mod search;
 mod sessions;
 mod tradeoffs;
 mod versions;
+mod visualizer;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -102,6 +104,7 @@ const USAGE: &str = "usage:
   archi read [<request.json> | -] [--at <id>] [--project <dir>]
   archi query [--scope <path>]... [--type <path>]... [--kind <k>]... [--view <v>]...
               [--carrier <path>]... [--edge-type <name>]... [--top] [--at <id>] [--project <dir>]
+  archi viz   [<graph.json> | -] [--depth <n>] [--max-nodes <n>] [--details]
   archi search <phrase>... [--kind element|intent|requirement|stressor|session]...
               [--limit <n>] [--json] [--project <dir>]
   archi tradeoffs [show] | set <favor,…> <spend,…> | auto <concern=high|low>... | clear
@@ -157,6 +160,8 @@ struct Args {
     evidence: bool,
     yes: bool,
     prune: bool,
+    details: bool,
+    max_nodes: Option<usize>,
     positional: Vec<String>,
 }
 
@@ -215,6 +220,8 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         evidence: false,
         yes: false,
         prune: false,
+        details: false,
+        max_nodes: None,
         positional: Vec::new(),
     };
     let mut it = argv.iter().peekable();
@@ -267,6 +274,8 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--evidence" => args.evidence = true,
             "--yes" => args.yes = true,
             "--prune" => args.prune = true,
+            "--details" => args.details = true,
+            "--max-nodes" => args.max_nodes = Some(int(value(&mut it, "--max-nodes")?, "--max-nodes")?),
             "--spec" => args.spec = Some(value(&mut it, "--spec")?),
             "--to" => args.to = Some(value(&mut it, "--to")?),
             "--into" => args.into = Some(value(&mut it, "--into")?),
@@ -306,6 +315,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
                     | "init"
                     | "repo"
                     | "tradeoffs"
+                    | "viz"
             ) =>
             {
                 args.positional.push(other.to_string())
@@ -1204,6 +1214,61 @@ fn run_query(args: &Args) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// `archi viz`: draw a piped subgraph query as an ASCII diagram
+/// (`archi query … | archi viz`). Reads the graph from a file, `-`, or piped
+/// stdin — the model is not consulted, only the graph on the wire. Collapses
+/// deep nesting and non-mandatory detail to stay readable, and refuses a slice
+/// too large to draw (exit 1) with guidance on narrowing it.
+fn run_viz(args: &Args) -> ExitCode {
+    use std::io::IsTerminal as _;
+    let text = match args.positional.as_slice() {
+        [] if std::io::stdin().is_terminal() => {
+            return usage_err("`viz` takes a graph file, or `-` / piped `archi query` output");
+        }
+        [] => std::io::read_to_string(std::io::stdin()),
+        [path] if path == "-" => std::io::read_to_string(std::io::stdin()),
+        [path] => fs::read_to_string(path),
+        _ => return usage_err("`viz` takes one graph file"),
+    };
+    let text = match text {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("archi: cannot read the graph: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let value: Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("archi: the graph is not valid JSON: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let graph = match visualizer::parse_graph(&value) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("archi: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let opts = visualizer::VizOptions {
+        depth: args.depth.unwrap_or(visualizer::DEFAULT_DEPTH),
+        max_nodes: args.max_nodes.unwrap_or(visualizer::DEFAULT_MAX_NODES),
+        max_edges: visualizer::DEFAULT_MAX_EDGES,
+        details: args.details,
+    };
+    match visualizer::render(&graph, &opts) {
+        Ok(diagram) => {
+            print!("{diagram}");
+            ExitCode::SUCCESS
+        }
+        Err(summary) => {
+            eprint!("{summary}");
+            ExitCode::from(1)
+        }
+    }
+}
+
 /// `archi search`: ranked retrieval by phrase across every KB object
 /// (`archi/requirements/agent-retrieval/`). The one verb that does not die with the
 /// model: a failed compile darkens the element corpus alone — doc cards
@@ -1905,6 +1970,7 @@ fn main() -> ExitCode {
         "plan" => run_plan(&args),
         "read" => run_read(&args),
         "query" => run_query(&args),
+        "viz" => run_viz(&args),
         "search" => run_search(&args),
         "tradeoffs" => run_tradeoffs(&args),
         other => usage_err(&format!("unknown command `{other}`")),

@@ -20,6 +20,10 @@ Ground rules, always:
   for it before deriving a requirement (does a claim like this exist?),
   before defining an element (is this concept already modeled?), and when
   a finding names something unfamiliar.
+- Show, don't tell. When the user asks to explain or visualize the design,
+  pipe a query into the visualizer — `archi query <filters> | archi viz` —
+  which draws the subgraph as a readable ASCII diagram, collapsing detail and
+  deep nesting and refusing a slice too large to read (with hints to narrow).
 - Never invent references. Requirements name model elements by absolute
   path, stressors pin versions, tasks pin nodes — `check` and `plan verify`
   verify every one; a broken reference is a bug you just created.

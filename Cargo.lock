@@ -6,6 +6,7 @@ version = 4
 name = "archi"
 version = "0.1.4"
 dependencies = [
+ "ascii-dag",
  "diffy",
  "modeling-lang",
  "serde",
@@ -13,6 +14,12 @@ dependencies = [
  "sha2",
  "toml",
 ]
+
+[[package]]
+name = "ascii-dag"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd898d2dcffeeb51015c511a2849a8637c894b833afc946936d48b1e5c8aa6ec"
 
 [[package]]
 name = "block-buffer"
