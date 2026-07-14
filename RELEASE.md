@@ -11,6 +11,27 @@ name always matches what `archi --version` prints. Never rebuild an
 already-published version string — bump the version instead; old tarballs stay
 downloadable and that is the migration model.
 
+## Releases
+
+### 0.1.5
+
+Trade-off axes on the markdown base. Decisions are a new doc primitive — one
+file per trade under `archi/decisions/`, frontmatter `links` / `prefer` /
+`over` — and the sole carrier of the fixed nine axes (`archi axes` lists them
+with definitions; an off-list label is legal, kept verbatim, surfaced as the
+`off_list_axis` finding). Stressors gain a fourth outcome, `accepted`: the
+break is kept, nothing derives (an origin naming an accepted stressor is
+`E_DOC_REF`), and a decision must link it — otherwise the
+`accepted_unjustified` finding, mirroring `breaking_unanswered`. An accepted
+break is still a break for incidence: the row stands in the matrix under its
+own outcome and compounds with survivors, and a compound pair carrying an
+accepted member names it — flagged louder. `archi search --kind decision`
+retrieves the records (element cards carry `decided-by`); `archi tradeoffs
+show` tallies the revealed priority profile beside the declared stance.
+Fully additive: a tree using none of the new constructs checks, scores and
+searches byte-identically to 0.1.4; on 0.1.4 binaries an `accepted` outcome
+is one located `E_DOC` and `archi/decisions/` is invisible.
+
 ## Prerequisites (one-time setup)
 
 ```sh
