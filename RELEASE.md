@@ -13,6 +13,16 @@ downloadable and that is the migration model.
 
 ## Releases
 
+### 0.1.7
+
+A sharper `archi` skill. The embedded operating manual gains a standing
+instruction: don't run the whole cycle in one pass — ask the user which stage to
+focus on (initial architecture + stress, stress + update, plan, execute) and do
+only that. Skill-only: the binary's embedded briefing changes, so `archi init`
+and `archi sync-skills` now write the newer copy, but no verb, format or finding
+moves. A 0.1.6 tree brought current with `archi sync-skills` reports the `archi`
+skill as `updated` and is otherwise byte-identical.
+
 ### 0.1.6
 
 `archi sync-skills` — the deliberate verb that reconciles an initialized tree's
