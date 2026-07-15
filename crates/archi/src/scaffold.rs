@@ -36,6 +36,9 @@ pub enum Act {
     Created,
     /// A CLAUDE.md that had no fence gained the block; nothing else moved.
     Appended,
+    /// Present and different — overwritten with the binary's copy. Only
+    /// `sync-skills` produces this; `init` is create-only.
+    Updated,
     /// Present and already what init would write.
     Ok,
     /// Present and different — read, reported, left alone.
@@ -165,6 +168,85 @@ pub fn init(target: &Path) -> Result<Outcome, String> {
     })
 }
 
+/// Sync an initialized tree's briefing to this binary's copies. Where `init`
+/// is create-only, `sync-skills` is the deliberate verb that reconciles a
+/// project with a newer binary (`the-installed-skill-drifts`): a skill or
+/// CLAUDE.md block that already matches is `ok`, an absent one is `created`,
+/// and any divergent one is `updated` — overwritten with the binary's copy,
+/// unconditionally. It never touches the model, only the briefing, so a
+/// reflexive re-run cannot lose source; init stays create-only
+/// (`a-re-run-clobbers-the-tree` stays answered). Requires the tree to be a
+/// project already; the target is located, not created.
+pub fn sync_skills(target: &Path) -> Result<Outcome, String> {
+    let target = target
+        .canonicalize()
+        .map_err(|e| format!("cannot resolve {}: {e}", target.display()))?;
+
+    let manifest = target.join("archi.toml");
+    if !manifest.is_file() {
+        return Err(format!(
+            "{} is not an archiplan project (no archi.toml) — run `archi init` first",
+            target.display()
+        ));
+    }
+    let src = manifest_src(&target).map_err(|d| d.message)?;
+    let name = project_name(&target);
+    let enclosing = target.parent().and_then(find_project_root);
+
+    let mut steps = Vec::new();
+
+    // The briefing skills: overwrite any that has drifted from the embedded copy.
+    for (skill, text) in SKILLS {
+        let path = target.join(".claude/skills").join(skill).join("SKILL.md");
+        let act = match fs::read_to_string(&path) {
+            Err(_) => {
+                write_new(&path, text)?;
+                (Act::Created, None)
+            }
+            Ok(found) if found == text => (Act::Ok, Some("matches this binary's copy".into())),
+            Ok(_) => {
+                fs::write(&path, text)
+                    .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+                (Act::Updated, Some("refreshed to this binary's copy".into()))
+            }
+        };
+        steps.push(step(act.0, &target, &path, act.1));
+    }
+
+    // The CLAUDE.md block: the fence marks the one region sync may reclaim, so
+    // its inner content is overwritten in place while the surrounding prose is
+    // left untouched.
+    let block = claude_block(&src);
+    let claude = target.join("CLAUDE.md");
+    let act = match fs::read_to_string(&claude) {
+        Err(_) => {
+            write_new(&claude, &format!("{block}\n"))?;
+            (Act::Created, None)
+        }
+        Ok(found) => match fenced(&found) {
+            Some(inner) if inner == block => (Act::Ok, Some("the archi block is present".into())),
+            Some(_) => {
+                fs::write(&claude, replace_fence(&found, &block))
+                    .map_err(|e| format!("cannot write {}: {e}", claude.display()))?;
+                (Act::Updated, Some("its archi block refreshed".into()))
+            }
+            None => {
+                let sep = if found.is_empty() || found.ends_with('\n') { "\n" } else { "\n\n" };
+                fs::write(&claude, format!("{found}{sep}{block}\n"))
+                    .map_err(|e| format!("cannot write {}: {e}", claude.display()))?;
+                (Act::Appended, Some("the archi block".into()))
+            }
+        },
+    };
+    steps.push(step(act.0, &target, &claude, act.1));
+
+    Ok(Outcome {
+        name,
+        enclosing,
+        steps,
+    })
+}
+
 /// The report, one line per artifact plus the verdict.
 pub fn render(o: &Outcome) -> String {
     let mut out = String::new();
@@ -175,12 +257,7 @@ pub fn render(o: &Outcome) -> String {
         ));
     }
     for s in &o.steps {
-        let verb = match s.act {
-            Act::Created => "created",
-            Act::Appended => "appended",
-            Act::Ok => "ok",
-            Act::Kept => "kept",
-        };
+        let verb = act_verb(s.act);
         match &s.detail {
             Some(d) => out.push_str(&format!("{verb:<9}{} ({d})\n", s.path)),
             None => out.push_str(&format!("{verb:<9}{}\n", s.path)),
@@ -192,6 +269,49 @@ pub fn render(o: &Outcome) -> String {
         out.push_str("already initialized — nothing to create\n");
     }
     out
+}
+
+/// The report for `sync-skills`: one line per artifact, then the verdict.
+pub fn render_sync(o: &Outcome) -> String {
+    let mut out = String::new();
+    if let Some(root) = &o.enclosing {
+        out.push_str(&format!(
+            "note: an enclosing project sits at {} — below this sync, the nearest manifest wins\n",
+            root.display()
+        ));
+    }
+    for s in &o.steps {
+        let verb = act_verb(s.act);
+        match &s.detail {
+            Some(d) => out.push_str(&format!("{verb:<9}{} ({d})\n", s.path)),
+            None => out.push_str(&format!("{verb:<9}{}\n", s.path)),
+        }
+    }
+    let wrote = o
+        .steps
+        .iter()
+        .filter(|s| matches!(s.act, Act::Created | Act::Appended | Act::Updated))
+        .count();
+    if wrote > 0 {
+        out.push_str(&format!(
+            "synced `{}` — the briefing now matches this binary\n",
+            o.name
+        ));
+    } else {
+        out.push_str("already in sync — the briefing matches this binary\n");
+    }
+    out
+}
+
+/// The report verb for one act.
+fn act_verb(act: Act) -> &'static str {
+    match act {
+        Act::Created => "created",
+        Act::Appended => "appended",
+        Act::Updated => "updated",
+        Act::Ok => "ok",
+        Act::Kept => "kept",
+    }
 }
 
 fn step(act: Act, root: &Path, path: &Path, detail: Option<String>) -> Step {
@@ -248,6 +368,15 @@ fn fenced(text: &str) -> Option<&str> {
     let start = text.find(FENCE_OPEN)?;
     let end = text[start..].find(FENCE_CLOSE)? + start + FENCE_CLOSE.len();
     Some(&text[start..end])
+}
+
+/// Swap the fenced archi region of `text` for `block`, leaving every byte
+/// outside the fence — prose above and below — exactly where it was. The
+/// caller has already confirmed the fence is present via `fenced`.
+fn replace_fence(text: &str, block: &str) -> String {
+    let start = text.find(FENCE_OPEN).expect("fence present");
+    let end = text[start..].find(FENCE_CLOSE).expect("fence present") + start + FENCE_CLOSE.len();
+    format!("{}{}{}", &text[..start], block, &text[end..])
 }
 
 /// The starter module: comment-only, so the model starts empty and the
@@ -332,15 +461,7 @@ mod tests {
     fn acts(o: &Outcome) -> Vec<(&'static str, String)> {
         o.steps
             .iter()
-            .map(|s| {
-                let verb = match s.act {
-                    Act::Created => "created",
-                    Act::Appended => "appended",
-                    Act::Ok => "ok",
-                    Act::Kept => "kept",
-                };
-                (verb, s.path.clone())
-            })
+            .map(|s| (act_verb(s.act), s.path.clone()))
             .collect()
     }
 
@@ -492,5 +613,86 @@ mod tests {
         assert_eq!(o.enclosing, None);
         fs::remove_dir_all(&dir).unwrap();
         fs::remove_dir_all(&lone).unwrap();
+    }
+
+    #[test]
+    fn sync_leaves_a_fresh_tree_byte_identical() {
+        let dir = temp_dir();
+        init(&dir).unwrap();
+        let before = snapshot(&dir);
+        let o = sync_skills(&dir).unwrap();
+        assert_eq!(before, snapshot(&dir));
+        assert!(o.steps.iter().all(|s| s.act == Act::Ok), "{}", render_sync(&o));
+        assert!(render_sync(&o).contains("already in sync"));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn sync_creates_a_missing_skill() {
+        let dir = temp_dir();
+        init(&dir).unwrap();
+        let skill = dir.join(".claude/skills/archi-merge/SKILL.md");
+        fs::remove_file(&skill).unwrap();
+        let o = sync_skills(&dir).unwrap();
+        let created: Vec<_> = o
+            .steps
+            .iter()
+            .filter(|s| s.act == Act::Created)
+            .map(|s| s.path.as_str())
+            .collect();
+        assert_eq!(created, [".claude/skills/archi-merge/SKILL.md"]);
+        let (_, embedded) = SKILLS.iter().find(|(n, _)| *n == "archi-merge").unwrap();
+        assert_eq!(&fs::read_to_string(&skill).unwrap(), embedded);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn sync_overwrites_a_divergent_skill_unconditionally() {
+        let dir = temp_dir();
+        init(&dir).unwrap();
+        let skill = dir.join(".claude/skills/archi/SKILL.md");
+        fs::write(&skill, "locally tuned\n").unwrap();
+
+        // No flag, no keeping: a divergent copy is overwritten with the embedded text.
+        let o = sync_skills(&dir).unwrap();
+        assert!(
+            o.steps
+                .iter()
+                .any(|s| s.act == Act::Updated && s.path == ".claude/skills/archi/SKILL.md")
+        );
+        assert!(!o.steps.iter().any(|s| s.act == Act::Kept));
+        let (_, embedded) = SKILLS.iter().find(|(n, _)| *n == "archi").unwrap();
+        assert_eq!(&fs::read_to_string(&skill).unwrap(), embedded);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn sync_refreshes_the_claude_block_prose_intact() {
+        let dir = temp_dir();
+        init(&dir).unwrap();
+        let claude = dir.join("CLAUDE.md");
+        fs::write(
+            &claude,
+            format!("# House rules\n\nTabs are love.\n\n{FENCE_OPEN}\nstale\n{FENCE_CLOSE}\n"),
+        )
+        .unwrap();
+
+        // Only the fenced region moves; the prose above it does not.
+        let o = sync_skills(&dir).unwrap();
+        assert!(o.steps.iter().any(|s| s.act == Act::Updated && s.path == "CLAUDE.md"));
+        let text = fs::read_to_string(&claude).unwrap();
+        assert!(text.starts_with("# House rules\n\nTabs are love.\n"), "{text}");
+        assert!(text.contains("## Archiplan"));
+        assert!(!text.contains("\nstale\n"));
+        assert_eq!(text.matches(FENCE_OPEN).count(), 1);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn sync_needs_a_project() {
+        let dir = temp_dir();
+        let err = sync_skills(&dir).unwrap_err();
+        assert!(err.contains("archi.toml"), "{err}");
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

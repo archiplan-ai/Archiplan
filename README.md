@@ -182,6 +182,11 @@ Run `archi init` in a project directory. It scaffolds everything — config, a s
 model, and the `archi` skill: a complete operating manual for the loop that your coding
 agent can follow end to end.
 
+When you upgrade the `archi` binary, run `archi sync-skills` in a project to bring that
+installed briefing — the skills and the `CLAUDE.md` block — up to the new version. It
+overwrites the briefing with the binary's copies and touches nothing else, so `init`
+stays create-only and re-running the sync is always safe.
+
 Then go deeper:
 
 - [skills/archi.md](skills/archi.md) — the full workflow, greenfield and brownfield, and the modeling language in brief

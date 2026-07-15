@@ -72,6 +72,7 @@ use serde_json::{Value, json};
 
 const USAGE: &str = "usage:
   archi init  [<dir>]
+  archi sync-skills [--project <dir>]
   archi check [--project <dir>] [--json]
   archi build [--project <dir>] [--emit-batch <file|->]
   archi nkp   [--project <dir>] [--regime | --hotspots | --corridors] [--top | --scope <path>]
@@ -1570,6 +1571,27 @@ fn run_init(args: &Args) -> ExitCode {
     }
 }
 
+/// `archi sync-skills` — sync an initialized tree's briefing to this binary's
+/// copies. Locates an existing project (never creates one) and overwrites any
+/// divergent skill or CLAUDE.md block with the binary's copy, unconditionally;
+/// it never touches the model, so a re-run cannot lose source.
+fn run_sync_skills(args: &Args) -> ExitCode {
+    let root = match locate_project(args) {
+        Ok(r) => r,
+        Err(e) => return usage_err(&e),
+    };
+    match scaffold::sync_skills(&root) {
+        Ok(outcome) => {
+            print!("{}", scaffold::render_sync(&outcome));
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("archi: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn run_build(args: &Args) -> ExitCode {
     let root = match locate_project(args) {
         Ok(r) => r,
@@ -2021,6 +2043,7 @@ fn main() -> ExitCode {
     };
     match args.verb.as_str() {
         "init" => run_init(&args),
+        "sync-skills" => run_sync_skills(&args),
         "check" => run_check(&args),
         "build" => run_build(&args),
         "nkp" => run_nkp(&args),

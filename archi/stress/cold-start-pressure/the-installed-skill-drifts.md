@@ -19,7 +19,11 @@ sometimes wrong.
 
 ## Resolution
 
-Holds as designed: the tree owns its briefing. Create-only means a re-run never
-flattens local tuning, and the report names the divergence — `kept`, differs from
-this binary's copy — so staleness is visible instead of silent; a refresh is a
-deliberate delete and re-run away.
+Holds as designed: reconciliation is never automatic. Create-only `init` never
+flattens the tree on a reflexive re-run, so a re-run cannot cost a morning's work.
+The refresh is a separate, deliberately-invoked verb — `archi sync-skills` — that
+overwrites the installed briefing (the skills and the fenced CLAUDE.md block) with
+the binary's copies: a match is `ok`, an absent file is restored, any divergent one
+is overwritten. It touches only the briefing, never the model. Invoking the verb
+*is* the operator choosing the binary as the winner — nothing picks behind their
+back, and a team that has tuned its copy simply does not run it.
