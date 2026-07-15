@@ -30,6 +30,8 @@ Ground rules, always:
 - Harden first, execute second. Code is written against a *pinned* version,
   never against a moving spec.
 
+IMPORTANT: Don't rush to complete whole cycle described below in one pass. Ask user what stage to focus on instead and do only that part: initial architecture + stress (greenfield) / stress + update architecture / plan / execute plan etc.
+
 ## Greenfield
 
 1. **Init** — `archi init` scaffolds it all: `archi.toml`, the source dir
