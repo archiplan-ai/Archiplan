@@ -13,6 +13,23 @@ downloadable and that is the migration model.
 
 ## Releases
 
+### 0.1.6
+
+`archi sync-skills` — the deliberate verb that reconciles an initialized tree's
+briefing with a newer binary. Where `init` is create-only, `sync-skills`
+locates an existing project (never creates one) and overwrites any skill or
+`CLAUDE.md` block that has drifted from the binary's embedded copy,
+unconditionally: a briefing file that already matches is `ok`, an absent one is
+`created`, and a divergent one is the new `updated` outcome — refreshed in
+place. The `CLAUDE.md` fence marks the one region sync may reclaim, so its inner
+block is rewritten while the surrounding prose is left untouched. It touches
+only the briefing, never the model, so a reflexive re-run cannot lose source and
+`init` stays create-only. `archi sync-skills [--project <dir>]` locates the
+project the same way `check` and `build` do; running it in a tree without
+`archi.toml` errors and points at `archi init`.
+Fully additive: a tree checks, scores and searches byte-identically to 0.1.5,
+and on 0.1.5 binaries `sync-skills` is simply an unknown verb.
+
 ### 0.1.5
 
 Trade-off axes on the markdown base. Decisions are a new doc primitive — one
