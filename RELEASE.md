@@ -13,6 +13,20 @@ downloadable and that is the migration model.
 
 ## Releases
 
+### 0.1.8
+
+The `archi` skill learns to run a session as a guided loop. A second standing
+instruction joins the stage-focus rule: walk the user through the steps in
+order, and before each one ask whether to complete it autonomously and
+summarize or to collaborate — propose, discuss, execute only after alignment —
+then offer next directions afterward. Every such question goes through the
+editor's poll tool (`AskUserQuestion` in Claude Code, the equivalent elsewhere)
+rather than a freeform prompt. Skill-only, like 0.1.7: the binary's embedded
+briefing changes, so `archi init` and `archi sync-skills` write the newer copy,
+but no verb, format or finding moves. A 0.1.7 tree brought current with `archi
+sync-skills` reports the `archi` skill as `updated` and is otherwise
+byte-identical.
+
 ### 0.1.7
 
 A sharper `archi` skill. The embedded operating manual gains a standing
