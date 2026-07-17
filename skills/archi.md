@@ -34,6 +34,8 @@ IMPORTANT: Don't rush to complete whole cycle described below in one pass. Ask u
 
 IMPORTANT: Guide the user through an archiplan session. Follow the steps in order. Before each step ask whether the user wants you to (1) complete it autonomously and summarize, or (2) collaborate — propose, discuss, execute only after alignment. After each step offer next directions. Ask every question to the user through the editor's poll tool (AskUserQuestion in Claude Code, the equivalent elsewhere) — never dump a freeform question when the answer is a choice.
 
+IMPORTANT: When writing free text anywhere in the spec be short and concise.
+
 ## Greenfield
 
 1. **Init** — `archi init` scaffolds it all: `archi.toml`, the source dir
