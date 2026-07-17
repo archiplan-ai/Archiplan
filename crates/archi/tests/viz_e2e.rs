@@ -75,10 +75,17 @@ fn a_query_pipes_into_a_diagram() {
     assert!(out.contains("Orders"), "draws Orders:\n{out}");
     assert!(out.contains("Billing"), "draws Billing:\n{out}");
     assert!(out.contains("subgraph ·"), "has a caption:\n{out}");
-    // OrderId is a carrier — related but unconnected, so it is footnoted, not
-    // drawn into a sprawling row.
-    assert!(out.contains("unconnected in this slice:"), "footnotes carriers:\n{out}");
-    assert!(out.contains("OrderId"), "{out}");
+    // OrderId is carried on the order_wire edge and is in the slice, so the
+    // edge is drawn through it — Orders → OrderId → Billing — in a rounded
+    // box, and the note names it as data. Only the truly edgeless nodes (the
+    // preset ontology types) stay in the unconnected footnote.
+    assert!(out.contains("(OrderId)"), "rounds the data box:\n{out}");
+    assert!(out.contains("data carried on edges: OrderId"), "notes the data:\n{out}");
+    let footnote = out.lines().find(|l| l.starts_with("unconnected in this slice:"));
+    assert!(
+        footnote.is_some_and(|l| !l.contains("OrderId")),
+        "carried data is drawn, not footnoted:\n{out}"
+    );
     // A structural diagram, never the layout engine's cycle bail-out.
     assert!(!out.contains("CYCLE DETECTED"), "{out}");
     fs::remove_dir_all(&root).unwrap();

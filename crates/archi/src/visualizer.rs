@@ -10,10 +10,19 @@
 //! - **Collapse deep nesting.** Node ids are absolute dot-paths; a node deeper
 //!   than the depth budget folds into its surviving ancestor, which carries a
 //!   `+N` badge for the descendants it swallowed.
-//! - **Collapse non-mandatory detail.** The diagram shows only the mandatory
-//!   structure — node identity and the edges between nodes. Ports, connection
-//!   types, carriers, views and prose are withheld unless `--details` asks for
-//!   the supplementary listing.
+//! - **Collapse non-mandatory detail.** The diagram shows the mandatory
+//!   structure — node identity, the edges between nodes, and each edge's
+//!   rel/conn type as a `‹tag›` on its path, so no arrow is anonymous. Ports,
+//!   views and prose are withheld unless `--details` asks for the
+//!   supplementary listing; so is a carrier whose node the slice leaves out.
+//! - **Draw data into the flow.** A connection's payload rides its lanes as
+//!   `carrier` (forward) and `rev_carrier` (reverse). When the carried node is
+//!   itself in the slice, the edge is drawn *through* it — source → data →
+//!   target — so the flow of data is visible and a shared payload becomes the
+//!   junction its producers and consumers meet at, not an unconnected box in
+//!   a footnote. Data boxes are rounded — `(Data)` against a component's
+//!   `[Component]` — and a routed edge carries no type tag: its payload names
+//!   the interaction.
 //! - **Break cycles.** `ascii-dag` draws DAGs; architecture graphs cycle
 //!   (bidirectional connections, feedback). A back-edge that would cycle is
 //!   pulled out of the drawing and reported beneath it, so nothing is lost.
@@ -166,22 +175,56 @@ pub fn render(graph: &InGraph, opts: &VizOptions) -> Result<String, String> {
 
     // Collapse edges onto surviving nodes: drop edges that fold into a single
     // node, dedup parallel edges, and remember genuine self-references.
-    let mut cedges: Vec<(usize, usize)> = Vec::new();
-    let mut seen: BTreeSet<(usize, usize)> = BTreeSet::new();
+    //
+    // Data flows *via* edges: a payload rides a connection's lanes as
+    // `carrier` (forward) and `rev_carrier` (reverse). When the carried node
+    // is itself in the slice, the edge is drawn *through* it — source → data →
+    // target, and target → data → source for the reverse lane — so a shared
+    // payload becomes the junction its producers and consumers meet at. A
+    // carrier the slice leaves out stays a `--details` annotation.
+    //
+    // An edge drawn direct keeps its rel/conn type name as a tag on the path
+    // (`A → ‹wire› → B`); a routed edge needs none — its payload names the
+    // interaction. Parallel edges of *different* types stay distinct paths.
+    let declared: BTreeSet<String> = graph.nodes.iter().map(|n| collapse(&n.id, depth)).collect();
+    let mut cedges: Vec<(usize, usize, Option<String>)> = Vec::new();
+    let mut seen: BTreeSet<(usize, usize, Option<String>)> = BTreeSet::new();
     let mut self_refs: BTreeSet<usize> = BTreeSet::new();
+    let mut data_nodes: BTreeSet<usize> = BTreeSet::new();
     for edge in &graph.edges {
-        let cs = collapse(&edge.source, depth);
-        let cd = collapse(&edge.target, depth);
-        let i = intern(&mut order, &mut index, cs);
-        let j = intern(&mut order, &mut index, cd);
-        if i == j {
-            if edge.source == edge.target {
-                self_refs.insert(i);
+        let fwd = carried(&edge.carrier, &declared, depth);
+        let rev = carried(&edge.rev_carrier, &declared, depth);
+        let tag = edge.type_name.as_deref().filter(|t| !t.is_empty());
+        let mut hops: Vec<(&str, &str, Option<&str>)> = Vec::new();
+        match fwd {
+            Some(c) => {
+                hops.push((&edge.source, c, None));
+                hops.push((c, &edge.target, None));
             }
-            continue;
+            None => hops.push((&edge.source, &edge.target, tag)),
         }
-        if seen.insert((i, j)) {
-            cedges.push((i, j));
+        if let Some(c) = rev {
+            hops.push((&edge.target, c, None));
+            hops.push((c, &edge.source, None));
+        }
+        for (s, t, tag) in hops {
+            let i = intern(&mut order, &mut index, collapse(s, depth));
+            let j = intern(&mut order, &mut index, collapse(t, depth));
+            if i == j {
+                if s == t {
+                    self_refs.insert(i);
+                }
+                continue;
+            }
+            if fwd == Some(s) || rev == Some(s) {
+                data_nodes.insert(i);
+            }
+            if fwd == Some(t) || rev == Some(t) {
+                data_nodes.insert(j);
+            }
+            if seen.insert((i, j, tag.map(String::from))) {
+                cedges.push((i, j, tag.map(String::from)));
+            }
         }
     }
 
@@ -189,14 +232,13 @@ pub fn render(graph: &InGraph, opts: &VizOptions) -> Result<String, String> {
         return Ok("(empty subgraph — the query matched no nodes)\n".into());
     }
 
-    // An unconnected node adds width but no structure — a query's related
-    // carrier nodes arrive as isolated boxes. Once there are edges to draw,
-    // isolated nodes move to a footnote rather than a sprawling row; with no
-    // edges at all, the nodes themselves are the diagram.
+    // An unconnected node adds width but no structure. Once there are edges
+    // to draw, isolated nodes move to a footnote rather than a sprawling row;
+    // with no edges at all, the nodes themselves are the diagram.
     let mut connected: BTreeSet<usize> = BTreeSet::new();
-    for &(i, j) in &cedges {
-        connected.insert(i);
-        connected.insert(j);
+    for (i, j, _) in &cedges {
+        connected.insert(*i);
+        connected.insert(*j);
     }
     let drawn: Vec<usize> = if cedges.is_empty() {
         (0..order.len()).collect()
@@ -219,14 +261,45 @@ pub fn render(graph: &InGraph, opts: &VizOptions) -> Result<String, String> {
 
     // Compact the drawn nodes to a dense 0..k index space for the layout;
     // labels must outlive the borrowing `Graph`, so build the arena first.
+    // A typed edge routes through a tag pseudo-node (`A → ‹wire› → B`): a tag
+    // is a layout node, so its placement is collision-proof — unlike the
+    // layout engine's inline edge labels, which drop and mislead on merged
+    // lanes. The box is stripped after rendering.
     let slot: BTreeMap<usize, usize> =
         drawn.iter().enumerate().map(|(new, &old)| (old, new)).collect();
-    let labels: Vec<String> = drawn
+    let mut labels: Vec<String> = drawn
         .iter()
         .map(|&old| label_for(&order[old], folded.get(&old).copied().unwrap_or(0)))
         .collect();
-    let edges: Vec<(usize, usize)> = kept.iter().map(|&(u, v)| (slot[&u], slot[&v])).collect();
-    let diagram = draw(&labels, &edges);
+    let tags = labels.len();
+    let mut edges: Vec<(usize, usize)> = Vec::new();
+    for (u, v, tag) in &kept {
+        match tag {
+            Some(t) => {
+                let k = labels.len();
+                labels.push(format!("‹{}›", truncate_tail(t, MAX_LABEL)));
+                edges.push((slot[u], k));
+                edges.push((k, slot[v]));
+            }
+            None => edges.push((slot[u], slot[v])),
+        }
+    }
+    let mut diagram = draw(&labels, &edges);
+
+    // Restyle after layout — `(`, `[` and space are all one column, so
+    // alignment is untouched:
+    // - a payload junction is rounded, (Data) against a component's
+    //   [Component], so the two read apart at a glance;
+    // - an edge tag sheds its box, ‹wire› on the path rather than a node.
+    for (k, &old) in drawn.iter().enumerate() {
+        if data_nodes.contains(&old) {
+            diagram = diagram.replace(&format!("[{}]", labels[k]), &format!("({})", labels[k]));
+        }
+    }
+    for tag in &labels[tags..] {
+        diagram = diagram.replace(&format!("[{tag}]"), &format!(" {tag} "));
+    }
+    let diagram = diagram.lines().map(str::trim_end).collect::<Vec<_>>().join("\n");
 
     // Assemble: caption, diagram, notes, then the optional detail listing.
     let hidden: usize = drawn.iter().filter_map(|old| folded.get(old)).sum();
@@ -234,7 +307,7 @@ pub fn render(graph: &InGraph, opts: &VizOptions) -> Result<String, String> {
         caption(drawn.len(), cedges.len(), hidden, isolated.len(), depth),
         diagram,
     ];
-    if let Some(notes) = notes(&order, &feedback, &self_refs, &isolated) {
+    if let Some(notes) = notes(&order, &feedback, &self_refs, &data_nodes, &isolated) {
         blocks.push(notes);
     }
     if opts.details {
@@ -247,6 +320,16 @@ pub fn render(graph: &InGraph, opts: &VizOptions) -> Result<String, String> {
 /// shallow enough.
 fn collapse(id: &str, depth: usize) -> String {
     id.split('.').take(depth).collect::<Vec<_>>().join(".")
+}
+
+/// The lane's payload, when the carried node is itself in the slice — the
+/// condition for drawing the edge through it rather than direct.
+fn carried<'a>(
+    lane: &'a Option<String>,
+    declared: &BTreeSet<String>,
+    depth: usize,
+) -> Option<&'a str> {
+    lane.as_deref().filter(|c| declared.contains(&collapse(c, depth)))
 }
 
 /// Assign `cid` a stable index, reusing an existing one.
@@ -285,16 +368,20 @@ fn truncate_tail(s: &str, max: usize) -> String {
 /// Greedily keep edges in appearance order, dropping any whose target already
 /// reaches its source — the minimal spanning DAG plus a list of the back-edges
 /// left out. Deterministic: the input order decides the tie.
-fn break_cycles(n: usize, edges: &[(usize, usize)]) -> (Vec<(usize, usize)>, Vec<(usize, usize)>) {
+#[allow(clippy::type_complexity)]
+fn break_cycles(
+    n: usize,
+    edges: &[(usize, usize, Option<String>)],
+) -> (Vec<(usize, usize, Option<String>)>, Vec<(usize, usize, Option<String>)>) {
     let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
     let mut kept = Vec::new();
     let mut feedback = Vec::new();
-    for &(u, v) in edges {
-        if reaches(&adj, v, u) {
-            feedback.push((u, v));
+    for (u, v, tag) in edges {
+        if reaches(&adj, *v, *u) {
+            feedback.push((*u, *v, tag.clone()));
         } else {
-            adj[u].push(v);
-            kept.push((u, v));
+            adj[*u].push(*v);
+            kept.push((*u, *v, tag.clone()));
         }
     }
     (kept, feedback)
@@ -355,19 +442,21 @@ fn caption(nodes: usize, edges: usize, hidden: usize, unconnected: usize, depth:
     line
 }
 
-/// Feedback-edge and self-reference notes, or `None` when the diagram stands
-/// on its own.
+/// Feedback-edge, self-reference and data-node notes, or `None` when the
+/// diagram stands on its own.
 fn notes(
     order: &[String],
-    feedback: &[(usize, usize)],
+    feedback: &[(usize, usize, Option<String>)],
     self_refs: &BTreeSet<usize>,
+    data_nodes: &BTreeSet<usize>,
     isolated: &[usize],
 ) -> Option<String> {
     let mut lines = Vec::new();
     if !feedback.is_empty() {
         lines.push("feedback edges (not drawn, would cycle):".to_string());
-        for &(u, v) in feedback.iter().take(8) {
-            lines.push(format!("  {} → {}", order[u], order[v]));
+        for (u, v, tag) in feedback.iter().take(8) {
+            let name = tag.as_ref().map(|t| format!("‹{t}› → ")).unwrap_or_default();
+            lines.push(format!("  {} → {name}{}", order[*u], order[*v]));
         }
         if feedback.len() > 8 {
             lines.push(format!("  … and {} more", feedback.len() - 8));
@@ -376,6 +465,14 @@ fn notes(
     if !self_refs.is_empty() {
         let names: Vec<&str> = self_refs.iter().map(|&i| order[i].as_str()).collect();
         lines.push(format!("self-references: {}", names.join(", ")));
+    }
+    if !data_nodes.is_empty() {
+        let names: Vec<&str> = data_nodes.iter().take(12).map(|&i| order[i].as_str()).collect();
+        let mut line = format!("data carried on edges: {}", names.join(", "));
+        if data_nodes.len() > 12 {
+            line.push_str(&format!(", … and {} more", data_nodes.len() - 12));
+        }
+        lines.push(line);
     }
     if !isolated.is_empty() {
         let names: Vec<&str> = isolated.iter().take(12).map(|&i| order[i].as_str()).collect();
@@ -649,6 +746,94 @@ mod tests {
     }
 
     #[test]
+    fn routes_edges_through_carried_data_nodes() {
+        // The payload is in the slice, so the edge is drawn through it:
+        // UI → LoginForm → AuthService, not UI → AuthService plus a footnote.
+        let out = viz(
+            json!({
+                "nodes": [{"id": "UI"}, {"id": "AuthService"}, {"id": "LoginForm"}],
+                "edges": [{
+                    "kind": "connection", "source": "UI", "target": "AuthService",
+                    "carrier": "LoginForm"
+                }]
+            }),
+            &VizOptions::default(),
+        );
+        assert!(out.contains("subgraph · 3 nodes · 2 edges"), "{out}");
+        // The payload's box is rounded, a component's square.
+        assert!(out.contains("(LoginForm)"), "{out}");
+        assert!(out.contains("[UI]"), "{out}");
+        assert!(out.contains("[AuthService]"), "{out}");
+        assert!(out.contains("data carried on edges: LoginForm"), "{out}");
+        assert!(!out.contains("unconnected"), "{out}");
+    }
+
+    #[test]
+    fn reverse_carriers_route_back_through_their_data_node() {
+        // A pull: the reverse lane carries Token back. The return hop closes a
+        // cycle, so one leg is lifted to the feedback note — never dropped.
+        let out = viz(
+            json!({
+                "nodes": [{"id": "UI"}, {"id": "AuthService"}, {"id": "Token"}],
+                "edges": [{
+                    "kind": "connection", "source": "UI", "target": "AuthService",
+                    "rev_carrier": "Token"
+                }]
+            }),
+            &VizOptions::default(),
+        );
+        assert!(out.contains("subgraph · 3 nodes · 3 edges"), "{out}");
+        assert!(out.contains("(Token)"), "{out}");
+        assert!(out.contains("data carried on edges: Token"), "{out}");
+        assert!(out.contains("feedback edges"), "{out}");
+        assert!(out.contains("Token → UI"), "{out}");
+        assert!(!out.contains("unconnected"), "{out}");
+    }
+
+    #[test]
+    fn shared_carriers_become_junctions() {
+        // Two producers of the same payload meet at its node; the parallel
+        // hops into the shared consumer dedup.
+        let out = viz(
+            json!({
+                "nodes": [
+                    {"id": "Rpc"}, {"id": "Stream"}, {"id": "Meter"}, {"id": "UsageRecord"}
+                ],
+                "edges": [
+                    {"kind": "connection", "source": "Rpc", "target": "Meter",
+                     "carrier": "UsageRecord"},
+                    {"kind": "connection", "source": "Stream", "target": "Meter",
+                     "carrier": "UsageRecord"}
+                ]
+            }),
+            &VizOptions::default(),
+        );
+        // Rpc → UsageRecord, Stream → UsageRecord, UsageRecord → Meter.
+        assert!(out.contains("subgraph · 4 nodes · 3 edges"), "{out}");
+        assert!(out.contains("(UsageRecord)"), "{out}");
+        assert!(out.contains("data carried on edges: UsageRecord"), "{out}");
+        assert!(!out.contains("unconnected"), "{out}");
+    }
+
+    #[test]
+    fn carriers_absent_from_the_slice_stay_out_of_the_diagram() {
+        // The payload node was filtered out of the slice: the edge is drawn
+        // direct, and the carrier remains a `--details` annotation.
+        let out = viz(
+            json!({
+                "nodes": [{"id": "A"}, {"id": "B"}],
+                "edges": [{
+                    "kind": "connection", "source": "A", "target": "B", "carrier": "X"
+                }]
+            }),
+            &VizOptions::default(),
+        );
+        assert!(out.contains("subgraph · 2 nodes · 1 edge"), "{out}");
+        assert!(!out.contains("X"), "{out}");
+        assert!(!out.contains("data carried"), "{out}");
+    }
+
+    #[test]
     fn refuses_when_too_large() {
         let nodes: Vec<Value> = (0..30).map(|i| json!({"id": format!("N{i}")})).collect();
         let err = render(
@@ -697,12 +882,86 @@ mod tests {
         let out = viz(
             json!({
                 "nodes": [{"id": "A"}, {"id": "B"}],
-                "edges": [{"kind": "connection", "type": "send", "source": "A", "target": "B"}]
+                "edges": [{
+                    "kind": "connection", "type": "send", "source": "A",
+                    "source_port": "out", "target": "B", "views": ["flow"]
+                }]
             }),
             &VizOptions::default(),
         );
+        // The type is structure and stays — as the edge's tag — but ports and
+        // views wait for --details.
         assert!(!out.contains("details"), "{out}");
-        assert!(!out.contains("send"), "{out}");
+        assert!(out.contains("‹send›"), "{out}");
+        assert!(!out.contains("A.out"), "{out}");
+        assert!(!out.contains("flow"), "{out}");
+    }
+
+    #[test]
+    fn direct_edges_are_tagged_with_their_type() {
+        let out = viz(
+            json!({
+                "nodes": [{"id": "Orders"}, {"id": "Billing"}],
+                "edges": [
+                    {"kind": "connection", "type": "wire", "source": "Orders", "target": "Billing"}
+                ]
+            }),
+            &VizOptions::default(),
+        );
+        assert!(out.contains("subgraph · 2 nodes · 1 edge"), "{out}");
+        assert!(out.contains("‹wire›"), "{out}");
+        // The tag rides the path unboxed — never as a node of its own.
+        assert!(!out.contains("[‹wire›]"), "{out}");
+    }
+
+    #[test]
+    fn parallel_edges_of_different_types_stay_distinct() {
+        let out = viz(
+            json!({
+                "nodes": [{"id": "A"}, {"id": "B"}],
+                "edges": [
+                    {"kind": "connection", "type": "wire", "source": "A", "target": "B"},
+                    {"kind": "relation", "type": "audits", "source": "A", "target": "B"}
+                ]
+            }),
+            &VizOptions::default(),
+        );
+        assert!(out.contains("subgraph · 2 nodes · 2 edges"), "{out}");
+        assert!(out.contains("‹wire›"), "{out}");
+        assert!(out.contains("‹audits›"), "{out}");
+    }
+
+    #[test]
+    fn routed_edges_carry_no_type_tag() {
+        // The payload junction names the interaction; a tag would say it twice.
+        let out = viz(
+            json!({
+                "nodes": [{"id": "UI"}, {"id": "AuthService"}, {"id": "LoginForm"}],
+                "edges": [{
+                    "kind": "connection", "type": "login", "source": "UI",
+                    "target": "AuthService", "carrier": "LoginForm"
+                }]
+            }),
+            &VizOptions::default(),
+        );
+        assert!(out.contains("(LoginForm)"), "{out}");
+        assert!(!out.contains("‹login›"), "{out}");
+    }
+
+    #[test]
+    fn feedback_notes_name_the_edge_type() {
+        let out = viz(
+            json!({
+                "nodes": [{"id": "A"}, {"id": "B"}],
+                "edges": [
+                    {"kind": "connection", "type": "req", "source": "A", "target": "B"},
+                    {"kind": "connection", "type": "ack", "source": "B", "target": "A"}
+                ]
+            }),
+            &VizOptions::default(),
+        );
+        assert!(out.contains("feedback edges"), "{out}");
+        assert!(out.contains("B → ‹ack› → A"), "{out}");
     }
 
     use serde_json::json;
