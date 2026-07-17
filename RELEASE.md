@@ -13,6 +13,22 @@ downloadable and that is the migration model.
 
 ## Releases
 
+### 0.1.9
+
+`archi viz` learns to draw the flow of data. A payload riding a connection's
+lanes (`carrier`/`rev_carrier`) that is itself in the slice is drawn *through*
+— source → data → target, the reverse lane routing back — so shared data
+becomes the junction its producers and consumers meet at instead of an
+unconnected box in a footnote. The diagram's vocabulary is now three-way:
+`[Component]` square, `(Data)` rounded, and every direct edge tagged with its
+rel/conn type on the path — `A → ‹wire› → B` — so no arrow is anonymous; a
+routed edge carries no tag, its payload names the interaction. Parallel edges
+of different types stay distinct paths, feedback notes name their type, and
+the new `data carried on edges:` note doubles as the legend. Ports, views,
+prose and out-of-slice carriers remain `--details`. The embedded `archi` skill
+also gains a standing instruction to keep spec prose short, so `archi
+sync-skills` reports it `updated`.
+
 ### 0.1.8
 
 The `archi` skill learns to run a session as a guided loop. A second standing
