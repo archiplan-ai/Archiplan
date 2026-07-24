@@ -16,8 +16,9 @@ use std::path::{Path, PathBuf};
 use modeling_lang::source::{find_project_root, manifest_src};
 
 /// The briefing, embedded at build time: skill name → SKILL.md text.
-const SKILLS: [(&str, &str); 4] = [
+const SKILLS: [(&str, &str); 5] = [
     ("archi", include_str!("../../../skills/archi.md")),
+    ("archi-implement", include_str!("../../../skills/archi-implement.md")),
     ("archi-merge", include_str!("../../../skills/archi-merge.md")),
     (
         "archi-finish-worktree",
@@ -450,10 +451,11 @@ fn claude_block(src: &str) -> String {
          \x20 under `archi/` (paths, not payloads): a finding that is not a file on\n\
          \x20 disk does not exist, and every fan-out is gated by `archi check` plus\n\
          \x20 a count of the files it claims to have written.\n\
-         - The full workflow (model, stress, version, plan, implement with link\n\
-         \x20 capture) is the `archi` skill in `.claude/skills/archi/`; merging\n\
-         \x20 parallel spec work is `archi-merge`, and crossing a project off the\n\
-         \x20 old fractal client is `archi-migrate-fractal`.\n\
+         - The spec workflow (model, stress, version, plan) is the `archi` skill\n\
+         \x20 in `.claude/skills/archi/`; executing a plan in waves is\n\
+         \x20 `archi-implement`; closing a worktree seat is `archi-finish-worktree`;\n\
+         \x20 merging parallel spec work is `archi-merge`, and crossing a project\n\
+         \x20 off the old fractal client is `archi-migrate-fractal`.\n\
          {FENCE_CLOSE}"
     )
 }

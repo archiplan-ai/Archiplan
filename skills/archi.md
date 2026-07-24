@@ -1,6 +1,6 @@
 ---
 name: archi
-description: Drive the archiplan workflow end to end — capture intent, derive requirements, model, stress-harden, version, plan, and implement in waves with code-link capture. Use when architecting or implementing a system with archiplan, greenfield or brownfield.
+description: Drive the archiplan spec workflow — capture intent, derive requirements, model, stress-harden, version, and plan. Use when architecting a system with archiplan, greenfield or brownfield; execution of a plan is the archi-implement skill.
 ---
 
 # Archi workflow
@@ -80,7 +80,7 @@ session, before any mutation:
    reopen from step 1) — or **cancel the whole session**. There is no
    third path: never proceed bare, never mutate an ungoverned tree.
 2. **Look for the existing seat first**: `archi worktree ls` (narrow with
-   `--spec <effort>` / `--plan <slug>`). Implementing a spec continues in
+   `--spec <effort>` / `--plan <slug>`). Work on a spec continues in
    that spec's worktree — `cd` there; a plan made current there
    (`archi plan use <name>`) joins the same binding and pins the spec
    version of that branch. A seat that exists only as a pushed branch is
@@ -107,8 +107,8 @@ never guesses a member's main.
 
 The registry moves only by verbs — `archi worktree ls | drop` — never by
 hand. Closing a seat is `archi worktree merge <slug>` (the
-archi-finish-worktree skill). Merging a spec early, before its
-implementation, is the exception
+archi-finish-worktree skill). Merging a spec early, before the rest of
+its unit, is the exception
 for one case only: a *parallel dependent* effort needs to pin your
 published version; the default unit rides one seat and lands once.
 
@@ -314,26 +314,17 @@ published version; the default unit rides one seat and lands once.
    Repeat 4–6 until a round survives — that version is the hardened
    spec.
 7. **Plan** — `archi plan use <name>` (refuses on an unsaved model — save
-   first). `archi plan task add <node>` per node to implement; spec_refs
+   first). `archi plan task add <node>` per node to realize; spec_refs
    and requirements are derived, never retyped. Then edit `plan.json`:
    envelope (`problem`, `technology_stack` with provenance,
    `architecture_summary`, `stack_mapping`), per task `description`,
    `inputs` (dependencies, keyed by producing task), `outputs` (files it
    will write — capture attributes deltas through these), `scenarios`, and
    one verification per matched requirement (read the matches from
-   `archi plan verify --json`). Loop `plan verify` to clean.
-8. **Execute waves** — `archi plan start`. Per wave: implement each
-   in-flight task inside its declared outputs, then `archi plan next` — it
-   captures the delta into candidate links (signal-bearing pairs only; the
-   no-signal product is suppressed, whole under `link capture --json`) and
-   blocks on asserted coverage of the refs the delta presses. Review
-   `archi link ls --evidence`, `link confirm` the load-bearing candidates,
-   `link rm` the drive-bys (subtractions stick), and re-run `plan next`.
-   Unpressed uncovered refs arrive as a suggested `link add` checklist —
-   hand-author the ones whose traceability you want, skip the rest. After
-   the last wave it prints the scenarios: verify them end to end, then one
-   more `plan next` → `DONE`.
-9. **Steady state** — `archi check` and `archi link verify` in CI;
+   `archi plan verify --json`). Loop `plan verify` to clean. Executing
+   the plan — waves, capture, link evidence — is the `archi-implement`
+   skill.
+8. **Steady state** — `archi check` and `archi link verify` in CI;
    `archi link audit` for dark deltas, dark spec, and decayed evidence.
 
 ## Brownfield
@@ -356,7 +347,8 @@ are authored from day one.
    only where the exact body is the contract.
 5. Stress the recovered model as in greenfield — legacy assumptions are
    the best stressors.
-6. Plan and execute as greenfield 7–8. Tasks over existing nodes seed
+6. Plan as greenfield 7; executing it is the `archi-implement` skill.
+   Tasks over existing nodes seed
    their incoming edges — the contracts not to break; declare every file
    you will touch in `outputs` so capture attributes your delta instead of
    reporting leftovers.

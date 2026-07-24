@@ -20,7 +20,20 @@ Ground rules, always:
 
 1. **Close the work.** In the seat: the wave loop finished (`archi plan
    next`) or `archi plan close`; `archi check` green; everything committed.
-2. **Land.** From the receiving checkout:
+2. **Pre-flight the join.** From the receiving checkout, before merging:
+   `git log --oneline <slug-branch>..<receiving-branch>` — empty means
+   the receiving branch never moved since the seat forked: land directly.
+   If it moved, ask the same range about the archive:
+   `git log --oneline <slug-branch>..<receiving-branch> -- archi/versions/`
+   - archive untouched → plain divergence: merge; an ordinary content
+     conflict, if one appears, goes to the `archi-merge` triage;
+   - archive touched *and* the seat minted saves of its own → the
+     version-id collision is guaranteed — do not attempt the direct
+     landing. Merge the receiving branch **into the seat** first, run the
+     collision ceremony there (keep the first-landed archive,
+     `archi version remint -m <note> [--session <slug>]`, `archi check`
+     green), commit the printed unit, then land.
+3. **Land.** From the receiving checkout:
    `archi worktree merge <slug> [--to [<member>=]<branch>]...`
    - member branches push to their remotes and retire — their integration
      is PRs on the forge, never a local merge into a member checkout;
@@ -30,7 +43,7 @@ Ground rules, always:
      PR;
    - a clean landing removes the worktree and clears its binding in the
      same move.
-3. **On refusal, repair and re-run** — the verb is idempotent:
+4. **On refusal, repair and re-run** — the verb is idempotent:
    - *open plan* → close it (step 1);
    - *protected receiving branch* → `--to <branch>`, push, PR;
    - *member push refused* (no remote, no rights) → repair the remote and
@@ -39,7 +52,7 @@ Ground rules, always:
      the remint runs in this seat — re-attach it with
      `archi worktree mint <slug>` if the landing already retired it — then
      re-run the merge to finish the retire.
-4. **Abandoning instead of landing** is `archi worktree drop <slug>`:
+5. **Abandoning instead of landing** is `archi worktree drop <slug>`:
    worktrees go, unpushed branches stay for hand deletion.
 
 ## Failure modes
