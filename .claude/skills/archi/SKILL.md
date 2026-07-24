@@ -1,6 +1,6 @@
 ---
 name: archi
-description: Drive the archiplan spec workflow — capture intent, derive requirements, model, stress-harden, version, and plan. Use when architecting a system with archiplan, greenfield or brownfield; execution of a plan is the archi-implement skill.
+description: Drive the archiplan spec workflow — capture intent, derive requirements, model, stress-harden, version. Use when architecting a system with archiplan, greenfield or brownfield; planning is the archi-plan skill, execution the archi-implement skill.
 ---
 
 # Archi workflow
@@ -313,25 +313,10 @@ published version; the default unit rides one seat and lands once.
 
    Repeat 4–6 until a round survives — that version is the hardened
    spec.
-7. **Plan** — `archi plan use <name>` (refuses on an unsaved model — save
-   first). `archi plan task add <node>` per node to realize; spec_refs
-   and requirement candidates are derived, never retyped. Then edit
-   `plan.json`:
-   envelope (`problem`, `technology_stack` with provenance,
-   `architecture_summary`, `stack_mapping` — verify cross-checks the two),
-   per task `description`,
-   **`owns` — the curation**: the derived matched set is the candidate
-   list (`plan show` marks unowned; `plan verify --json` carries it), own
-   the requirements this task answers for — a strict subset, at least one
-   when candidates exist; several tasks may touch one element without all
-   of them answering for its requirements. Then `inputs` (dependencies,
-   keyed by producing task), `outputs` (files it
-   will write — capture attributes deltas through these), `scenarios`, and
-   one verification per **owned** requirement. Loop `plan verify` to
-   clean — its report is the whole worklist: empty descriptions, missing
-   outputs, unmapped summary, unowned candidates, unverified owned
-   requirements. Executing
-   the plan — waves, capture, link evidence — is the `archi-implement`
+7. **Plan** — the `archi-plan` skill: the envelope with a user-polled
+   stack and its infrastructure, tasks per node, requirement ownership,
+   named verifications, scenarios. `plan use` refuses on an unsaved
+   model — save first. Executing the plan is the `archi-implement`
    skill.
 8. **Steady state** — `archi check` and `archi link verify` in CI;
    `archi link audit` for dark deltas, dark spec, and decayed evidence.
@@ -356,8 +341,8 @@ are authored from day one.
    only where the exact body is the contract.
 5. Stress the recovered model as in greenfield — legacy assumptions are
    the best stressors.
-6. Plan as greenfield 7; executing it is the `archi-implement` skill.
-   Tasks over existing nodes seed
+6. Plan with the `archi-plan` skill; executing it is the
+   `archi-implement` skill. Tasks over existing nodes seed
    their incoming edges — the contracts not to break; declare every file
    you will touch in `outputs` so capture attributes your delta instead of
    reporting leftovers.

@@ -114,7 +114,8 @@ a. **TDD.** Write failing tests derived from the task's owned-requirement
    verifications. Confirm red.
 b. **context7.** If `mcp__context7__*` tools are exposed, query them for
    current docs of every library/framework the brief lists in
-   `stack_details`. Otherwise rely on what you know.
+   `stack_details` — the test frameworks and utilities included.
+   Otherwise rely on what you know.
 c. Implement until tests are green — **inside the task's declared
    `outputs`**: capture attributes deltas through them, and code outside
    them lands as unaccounted.
@@ -144,7 +145,12 @@ coverage of the refs the delta presses:
 ## Step 5 — Scenarios step
 
 `plan next` printed the scenarios. Verify each end to end — one test per
-scenario, iterate until every scenario is green — then:
+scenario, on the infrastructure the plan named (its docker setup),
+iterate until every scenario is green. **Missing infrastructure is a
+stop, not a skip**: ask the user through the poll tool — stand the
+infrastructure up now, or defer the scenario step with an explicit note
+in your report; a silent `plan next` over unverified scenarios is
+forbidden. Then:
 
 ```
 archi plan next
