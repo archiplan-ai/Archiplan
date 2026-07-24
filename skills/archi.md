@@ -315,13 +315,22 @@ published version; the default unit rides one seat and lands once.
    spec.
 7. **Plan** — `archi plan use <name>` (refuses on an unsaved model — save
    first). `archi plan task add <node>` per node to realize; spec_refs
-   and requirements are derived, never retyped. Then edit `plan.json`:
+   and requirement candidates are derived, never retyped. Then edit
+   `plan.json`:
    envelope (`problem`, `technology_stack` with provenance,
-   `architecture_summary`, `stack_mapping`), per task `description`,
-   `inputs` (dependencies, keyed by producing task), `outputs` (files it
+   `architecture_summary`, `stack_mapping` — verify cross-checks the two),
+   per task `description`,
+   **`owns` — the curation**: the derived matched set is the candidate
+   list (`plan show` marks unowned; `plan verify --json` carries it), own
+   the requirements this task answers for — a strict subset, at least one
+   when candidates exist; several tasks may touch one element without all
+   of them answering for its requirements. Then `inputs` (dependencies,
+   keyed by producing task), `outputs` (files it
    will write — capture attributes deltas through these), `scenarios`, and
-   one verification per matched requirement (read the matches from
-   `archi plan verify --json`). Loop `plan verify` to clean. Executing
+   one verification per **owned** requirement. Loop `plan verify` to
+   clean — its report is the whole worklist: empty descriptions, missing
+   outputs, unmapped summary, unowned candidates, unverified owned
+   requirements. Executing
    the plan — waves, capture, link evidence — is the `archi-implement`
    skill.
 8. **Steady state** — `archi check` and `archi link verify` in CI;

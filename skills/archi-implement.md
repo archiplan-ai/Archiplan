@@ -12,8 +12,9 @@ description: Drive the implementation of a started archi plan — wave by wave, 
 You are driving the implementation cycle of a plan authored at the plan
 stage of `/archi`. The plan is the source of truth — `archi plan
 current-wave` names the tasks in flight; the brief per task comes from
-`archi plan show` (description, spec_refs, matched requirements with
-verification counts) plus the authored fields read from `plan.json`
+`archi plan show` (description, spec_refs, owned requirements with
+verification counts — unowned matches are other tasks' duty) plus the
+authored fields read from `plan.json`
 (inputs, outputs, stack_details, verification texts — a read, never an
 edit). The tool is `archi`. You stop when `archi plan next` prints
 `DONE`.
@@ -109,8 +110,8 @@ reviews, and runs the verbs.
 
 Per-task contract (carried by the sub-agent's prompt):
 
-a. **TDD.** Write failing tests derived from the task's matched-
-   requirement verifications. Confirm red.
+a. **TDD.** Write failing tests derived from the task's owned-requirement
+   verifications. Confirm red.
 b. **context7.** If `mcp__context7__*` tools are exposed, query them for
    current docs of every library/framework the brief lists in
    `stack_details`. Otherwise rely on what you know.

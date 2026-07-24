@@ -102,6 +102,12 @@ pub struct Task {
     /// The spec elements it realizes: node paths and canonical edge text,
     /// version-free — the plan's pin applies to all of them.
     pub spec_refs: Vec<String>,
+    /// The requirements this task owns, curated from the derived matched
+    /// set — a strict subset, authored at the plan stage. Verification
+    /// duty counts these, not every match: several tasks may touch one
+    /// element without all of them answering for its requirements.
+    #[serde(default)]
+    pub owns: Vec<String>,
     /// Concrete tech detail for this task.
     #[serde(default)]
     pub stack_details: String,
@@ -426,6 +432,7 @@ pub fn task_add(root: &Path, node: &str, description: Option<&str>) -> Result<Ta
         node: node.to_string(),
         description: description.unwrap_or_default().to_string(),
         spec_refs: seed_spec_refs(model, node),
+        owns: Vec::new(),
         stack_details: String::new(),
         inputs: BTreeMap::new(),
         outputs: Vec::new(),
@@ -511,6 +518,10 @@ pub struct MatchedReq {
     pub req: String,
     /// Which of the task's own spec_refs pulled it in.
     pub matched_refs: Vec<String>,
+    /// Whether the task owns this match (`owns` in plan.json) — the match
+    /// is the candidate, ownership is the curation.
+    #[serde(default)]
+    pub owned: bool,
 }
 
 /// Everything derived from a plan against the spec — recomputed, never
@@ -595,6 +606,7 @@ fn matched_requirements(
                 slot: format!("r{}", out.len() + 1),
                 req: r.slug.clone(),
                 matched_refs,
+                owned: false,
             });
         }
     }
@@ -703,6 +715,16 @@ pub(crate) fn verify_plan(root: &Path, live: &Model, plan: &Plan) -> Result<Plan
                 t.id, t.node, plan.version
             ));
         }
+        if t.description.trim().is_empty() {
+            errors.push(format!("{}: empty description — say what the task does", t.id));
+        }
+        if t.outputs.is_empty() {
+            notes.push(format!(
+                "{}: no outputs declared — capture cannot attribute its delta; \
+                 name the files it will write",
+                t.id
+            ));
+        }
         for r in &t.spec_refs {
             if r.contains('@') {
                 errors.push(format!(
@@ -747,6 +769,19 @@ pub(crate) fn verify_plan(root: &Path, live: &Model, plan: &Plan) -> Result<Plan
         }
     }
 
+    // The envelope: every summary node mapped, every mapping summarized.
+    let summary: BTreeSet<&str> =
+        plan.architecture_summary.iter().map(|s| s.node.as_str()).collect();
+    let mapped: BTreeSet<&str> = plan.stack_mapping.iter().map(|m| m.node.as_str()).collect();
+    for s in summary.difference(&mapped) {
+        errors.push(format!("summary node `{s}` has no stack mapping"));
+    }
+    for m in mapped.difference(&summary) {
+        errors.push(format!(
+            "stack mapping realizes `{m}`, which the summary does not name"
+        ));
+    }
+
     // Waves.
     let waves = match layer(&plan.tasks) {
         Ok(w) => w,
@@ -774,12 +809,46 @@ pub(crate) fn verify_plan(root: &Path, live: &Model, plan: &Plan) -> Result<Plan
     let endpoints = edge_endpoints(pinned);
     let mut matched = BTreeMap::new();
     for t in &plan.tasks {
-        let m = matched_requirements(pinned, &tree, &endpoints, t);
-        for slug in t.verifications.keys() {
+        let mut m = matched_requirements(pinned, &tree, &endpoints, t);
+        // Curation: the matched set is the candidate list, `owns` the
+        // authored selection — a strict subset, at least one when
+        // candidates exist. Verification duty follows ownership.
+        for slug in &t.owns {
             if !m.iter().any(|mr| &mr.req == slug) {
                 errors.push(format!(
-                    "{}: verification for `{slug}`, which the reverse lookup does not match — \
-                     a stale key, or the requirement moved",
+                    "{}: owns `{slug}`, which the reverse lookup does not match — \
+                     drop it, or restore the spec_ref that carried it",
+                    t.id
+                ));
+            }
+        }
+        if t.owns.is_empty() && !m.is_empty() {
+            errors.push(format!(
+                "{}: {} matched requirement{} and none owned — `owns` in plan.json \
+                 selects the ones this task answers for; own at least one",
+                t.id,
+                m.len(),
+                if m.len() == 1 { "" } else { "s" }
+            ));
+        }
+        for mr in &mut m {
+            mr.owned = t.owns.contains(&mr.req);
+        }
+        for slug in t.verifications.keys() {
+            if !t.owns.contains(slug) {
+                errors.push(format!(
+                    "{}: verification for `{slug}`, which the task does not own — \
+                     own it, or drop the stale key",
+                    t.id
+                ));
+            }
+        }
+        for slug in &t.owns {
+            if m.iter().any(|mr| &mr.req == slug)
+                && t.verifications.get(slug).is_none_or(Vec::is_empty)
+            {
+                errors.push(format!(
+                    "{}: owned `{slug}` has no verification — author the observable check",
                     t.id
                 ));
             }
@@ -821,26 +890,6 @@ fn gate_structure(report: &PlanReport) -> Result<(), String> {
     ))
 }
 
-/// Every matched requirement of every task carries at least one authored
-/// verification — the plan refuses to start half-promised.
-fn gate_verifications(plan: &Plan, report: &PlanReport) -> Result<(), String> {
-    let mut missing = Vec::new();
-    for t in &plan.tasks {
-        for m in report.derived.matched.get(&t.id).into_iter().flatten() {
-            if t.verifications.get(&m.req).is_none_or(Vec::is_empty) {
-                missing.push(format!("{}: {} ({})", t.id, m.req, m.slot));
-            }
-        }
-    }
-    if missing.is_empty() {
-        Ok(())
-    } else {
-        Err(format!(
-            "every matched requirement needs a verification before start; missing:\n  {}",
-            missing.join("\n  ")
-        ))
-    }
-}
 
 /// Asserted code-link coverage, scoped to the delta: a ref gates only when
 /// the closing capture pressed it — some claimed changed item of its task
@@ -912,7 +961,6 @@ pub fn start(root: &Path, model: &Model) -> Result<(Plan, Vec<String>), String> 
     }
     let report = verify_plan(root, model, &plan)?;
     gate_structure(&report)?;
-    gate_verifications(&plan, &report)?;
     links::capture::write_index(root, &plan.name, 1)?;
     plan.state = PlanState::Started;
     plan.closed_waves = 0;
@@ -1151,9 +1199,10 @@ pub fn render_show(plan: &Plan, report: &PlanReport) -> String {
             for m in report.derived.matched.get(id).into_iter().flatten() {
                 let proofs = task.verifications.get(&m.req).map_or(0, Vec::len);
                 out.push_str(&format!(
-                    "    {} {} (via {}) — {} verification{}\n",
+                    "    {} {}{} (via {}) — {} verification{}\n",
                     m.slot,
                     m.req,
+                    if m.owned { "" } else { " (unowned)" },
                     m.matched_refs.join(", "),
                     proofs,
                     if proofs == 1 { "" } else { "s" }
@@ -1273,6 +1322,27 @@ mod tests {
         load_active(root).unwrap()
     }
 
+    /// Author the curation whole: descriptions, own every matched
+    /// requirement, one verification per owned — the old own-everything
+    /// behavior, spelled out.
+    fn curate_all(root: &Path, model: &Model) {
+        let mut plan = active(root);
+        let report = verify_plan(root, model, &plan).unwrap();
+        for t in &mut plan.tasks {
+            if t.description.trim().is_empty() {
+                t.description = format!("realize {}", t.node);
+            }
+            let matched = report.derived.matched.get(&t.id).into_iter().flatten();
+            t.owns = matched.clone().map(|m| m.req.clone()).collect();
+            for m in matched {
+                t.verifications
+                    .entry(m.req.clone())
+                    .or_insert_with(|| vec![format!("test — proves {}", m.req)]);
+            }
+        }
+        store_plan(root, &plan).unwrap();
+    }
+
     #[test]
     fn use_pins_a_hardened_version_and_switches() {
         let root = temp_project();
@@ -1368,6 +1438,7 @@ mod tests {
         use_plan(&root, ws.model(), "mvp").unwrap();
         task_add(&root, "Store", None).unwrap();
         task_add(&root, "Auth", None).unwrap();
+        curate_all(&root, ws.model());
 
         let report = verify(&root, ws.model()).unwrap();
         assert_eq!(report.errors, Vec::<String>::new());
@@ -1441,18 +1512,12 @@ mod tests {
         plan.tasks[1].inputs.insert("t1".into(), "the store api".into());
         store_plan(&root, &plan).unwrap();
 
-        // The start gate: every matched requirement wants a verification.
+        // The start gate: unowned matches and empty descriptions refuse —
+        // curation is authored before the plan runs.
         let err = start(&root, ws.model()).unwrap_err();
-        assert!(err.contains("needs a verification"), "{err}");
-        let mut plan = active(&root);
-        let report = verify_plan(&root, ws.model(), &plan).unwrap();
-        for t in &mut plan.tasks {
-            for m in &report.derived.matched[&t.id] {
-                t.verifications
-                    .insert(m.req.clone(), vec![format!("test — proves {}", m.req)]);
-            }
-        }
-        store_plan(&root, &plan).unwrap();
+        assert!(err.contains("none owned"), "{err}");
+        assert!(err.contains("empty description"), "{err}");
+        curate_all(&root, ws.model());
         let (started, wave1) = start(&root, ws.model()).unwrap();
         assert_eq!(started.state, PlanState::Started);
         assert_eq!(wave1, vec!["t1".to_string()]);
@@ -1571,14 +1636,8 @@ mod tests {
 
         let mut plan = active(&root);
         plan.tasks[0].outputs.push("code/auth.rs".into());
-        let report = verify_plan(&root, ws.model(), &plan).unwrap();
-        for t in &mut plan.tasks {
-            for m in &report.derived.matched[&t.id] {
-                t.verifications
-                    .insert(m.req.clone(), vec![format!("test — proves {}", m.req)]);
-            }
-        }
         store_plan(&root, &plan).unwrap();
+        curate_all(&root, ws.model());
         start(&root, ws.model()).unwrap();
 
         // The delta names the incoming wire's ports but never the node:
@@ -1617,6 +1676,79 @@ mod tests {
             "{:?}",
             outcome.checklist
         );
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn curation_selects_from_matched_and_scopes_the_verification_duty() {
+        let root = temp_project();
+        let ws = compiled(&root);
+        save_version(&root);
+        put_requirements(&root);
+        use_plan(&root, ws.model(), "mvp").unwrap();
+        task_add(&root, "Store", Some("keep the creds")).unwrap();
+
+        // Own one of the two matches: the unowned one demands nothing.
+        let mut plan = active(&root);
+        plan.tasks[0].owns = vec!["store-encrypted".into()];
+        plan.tasks[0]
+            .verifications
+            .insert("store-encrypted".into(), vec!["test — encrypted at rest".into()]);
+        store_plan(&root, &plan).unwrap();
+        let report = verify(&root, ws.model()).unwrap();
+        assert_eq!(report.errors, Vec::<String>::new(), "{:?}", report.errors);
+        let flags: Vec<(String, bool)> = report.derived.matched["t1"]
+            .iter()
+            .map(|m| (m.req.clone(), m.owned))
+            .collect();
+        assert_eq!(
+            flags,
+            vec![
+                ("service-hardening".to_string(), false),
+                ("store-encrypted".to_string(), true)
+            ]
+        );
+        // The show surface marks the unowned candidate; the missing
+        // outputs ride as a note, never an error.
+        let rendered = render_show(&active(&root), &report);
+        assert!(rendered.contains("service-hardening (unowned)"), "{rendered}");
+        assert!(!rendered.contains("store-encrypted (unowned)"), "{rendered}");
+        assert!(report.notes.join("\n").contains("no outputs declared"), "{:?}", report.notes);
+
+        // The envelope cross-check: a summary node without a mapping and a
+        // mapping outside the summary both refuse.
+        let mut plan = active(&root);
+        plan.architecture_summary.push(SummaryLine {
+            node: "Store".into(),
+            role: "keeps the rows".into(),
+        });
+        plan.stack_mapping.push(StackMapping { tech: "sqlite".into(), node: "Auth".into() });
+        store_plan(&root, &plan).unwrap();
+        let report = verify(&root, ws.model()).unwrap();
+        let all = report.errors.join("\n");
+        assert!(all.contains("summary node `Store` has no stack mapping"), "{all}");
+        assert!(all.contains("stack mapping realizes `Auth`"), "{all}");
+        let mut plan = active(&root);
+        plan.architecture_summary.clear();
+        plan.stack_mapping.clear();
+        store_plan(&root, &plan).unwrap();
+
+        // A verification for an unowned match is a stale key; owning a
+        // requirement the lookup never matched is a lie — both refuse.
+        let mut plan = active(&root);
+        plan.tasks[0]
+            .verifications
+            .insert("service-hardening".into(), vec!["test — hardened".into()]);
+        plan.tasks[0].owns.push("ghost-req".into());
+        store_plan(&root, &plan).unwrap();
+        let report = verify(&root, ws.model()).unwrap();
+        let all = report.errors.join("\n");
+        assert!(
+            all.contains("`service-hardening`, which the task does not own"),
+            "{all}"
+        );
+        assert!(all.contains("owns `ghost-req`"), "{all}");
 
         fs::remove_dir_all(&root).unwrap();
     }
@@ -1661,6 +1793,7 @@ mod tests {
         plan.tasks[1].inputs.remove("t9");
         plan.tasks[1].spec_refs.retain(|r| !r.contains('@'));
         store_plan(&root, &plan).unwrap();
+        curate_all(&root, ws.model());
         fs::write(
             root.join("archi/src/model.arch"),
             MODEL.replace("def node Store:\n  port inn\n", "def node Safe:\n  port inn\n")

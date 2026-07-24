@@ -135,21 +135,31 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     plan["tasks"][1]["inputs"] = serde_json::json!({"t1": "the store api"});
     store_plan_json(&root, &plan);
 
-    // The start gate: every matched requirement wants a verification.
+    // The start gate: matches are candidates — nothing owned, nothing
+    // verified, one task still undescribed: the gate refuses.
     let (_, err) = fails(&root, &["plan", "start"]);
-    assert!(err.contains("needs a verification"), "{err}");
+    assert!(err.contains("none owned"), "{err}");
+    assert!(err.contains("empty description"), "{err}");
 
-    // The derived view says which — fill them through the same text surface.
-    let verify: Value =
-        serde_json::from_str(&ok(&root, &["plan", "verify", "--json"])).unwrap();
+    // The derived view says which — curate ownership and author the
+    // proofs through the same text surface. Verify carries the worklist
+    // (and exits nonzero while it stands).
+    let (verify_out, _) = fails(&root, &["plan", "verify", "--json"]);
+    let verify: Value = serde_json::from_str(&verify_out).unwrap();
     let mut plan = plan_json(&root);
     for task in plan["tasks"].as_array_mut().unwrap() {
         let id = task["id"].as_str().unwrap().to_string();
+        if task["description"].as_str().unwrap_or_default().is_empty() {
+            task["description"] = serde_json::json!("realize the node");
+        }
+        let mut owns = Vec::new();
         let mut proofs = serde_json::Map::new();
         for m in verify["matched"][&id].as_array().unwrap() {
             let req = m["req"].as_str().unwrap();
+            owns.push(req.to_string());
             proofs.insert(req.into(), serde_json::json!([format!("test — proves {req}")]));
         }
+        task["owns"] = serde_json::json!(owns);
         task["verifications"] = Value::Object(proofs);
     }
     store_plan_json(&root, &plan);
