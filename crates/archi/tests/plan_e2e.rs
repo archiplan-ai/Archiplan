@@ -86,6 +86,27 @@ fn fails(root: &Path, args: &[&str]) -> (String, String) {
     (stdout, stderr)
 }
 
+/// Run the binary with text piped to stdin; return (success, stdout, stderr).
+fn run_stdin(root: &Path, args: &[&str], stdin: &str) -> (bool, String, String) {
+    use std::io::Write;
+    use std::process::Stdio;
+    let mut child = Command::new(env!("CARGO_BIN_EXE_archi"))
+        .args(args)
+        .args(["--project", root.to_str().unwrap()])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("archi runs");
+    child.stdin.as_mut().unwrap().write_all(stdin.as_bytes()).unwrap();
+    let out = child.wait_with_output().unwrap();
+    (
+        out.status.success(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
 fn plan_json(root: &Path) -> Value {
     let text = fs::read_to_string(root.join("archi/plans/mvp/plan.json")).unwrap();
     serde_json::from_str(&text).unwrap()
@@ -107,6 +128,174 @@ fn captured_ids(stdout: &str) -> Vec<String> {
         .filter_map(|l| l.split_whitespace().next())
         .map(str::to_string)
         .collect()
+}
+
+#[test]
+fn the_authoring_verbs_cover_the_old_surface() {
+    let root = temp_project();
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+
+    // Envelope through verbs.
+    ok(&root, &["plan", "problem", "a tiny hardened store"]);
+    ok(&root, &["plan", "tech", "add", "Rust", "--provenance", "user choice"]);
+    let (_, err) = fails(&root, &["plan", "tech", "add", "Rust"]);
+    assert!(err.contains("already in the stack"), "{err}");
+    ok(&root, &["plan", "architecture-summary", "add", "Store", "keeps the rows"]);
+    ok(&root, &["plan", "architecture-summary", "add", "Auth", "guards the door"]);
+    ok(&root, &["plan", "architecture-summary", "add", "Gate", "fronts the world"]);
+    ok(&root, &["plan", "stack-mapping", "add", "Store", "Rust"]);
+    ok(&root, &["plan", "stack-mapping", "add", "Auth", "Rust"]);
+    ok(&root, &["plan", "stack-mapping", "add", "Gate", "Rust"]);
+    let (_, err) = fails(&root, &["plan", "stack-mapping", "add", "Store", "Rust"]);
+    assert!(err.contains("already realizes"), "{err}");
+    assert!(ok(&root, &["plan", "show"]).contains("problem: a tiny hardened store"));
+
+    // Scenarios: add, list, remove — 1-based.
+    ok(&root, &["plan", "scenarios", "add", "a user stores a row"]);
+    ok(&root, &["plan", "scenarios", "add", "a bogus flow"]);
+    assert!(ok(&root, &["plan", "scenarios", "list"]).contains("2. a bogus flow"));
+    ok(&root, &["plan", "scenarios", "remove", "2"]);
+    let (_, err) = fails(&root, &["plan", "scenarios", "remove", "5"]);
+    assert!(err.contains("no scenario 5"), "{err}");
+
+    // Tasks and their authored fields.
+    ok(&root, &["plan", "task", "add", "Store"]);
+    ok(&root, &["plan", "task", "add", "Auth"]);
+    ok(&root, &["plan", "task", "desc", "t1", "persist rows"]);
+    ok(&root, &["plan", "task", "desc", "t2", "guard the door"]);
+    ok(&root, &["plan", "task", "stack-detail", "add", "t1", "sqlite via rusqlite"]);
+    ok(&root, &["plan", "task", "output", "add", "t1", "code/store.rs"]);
+    ok(&root, &["plan", "task", "output", "add", "t2", "code/auth.rs"]);
+    ok(&root, &["plan", "task", "input", "add", "t2", "the store api", "--from", "t1"]);
+    let (_, err) = fails(&root, &["plan", "task", "input", "add", "t2", "ghost", "--from", "t9"]);
+    assert!(err.contains("no producer `t9`"), "{err}");
+    let (_, err) = fails(&root, &["plan", "task", "spec-ref", "add", "t2", "Phantom"]);
+    assert!(err.contains("E_MODEL_REF"), "{err}");
+    // widening: the outgoing edge the seed leaves out grows the
+    // candidate set of the task that claimed it
+    ok(&root, &["plan", "task", "spec-ref", "add", "t2", "Auth.creds wire Store.inn"]);
+    let out = ok(&root, &["plan", "task", "req", "suggest", "t2"]);
+    assert!(out.contains("store-encrypted (candidate)"), "{out}");
+
+    // Curation: suggest → own (slug or slot) → verification; misuse refuses.
+    let out = ok(&root, &["plan", "task", "req", "suggest", "t1"]);
+    assert!(out.contains("store-encrypted (candidate)"), "{out}");
+    let (_, err) = fails(
+        &root,
+        &["plan", "task", "verification", "add", "t1", "store-encrypted", "test — sealed"],
+    );
+    assert!(err.contains("own it first"), "{err}");
+    ok(&root, &["plan", "task", "req", "add", "t1", "store-encrypted"]);
+    ok(&root, &["plan", "task", "req", "add", "t1", "r1"]); // slot addressing
+    let (_, err) = fails(&root, &["plan", "task", "req", "add", "t1", "ghost-req"]);
+    assert!(err.contains("not among"), "{err}");
+    ok(&root, &[
+        "plan", "task", "verification", "add", "t1", "store-encrypted",
+        "test — rows encrypted at rest",
+    ]);
+    ok(&root, &["plan", "task", "verification", "add", "t1", "r1", "test — hardened"]);
+    ok(&root, &["plan", "task", "req", "add", "t2", "service-hardening"]);
+    ok(&root, &[
+        "plan", "task", "verification", "add", "t2", "service-hardening",
+        "test — login hardened",
+    ]);
+    ok(&root, &["plan", "task", "verification", "add", "t2", "service-hardening", "test — drop me"]);
+    let (_, err) = fails(&root, &["plan", "task", "verification", "remove", "t2", "service-hardening", "9"]);
+    assert!(err.contains("no verification 9"), "{err}");
+    ok(&root, &["plan", "task", "verification", "remove", "t2", "service-hardening", "2"]);
+    let out = ok(&root, &["plan", "task", "req-list", "t2"]);
+    assert!(out.contains("service-hardening — 1 verification"), "{out}");
+    // remove without an index clears the key whole — and re-authoring works
+    ok(&root, &["plan", "task", "verification", "remove", "t2", "service-hardening"]);
+    let out = ok(&root, &["plan", "task", "req-list", "t2"]);
+    assert!(out.contains("service-hardening — 0 verifications"), "{out}");
+    ok(&root, &[
+        "plan", "task", "verification", "add", "t2", "service-hardening",
+        "test — login hardened",
+    ]);
+
+    // Disowning takes the verifications with it.
+    ok(&root, &["plan", "task", "req", "remove", "t1", "service-hardening"]);
+    let out = ok(&root, &["plan", "task", "req-list", "t1"]);
+    assert!(!out.contains("service-hardening"), "{out}");
+    assert!(out.contains("store-encrypted"), "{out}");
+
+    // The standalone brief.
+    let brief = ok(&root, &["plan", "task", "show", "t1"]);
+    assert!(brief.contains("t1 Store — persist rows"), "{brief}");
+    assert!(brief.contains("sqlite via rusqlite"), "{brief}");
+    assert!(brief.contains("output: code/store.rs"), "{brief}");
+    assert!(brief.contains("store-encrypted (owned"), "{brief}");
+    assert!(brief.contains("verify: test — rows encrypted at rest"), "{brief}");
+
+    // The read surfaces, then the verb-authored plan verifies and starts.
+    assert!(ok(&root, &["plan", "list"]).contains("mvp @ v0001 (draft)"));
+    assert!(ok(&root, &["plan", "status"]).contains("plan `mvp` @ v0001 (draft), 0 waves closed"));
+    ok(&root, &["plan", "verify"]);
+    ok(&root, &["plan", "start"]);
+    assert!(ok(&root, &["plan", "status"]).contains("(started)"));
+
+    // Authoring is a draft-stage act.
+    let (_, err) = fails(&root, &["plan", "problem", "too late"]);
+    assert!(err.contains("authoring happens in draft"), "{err}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn batch_runs_every_verb_from_stdin_and_stops_at_the_first_failure() {
+    let root = temp_project();
+    ok(&root, &["version", "save", "-m", "first"]);
+
+    // One invocation authors the whole plan: comments and blank lines are
+    // skipped, CRLF tolerated, `\n` in double quotes carries a multiline
+    // value, `--project` is forwarded to every line.
+    let script = "# the whole plan in one call\r\n\
+                  plan use mvp\n\
+                  plan problem \"a tiny hardened store\"\n\
+                  plan tech add Rust --provenance \"user choice\"\n\
+                  \n\
+                  plan architecture-summary add Store \"keeps the rows\"\n\
+                  plan architecture-summary add Auth \"guards the door\"\n\
+                  plan architecture-summary add Gate \"fronts the world\"\n\
+                  plan stack-mapping add Store Rust\n\
+                  plan stack-mapping add Auth Rust\n\
+                  plan stack-mapping add Gate Rust\n\
+                  plan scenarios add \"a user stores a row\"\n\
+                  plan task add Store\n\
+                  plan task add Auth\n\
+                  plan task desc t1 \"persist rows\\nacross restarts\"\n\
+                  plan task desc t2 \"guard the door\"\n\
+                  plan task output add t1 code/store.rs\n\
+                  plan task output add t2 code/auth.rs\n\
+                  plan task input add t2 \"the store api\" --from t1\n\
+                  plan task req add t1 store-encrypted\n\
+                  plan task req add t2 service-hardening\n\
+                  plan task verification add t1 store-encrypted \"test — rows encrypted at rest\"\n\
+                  plan task verification add t2 service-hardening \"test — login hardened\"\n\
+                  plan task req remove t1 service-hardening\n";
+    let (success, out, err) = run_stdin(&root, &["batch"], script);
+    // t1 never owned service-hardening — the batch stops exactly there.
+    assert!(!success, "{out}");
+    assert!(err.contains("batch stopped at line 24"), "{err}");
+    assert!(out.contains("[22]"), "the lines before it ran: {out}");
+
+    // Everything before the stop is applied; nothing after existed.
+    let brief = ok(&root, &["plan", "task", "show", "t1"]);
+    assert!(brief.contains("across restarts"), "the escaped newline landed: {brief}");
+    ok(&root, &["plan", "verify"]);
+    ok(&root, &["plan", "start"]);
+
+    // Nesting refuses; a parse error names its line.
+    let (success, _, err) = run_stdin(&root, &["batch"], "batch\n");
+    assert!(!success);
+    assert!(err.contains("does not nest"), "{err}");
+    let (success, _, err) = run_stdin(&root, &["batch"], "plan problem 'open\n");
+    assert!(!success);
+    assert!(err.contains("unterminated"), "{err}");
+
+    fs::remove_dir_all(&root).unwrap();
 }
 
 #[test]

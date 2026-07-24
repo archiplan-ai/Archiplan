@@ -9,15 +9,13 @@ description: Drive the implementation of a started archi plan — wave by wave, 
 
 # Implement an archi Plan
 
-You are driving the implementation cycle of a plan authored at the plan
-stage of `/archi`. The plan is the source of truth — `archi plan
-current-wave` names the tasks in flight; the brief per task comes from
-`archi plan show` (description, spec_refs, owned requirements with
-verification counts — unowned matches are other tasks' duty) plus the
-authored fields read from `plan.json`
-(inputs, outputs, stack_details, verification texts — a read, never an
-edit). The tool is `archi`. You stop when `archi plan next` prints
-`DONE`.
+You are driving the implementation cycle of a plan authored via
+`/archi-plan`. The plan is the source of truth — `archi plan
+current-wave` names the tasks in flight, and the brief per task comes
+from `archi plan task show <id>`: description, pinned version, spec_refs,
+stack details, inputs, outputs, owned requirements with their
+verification texts (unowned matches are other tasks' duty). The tool is
+`archi`. You stop when `archi plan next` prints `DONE`.
 
 Ask every question to the user through the editor's poll tool
 (`AskUserQuestion` in Claude Code, the equivalent elsewhere) — never dump
@@ -72,7 +70,7 @@ archi plan use <name>
 ## Step 2 — Synchronize lifecycle state
 
 ```
-archi plan show
+archi plan status
 ```
 
 Branch on the printed state:
@@ -100,6 +98,7 @@ Step 2 for a completed plan.
 
 ```
 archi plan current-wave
+archi plan task show <task_id>
 ```
 
 For each task in the wave, read the brief verbatim, then dispatch one
@@ -167,9 +166,9 @@ dispatches one — **all in a single message**, with
 `subagent_type: general-purpose`. Each prompt must
 be self-contained — sub-agents do not inherit conversation context.
 Include the seat's working directory (and the member worktree path when
-the task's outputs live in a member repo), the task id, its brief
-verbatim, and the per-task contract (TDD, context7 if available,
-implement inside the declared outputs). Sub-agents write code and tests
+the task's outputs live in a member repo), the task id, its
+`archi plan task show` brief verbatim, and the per-task contract (TDD,
+context7 if available, implement inside the declared outputs). Sub-agents write code and tests
 only — every `plan` and `link` verb stays with you, the orchestrator.
 Wait for every sub-agent before you call `archi plan next`.
 
@@ -180,8 +179,8 @@ sub-agents cannot prompt for permission on their own.
 ## Principles
 
 - **Plan is the source of truth.** Read the in-flight ids through
-  `archi plan current-wave` and the briefs through `archi plan show` +
-  `plan.json`; do not improvise from memory.
+  `archi plan current-wave` and the briefs through
+  `archi plan task show`; do not improvise from memory.
 - **Commit before the join.** The wave is committed before
   `archi plan next` — a link's commit provenance is stamped at birth,
   from a clean tree only.
@@ -195,8 +194,9 @@ sub-agents cannot prompt for permission on their own.
   the orchestrator never writes task code inline.
 - **Stop on plan errors.** Surface the CLI message verbatim and route the
   user back to `/archi` as the message dictates.
-- **Lifecycle moves only through verbs.** Never hand-edit `state`,
-  `closed_waves`, latches, the version archive or the link journal;
-  authored plan fields were the plan stage's business, not this skill's.
+- **CLI is the only author.** Never hand-edit plan.json — `state`,
+  `closed_waves`, latches, the version archive or the link journal least
+  of all; authored plan fields were `/archi-plan`'s business, through its
+  verbs, not this skill's.
 - **Code lands only in seats.** The plan's worktree and its member
   worktrees — never a primary checkout.

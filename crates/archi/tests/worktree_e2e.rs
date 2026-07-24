@@ -137,9 +137,13 @@ fn read_verbs_answer_on_a_protected_branch() {
     let (_ws, spec) = protected_repo("reads");
     ok(&spec, &["check"]);
     ok(&spec, &["version", "list"]);
-    // plan verify is a read: it passes the guard and fails on its own terms.
+    // plan reads pass the guard and fail on their own terms — the
+    // authoring reads (suggest, list) included.
     let (_, _, err) = run(&spec, &["plan", "verify"]);
     assert!(err.contains("no active plan"), "past the guard, not stopped by it: {err}");
+    let (_, _, err) = run(&spec, &["plan", "scenarios", "list"]);
+    assert!(err.contains("no active plan"), "past the guard, not stopped by it: {err}");
+    ok(&spec, &["plan", "list"]);
 }
 
 #[test]

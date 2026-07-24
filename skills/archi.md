@@ -8,9 +8,11 @@ description: Drive the archiplan spec workflow — capture intent, derive requir
 Ground rules, always:
 
 - Everything is text. Model = `.arch` sources under `archi/src/`,
-  requirements, stressors and decisions = markdown under `archi/`, plan = `plan.json`. Mutate by editing files;
-  lifecycle moves only through verbs. Run `archi check` after every editing
-  round — errors block, findings are the worklist.
+  requirements, stressors and decisions = markdown under `archi/` —
+  mutate them by editing files. The plan is text too, but its author is
+  the CLI: every plan mutation goes through `archi plan` verbs, never a
+  hand edit. Lifecycle moves only through verbs. Run `archi check` after
+  every editing round — errors block, findings are the worklist.
 - Search, don't grep. `archi search <phrase>` is ranked retrieval over
   every archi object — model elements with their identity prose, intents,
   requirements, stressors, sessions — and each hit carries its addresses

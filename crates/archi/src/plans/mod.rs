@@ -641,6 +641,295 @@ fn layer(tasks: &[Task]) -> Result<Vec<Vec<String>>, String> {
     Ok(waves)
 }
 
+// ---- verbs: authoring --------------------------------------------------------
+//
+// The full free-fractal authoring surface, re-homed onto text: every verb
+// is a validated read-modify-write of plan.json — the file stays the truth,
+// the verb spares the author the schema.
+
+/// Authoring is a draft-stage act — a started plan restructures through
+/// `plan reset`, a completed one is history.
+fn authoring_plan(root: &Path) -> Result<Plan, String> {
+    let plan = load_active(root)?;
+    if plan.state != PlanState::Draft {
+        return Err(format!(
+            "the plan is {}: authoring happens in draft — `plan reset` restructures",
+            plan.state.describe()
+        ));
+    }
+    Ok(plan)
+}
+
+pub fn set_problem(root: &Path, text: &str) -> Result<(), String> {
+    let mut plan = authoring_plan(root)?;
+    plan.problem = text.to_string();
+    store_plan(root, &plan)
+}
+
+pub fn tech_add(root: &Path, tech: &str, provenance: &str) -> Result<(), String> {
+    let mut plan = authoring_plan(root)?;
+    if plan.technology_stack.iter().any(|t| t.tech == tech) {
+        return Err(format!("`{tech}` is already in the stack"));
+    }
+    plan.technology_stack.push(TechChoice {
+        tech: tech.to_string(),
+        provenance: provenance.to_string(),
+    });
+    store_plan(root, &plan)
+}
+
+pub fn summary_add(root: &Path, node: &str, role: &str) -> Result<(), String> {
+    let mut plan = authoring_plan(root)?;
+    if plan.architecture_summary.iter().any(|s| s.node == node) {
+        return Err(format!("`{node}` already carries a summary line"));
+    }
+    plan.architecture_summary.push(SummaryLine {
+        node: node.to_string(),
+        role: role.to_string(),
+    });
+    store_plan(root, &plan)
+}
+
+pub fn mapping_add(root: &Path, node: &str, tech: &str) -> Result<(), String> {
+    let mut plan = authoring_plan(root)?;
+    if plan.stack_mapping.iter().any(|m| m.node == node && m.tech == tech) {
+        return Err(format!("`{tech}` already realizes `{node}`"));
+    }
+    plan.stack_mapping.push(StackMapping {
+        tech: tech.to_string(),
+        node: node.to_string(),
+    });
+    store_plan(root, &plan)
+}
+
+pub fn scenarios_add(root: &Path, text: &str) -> Result<(), String> {
+    let mut plan = authoring_plan(root)?;
+    plan.scenarios.push(text.to_string());
+    store_plan(root, &plan)
+}
+
+/// 1-based, as `scenarios list` numbers them.
+pub fn scenarios_remove(root: &Path, index: usize) -> Result<String, String> {
+    let mut plan = authoring_plan(root)?;
+    if index == 0 || index > plan.scenarios.len() {
+        return Err(format!(
+            "no scenario {index} — `archi plan scenarios list` numbers {} of them",
+            plan.scenarios.len()
+        ));
+    }
+    let removed = plan.scenarios.remove(index - 1);
+    store_plan(root, &plan)?;
+    Ok(removed)
+}
+
+fn task_entry<'a>(plan: &'a mut Plan, id: &str) -> Result<&'a mut Task, String> {
+    plan.tasks
+        .iter_mut()
+        .find(|t| t.id == id)
+        .ok_or_else(|| format!("no task `{id}` — `archi plan show` lists them"))
+}
+
+pub fn task_desc(root: &Path, id: &str, text: &str) -> Result<(), String> {
+    let mut plan = authoring_plan(root)?;
+    task_entry(&mut plan, id)?.description = text.to_string();
+    store_plan(root, &plan)
+}
+
+pub fn task_stack_detail_add(root: &Path, id: &str, text: &str) -> Result<(), String> {
+    let mut plan = authoring_plan(root)?;
+    let t = task_entry(&mut plan, id)?;
+    if t.stack_details.is_empty() {
+        t.stack_details = text.to_string();
+    } else {
+        t.stack_details.push('\n');
+        t.stack_details.push_str(text);
+    }
+    store_plan(root, &plan)
+}
+
+pub fn task_input_add(root: &Path, id: &str, from: &str, note: &str) -> Result<(), String> {
+    let mut plan = authoring_plan(root)?;
+    if id == from {
+        return Err(format!("`{id}` cannot input itself"));
+    }
+    if !plan.tasks.iter().any(|t| t.id == from) {
+        return Err(format!("no producer `{from}` — `archi plan show` lists the tasks"));
+    }
+    task_entry(&mut plan, id)?
+        .inputs
+        .insert(from.to_string(), note.to_string());
+    store_plan(root, &plan)
+}
+
+pub fn task_output_add(root: &Path, id: &str, path: &str) -> Result<(), String> {
+    let mut plan = authoring_plan(root)?;
+    let t = task_entry(&mut plan, id)?;
+    if t.outputs.iter().any(|o| o == path) {
+        return Err(format!("`{path}` is already an output of {id}"));
+    }
+    t.outputs.push(path.to_string());
+    store_plan(root, &plan)
+}
+
+pub fn task_spec_ref_add(root: &Path, id: &str, r: &str) -> Result<(), String> {
+    let mut plan = authoring_plan(root)?;
+    if r.contains('@') {
+        return Err(format!(
+            "`{r}` carries a version — spec_refs are version-free; the plan's pin applies"
+        ));
+    }
+    let canonical = links::normalize_ref(r);
+    if r != canonical {
+        return Err(format!("`{r}` is not canonical — write `{canonical}`"));
+    }
+    let ws = compile_pinned(root, &plan.version)?;
+    let spec = links::SpecRef { path: canonical.clone(), version: None };
+    if !links::resolves_in(ws.model(), &spec) {
+        return Err(format!(
+            "`{r}` names no element of {} (E_MODEL_REF)",
+            plan.version
+        ));
+    }
+    let t = task_entry(&mut plan, id)?;
+    if t.spec_refs.iter().any(|s| s == &canonical) {
+        return Err(format!("`{r}` is already a spec_ref of {id}"));
+    }
+    t.spec_refs.push(canonical);
+    store_plan(root, &plan)?;
+    Ok(())
+}
+
+/// Resolve a requirement handle — a slug, or a per-task slot (`r1`) — against
+/// the task's matched set.
+fn resolve_req<'a>(matched: &'a [MatchedReq], handle: &str) -> Option<&'a MatchedReq> {
+    matched.iter().find(|m| m.req == handle || m.slot == handle)
+}
+
+pub fn own_add(root: &Path, live: &Model, id: &str, handle: &str) -> Result<String, String> {
+    let mut plan = authoring_plan(root)?;
+    let report = verify_plan(root, live, &plan)?;
+    let matched = report.derived.matched.get(id).map(Vec::as_slice).unwrap_or_default();
+    let Some(m) = resolve_req(matched, handle) else {
+        return Err(format!(
+            "`{handle}` is not among {id}'s matched requirements — \
+             `archi plan task req suggest {id}` lists the candidates; a missing candidate \
+             wants a spec_ref (`archi plan task spec-ref add`)"
+        ));
+    };
+    let slug = m.req.clone();
+    let t = task_entry(&mut plan, id)?;
+    if t.owns.contains(&slug) {
+        return Err(format!("{id} already owns `{slug}`"));
+    }
+    t.owns.push(slug.clone());
+    store_plan(root, &plan)?;
+    Ok(slug)
+}
+
+pub fn own_remove(root: &Path, id: &str, handle: &str) -> Result<String, String> {
+    let mut plan = authoring_plan(root)?;
+    let t = task_entry(&mut plan, id)?;
+    let Some(pos) = t.owns.iter().position(|s| s == handle) else {
+        return Err(format!("{id} does not own `{handle}` — `archi plan task req-list {id}`"));
+    };
+    let slug = t.owns.remove(pos);
+    t.verifications.remove(&slug);
+    store_plan(root, &plan)?;
+    Ok(slug)
+}
+
+pub fn verification_add(
+    root: &Path,
+    live: &Model,
+    id: &str,
+    handle: &str,
+    text: &str,
+) -> Result<String, String> {
+    let mut plan = authoring_plan(root)?;
+    let report = verify_plan(root, live, &plan)?;
+    let matched = report.derived.matched.get(id).map(Vec::as_slice).unwrap_or_default();
+    let slug = resolve_req(matched, handle)
+        .map(|m| m.req.clone())
+        .unwrap_or_else(|| handle.to_string());
+    let t = task_entry(&mut plan, id)?;
+    if !t.owns.contains(&slug) {
+        return Err(format!(
+            "{id} does not own `{slug}` — own it first: `archi plan task req add {id} {slug}`"
+        ));
+    }
+    t.verifications.entry(slug.clone()).or_default().push(text.to_string());
+    store_plan(root, &plan)?;
+    Ok(slug)
+}
+
+pub fn verification_remove(
+    root: &Path,
+    live: &Model,
+    id: &str,
+    handle: &str,
+    index: Option<usize>,
+) -> Result<String, String> {
+    let mut plan = authoring_plan(root)?;
+    let report = verify_plan(root, live, &plan)?;
+    let matched = report.derived.matched.get(id).map(Vec::as_slice).unwrap_or_default();
+    let slug = resolve_req(matched, handle)
+        .map(|m| m.req.clone())
+        .unwrap_or_else(|| handle.to_string());
+    let t = task_entry(&mut plan, id)?;
+    let Some(list) = t.verifications.get_mut(&slug) else {
+        return Err(format!("{id} has no verifications for `{slug}`"));
+    };
+    match index {
+        Some(i) => {
+            if i == 0 || i > list.len() {
+                return Err(format!("no verification {i} — {slug} carries {}", list.len()));
+            }
+            list.remove(i - 1);
+            if list.is_empty() {
+                t.verifications.remove(&slug);
+            }
+        }
+        None => {
+            t.verifications.remove(&slug);
+        }
+    }
+    store_plan(root, &plan)?;
+    Ok(slug)
+}
+
+/// The standalone brief `archi plan task show` renders: everything a
+/// sub-agent needs, no implicit context.
+pub fn render_task_show(plan: &Plan, report: &PlanReport, id: &str) -> Result<String, String> {
+    let Some(t) = plan.tasks.iter().find(|t| t.id == id) else {
+        return Err(format!("no task `{id}` — `archi plan show` lists them"));
+    };
+    let mut out = format!("{} {} — {}\n", t.id, t.node, t.description);
+    out.push_str(&format!("pinned: {}\n", plan.version));
+    out.push_str(&format!("spec_refs: {}\n", t.spec_refs.join(", ")));
+    if !t.stack_details.is_empty() {
+        out.push_str(&format!("stack: {}\n", t.stack_details.replace('\n', "; ")));
+    }
+    for (from, note) in &t.inputs {
+        out.push_str(&format!("input ← {from}: {note}\n"));
+    }
+    for o in &t.outputs {
+        out.push_str(&format!("output: {o}\n"));
+    }
+    for m in report.derived.matched.get(id).into_iter().flatten() {
+        let owned = if m.owned { "owned" } else { "unowned" };
+        out.push_str(&format!(
+            "{} {} ({owned}, via {})\n",
+            m.slot,
+            m.req,
+            m.matched_refs.join(", ")
+        ));
+        for v in t.verifications.get(&m.req).into_iter().flatten() {
+            out.push_str(&format!("  verify: {v}\n"));
+        }
+    }
+    Ok(out)
+}
+
 // ---- verify ------------------------------------------------------------------
 
 /// The outcome of `archi plan verify`: structural errors gate the

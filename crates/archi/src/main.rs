@@ -47,6 +47,7 @@
 
 mod addressing;
 mod axes;
+mod batch;
 mod docs;
 mod incidence;
 mod links;
@@ -101,13 +102,21 @@ const USAGE: &str = "usage:
   archi link audit [--scope <path>] [--since [<member>=]<rev>] [--repo <member>] [--prune] [--json] [--project <dir>]
   archi repo ls [--json] [--project <dir>]
   archi repo map <member> <dir> [--project <dir>]
+  archi batch [-] [--project <dir>]   # commands from stdin, one per line, fail-fast
   archi status [--project <dir>]
   archi worktree mint <slug> [--plan <name>] [--repos <a,b>] [--base [<member>=]<branch>]... [--project <dir>]
   archi worktree ls [--plan <slug>] [--spec <effort>] [--json] [--project <dir>]
   archi worktree drop <slug|path> [--project <dir>]
   archi worktree merge <slug|path> [--to [<member>=]<branch>]... [--project <dir>]
-  archi plan use <name> | repin | show [--json] | verify [--json] [--project <dir>]
-  archi plan task add <node> [--desc <text>] [--project <dir>]
+  archi plan use <name> | repin | show [--json] | verify [--json] | list | status [--project <dir>]
+  archi plan problem <text> | tech add <tech> [--provenance <why>] [--project <dir>]
+  archi plan architecture-summary add <node> <role> | stack-mapping add <node> <tech> [--project <dir>]
+  archi plan scenarios add <text> | list | remove <index> [--project <dir>]
+  archi plan task add <node> [--desc <text>] | desc <id> <text> | show <id> [--project <dir>]
+  archi plan task stack-detail add <id> <text> | spec-ref add <id> <ref> [--project <dir>]
+  archi plan task input add <id> <note> --from <producer> | output add <id> <path> [--project <dir>]
+  archi plan task req suggest <id> | add <id> <req|slot> | remove <id> <req> | req-list <id> [--project <dir>]
+  archi plan task verification add <id> <req|slot> <text> | remove <id> <req|slot> [<n>] [--project <dir>]
   archi plan start | next | current-wave | close | reset [--project <dir>]
   archi read [<request.json> | -] [--at <id>] [--project <dir>]
   archi query [--scope <path>]... [--type <path>]... [--kind <k>]... [--view <v>]...
@@ -176,6 +185,8 @@ struct Args {
     base: Vec<String>,
     to_many: Vec<String>,
     plan_flag: Option<String>,
+    provenance: Option<String>,
+    from_task: Option<String>,
     positional: Vec<String>,
 }
 
@@ -241,6 +252,8 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         base: Vec::new(),
         to_many: Vec::new(),
         plan_flag: None,
+        provenance: None,
+        from_task: None,
         positional: Vec::new(),
     };
     let mut it = argv.iter().peekable();
@@ -305,6 +318,8 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--repos" => args.repos = Some(value(&mut it, "--repos")?),
             "--base" => args.base.push(value(&mut it, "--base")?),
             "--plan" => args.plan_flag = Some(value(&mut it, "--plan")?),
+            "--provenance" => args.provenance = Some(value(&mut it, "--provenance")?),
+            "--from" => args.from_task = Some(value(&mut it, "--from")?),
             "--into" => args.into = Some(value(&mut it, "--into")?),
             "--keep" => args.keep = Some(value(&mut it, "--keep")?),
             "--task" => args.task = Some(value(&mut it, "--task")?),
@@ -345,6 +360,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
                     | "tradeoffs"
                     | "viz"
                     | "worktree"
+                    | "batch"
             ) =>
             {
                 args.positional.push(other.to_string())
@@ -1752,7 +1768,24 @@ fn run_plan(args: &Args) -> ExitCode {
     };
     let sub = args.positional.first().map(String::as_str);
     let rest = args.positional.get(1..).unwrap_or_default();
-    if matches!(sub, Some("use" | "repin" | "task" | "start" | "next" | "close" | "reset")) {
+    // The authoring and lifecycle verbs mutate; suggest/list/show surfaces
+    // read and stay free everywhere.
+    let second = args.positional.get(1).map(String::as_str);
+    let third = args.positional.get(2).map(String::as_str);
+    let mutating = match sub {
+        Some(
+            "use" | "repin" | "start" | "next" | "close" | "reset" | "problem" | "tech"
+            | "architecture-summary" | "stack-mapping",
+        ) => true,
+        Some("scenarios") => second != Some("list"),
+        Some("task") => match second {
+            Some("show") | Some("req-list") => false,
+            Some("req") => third != Some("suggest"),
+            _ => true,
+        },
+        _ => false,
+    };
+    if mutating {
         let work = if sub == Some("use") {
             rest.first().cloned()
         } else {
@@ -1804,6 +1837,190 @@ fn run_plan(args: &Args) -> ExitCode {
                     println!("added {} {} — spec_refs: {}", t.id, t.node, t.spec_refs.join(", "));
                     ExitCode::SUCCESS
                 }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("task"), [desc, id, text]) if desc == "desc" => {
+            match plans::task_desc(&root, id, text) {
+                Ok(()) => {
+                    println!("{id} described");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("task"), [sd, add, id, text]) if sd == "stack-detail" && add == "add" => {
+            match plans::task_stack_detail_add(&root, id, text) {
+                Ok(()) => {
+                    println!("{id} stack + {text}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("task"), [input, add, id, note]) if input == "input" && add == "add" => {
+            let Some(from) = args.from_task.as_deref() else {
+                return usage_err("`task input add` names its producer: --from <task_id>");
+            };
+            match plans::task_input_add(&root, id, from, note) {
+                Ok(()) => {
+                    println!("{id} ← {from}: {note}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("task"), [output, add, id, path]) if output == "output" && add == "add" => {
+            match plans::task_output_add(&root, id, path) {
+                Ok(()) => {
+                    println!("{id} output + {path}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("task"), [sr, add, id, r]) if sr == "spec-ref" && add == "add" => {
+            match plans::task_spec_ref_add(&root, id, r) {
+                Ok(()) => {
+                    println!("{id} spec_ref + {r}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("task"), [req, suggest, id]) if req == "req" && suggest == "suggest" => {
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            match plans::show(&root, ws.model()) {
+                Ok((plan, report)) => {
+                    let Some(t) = plan.tasks.iter().find(|t| &t.id == id) else {
+                        return fail(format!("no task `{id}` — `archi plan show` lists them"));
+                    };
+                    let matched = report.derived.matched.get(&t.id).into_iter().flatten();
+                    let mut any = false;
+                    for m in matched {
+                        any = true;
+                        println!(
+                            "{} {} ({}) via {}",
+                            m.slot,
+                            m.req,
+                            if m.owned { "owned" } else { "candidate" },
+                            m.matched_refs.join(", ")
+                        );
+                    }
+                    if !any {
+                        println!("no candidates — the task's elements carry no requirements");
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("task"), [req, add, id, handle]) if req == "req" && add == "add" => {
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            match plans::own_add(&root, ws.model(), id, handle) {
+                Ok(slug) => {
+                    println!("{id} owns {slug}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("task"), [req, remove, id, handle]) if req == "req" && remove == "remove" => {
+            match plans::own_remove(&root, id, handle) {
+                Ok(slug) => {
+                    println!("{id} disowned {slug} (its verifications went with it)");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("task"), [rl, id]) if rl == "req-list" => {
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            match plans::show(&root, ws.model()) {
+                Ok((plan, report)) => {
+                    let Some(t) = plan.tasks.iter().find(|t| &t.id == id) else {
+                        return fail(format!("no task `{id}` — `archi plan show` lists them"));
+                    };
+                    if t.owns.is_empty() {
+                        println!("{id} owns nothing — `archi plan task req suggest {id}`");
+                    }
+                    for m in report.derived.matched.get(&t.id).into_iter().flatten() {
+                        if !m.owned {
+                            continue;
+                        }
+                        let proofs = t.verifications.get(&m.req).map_or(0, Vec::len);
+                        println!(
+                            "{} {} — {} verification{}",
+                            m.slot,
+                            m.req,
+                            proofs,
+                            if proofs == 1 { "" } else { "s" }
+                        );
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("task"), [verification, add, id, handle, text])
+            if verification == "verification" && add == "add" =>
+        {
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            match plans::verification_add(&root, ws.model(), id, handle, text) {
+                Ok(slug) => {
+                    println!("{id} {slug} verify + {text}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("task"), [verification, remove, id, handle, rest @ ..])
+            if verification == "verification" && remove == "remove" && rest.len() <= 1 =>
+        {
+            let index = match rest.first() {
+                None => None,
+                Some(n) => match n.parse::<usize>() {
+                    Ok(i) => Some(i),
+                    Err(_) => return usage_err("`verification remove` takes a 1-based index"),
+                },
+            };
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            match plans::verification_remove(&root, ws.model(), id, handle, index) {
+                Ok(slug) => {
+                    println!("{id} {slug} verification removed");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("task"), [show, id]) if show == "show" => {
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            match plans::show(&root, ws.model()) {
+                Ok((plan, report)) => match plans::render_task_show(&plan, &report, id) {
+                    Ok(text) => {
+                        print!("{text}");
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => fail(e),
+                },
                 Err(e) => fail(e),
             }
         }
@@ -1940,6 +2157,100 @@ fn run_plan(args: &Args) -> ExitCode {
                 Err(e) => fail(e),
             }
         }
+        (Some("problem"), [text]) => match plans::set_problem(&root, text) {
+            Ok(()) => {
+                println!("problem set");
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e),
+        },
+        (Some("tech"), [add, tech]) if add == "add" => {
+            let prov = args.provenance.clone().unwrap_or_default();
+            match plans::tech_add(&root, tech, &prov) {
+                Ok(()) => {
+                    println!("stack + {tech}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("architecture-summary"), [add, node, role]) if add == "add" => {
+            match plans::summary_add(&root, node, role) {
+                Ok(()) => {
+                    println!("summary + {node}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("stack-mapping"), [add, node, tech]) if add == "add" => {
+            match plans::mapping_add(&root, node, tech) {
+                Ok(()) => {
+                    println!("mapping + {tech} realizes {node}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("scenarios"), [add, text]) if add == "add" => {
+            match plans::scenarios_add(&root, text) {
+                Ok(()) => {
+                    println!("scenario added");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("scenarios"), [list]) if list == "list" => match plans::load_active(&root) {
+            Ok(p) => {
+                if p.scenarios.is_empty() {
+                    println!("no scenarios");
+                }
+                for (i, s) in p.scenarios.iter().enumerate() {
+                    println!("{}. {s}", i + 1);
+                }
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e),
+        },
+        (Some("scenarios"), [remove, idx]) if remove == "remove" => {
+            let Ok(i) = idx.parse::<usize>() else {
+                return usage_err("`scenarios remove` takes the 1-based index from `list`");
+            };
+            match plans::scenarios_remove(&root, i) {
+                Ok(s) => {
+                    println!("removed: {s}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("list"), []) => match plans::all_plans(&root) {
+            Ok(all) => {
+                if all.is_empty() {
+                    println!("no plans — `archi plan use <name>` creates one");
+                }
+                for p in all {
+                    println!("{} @ {} ({})", p.name, p.version, p.state.describe());
+                }
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e),
+        },
+        (Some("status"), []) => match plans::load_active(&root) {
+            Ok(p) => {
+                println!(
+                    "plan `{}` @ {} ({}), {} wave{} closed",
+                    p.name,
+                    p.version,
+                    p.state.describe(),
+                    p.closed_waves,
+                    if p.closed_waves == 1 { "" } else { "s" }
+                );
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e),
+        },
         (Some("close"), []) => match plans::close(&root) {
             Ok(p) => {
                 println!("closed plan `{}`", p.name);
@@ -1955,7 +2266,9 @@ fn run_plan(args: &Args) -> ExitCode {
             Err(e) => fail(e),
         },
         _ => usage_err(
-            "`plan` takes: use <name> | repin | show | verify | task add <node> [--desc <text>] | \
+            "`plan` takes: use <name> | repin | show | verify | list | status | problem | tech add | \
+             architecture-summary add | stack-mapping add | scenarios add|list|remove | \
+             task add|desc|show|stack-detail|spec-ref|input|output|req|req-list|verification | \
              start | next | current-wave | close | reset",
         ),
     }
@@ -2475,6 +2788,17 @@ fn main() -> ExitCode {
         "repo" => run_repo(&args),
         "worktree" => run_worktree(&args),
         "status" => run_status(&args),
+        "batch" => {
+            let well_formed = match args.positional.as_slice() {
+                [] => true,
+                [p] => p == "-",
+                _ => false,
+            };
+            if !well_formed {
+                return usage_err("`batch` reads its commands from stdin: archi batch [-]");
+            }
+            batch::run(args.project.as_deref())
+        }
         "plan" => run_plan(&args),
         "read" => run_read(&args),
         "query" => run_query(&args),
