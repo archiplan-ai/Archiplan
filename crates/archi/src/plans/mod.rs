@@ -45,7 +45,7 @@ pub enum PlanState {
 }
 
 impl PlanState {
-    fn describe(self) -> &'static str {
+    pub(crate) fn describe(self) -> &'static str {
         match self {
             PlanState::Draft => "draft",
             PlanState::Started => "started",
@@ -127,6 +127,12 @@ pub struct Plan {
     pub name: String,
     /// The pinned spec version (`vNNNN`); `plan repin` moves it.
     pub version: String,
+    /// The pinned version's content hash (`sha256:…`), stamped at use and
+    /// repin — a pin is verified by content, not id alone, so a remint
+    /// cannot silently reinterpret it
+    /// (`archi/requirements/worktree-parallelism/pins-survive-a-remint`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version_hash: Option<String>,
     /// ISO-8601 UTC timestamp of creation.
     pub created: String,
     /// Lifecycle state.
@@ -245,6 +251,21 @@ pub(crate) fn load_active(root: &Path) -> Result<Plan, String> {
     }
 }
 
+/// Every stored plan, sorted by name — the handoff listing `status` prints.
+pub(crate) fn all_plans(root: &Path) -> Result<Vec<Plan>, String> {
+    let dir = plans_dir(root);
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return Ok(Vec::new());
+    };
+    let mut names: Vec<String> = entries
+        .filter_map(Result::ok)
+        .filter(|e| e.path().is_dir())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names.iter().map(|n| load_plan(root, n)).collect()
+}
+
 fn now() -> String {
     versions::iso8601_utc(SystemTime::now())
 }
@@ -295,9 +316,11 @@ pub fn use_plan(root: &Path, model: &Model, name: &str) -> Result<Used, String> 
         return Ok(Used::Switched(plan));
     }
     let version = pinnable_version(root, model)?;
+    let version_hash = pin_hash(root, &version);
     let plan = Plan {
         name: name.to_string(),
         version,
+        version_hash,
         created: now(),
         state: PlanState::Draft,
         closed_waves: 0,
@@ -325,8 +348,56 @@ pub fn repin(root: &Path, model: &Model) -> Result<(Plan, String), String> {
         return Err(format!("already pinned to {to}"));
     }
     let from = std::mem::replace(&mut plan.version, to);
+    plan.version_hash = pin_hash(root, &plan.version);
     store_plan(root, &plan)?;
     Ok((plan, from))
+}
+
+/// The archived content hash a pin records; `None` leaves an unhashed pin,
+/// which `check` treats as silent (pre-hash plans keep working).
+fn pin_hash(root: &Path, version: &str) -> Option<String> {
+    versions::Archive::open(root)
+        .ok()
+        .flatten()
+        .and_then(|a| a.entry(version).map(|e| e.model.clone()))
+}
+
+/// A plan whose pin no longer means what it meant
+/// (`archi/requirements/worktree-parallelism/pins-survive-a-remint`).
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PlanFinding {
+    StalePin { plan: String, version: String },
+}
+
+impl std::fmt::Display for PlanFinding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PlanFinding::StalePin { plan, version } => write!(
+                f,
+                "stale plan pin: `{plan}` pins {version}, whose archived content changed \
+                 since the pin — `archi plan repin`"
+            ),
+        }
+    }
+}
+
+/// Compare every stored plan's pin hash against the archive. Hash-less
+/// plans and ids the archive no longer holds stay silent — the lazy
+/// `compile_pinned` error owns those.
+pub(crate) fn check(root: &Path) -> Result<Vec<PlanFinding>, String> {
+    let Some(archive) = versions::Archive::open(root)? else {
+        return Ok(Vec::new());
+    };
+    let mut out = Vec::new();
+    for p in all_plans(root)? {
+        if let (Some(stored), Some(entry)) = (&p.version_hash, archive.entry(&p.version)) {
+            if stored != &entry.model {
+                out.push(PlanFinding::StalePin { plan: p.name.clone(), version: p.version.clone() });
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// `archi plan task add <node>`: mint a task pinned to a node of the

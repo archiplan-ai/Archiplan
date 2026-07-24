@@ -101,6 +101,9 @@ pub struct Session {
     pub version: Option<(String, usize)>,
     /// The closing version id (empty while open) and its line.
     pub closed: Option<(String, usize)>,
+    /// The closing version's content hash, stamped by the closing verbs;
+    /// absent on pre-hash records.
+    pub version_hash: Option<(String, usize)>,
     /// Rounds folded into this record (`## Folded:` sections), in file order.
     pub folded: Vec<Folded>,
 }
@@ -323,13 +326,20 @@ pub fn session(doc: &MdDoc, file: &str, stem: &str, diags: &mut Vec<DocDiagnosti
         };
         folded.push(folded_section(h, label, file, diags));
     }
-    let fm = frontmatter(doc, file, &["version", "closed"], "version, closed", diags);
+    let fm = frontmatter(
+        doc,
+        file,
+        &["version", "closed", "version-hash"],
+        "version, closed, version-hash",
+        diags,
+    );
     Session {
         slug: stem.to_string(),
         file: file.to_string(),
         line: doc.name_line,
         version: scalar(fm, "version", file, diags),
         closed: scalar(fm, "closed", file, diags),
+        version_hash: optional_scalar(fm, "version-hash", file, diags),
         folded,
     }
 }
@@ -602,6 +612,29 @@ fn scalar(
                 None
             }
         },
+    }
+}
+
+/// A scalar field that may be absent — absence stays legal (pre-hash
+/// records); a list is still a fault.
+fn optional_scalar(
+    fm: Option<&[Field]>,
+    key: &str,
+    file: &str,
+    diags: &mut Vec<DocDiagnostic>,
+) -> Option<(String, usize)> {
+    let f = fm?.iter().find(|f| f.key == key)?;
+    match &f.value {
+        FieldValue::Scalar(s) => Some((s.clone(), f.line)),
+        FieldValue::List(_) => {
+            diags.push(DocDiagnostic::new(
+                "E_DOC",
+                format!("`{key}` is a scalar field, not a list"),
+                file,
+                f.line,
+            ));
+            None
+        }
     }
 }
 

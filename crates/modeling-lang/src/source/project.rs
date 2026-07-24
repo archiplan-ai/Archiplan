@@ -31,6 +31,9 @@ pub(crate) struct Manifest {
     pub preset: String,
     /// Declared member repositories, in declaration order.
     pub repos: Vec<RepoDecl>,
+    /// Branches where mutating verbs refuse, consumed by `archi`; empty
+    /// means no protection.
+    pub protected: Vec<String>,
 }
 
 /// One declared member repository: the name is the identity refs and journal
@@ -70,6 +73,9 @@ struct ProjectSection {
     name: String,
     src: Option<String>,
     preset: Option<String>,
+    /// Protected branches, consumed by `archi` — validated here for the
+    /// same loud-typo reason as `[audit]`.
+    protected: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -131,6 +137,7 @@ pub(crate) fn read_manifest(root: &Path) -> Result<Manifest, Diagnostic> {
             .preset
             .unwrap_or_else(|| "default".to_string()),
         repos,
+        protected: parsed.project.protected.unwrap_or_default(),
     })
 }
 
@@ -305,6 +312,22 @@ mod tests {
     fn a_memberless_manifest_yields_the_empty_list() {
         let m = manifest_of("[project]\nname = \"t\"\n").unwrap();
         assert!(m.repos.is_empty());
+    }
+
+    #[test]
+    fn protected_branches_parse_and_default_empty() {
+        let m =
+            manifest_of("[project]\nname = \"t\"\nprotected = [\"main\", \"release\"]\n").unwrap();
+        assert_eq!(m.protected, vec!["main", "release"]);
+        let m = manifest_of("[project]\nname = \"t\"\n").unwrap();
+        assert!(m.protected.is_empty());
+    }
+
+    #[test]
+    fn a_typo_of_protected_is_loud() {
+        let e = manifest_of("[project]\nname = \"t\"\nprotectd = [\"main\"]\n").unwrap_err();
+        assert_eq!(e.code, "E_PROJECT");
+        assert!(e.message.contains("protectd"), "{}", e.message);
     }
 
     #[test]

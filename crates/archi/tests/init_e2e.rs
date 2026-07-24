@@ -74,9 +74,18 @@ fn a_fresh_init_stands_up_a_building_project() {
     // The report: every artifact created, the manifest on the last created
     // line, the verdict naming the project.
     let created: Vec<&str> = out.lines().filter(|l| l.starts_with("created")).collect();
-    assert_eq!(created.len(), 6, "{out}");
+    assert_eq!(created.len(), 8, "{out}");
     assert!(created.last().unwrap().contains("archi.toml"), "{out}");
     assert!(out.contains("initialized `proj`"), "{out}");
+
+    // Seat artifacts are ignored from birth — machine-local, never merged.
+    let ignore = fs::read_to_string(root.join("proj/.gitignore")).unwrap();
+    assert!(ignore.contains("archi/*.local.toml"), "{ignore}");
+    assert!(ignore.contains("archi/plans/.current"), "{ignore}");
+
+    // The seat discipline is declared from birth; deleting the line opts out.
+    let manifest = fs::read_to_string(root.join("proj/archi.toml")).unwrap();
+    assert!(manifest.contains("protected = [\"main\"]"), "{manifest}");
 
     // The scaffolded tree is a passing, empty project.
     let build = ok_in(&root, &["build", "--project", "proj"]);
@@ -138,7 +147,14 @@ fn the_manifest_routes_the_starter_and_a_broken_one_aborts() {
 fn the_briefing_lands_verbatim_and_the_fence_appends_once() {
     let root = temp_dir();
     fs::write(root.join("CLAUDE.md"), "# House rules\n\nTabs are love.\n").unwrap();
+    fs::write(root.join(".gitignore"), "target/\narchi/*.local.toml\n").unwrap();
     ok_in(&root, &["init", "."]);
+
+    // A partial .gitignore gains only its missing line, exactly once.
+    let ignore = fs::read_to_string(root.join(".gitignore")).unwrap();
+    assert!(ignore.starts_with("target/\n"), "{ignore}");
+    assert_eq!(ignore.matches("archi/*.local.toml").count(), 1, "{ignore}");
+    assert_eq!(ignore.matches("archi/plans/.current").count(), 1, "{ignore}");
 
     for (skill, text) in [
         ("archi", SKILL_ARCHI),
@@ -205,8 +221,16 @@ fn the_verbs_around_init_keep_their_contracts() {
     let (code, _, _) = run_in(&root, &["search", "anything", "at", "all"]);
     assert_eq!(code, Some(0));
 
-    // A save, an init, a save: init minted nothing the second save could
-    // notice.
+    // A fresh init declares the seat discipline: gitless mutation is a
+    // full stop naming the repair, never a silent bare run.
+    let (code, _, stderr) = run_in(&root, &["version", "save", "-m", "first"]);
+    assert_eq!(code, Some(1), "{stderr}");
+    assert!(stderr.contains("git init"), "{stderr}");
+
+    // Opting out (deleting the line) restores the bare flow: a save, an
+    // init, a save — init minted nothing the second save could notice.
+    let manifest = fs::read_to_string(root.join("archi.toml")).unwrap();
+    fs::write(root.join("archi.toml"), manifest.replace("protected = [\"main\"]\n", "")).unwrap();
     ok_in(&root, &["version", "save", "-m", "first"]);
     let out = ok_in(&root, &["init", "."]);
     assert!(out.contains("already initialized"), "{out}");

@@ -182,7 +182,7 @@ pub fn map_member(project_root: &Path, name: &str, dir: &str) -> Result<Member, 
     Ok(set.get(name).expect("just mapped").clone())
 }
 
-fn toml_string(s: &str) -> String {
+pub(crate) fn toml_string(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
 }
 

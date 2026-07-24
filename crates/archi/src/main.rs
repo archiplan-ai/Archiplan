@@ -58,6 +58,7 @@ mod sessions;
 mod tradeoffs;
 mod versions;
 mod visualizer;
+mod worktrees;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -100,6 +101,11 @@ const USAGE: &str = "usage:
   archi link audit [--scope <path>] [--since [<member>=]<rev>] [--repo <member>] [--prune] [--json] [--project <dir>]
   archi repo ls [--json] [--project <dir>]
   archi repo map <member> <dir> [--project <dir>]
+  archi status [--project <dir>]
+  archi worktree mint <slug> [--plan <name>] [--repos <a,b>] [--base [<member>=]<branch>]... [--project <dir>]
+  archi worktree ls [--plan <slug>] [--spec <effort>] [--json] [--project <dir>]
+  archi worktree drop <slug|path> [--project <dir>]
+  archi worktree merge <slug|path> [--to [<member>=]<branch>]... [--project <dir>]
   archi plan use <name> | repin | show [--json] | verify [--json] [--project <dir>]
   archi plan task add <node> [--desc <text>] [--project <dir>]
   archi plan start | next | current-wave | close | reset [--project <dir>]
@@ -166,6 +172,10 @@ struct Args {
     prune: bool,
     details: bool,
     max_nodes: Option<usize>,
+    repos: Option<String>,
+    base: Vec<String>,
+    to_many: Vec<String>,
+    plan_flag: Option<String>,
     positional: Vec<String>,
 }
 
@@ -227,6 +237,10 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         prune: false,
         details: false,
         max_nodes: None,
+        repos: None,
+        base: Vec::new(),
+        to_many: Vec::new(),
+        plan_flag: None,
         positional: Vec::new(),
     };
     let mut it = argv.iter().peekable();
@@ -282,7 +296,15 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--details" => args.details = true,
             "--max-nodes" => args.max_nodes = Some(int(value(&mut it, "--max-nodes")?, "--max-nodes")?),
             "--spec" => args.spec = Some(value(&mut it, "--spec")?),
+            // `worktree merge` receives per-member branches; link repin
+            // keeps the single --to.
+            "--to" if args.verb == "worktree" => {
+                args.to_many.push(value(&mut it, "--to")?)
+            }
             "--to" => args.to = Some(value(&mut it, "--to")?),
+            "--repos" => args.repos = Some(value(&mut it, "--repos")?),
+            "--base" => args.base.push(value(&mut it, "--base")?),
+            "--plan" => args.plan_flag = Some(value(&mut it, "--plan")?),
             "--into" => args.into = Some(value(&mut it, "--into")?),
             "--keep" => args.keep = Some(value(&mut it, "--keep")?),
             "--task" => args.task = Some(value(&mut it, "--task")?),
@@ -322,6 +344,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
                     | "repo"
                     | "tradeoffs"
                     | "viz"
+                    | "worktree"
             ) =>
             {
                 args.positional.push(other.to_string())
@@ -408,6 +431,12 @@ fn run_check(args: &Args) -> ExitCode {
     // the model and cross-check against it; their errors fail the check,
     // their findings are advisory (archi/requirements/self-hosting/docs-compile-with-the-model.md).
     let doc = docs::check(&root, ws.model());
+    // Plan pins are verified by content: a remint that changed what an id
+    // resolves to surfaces here, advisory like every finding.
+    let plan_findings = plans::check(&root).unwrap_or_else(|e| {
+        eprintln!("archi: warning: {e}");
+        Vec::new()
+    });
     let clean = archive_errors.is_empty() && doc.diagnostics.is_empty();
     // A check with no errors closes on the landscape read: the NKP scoring
     // and the refactoring directions it implies, over the default slice.
@@ -444,6 +473,11 @@ fn run_check(args: &Args) -> ExitCode {
             addressing::of_doc_finding(f).stamp(&mut v);
             v
         }));
+        all.extend(plan_findings.iter().map(|f| {
+            let mut v = serde_json::to_value(f).expect("serializes");
+            addressing::of_plan_finding(f).stamp(&mut v);
+            v
+        }));
         let mut envelope = json!({ "status": "ok", "findings": all });
         if !archive_errors.is_empty() {
             envelope["status"] = json!("error");
@@ -472,7 +506,7 @@ fn run_check(args: &Args) -> ExitCode {
             serde_json::to_string_pretty(&envelope).expect("serializes")
         );
     } else {
-        if findings.is_empty() && doc.findings.is_empty() {
+        if findings.is_empty() && doc.findings.is_empty() && plan_findings.is_empty() {
             println!("no findings");
         } else {
             for f in &findings {
@@ -480,6 +514,9 @@ fn run_check(args: &Args) -> ExitCode {
             }
             for f in &doc.findings {
                 println!("{f}  [{}]", addressing::of_doc_finding(f).id);
+            }
+            for f in &plan_findings {
+                println!("{f}  [{}]", addressing::of_plan_finding(f).id);
             }
         }
         if let Some(report) = &nkp {
@@ -588,6 +625,11 @@ fn run_version(args: &Args) -> ExitCode {
         Ok(r) => r,
         Err(e) => return usage_err(&e),
     };
+    if matches!(sub, Some("save" | "remint" | "anchor")) {
+        if let Err(e) = worktrees::guard_mutation(&root, None) {
+            return fail(e);
+        }
+    }
     // Subcommands that read the archive alone; save, anchor and current
     // compile the live tree first — a model that does not compile has no
     // version.
@@ -921,6 +963,363 @@ fn run_repo(args: &Args) -> ExitCode {
     }
 }
 
+fn run_status(args: &Args) -> ExitCode {
+    let root = match locate_project(args) {
+        Ok(r) => r,
+        Err(e) => return usage_err(&e),
+    };
+    // Checkout identity: where am I, per git and the registry. Every read
+    // here is lenient — status answers from whatever state exists.
+    match worktrees::toplevel(&root) {
+        Some(top) => {
+            let branch =
+                worktrees::current_branch(&top).unwrap_or_else(|| "(detached)".to_string());
+            println!("checkout: {} on {branch}", top.display());
+            match worktrees::Registry::load(&root) {
+                Ok(Some(reg)) => match reg.binding_of(&top) {
+                    Some(b) => {
+                        let mut parts = Vec::new();
+                        if let Some(p) = &b.plan {
+                            parts.push(format!("plan {p}"));
+                        }
+                        if let Some(s) = &b.effort {
+                            parts.push(format!("spec {s}"));
+                        }
+                        let work =
+                            if parts.is_empty() { "bound".to_string() } else { parts.join("  ") };
+                        println!("binding: {work} on {}", b.branch);
+                        for (name, m) in &b.members {
+                            let state = if m.path.is_dir() { "ok" } else { "worktree missing" };
+                            println!(
+                                "member {name}: {} on {} (base {}) — {state}",
+                                m.path.display(),
+                                m.branch,
+                                m.base
+                            );
+                        }
+                    }
+                    None => println!("binding: none — this checkout is unbound"),
+                },
+                Ok(None) => {}
+                Err(e) => eprintln!("archi: warning: {e}"),
+            }
+        }
+        None => println!(
+            "checkout: {} (not a git repository — the seat model needs one; \
+             `git init` enables it, ask the user before creating)",
+            root.display()
+        ),
+    }
+    match plans::load_active(&root) {
+        Ok(p) => {
+            let wave = match p.state {
+                plans::PlanState::Started => format!(", wave {}", p.closed_waves + 1),
+                _ => String::new(),
+            };
+            println!("plan: {} @ {} ({}{wave})", p.name, p.version, p.state.describe());
+        }
+        Err(_) => println!("plan: none active here"),
+    }
+    match compile_project(&root) {
+        Ok(c) => match versions::current(&root, c.workspace.model()) {
+            Ok(versions::Current::NoVersions) => println!("version: none saved"),
+            Ok(versions::Current::At(id)) => println!("version: at {id}"),
+            Ok(versions::Current::DirtySince(id)) => println!("version: dirty since {id}"),
+            Err(e) => eprintln!("archi: warning: {e}"),
+        },
+        Err(_) => println!("version: the model does not compile — `archi check` locates it"),
+    }
+    let tree = docs::discover_tree(&root);
+    match tree.sessions.iter().find(|s| s.open()) {
+        Some(s) => println!("stress: round `{}` open", s.slug),
+        None => println!("stress: no open round"),
+    }
+    // The handoff listing: every plan of this branch with open lifecycle.
+    match plans::all_plans(&root) {
+        Ok(all) => {
+            let open: Vec<_> =
+                all.iter().filter(|p| p.state != plans::PlanState::Completed).collect();
+            if open.is_empty() {
+                println!("open plans: none");
+            } else {
+                for p in open {
+                    let wave = match p.state {
+                        plans::PlanState::Started => format!(", wave {}", p.closed_waves + 1),
+                        _ => String::new(),
+                    };
+                    println!("open plan: {} @ {} ({}{wave})", p.name, p.version, p.state.describe());
+                }
+            }
+        }
+        Err(e) => eprintln!("archi: warning: {e}"),
+    }
+    ExitCode::SUCCESS
+}
+
+fn run_worktree(args: &Args) -> ExitCode {
+    let fail = |e: String| -> ExitCode {
+        eprintln!("archi: {e}");
+        ExitCode::from(1)
+    };
+    let root = match locate_project(args) {
+        Ok(r) => r,
+        Err(e) => return usage_err(&e),
+    };
+    let load = || -> Result<worktrees::Registry, String> {
+        worktrees::Registry::load(&root)?
+            .ok_or_else(|| "not a git repository — worktrees need git".to_string())
+    };
+    let sub = args.positional.first().map(String::as_str);
+    let rest = args.positional.get(1..).unwrap_or_default();
+    match (sub, rest) {
+        (Some("mint"), [slug]) => {
+            let plan = args.plan_flag.as_deref();
+            let effort = if plan.is_none() { Some(slug.as_str()) } else { None };
+            let repos: Vec<String> = args
+                .repos
+                .as_deref()
+                .map(|r| {
+                    r.split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default();
+            let mut bases = std::collections::BTreeMap::new();
+            for b in &args.base {
+                let Some((m, br)) = b.split_once('=') else {
+                    return usage_err("`--base` names its member: --base <member>=<branch>");
+                };
+                bases.insert(m.to_string(), br.to_string());
+            }
+            let m = match worktrees::mint(&root, slug, plan, effort, &repos, &bases) {
+                Ok(m) => m,
+                Err(e) => return fail(e),
+            };
+            if m.seated {
+                println!("seated: {} carries `{slug}` on {}", m.path.display(), m.branch);
+            } else {
+                println!(
+                    "minted {} on branch {}{} — cd {} to work there; \
+                     the CLI never changes your directory",
+                    m.path.display(),
+                    m.branch,
+                    if m.attached { " (existing branch attached)" } else { "" },
+                    m.path.display()
+                );
+            }
+            if let Ok(Some(reg)) = worktrees::Registry::load(&root) {
+                if let Some(b) = reg.binding_of(&m.path) {
+                    for (name, mb) in &b.members {
+                        println!(
+                            "member {name}: {} on {} (base {})",
+                            mb.path.display(),
+                            mb.branch,
+                            mb.base
+                        );
+                    }
+                }
+            }
+            ExitCode::SUCCESS
+        }
+        (Some("ls"), []) => {
+            let reg = match load() {
+                Ok(r) => r,
+                Err(e) => return fail(e),
+            };
+            let matches = |b: Option<&worktrees::Binding>| -> bool {
+                match (args.plan_flag.as_deref(), args.spec.as_deref()) {
+                    (None, None) => true,
+                    (p, s) => b.is_some_and(|b| {
+                        p.map_or(true, |p| b.plan.as_deref() == Some(p))
+                            && s.map_or(true, |s| b.effort.as_deref() == Some(s))
+                    }),
+                }
+            };
+            let wts = worktrees::list_worktrees(&root);
+            if args.json {
+                let rows: Vec<Value> = wts
+                    .iter()
+                    .filter(|w| matches(reg.binding_of(&w.path)))
+                    .map(|w| {
+                        let b = reg.binding_of(&w.path);
+                        json!({
+                            "path": w.path.display().to_string(),
+                            "branch": w.branch,
+                            "plan": b.and_then(|b| b.plan.clone()),
+                            "spec": b.and_then(|b| b.effort.clone()),
+                            "bound": b.is_some(),
+                        })
+                    })
+                    .collect();
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({ "worktrees": rows }))
+                        .expect("serializes")
+                );
+                return ExitCode::SUCCESS;
+            }
+            let mut shown = 0usize;
+            for wt in &wts {
+                let b = reg.binding_of(&wt.path);
+                if !matches(b) {
+                    continue;
+                }
+                shown += 1;
+                let branch = wt.branch.clone().unwrap_or_else(|| "(detached)".to_string());
+                let work = match b {
+                    Some(b) => {
+                        let mut parts = Vec::new();
+                        if let Some(p) = &b.plan {
+                            parts.push(format!("plan {p}"));
+                        }
+                        if let Some(s) = &b.effort {
+                            parts.push(format!("spec {s}"));
+                        }
+                        if parts.is_empty() { "bound".to_string() } else { parts.join("  ") }
+                    }
+                    None => "unbound".to_string(),
+                };
+                println!("{}  {branch}  {work}", wt.path.display());
+                if let Some(b) = b {
+                    for (name, m) in &b.members {
+                        let state = if !m.checkout.is_dir() {
+                            "checkout unresolved"
+                        } else if m.path.is_dir() {
+                            "ok"
+                        } else {
+                            "worktree missing"
+                        };
+                        println!(
+                            "  member {name}: {} {} (base {}) — {state}",
+                            m.path.display(),
+                            m.branch,
+                            m.base
+                        );
+                    }
+                }
+            }
+            if shown == 0 {
+                println!("no worktrees match");
+            }
+            ExitCode::SUCCESS
+        }
+        (Some("drop"), [handle]) => {
+            let mut reg = match load() {
+                Ok(r) => r,
+                Err(e) => return fail(e),
+            };
+            let Some(key) = reg.resolve_key(handle) else {
+                return fail(format!(
+                    "`{handle}` matches no registry entry — `archi worktree ls` shows them"
+                ));
+            };
+            let binding = reg.get_mut(&key).expect("resolved key").clone();
+            for (name, m) in &binding.members {
+                let repo = if m.checkout.is_dir() { &m.checkout } else { &m.path };
+                if worktrees::list_worktrees(repo).iter().any(|w| w.path == m.path) {
+                    if let Err(e) = worktrees::worktree_remove(repo, &m.path, false) {
+                        return fail(format!(
+                            "{name}: {e}\nnothing dropped; commit or stash the member \
+                             worktree's changes (or remove it by hand), then re-run"
+                        ));
+                    }
+                }
+                if worktrees::branch_exists(repo, &m.branch) {
+                    println!(
+                        "member {name}: branch {} stays — unpushed work is yours to \
+                         delete by hand",
+                        m.branch
+                    );
+                }
+            }
+            let path = PathBuf::from(&key);
+            if worktrees::list_worktrees(&root).iter().any(|w| w.path == path) {
+                if let Some(top) = worktrees::toplevel(&root) {
+                    let rel = root.strip_prefix(&top).unwrap_or(Path::new(""));
+                    worktrees::scrub_seat(&path.join(rel));
+                }
+                if let Err(e) = worktrees::worktree_remove(&root, &path, false) {
+                    return fail(format!(
+                        "{e}\nthe worktree stays bound; commit or stash its changes \
+                         (or remove it by hand), then re-run"
+                    ));
+                }
+            }
+            let b = reg.remove(&key).expect("resolved key");
+            if let Err(e) = reg.save() {
+                return fail(e);
+            }
+            println!("dropped {key} ({})", b.branch);
+            if worktrees::branch_exists(&root, &b.branch) {
+                println!(
+                    "branch {} stays — delete it by hand once its work is integrated",
+                    b.branch
+                );
+            }
+            ExitCode::SUCCESS
+        }
+        (Some("merge"), [handle]) => {
+            let mut to = std::collections::BTreeMap::new();
+            for t in &args.to_many {
+                match t.split_once('=') {
+                    Some((m, b)) => to.insert(m.to_string(), b.to_string()),
+                    None => to.insert(String::new(), t.clone()),
+                };
+            }
+            let report = match worktrees::merge(&root, handle, &to) {
+                Ok(r) => r,
+                Err(e) => return fail(e),
+            };
+            let mut failed = false;
+            for (name, outcome) in &report.members {
+                match outcome {
+                    worktrees::RepoOutcome::Pushed { remote_branch } => println!(
+                        "member {name}: pushed {} -> origin/{remote_branch}, worktree retired",
+                        report.branch
+                    ),
+                    worktrees::RepoOutcome::Refused { detail } => {
+                        failed = true;
+                        println!("member {name}: kept — {detail}");
+                    }
+                    _ => {}
+                }
+            }
+            match &report.spec {
+                worktrees::RepoOutcome::Merged => println!("merged {}", report.branch),
+                worktrees::RepoOutcome::Landed { branch } => {
+                    println!("landed {} on new branch {branch}", report.branch)
+                }
+                worktrees::RepoOutcome::Conflict { detail } => {
+                    failed = true;
+                    println!("{detail}");
+                    println!(
+                        "the merge of {} stopped — finish the join by hand:\n\
+                         \x20 1. resolve the conflicts and `git commit` the merge\n\
+                         \x20 2. both sides minted a version? `archi version remint -m <note> [--session <slug>]`\n\
+                         \x20 3. `archi check` — stale pins surface there; `archi plan repin` re-pins\n\
+                         \x20 4. concurrent stress rounds? `archi session fold <slug>`\n\
+                         \x20 5. re-run `archi worktree merge {handle}` — the worktree and its binding stay until the join lands clean",
+                        report.branch
+                    );
+                }
+                _ => {}
+            }
+            if report.retired {
+                println!("retired {} — binding cleared", report.worktree.display());
+            } else if !failed {
+                println!(
+                    "not retired yet — repair the refusals above and re-run `archi worktree merge {handle}`"
+                );
+            }
+            if failed { ExitCode::from(1) } else { ExitCode::SUCCESS }
+        }
+        _ => usage_err(
+            "usage: archi worktree mint <slug> [--plan <name>] | ls [--plan <slug>] [--spec <effort>] [--json] | drop <slug|path> | merge <slug|path> [--to [<member>=]<branch>]...",
+        ),
+    }
+}
+
 fn run_link(args: &Args) -> ExitCode {
     let fail = |e: String| -> ExitCode {
         eprintln!("archi: {e}");
@@ -938,6 +1337,11 @@ fn run_link(args: &Args) -> ExitCode {
     };
     let sub = args.positional.first().map(String::as_str);
     let rest = args.positional.get(1..).unwrap_or_default();
+    if matches!(sub, Some("add" | "confirm" | "rm" | "repin")) {
+        if let Err(e) = worktrees::guard_mutation(&root, None) {
+            return fail(e);
+        }
+    }
     match (sub, rest) {
         (Some("add"), [spec, code]) => {
             let Some(kind) = args.kind_flag.as_deref().and_then(links::LinkKind::parse) else {
@@ -1348,6 +1752,16 @@ fn run_plan(args: &Args) -> ExitCode {
     };
     let sub = args.positional.first().map(String::as_str);
     let rest = args.positional.get(1..).unwrap_or_default();
+    if matches!(sub, Some("use" | "repin" | "task" | "start" | "next" | "close" | "reset")) {
+        let work = if sub == Some("use") {
+            rest.first().cloned()
+        } else {
+            plans::active_name(&root).ok().flatten()
+        };
+        if let Err(e) = worktrees::guard_mutation(&root, work.as_deref()) {
+            return fail(e);
+        }
+    }
     match (sub, rest) {
         (Some("use"), [name]) => {
             let ws = match live_model() {
@@ -1356,10 +1770,12 @@ fn run_plan(args: &Args) -> ExitCode {
             };
             match plans::use_plan(&root, ws.model(), name) {
                 Ok(plans::Used::Created(p)) => {
+                    worktrees::bind_plan(&root, &p.name);
                     println!("created plan `{}` @ {} — now current", p.name, p.version);
                     ExitCode::SUCCESS
                 }
                 Ok(plans::Used::Switched(p)) => {
+                    worktrees::bind_plan(&root, &p.name);
                     println!("switched to plan `{}` @ {}", p.name, p.version);
                     ExitCode::SUCCESS
                 }
@@ -1855,6 +2271,11 @@ fn run_session(args: &Args) -> ExitCode {
         Ok(r) => r,
         Err(e) => return usage_err(&e),
     };
+    if args.positional.first().map(String::as_str) == Some("fold") {
+        if let Err(e) = worktrees::guard_mutation(&root, None) {
+            return fail(e);
+        }
+    }
     match (
         args.positional.first().map(String::as_str),
         args.positional.get(1..).unwrap_or_default(),
@@ -2052,6 +2473,8 @@ fn main() -> ExitCode {
         "session" => run_session(&args),
         "link" => run_link(&args),
         "repo" => run_repo(&args),
+        "worktree" => run_worktree(&args),
+        "status" => run_status(&args),
         "plan" => run_plan(&args),
         "read" => run_read(&args),
         "query" => run_query(&args),

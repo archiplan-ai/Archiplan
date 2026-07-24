@@ -16,9 +16,13 @@ use std::path::{Path, PathBuf};
 use modeling_lang::source::{find_project_root, manifest_src};
 
 /// The briefing, embedded at build time: skill name → SKILL.md text.
-const SKILLS: [(&str, &str); 3] = [
+const SKILLS: [(&str, &str); 4] = [
     ("archi", include_str!("../../../skills/archi.md")),
     ("archi-merge", include_str!("../../../skills/archi-merge.md")),
+    (
+        "archi-finish-worktree",
+        include_str!("../../../skills/archi-finish-worktree.md"),
+    ),
     (
         "archi-migrate-fractal",
         include_str!("../../../skills/archi-migrate-fractal.md"),
@@ -147,14 +151,42 @@ pub fn init(target: &Path) -> Result<Outcome, String> {
     };
     steps.push(step(act.0, &target, &claude, act.1));
 
+    // The gitignore: seat artifacts are machine-local and never merged —
+    // create it, append the missing lines once, or leave it as found.
+    let gitignore = target.join(".gitignore");
+    let wanted = ["archi/*.local.toml", "archi/plans/.current"];
+    let act = match fs::read_to_string(&gitignore) {
+        Err(_) => {
+            write_new(&gitignore, &format!("{}\n", wanted.join("\n")))?;
+            (Act::Created, None)
+        }
+        Ok(found) => {
+            let missing: Vec<&str> = wanted
+                .into_iter()
+                .filter(|w| !found.lines().any(|l| l.trim() == *w))
+                .collect();
+            if missing.is_empty() {
+                (Act::Ok, Some("the archi lines are present".into()))
+            } else {
+                let sep = if found.is_empty() || found.ends_with('\n') { "" } else { "\n" };
+                fs::write(&gitignore, format!("{found}{sep}{}\n", missing.join("\n")))
+                    .map_err(|e| format!("cannot write {}: {e}", gitignore.display()))?;
+                (Act::Appended, Some("the archi lines".into()))
+            }
+        }
+    };
+    steps.push(step(act.0, &target, &gitignore, act.1));
+
     // The manifest, last: a tree is a project only once it is whole.
     if manifest.is_file() {
         steps.push(step(Act::Ok, &target, &manifest, Some("present".into())));
     } else {
+        // the seat discipline is on from birth: mutation runs in worktrees,
+        // never in the primary checkout; deleting the line is the opt-out
         write_new(
             &manifest,
             &format!(
-                "[project]\nname = \"{}\"\npreset = \"default\"\n",
+                "[project]\nname = \"{}\"\npreset = \"default\"\nprotected = [\"main\"]\n",
                 toml_escape(&name)
             ),
         )?;
@@ -414,6 +446,10 @@ fn claude_block(src: &str) -> String {
          - Find anything by phrase: `archi search <phrase>` — ranked hits across\n\
          \x20 elements, intents, requirements, stressors, sessions and decisions,\n\
          \x20 each with its address.\n\
+         - Spec work delegated to subagents or workflows returns as FILES written\n\
+         \x20 under `archi/` (paths, not payloads): a finding that is not a file on\n\
+         \x20 disk does not exist, and every fan-out is gated by `archi check` plus\n\
+         \x20 a count of the files it claims to have written.\n\
          - The full workflow (model, stress, version, plan, implement with link\n\
          \x20 capture) is the `archi` skill in `.claude/skills/archi/`; merging\n\
          \x20 parallel spec work is `archi-merge`, and crossing a project off the\n\

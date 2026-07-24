@@ -203,7 +203,9 @@ impl Archive {
                     "`{}` holds merge conflict markers — two branches minted the same version \
                      id. Keep the first-landed entry and its patch file (both sides' model and \
                      doc work is already merged), then re-mint the later round onto the lineage: \
-                     `archi version remint -m <note> --session <slug>` \
+                     `archi version remint -m <note> --session <slug>` — run it in the later \
+                     round's seat, re-attached with `archi worktree mint <slug>` if it was \
+                     already retired \
                      (archi/requirements/self-hosting/parallel-editing-discipline.md)",
                     index.display()
                 )
@@ -227,6 +229,11 @@ impl Archive {
     /// The manifest entries, oldest first.
     pub fn entries(&self) -> &[Entry] {
         &self.entries
+    }
+
+    /// The entry an id names, when the archive holds it.
+    pub fn entry(&self, id: &str) -> Option<&Entry> {
+        self.entries.iter().find(|e| e.id == id)
     }
 
     fn file_name(e: &Entry) -> String {
