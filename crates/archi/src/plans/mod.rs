@@ -22,7 +22,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use modeling_lang::{Definition, Model, Statement, Workspace};
+use modeling_lang::{Definition, ElementKind, Model, Statement, Workspace};
 use serde::{Deserialize, Serialize};
 
 use crate::docs;
@@ -591,6 +591,20 @@ fn matched_requirements(
         for entry in entries {
             if let Some(terms) = pinned.term_surface(entry) {
                 surface.extend(terms);
+            } else if let Some((s, d)) = endpoints
+                .get(entry.as_str())
+                .or_else(|| endpoints.get(links::normalize_ref(entry).as_str()))
+            {
+                // canonical edge text: the claim rides its endpoints
+                surface.insert(s.clone());
+                surface.insert(d.clone());
+            } else if pinned.resolve_element(entry) == Some(ElementKind::Port) {
+                // a port names its owning node's interface — fold to the node
+                if let Some((node, _)) = entry.rsplit_once('.') {
+                    if let Some(terms) = pinned.term_surface(node) {
+                        surface.extend(terms);
+                    }
+                }
             }
         }
         if surface.is_empty() {
@@ -1143,6 +1157,25 @@ pub(crate) fn verify_plan(root: &Path, live: &Model, plan: &Plan) -> Result<Plan
             }
         }
         matched.insert(t.id.clone(), m);
+    }
+
+    // A requirement no task reaches is visible, never silent — outside the
+    // plan's scope, or a missing task or spec_ref; the reader decides which.
+    if !plan.tasks.is_empty() {
+        let reached: BTreeSet<&str> =
+            matched.values().flatten().map(|m| m.req.as_str()).collect();
+        for r in &tree.requirements {
+            let Some(f) = &r.fields else { continue };
+            let Some((entries, _)) = &f.satisfied_by else { continue };
+            if entries.is_empty() || f.deferred() || reached.contains(r.slug.as_str()) {
+                continue;
+            }
+            notes.push(format!(
+                "requirement `{}` reaches no task — outside this plan's scope, or a \
+                 missing task or spec_ref",
+                r.slug
+            ));
+        }
     }
 
     // A stale pin is advisory: the plan may finish against the version it
@@ -2038,6 +2071,50 @@ mod tests {
             "{all}"
         );
         assert!(all.contains("owns `ghost-req`"), "{all}");
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn port_and_edge_pins_fold_to_their_nodes_and_orphans_surface() {
+        let root = temp_project();
+        let ws = compiled(&root);
+        save_version(&root);
+        put(
+            &root,
+            "archi/requirements/hardening/hardening.md",
+            "# Hardening\n\nThe area.\n",
+        );
+        put(
+            &root,
+            "archi/requirements/hardening/port-pinned.md",
+            &requirement("Store.inn", "Port pinned"),
+        );
+        put(
+            &root,
+            "archi/requirements/hardening/edge-pinned.md",
+            &requirement("Auth.creds wire Store.inn", "Edge pinned"),
+        );
+        put(
+            &root,
+            "archi/requirements/hardening/gate-throughput.md",
+            &requirement("Gate", "Gate throughput"),
+        );
+        use_plan(&root, ws.model(), "mvp").unwrap();
+        task_add(&root, "Store", Some("persist rows")).unwrap();
+        curate_all(&root, ws.model());
+
+        let report = verify(&root, ws.model()).unwrap();
+        assert_eq!(report.errors, Vec::<String>::new(), "{:?}", report.errors);
+        let reqs: Vec<&str> =
+            report.derived.matched["t1"].iter().map(|m| m.req.as_str()).collect();
+        assert!(reqs.contains(&"port-pinned"), "a port folds to its node: {reqs:?}");
+        assert!(reqs.contains(&"edge-pinned"), "an edge folds to its endpoints: {reqs:?}");
+
+        // The requirement nothing reaches is a note, never a silence.
+        let notes = report.notes.join("\n");
+        assert!(notes.contains("`gate-throughput` reaches no task"), "{notes}");
+        assert!(!notes.contains("`port-pinned`"), "{notes}");
 
         fs::remove_dir_all(&root).unwrap();
     }
