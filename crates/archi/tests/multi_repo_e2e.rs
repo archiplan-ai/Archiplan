@@ -4,6 +4,8 @@
 //! member, and the memberless project untouched
 //! (`archi/requirements/multi-repo/`).
 
+mod util;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -80,6 +82,16 @@ fn ok(root: &Path, args: &[&str]) -> String {
     stdout
 }
 
+/// Seat the spec and map each member to its real checkout — the seat's
+/// relative `[[repo]]` paths resolve nowhere from the worktree.
+fn seat_mapped(spec: &Path, members: &[(&str, &Path)]) -> PathBuf {
+    let seat = util::seat(spec);
+    for (name, dir) in members {
+        ok(&seat, &["repo", "map", name, dir.to_str().unwrap()]);
+    }
+    seat
+}
+
 #[test]
 fn qualified_refs_run_the_whole_link_loop_across_members() {
     let ws = scratch("loop");
@@ -87,6 +99,7 @@ fn qualified_refs_run_the_whole_link_loop_across_members() {
     let backend = ws.join("backend");
     spec_project(&spec, "[[repo]]\nname = \"backend\"\npath = \"../backend\"\n");
     member_repo(&backend);
+    let spec = seat_mapped(&spec, &[("backend", &backend)]);
 
     // The doctor sees home and the member, both reachable.
     let ls = ok(&spec, &["repo", "ls"]);
@@ -132,6 +145,7 @@ fn absence_is_reported_never_decayed_and_fails_only_in_scope() {
     let backend = ws.join("backend");
     spec_project(&spec, "[[repo]]\nname = \"backend\"\npath = \"../backend\"\n");
     member_repo(&backend);
+    let spec = seat_mapped(&spec, &[("backend", &backend)]);
     ok(&spec, &[
         "link", "add", "Gate", "backend//src/lib.rs#serve_gate", "--kind", "indirect",
     ]);
@@ -159,6 +173,9 @@ fn absence_is_reported_never_decayed_and_fails_only_in_scope() {
     assert!(err.contains("repo map backend"), "{err}");
 
     // An undeclared member in the journal names the renamed-member recovery.
+    // The overlay goes with the declaration — a row naming an undeclared
+    // member is its own loud error, not the one under test.
+    fs::remove_file(spec.join("archi/repos.local.toml")).unwrap();
     fs::write(
         spec.join("archi.toml"),
         "[project]\nname = \"t\"\n[[repo]]\nname = \"core\"\npath = \"../backend\"\n",
@@ -177,9 +194,13 @@ fn baselines_and_audit_go_per_member() {
     let backend = ws.join("backend");
     spec_project(&spec, "[[repo]]\nname = \"backend\"\npath = \"../backend\"\n");
     member_repo(&backend);
+    let spec = seat_mapped(&spec, &[("backend", &backend)]);
+    // Home stays dirty at save — no home baseline, the per-member wording
+    // below keeps its subject.
+    fs::write(spec.join("wip.txt"), "uncommitted\n").unwrap();
 
     // Save while the member is clean: its baseline lands; home has no
-    // commit yet and the report says so per member.
+    // commit and the report says so per member.
     let saved = ok(&spec, &["version", "save", "-m", "first"]);
     assert!(saved.contains("baseline backend:"), "{saved}");
     let index = fs::read_to_string(spec.join("archi/versions/index.toml")).unwrap();
@@ -220,6 +241,12 @@ fn a_home_rooted_below_its_git_root_rebases_the_audit() {
     fs::write(spec.join("gadget.rs"), "pub fn gadget() {}\n").unwrap();
     git(&repo, &["add", "-A"]);
     git(&repo, &["commit", "-qm", "seed"]);
+    // Seat the monorepo: home rides two directories below the worktree
+    // root exactly as it sat below the git root.
+    ok(&spec, &["worktree", "mint", "seat"]);
+    let name = repo.file_name().unwrap().to_str().unwrap();
+    let seat = repo.parent().unwrap().join(format!("{name}-worktrees")).join("seat");
+    let spec = seat.join("tools").join("plan");
     ok(&spec, &["version", "save", "-m", "first"]);
     ok(&spec, &["version", "anchor"]);
 
@@ -240,6 +267,7 @@ fn a_home_rooted_below_its_git_root_rebases_the_audit() {
 fn a_memberless_project_is_todays_byte_for_byte() {
     let spec = scratch("plain");
     spec_project(&spec, "");
+    let spec = util::seat(&spec);
 
     // The doctor shows home alone; bare refs render bare; the audit keeps
     // its original no-delta-source wording.
@@ -276,6 +304,7 @@ fn a_dangling_baseline_degrades_alone() {
     );
     member_repo(&backend);
     member_repo(&frontend);
+    let spec = seat_mapped(&spec, &[("backend", &backend), ("frontend", &frontend)]);
 
     // Both baselines land on clean members.
     let saved = ok(&spec, &["version", "save", "-m", "first"]);

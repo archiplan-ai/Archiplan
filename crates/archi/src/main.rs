@@ -641,11 +641,6 @@ fn run_version(args: &Args) -> ExitCode {
         Ok(r) => r,
         Err(e) => return usage_err(&e),
     };
-    if matches!(sub, Some("save" | "remint" | "anchor")) {
-        if let Err(e) = worktrees::guard_mutation(&root, None) {
-            return fail(e);
-        }
-    }
     // Subcommands that read the archive alone; save, anchor and current
     // compile the live tree first — a model that does not compile has no
     // version.
@@ -1353,11 +1348,6 @@ fn run_link(args: &Args) -> ExitCode {
     };
     let sub = args.positional.first().map(String::as_str);
     let rest = args.positional.get(1..).unwrap_or_default();
-    if matches!(sub, Some("add" | "confirm" | "rm" | "repin")) {
-        if let Err(e) = worktrees::guard_mutation(&root, None) {
-            return fail(e);
-        }
-    }
     match (sub, rest) {
         (Some("add"), [spec, code]) => {
             let Some(kind) = args.kind_flag.as_deref().and_then(links::LinkKind::parse) else {
@@ -1768,33 +1758,6 @@ fn run_plan(args: &Args) -> ExitCode {
     };
     let sub = args.positional.first().map(String::as_str);
     let rest = args.positional.get(1..).unwrap_or_default();
-    // The authoring and lifecycle verbs mutate; suggest/list/show surfaces
-    // read and stay free everywhere.
-    let second = args.positional.get(1).map(String::as_str);
-    let third = args.positional.get(2).map(String::as_str);
-    let mutating = match sub {
-        Some(
-            "use" | "repin" | "start" | "next" | "close" | "reset" | "problem" | "tech"
-            | "architecture-summary" | "stack-mapping",
-        ) => true,
-        Some("scenarios") => second != Some("list"),
-        Some("task") => match second {
-            Some("show") | Some("req-list") => false,
-            Some("req") => third != Some("suggest"),
-            _ => true,
-        },
-        _ => false,
-    };
-    if mutating {
-        let work = if sub == Some("use") {
-            rest.first().cloned()
-        } else {
-            plans::active_name(&root).ok().flatten()
-        };
-        if let Err(e) = worktrees::guard_mutation(&root, work.as_deref()) {
-            return fail(e);
-        }
-    }
     match (sub, rest) {
         (Some("use"), [name]) => {
             let ws = match live_model() {
@@ -2584,11 +2547,6 @@ fn run_session(args: &Args) -> ExitCode {
         Ok(r) => r,
         Err(e) => return usage_err(&e),
     };
-    if args.positional.first().map(String::as_str) == Some("fold") {
-        if let Err(e) = worktrees::guard_mutation(&root, None) {
-            return fail(e);
-        }
-    }
     match (
         args.positional.first().map(String::as_str),
         args.positional.get(1..).unwrap_or_default(),
@@ -2755,6 +2713,51 @@ fn run_axes(args: &Args) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// The plan-ownership hint a guarded route hands the seat gate.
+enum PlanHint<'a> {
+    /// Mutation with no plan identity of its own (version, session, link…).
+    None,
+    /// `plan use <name>` — the name is on the command line.
+    Named(&'a str),
+    /// Any other plan mutation — the hint is whatever plan is active.
+    Active,
+}
+
+/// The router's single answer to "is this route guarded?" — `None` is a
+/// free route. Mutations of governed state (versions, sessions, links, the
+/// repo map, plans) are guarded; reads, bootstrap (`init`, `sync-skills`)
+/// and the seat verbs themselves (`worktree`, `status`, `batch` — each
+/// batch line re-enters the router on its own) stay free. Verb bodies
+/// never guard themselves.
+fn guarded_route(args: &Args) -> Option<PlanHint<'_>> {
+    let sub = |i: usize| args.positional.get(i).map(String::as_str);
+    match args.verb.as_str() {
+        "version" if matches!(sub(0), Some("save" | "remint" | "anchor")) => Some(PlanHint::None),
+        "session" if sub(0) == Some("fold") => Some(PlanHint::None),
+        "link" if matches!(sub(0), Some("add" | "confirm" | "rm" | "repin" | "capture")) => {
+            Some(PlanHint::None)
+        }
+        // The audit reads — until `--prune` lets it retire journal entries.
+        "link" if sub(0) == Some("audit") && args.prune => Some(PlanHint::None),
+        "repo" if sub(0) == Some("map") => Some(PlanHint::None),
+        "plan" => match sub(0) {
+            Some("use") => Some(args.positional.get(1).map_or(PlanHint::None, |n| PlanHint::Named(n))),
+            Some(
+                "repin" | "start" | "next" | "close" | "reset" | "problem" | "tech"
+                | "architecture-summary" | "stack-mapping",
+            ) => Some(PlanHint::Active),
+            Some("scenarios") if sub(1) != Some("list") => Some(PlanHint::Active),
+            Some("task") => match sub(1) {
+                Some("show") | Some("req-list") => None,
+                Some("req") if sub(2) == Some("suggest") => None,
+                _ => Some(PlanHint::Active),
+            },
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     // The standalone meta flags answer before any parsing or project
@@ -2775,6 +2778,23 @@ fn main() -> ExitCode {
         Ok(a) => a,
         Err(e) => return usage_err(&e),
     };
+    // The seat gate, wired once: a guarded route refuses before its runner
+    // is entered.
+    if let Some(hint) = guarded_route(&args) {
+        let root = match locate_project(&args) {
+            Ok(r) => r,
+            Err(e) => return usage_err(&e),
+        };
+        let work = match hint {
+            PlanHint::Named(name) => Some(name.to_string()),
+            PlanHint::Active => plans::active_name(&root).ok().flatten(),
+            PlanHint::None => None,
+        };
+        if let Err(e) = worktrees::guard_mutation(&root, work.as_deref()) {
+            eprintln!("archi: {e}");
+            return ExitCode::from(1);
+        }
+    }
     match args.verb.as_str() {
         "init" => run_init(&args),
         "sync-skills" => run_sync_skills(&args),

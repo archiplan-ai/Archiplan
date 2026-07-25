@@ -117,8 +117,9 @@ published version; the default unit rides one seat and lands once.
 ## Greenfield
 
 1. **Init** — `archi init` scaffolds it all: `archi.toml` (with
-   `protected = ["main"]` — the seat discipline is on from birth; deleting
-   the line is the conscious opt-out), the source dir
+   `protected = ["main"]` — branches that never receive a local merge,
+   only `--to` + push/PR; the seat discipline itself is unconditional
+   and needs no declaration), the source dir
    with a starter module, this skill and the CLAUDE.md brief. Create-only
    and safe to re-run — existing files are reported, never rewritten.
    `archi build` must pass before anything else.

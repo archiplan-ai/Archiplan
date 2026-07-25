@@ -891,33 +891,26 @@ pub fn merge(
 // ---------------------------------------------------------------------------
 // The guard
 
-/// The three-outcome gate every mutating verb passes: bound here — proceed;
-/// bound elsewhere — refuse naming the owner; unbound with the seat
-/// discipline on — mint and refuse with the path to enter. The discipline
-/// switches on with a non-empty `protected` list in archi.toml: the binding,
-/// not the branch, is the license to mutate — an unbound checkout (the
-/// primary included) never mutates. A declared discipline without git
-/// refuses loudly — it never silently evaporates; undeclared and gitless
-/// stays free.
+/// The three-outcome gate every mutating route passes — wired once, at the
+/// router in `main`, never inside verb bodies: bound here — proceed; bound
+/// elsewhere — refuse naming the owner; unbound — refuse toward a seat.
+/// The discipline is unconditional: the binding, not the branch, is the
+/// license to mutate — an unbound checkout (the primary included) never
+/// mutates, and gitless refuses loudly: the seat model (isolation,
+/// branches, merge) needs a repository. `protected` in archi.toml keeps a
+/// single meaning — branches that never receive a local merge.
 pub fn guard_mutation(root: &Path, work: Option<&str>) -> Result<(), String> {
     let root = canon(root);
     let Some(top) = toplevel(&root) else {
-        let protected = modeling_lang::source::manifest_protected(&root)
-            .map_err(|d| format!("{}: {}", d.code, d.message))?;
-        if protected.is_empty() {
-            return Ok(());
-        }
         return Err(
-            "archi.toml declares the seat discipline (`protected`) but this is not a git \
-             repository — the whole seat model (isolation, branches, merge) needs one. \
-             Ask the user: create it (`git init` and a seed commit), or cancel the work — \
-             never proceed bare under a declared discipline."
+            "not a git repository — archi mutations run only inside a seated worktree, \
+             and the seat model (isolation, branches, merge) needs one. Ask the user: \
+             create it (`git init` and a seed commit), or cancel the work — never \
+             proceed bare."
                 .to_string(),
         );
     };
-    let Some(reg) = Registry::load(&root)? else {
-        return Ok(());
-    };
+    let reg = Registry::load(&root)?.expect("a repository — toplevel resolved above");
     if let Some(slug) = work {
         if let Some((owner, _)) = reg.owner_of_plan(slug) {
             if Path::new(owner) != top.as_path() {
@@ -929,11 +922,6 @@ pub fn guard_mutation(root: &Path, work: Option<&str>) -> Result<(), String> {
         }
     }
     if reg.binding_of(&top).is_some() {
-        return Ok(());
-    }
-    let protected = modeling_lang::source::manifest_protected(&root)
-        .map_err(|d| format!("{}: {}", d.code, d.message))?;
-    if protected.is_empty() {
         return Ok(());
     }
     // One seat carries the whole unit — spec, plan, code. When seats exist,
@@ -957,8 +945,8 @@ pub fn guard_mutation(root: &Path, work: Option<&str>) -> Result<(), String> {
         Some(slug) if seats.is_empty() => {
             let minted = mint(&root, slug, Some(slug), None, &[], &BTreeMap::new())?;
             Err(format!(
-                "this checkout is unbound and the seat discipline is on (`protected` in \
-                 archi.toml) — minted worktree {} on branch {}; cd {} and re-run this verb; \
+                "this checkout is unbound — mutating verbs run only inside a seated \
+                 worktree; minted worktree {} on branch {}; cd {} and re-run this verb; \
                  the CLI never changes your directory",
                 minted.path.display(),
                 minted.branch,
@@ -966,21 +954,21 @@ pub fn guard_mutation(root: &Path, work: Option<&str>) -> Result<(), String> {
             ))
         }
         Some(slug) => Err(format!(
-            "this checkout is unbound and the seat discipline is on (`protected` in \
-             archi.toml) — existing seats:\n{}\nif `{slug}` continues one of them, work \
+            "this checkout is unbound — mutating verbs run only inside a seated \
+             worktree; existing seats:\n{}\nif `{slug}` continues one of them, work \
              there (cd its path); only new, unrelated work mints its own: \
              `archi worktree mint {slug}`",
             seats.join("\n")
         )),
         None if seats.is_empty() => Err(
-            "this checkout is unbound and the seat discipline is on (`protected` in \
-             archi.toml) — name the work first: `archi plan use <name>` mints a plan \
+            "this checkout is unbound — mutating verbs run only inside a seated \
+             worktree; name the work first: `archi plan use <name>` mints a plan \
              worktree, `archi worktree mint <slug>` seats spec work without a plan"
                 .to_string(),
         ),
         None => Err(format!(
-            "this checkout is unbound and the seat discipline is on (`protected` in \
-             archi.toml) — existing seats:\n{}\ncontinue in one of them (cd its path), or \
+            "this checkout is unbound — mutating verbs run only inside a seated \
+             worktree; existing seats:\n{}\ncontinue in one of them (cd its path), or \
              seat new work: `archi worktree mint <slug>`",
             seats.join("\n")
         )),
@@ -1109,29 +1097,27 @@ mod tests {
     }
 
     #[test]
-    fn the_guard_is_absent_without_git_or_discipline() {
-        // undeclared + gitless stays free
+    fn the_guard_is_unconditional() {
+        // gitless refuses loudly, naming the repair — with or without a
+        // protected list; the discipline never evaporates
         let plain = scratch();
         manifest(&plain, "");
-        assert!(guard_mutation(&plain, Some("x")).is_ok(), "nothing declared — nothing guarded");
-        // declared discipline without git refuses loudly, naming the repair
-        manifest(&plain, "protected = [\"main\"]\n");
         let e = guard_mutation(&plain, Some("x")).unwrap_err();
         assert!(e.contains("not a git repository"), "{e}");
         assert!(e.contains("git init"), "{e}");
         assert!(e.contains("or cancel"), "{e}");
+        // the discipline is checkout-conditional, not branch-conditional:
+        // an unbound checkout refuses on any branch, `protected` or not —
+        // the list keeps only its merge meaning
         let outer = scratch();
         let spec = repo(&outer, "spec");
         manifest(&spec, "");
         git(&spec, &["add", "-A"]);
         git(&spec, &["commit", "-qm", "manifest"]);
-        assert!(guard_mutation(&spec, Some("x")).is_ok(), "no protected list — no discipline");
-        // the discipline is checkout-conditional, not branch-conditional:
-        // an unbound checkout refuses on any branch, a feature one included
         git(&spec, &["switch", "-qc", "feature"]);
-        manifest(&spec, "protected = [\"main\"]\n");
         let e = guard_mutation(&spec, Some("x")).unwrap_err();
         assert!(e.contains("unbound"), "{e}");
+        assert!(e.contains("seated worktree"), "{e}");
     }
 
     #[test]

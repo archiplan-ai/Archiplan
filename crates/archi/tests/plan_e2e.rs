@@ -3,6 +3,8 @@
 //! scenario latch closes the cycle (`archi/requirements/planning/`,
 //! `archi/requirements/self-hosting/capture-at-the-join.md`).
 
+mod util;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -42,7 +44,7 @@ fn temp_project() -> PathBuf {
     fs::write(dir.join("code/auth.rs"), "pub fn login() -> bool { true }\n").unwrap();
     put_requirement(&dir, "store-encrypted", "Store encrypted", "Store");
     put_requirement(&dir, "service-hardening", "Service hardening", "Service");
-    dir
+    util::seat(&dir)
 }
 
 fn put_requirement(root: &Path, slug: &str, name: &str, satisfied_by: &str) {

@@ -4,6 +4,8 @@
 //! broken run, the briefing lands verbatim, and the verbs around init keep
 //! their contracts.
 
+mod util;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -221,25 +223,34 @@ fn the_verbs_around_init_keep_their_contracts() {
     let (code, _, _) = run_in(&root, &["search", "anything", "at", "all"]);
     assert_eq!(code, Some(0));
 
-    // A fresh init declares the seat discipline: gitless mutation is a
-    // full stop naming the repair, never a silent bare run.
+    // Gitless mutation is a full stop naming the repair, never a silent
+    // bare run — and the discipline is unconditional: deleting the
+    // `protected` line opts nothing out.
     let (code, _, stderr) = run_in(&root, &["version", "save", "-m", "first"]);
     assert_eq!(code, Some(1), "{stderr}");
     assert!(stderr.contains("git init"), "{stderr}");
-
-    // Opting out (deleting the line) restores the bare flow: a save, an
-    // init, a save — init minted nothing the second save could notice.
     let manifest = fs::read_to_string(root.join("archi.toml")).unwrap();
     fs::write(root.join("archi.toml"), manifest.replace("protected = [\"main\"]\n", "")).unwrap();
-    ok_in(&root, &["version", "save", "-m", "first"]);
-    let out = ok_in(&root, &["init", "."]);
+    let (code, _, stderr) = run_in(&root, &["version", "save", "-m", "first"]);
+    assert_eq!(code, Some(1), "no opt-out: {stderr}");
+    assert!(stderr.contains("git init"), "{stderr}");
+
+    // Seated, the flow runs: a save, an init, a save — init minted nothing
+    // the second save could notice.
+    let seat = util::seat(&root);
+    ok_in(&seat, &["version", "save", "-m", "first"]);
+    let out = ok_in(&seat, &["init", "."]);
     assert!(out.contains("already initialized"), "{out}");
-    let (_, stdout, stderr) = run_in(&root, &["version", "save", "-m", "again"]);
+    let (_, stdout, stderr) = run_in(&seat, &["version", "save", "-m", "again"]);
     assert!(
         (stdout.clone() + &stderr).contains("unchanged since v0001"),
         "{stdout}\n{stderr}"
     );
 
+    let _ = fs::remove_dir_all(root.parent().unwrap().join(format!(
+        "{}-worktrees",
+        root.file_name().unwrap().to_str().unwrap()
+    )));
     fs::remove_dir_all(&root).unwrap();
 }
 

@@ -1,7 +1,10 @@
 //! End to end through the real binary: the worktree seat discipline —
-//! protected branches refuse mutation and mint the seat, the registry moves
-//! by verbs, context follows the checkout
+//! mutation runs only inside a seated worktree (unconditionally: the guard
+//! sits at the router), protected branches refuse local merges, the
+//! registry moves by verbs, context follows the checkout
 //! (`archi/requirements/worktree-parallelism/`).
+
+mod util;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -69,8 +72,24 @@ fn ok(root: &Path, args: &[&str]) -> String {
     stdout
 }
 
-/// A committed spec repo on `main` with one saved version and no seat
-/// discipline — mutation and local merges run free.
+/// Run a save on `main` the disciplined way: a bootstrap seat maps the
+/// members, saves, commits, and merges back — mutations never run unbound,
+/// and the retire leaves the registry empty.
+fn seat_save(spec: &Path, slug: &str, map: &[(&str, &Path)], msg: &str) {
+    ok(spec, &["worktree", "mint", slug]);
+    let name = spec.file_name().unwrap().to_str().unwrap();
+    let wt = spec.parent().unwrap().join(format!("{name}-worktrees")).join(slug);
+    for (member, dir) in map {
+        ok(&wt, &["repo", "map", member, dir.to_str().unwrap()]);
+    }
+    ok(&wt, &["version", "save", "-m", msg]);
+    git(&wt, &["add", "-A"]);
+    git(&wt, &["commit", "-qm", msg]);
+    ok(spec, &["worktree", "merge", slug]);
+}
+
+/// A committed spec repo on `main` with one saved version, an empty
+/// registry, and no protected list — local merges run free.
 fn open_repo(tag: &str) -> (PathBuf, PathBuf) {
     let ws = scratch(tag);
     let spec = ws.join("spec");
@@ -82,14 +101,11 @@ fn open_repo(tag: &str) -> (PathBuf, PathBuf) {
     git(&spec, &["config", "commit.gpgsign", "false"]);
     git(&spec, &["add", "-A"]);
     git(&spec, &["commit", "-qm", "seed"]);
-    ok(&spec, &["version", "save", "-m", "seed"]);
-    git(&spec, &["add", "-A"]);
-    git(&spec, &["commit", "-qm", "archive"]);
+    seat_save(&spec, "boot", &[], "seed");
     (ws, spec)
 }
 
-/// [`open_repo`] plus the seat discipline: `protected = ["main"]`, added
-/// (and committed) after the save so the save itself runs unguarded.
+/// [`open_repo`] plus `protected = ["main"]` — `main` refuses local merges.
 fn protected_repo(tag: &str) -> (PathBuf, PathBuf) {
     let (ws, spec) = open_repo(tag);
     spec_project(&spec, "protected = [\"main\"]\n");
@@ -99,13 +115,16 @@ fn protected_repo(tag: &str) -> (PathBuf, PathBuf) {
 }
 
 #[test]
-fn a_protected_branch_mints_the_seat_and_the_worktree_proceeds() {
-    let (_ws, spec) = protected_repo("guard");
+fn an_unbound_checkout_mints_the_seat_and_the_worktree_proceeds() {
+    // No protected list: the discipline is unconditional — any unbound
+    // checkout refuses, the primary on `main` included.
+    let (_ws, spec) = open_repo("guard");
 
     // Mutation on main refuses, mints, and prints the path to enter.
     let (success, _out, err) = run(&spec, &["plan", "use", "auth"]);
-    assert!(!success, "mutation on a protected branch must refuse");
-    assert!(err.contains("protected"), "{err}");
+    assert!(!success, "mutation on an unbound checkout must refuse");
+    assert!(err.contains("unbound"), "{err}");
+    assert!(err.contains("seated worktree"), "{err}");
     assert!(err.contains("archi/auth"), "{err}");
     assert!(err.contains("never changes your directory"), "{err}");
     let wt = spec.parent().unwrap().join("spec-worktrees/auth");
@@ -133,7 +152,7 @@ fn a_protected_branch_mints_the_seat_and_the_worktree_proceeds() {
 }
 
 #[test]
-fn read_verbs_answer_on_a_protected_branch() {
+fn read_verbs_answer_on_an_unbound_checkout() {
     let (_ws, spec) = protected_repo("reads");
     ok(&spec, &["check"]);
     ok(&spec, &["version", "list"]);
@@ -148,7 +167,7 @@ fn read_verbs_answer_on_a_protected_branch() {
 
 #[test]
 fn a_verb_with_no_work_to_name_gets_both_recipes() {
-    let (_ws, spec) = protected_repo("recipes");
+    let (_ws, spec) = open_repo("recipes");
     let (success, _out, err) = run(&spec, &["version", "save", "-m", "x"]);
     assert!(!success);
     assert!(err.contains("plan use"), "{err}");
@@ -156,22 +175,13 @@ fn a_verb_with_no_work_to_name_gets_both_recipes() {
 }
 
 #[test]
-fn a_gitless_project_without_discipline_mutates_unchanged() {
+fn a_gitless_project_refuses_mutation_loudly() {
+    // No manifest opt-in anywhere in sight: the discipline never evaporates.
     let ws = scratch("gitless");
     let spec = ws.join("spec");
     spec_project(&spec, "");
-    ok(&spec, &["version", "save", "-m", "seed"]);
-    let out = ok(&spec, &["plan", "use", "auth"]);
-    assert!(out.contains("created plan `auth`"), "{out}");
-}
-
-#[test]
-fn a_declared_discipline_without_git_refuses_loudly() {
-    let ws = scratch("gitless-declared");
-    let spec = ws.join("spec");
-    spec_project(&spec, "protected = [\"main\"]\n");
     let (success, _out, err) = run(&spec, &["version", "save", "-m", "seed"]);
-    assert!(!success, "a declared discipline never silently evaporates");
+    assert!(!success, "gitless mutation is a stop, not a workflow");
     assert!(err.contains("not a git repository"), "{err}");
     assert!(err.contains("git init"), "{err}");
     assert!(err.contains("or cancel"), "{err}");
@@ -179,21 +189,6 @@ fn a_declared_discipline_without_git_refuses_loudly() {
     let st = ok(&spec, &["status"]);
     assert!(st.contains("not a git repository"), "{st}");
     assert!(st.contains("git init"), "{st}");
-}
-
-#[test]
-fn an_unprotected_branch_mutates_in_place_and_binds_on_plan_use() {
-    let ws = scratch("open");
-    let spec = ws.join("spec");
-    spec_project(&spec, "");
-    git(&spec, &["init", "-q", "-b", "main"]);
-    git(&spec, &["add", "-A"]);
-    git(&spec, &["commit", "-qm", "seed"]);
-    ok(&spec, &["version", "save", "-m", "seed"]);
-    let out = ok(&spec, &["plan", "use", "auth"]);
-    assert!(out.contains("created plan `auth`"), "{out}");
-    let ls = ok(&spec, &["worktree", "ls"]);
-    assert!(ls.contains("plan auth"), "{ls}");
 }
 
 #[test]
@@ -372,9 +367,9 @@ fn cascade_repo(tag: &str) -> (PathBuf, PathBuf, PathBuf) {
     git(&spec, &["config", "commit.gpgsign", "false"]);
     git(&spec, &["add", "-A"]);
     git(&spec, &["commit", "-qm", "seed"]);
-    ok(&spec, &["version", "save", "-m", "seed"]);
-    git(&spec, &["add", "-A"]);
-    git(&spec, &["commit", "-qm", "archive"]);
+    // The bootstrap seat maps the real member so the save records its
+    // baseline — the seat's own relative `../backend` resolves nowhere.
+    seat_save(&spec, "boot", &[("backend", &backend)], "seed");
     (ws, spec, backend)
 }
 
@@ -435,7 +430,9 @@ fn a_baseline_off_the_branch_refuses_with_the_base_escape() {
         format!("{MODEL}def node Extra:\n  port x\n"),
     )
     .unwrap();
-    ok(&spec, &["version", "save", "-m", "v2 with side baseline"]);
+    git(&spec, &["add", "-A"]);
+    git(&spec, &["commit", "-qm", "model grows"]);
+    seat_save(&spec, "boot2", &[("backend", &backend)], "v2 with side baseline");
     git(&backend, &["switch", "-q", "main"]);
 
     let (success, _out, err) = run(&spec, &["worktree", "mint", "feat", "--repos", "backend"]);
@@ -461,7 +458,7 @@ fn a_missing_baseline_names_both_repairs() {
     git(&spec, &["config", "user.name", "t"]);
     git(&spec, &["add", "-A"]);
     git(&spec, &["commit", "-qm", "seed"]);
-    ok(&spec, &["version", "save", "-m", "seed"]);
+    seat_save(&spec, "boot", &[], "seed");
     spec_project(&spec, "[[repo]]\nname = \"backend\"\npath = \"../backend\"\n");
     let (success, _out, err) = run(&spec, &["worktree", "mint", "feat", "--repos", "backend"]);
     assert!(!success);
@@ -528,6 +525,7 @@ fn a_doctored_plan_pin_surfaces_as_a_stale_pin_finding() {
     let ws = scratch("stale-plan");
     let spec = ws.join("spec");
     spec_project(&spec, "");
+    let spec = util::seat(&spec);
     ok(&spec, &["version", "save", "-m", "seed"]);
     ok(&spec, &["plan", "use", "auth"]);
     let plan_path = spec.join("archi/plans/auth/plan.json");
@@ -549,6 +547,7 @@ fn a_doctored_session_stamp_surfaces_as_a_stale_stamp_finding() {
     let ws = scratch("stale-session");
     let spec = ws.join("spec");
     spec_project(&spec, "");
+    let spec = util::seat(&spec);
     ok(&spec, &["version", "save", "-m", "seed"]);
     let round = spec.join("archi/stress/round");
     fs::create_dir_all(&round).unwrap();
