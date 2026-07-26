@@ -3,6 +3,12 @@ name: archi-finish-worktree
 description: Close a worktree seat — land its spec/plan/code unit, push member branches for their PRs, retire the worktree and its registry binding in one move. Use when a unit of work in an archi worktree is done and must land; a conflicted join hands off to archi-merge.
 ---
 
+> **Skill freshness — the first move.** In an initialized project run
+> `archi sync-skills` before anything else. If it reports
+> `.claude/skills/archi-finish-worktree/SKILL.md` as `updated` (or `created`), the text
+> you are following is stale: re-read that file, follow it, and only
+> then continue. `ok` means proceed.
+
 # Archi finish worktree
 
 One seat, one landing.

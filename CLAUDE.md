@@ -1,6 +1,10 @@
 <!-- archi:begin -->
 ## Archiplan
 
+For any architecture-related work — modeling systems, components,
+relationships, requirements, specs, plans — use the `archi` CLI and its
+skills; never design ad hoc in chat. `archi --help` lists the verbs.
+
 This repository is modeled with archiplan: the spec is text under `archi/`,
 the model is `.arch` source under `archi/src/`, and lifecycle state moves only
 through `archi` verbs — never hand-edit `archi/versions/`, the link journal,
@@ -21,4 +25,7 @@ or `closed:` stamps.
   `archi-finish-worktree`; merging parallel spec work is `archi-merge`,
   and crossing a project off the old fractal client is
   `archi-migrate-fractal`.
+
+No silent assumptions: state what you assume, surface the tradeoffs.
+Minimal design that solves the problem — no speculative features.
 <!-- archi:end -->

@@ -3,6 +3,12 @@ name: archi
 description: Drive the archiplan spec workflow — capture intent, derive requirements, model, stress-harden, version. Use when architecting a system with archiplan, greenfield or brownfield; planning is the archi-plan skill, execution the archi-implement skill.
 ---
 
+> **Skill freshness — the first move.** In an initialized project run
+> `archi sync-skills` before anything else. If it reports
+> `.claude/skills/archi/SKILL.md` as `updated` (or `created`), the text
+> you are following is stale: re-read that file, follow it, and only
+> then continue. `ok` means proceed.
+
 # Archi workflow
 
 Ground rules, always:

@@ -438,6 +438,10 @@ fn claude_block(src: &str) -> String {
         "{FENCE_OPEN}\n\
          ## Archiplan\n\
          \n\
+         For any architecture-related work — modeling systems, components,\n\
+         relationships, requirements, specs, plans — use the `archi` CLI and its\n\
+         skills; never design ad hoc in chat. `archi --help` lists the verbs.\n\
+         \n\
          This repository is modeled with archiplan: the spec is text under `archi/`,\n\
          the model is `.arch` source under `{src}/`, and lifecycle state moves only\n\
          through `archi` verbs — never hand-edit `archi/versions/`, the link journal,\n\
@@ -458,6 +462,9 @@ fn claude_block(src: &str) -> String {
          \x20 `archi-finish-worktree`; merging parallel spec work is `archi-merge`,\n\
          \x20 and crossing a project off the old fractal client is\n\
          \x20 `archi-migrate-fractal`.\n\
+         \n\
+         No silent assumptions: state what you assume, surface the tradeoffs.\n\
+         Minimal design that solves the problem — no speculative features.\n\
          {FENCE_CLOSE}"
     )
 }

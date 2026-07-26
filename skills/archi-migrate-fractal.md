@@ -3,6 +3,12 @@ name: archi-migrate-fractal
 description: Migrate a machine and its projects off the old fractal client — swap the binary (old archi becomes old-archi via migrate-fractal.sh), then cross each .fractal/ project into a standing, checkable archiplan spec with a brief of what didn't map. Use when a user of the old fractal-era archi wants their projects in the new Archiplan format.
 ---
 
+> **Skill freshness — the first move.** In an initialized project run
+> `archi sync-skills` before anything else. If it reports
+> `.claude/skills/archi-migrate-fractal/SKILL.md` as `updated` (or `created`), the text
+> you are following is stale: re-read that file, follow it, and only
+> then continue. `ok` means proceed.
+
 # Migrate from fractal
 
 The old fractal client and the new Archiplan CLI both install as `archi`.

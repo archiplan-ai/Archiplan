@@ -3,6 +3,12 @@ name: archi-implement
 description: Drive the implementation of a started archi plan — wave by wave, sub-agents in parallel, until `archi plan next` says `DONE`. Runs inside the worktree seat that carries the plan.
 ---
 
+> **Skill freshness — the first move.** In an initialized project run
+> `archi sync-skills` before anything else. If it reports
+> `.claude/skills/archi-implement/SKILL.md` as `updated` (or `created`), the text
+> you are following is stale: re-read that file, follow it, and only
+> then continue. `ok` means proceed.
+
 > **Working rules — apply to every step of this session:**
 > - **Bash Output Hygiene.** No `echo` separators and no `python`/`jq` to reformat already-readable output. Parse only when it genuinely narrows large output to the slice you need.
 > - **User-Facing Output.** Keep output user-friendly: don't dump archiplan jargon or internal element definitions into messages — write plain, concise summaries and cite spec elements as inline code (e.g. `Backend.api`).

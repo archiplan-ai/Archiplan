@@ -3,6 +3,12 @@ name: archi-merge
 description: Merge two branches that both mutated an archiplan spec — triage the join with check, resolve version-archive collisions with remint, read the journal's absorbed residue, fold concurrent stress rounds. Use when integrating parallel spec work or repairing a post-merge broken state.
 ---
 
+> **Skill freshness — the first move.** In an initialized project run
+> `archi sync-skills` before anything else. If it reports
+> `.claude/skills/archi-merge/SKILL.md` as `updated` (or `created`), the text
+> you are following is stale: re-read that file, follow it, and only
+> then continue. `ok` means proceed.
+
 # Archi merge
 
 Two writers, one lineage.

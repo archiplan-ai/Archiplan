@@ -3,6 +3,12 @@ name: archi-plan
 description: Generate an implementation plan from a hardened archi spec — an envelope with a user-polled stack and its infrastructure, tasks per node, curated requirement ownership, named verifications, scenarios. Authors the plan only; the spec is /archi, the code is /archi-implement.
 ---
 
+> **Skill freshness — the first move.** In an initialized project run
+> `archi sync-skills` before anything else. If it reports
+> `.claude/skills/archi-plan/SKILL.md` as `updated` (or `created`), the text
+> you are following is stale: re-read that file, follow it, and only
+> then continue. `ok` means proceed.
+
 > **Working rules — apply to every step of this session:**
 > - **Bash Output Hygiene.** No `echo` separators and no `python`/`jq` to reformat already-readable output. Parse only when it genuinely narrows large output to the slice you need.
 > - **User-Facing Output.** Keep output user-friendly: don't dump archiplan jargon or internal element definitions into messages — write plain, concise summaries and cite spec elements as inline code (e.g. `BookingService`).
