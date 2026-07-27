@@ -377,14 +377,10 @@ pub fn mint(
     let branch = branch_of(slug);
     let mut reg = Registry::load(&root)?.expect("toplevel resolved, so common dir does");
     ensure_excludes(&top);
-    // members resolve against the primary checkout: a worktree's own overlay
-    // only knows the members already cascaded to it
-    let worktrees = list_worktrees(&top);
-    let primary_top =
-        worktrees.first().map(|w| w.path.clone()).unwrap_or_else(|| top.clone());
+    // where the project sits inside the tree — a monorepo spec below the
+    // git root keeps that offset inside its seat too
     let rel = root.strip_prefix(&top).unwrap_or(Path::new("")).to_path_buf();
-    let primary_project = primary_top.join(&rel);
-
+    let worktrees = list_worktrees(&top);
     let seated = worktrees
         .iter()
         .find(|w| w.branch.as_deref() == Some(branch.as_str()))
@@ -407,12 +403,20 @@ pub fn mint(
         .as_ref()
         .map(|b| b.members.keys().cloned().collect())
         .unwrap_or_default();
+    // Members resolve against the invoked project root — the checkout that
+    // carries the unit's manifest, overlay and archive: the primary on a
+    // first cascade, the seat itself on a mid-unit extension (declarations
+    // and anchors made in the seat land on the primary only at the final
+    // merge). Already-cascaded members are excluded above, so the seat's
+    // overlay rows pointing at member worktrees never feed the cascade;
+    // a fresh member unresolvable from here refuses toward `repo map` —
+    // member locations are machine-local truth, the overlay carries them.
     let fresh_repos: Vec<String> =
         repos.iter().filter(|r| !known.contains(r)).cloned().collect();
     let targets = if fresh_repos.is_empty() {
         Vec::new()
     } else {
-        plan_cascade(&primary_project, slug, plan, &fresh_repos, bases)?
+        plan_cascade(&root, slug, plan, &fresh_repos, bases)?
     };
 
     // create: spec worktree (unless seated), then member worktrees — any

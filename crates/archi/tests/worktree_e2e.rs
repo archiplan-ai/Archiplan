@@ -419,6 +419,34 @@ fn the_cascade_mints_member_worktrees_and_the_seat_overlay() {
 }
 
 #[test]
+fn a_seat_extension_resolves_members_from_the_seat() {
+    // The unit lives in its seat: member declarations and anchors made
+    // there exist on no other branch — the mid-unit extension must read
+    // them from the seat, not the primary checkout.
+    let (ws, spec) = open_repo("extend");
+    let svc = ws.join("svc");
+    member_repo(&svc);
+    ok(&spec, &["worktree", "mint", "unit"]);
+    let wt = spec.parent().unwrap().join("spec-worktrees/unit");
+    let manifest = fs::read_to_string(wt.join("archi.toml")).unwrap();
+    fs::write(
+        wt.join("archi.toml"),
+        format!("{manifest}[[repo]]\nname = \"svc\"\npath = \"../svc\"\n"),
+    )
+    .unwrap();
+    ok(&wt, &["repo", "map", "svc", svc.to_str().unwrap()]);
+    ok(&wt, &["version", "anchor", "--repo", "svc"]);
+    let out = ok(&wt, &["worktree", "mint", "unit", "--repos", "svc"]);
+    assert!(out.contains("member svc:"), "{out}");
+    assert!(out.contains("(base main)"), "{out}");
+    let swt = svc.parent().unwrap().join("svc-worktrees/unit");
+    assert!(swt.is_dir(), "the member worktree cascaded from the seat");
+    let ls = ok(&wt, &["worktree", "ls"]);
+    assert!(ls.contains("member svc:"), "{ls}");
+    assert!(ls.contains("— ok"), "{ls}");
+}
+
+#[test]
 fn a_baseline_off_the_branch_refuses_with_the_base_escape() {
     let (_ws, spec, backend) = cascade_repo("off-branch");
     // the latest baseline lands on a side branch the checkout then leaves —
