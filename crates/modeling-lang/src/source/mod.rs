@@ -87,6 +87,13 @@ pub fn manifest_repos(root: &Path) -> Result<Vec<project::RepoDecl>, Diagnostic>
     project::read_manifest(root).map(|m| m.repos)
 }
 
+/// The manifest's protected branches (`[project] protected`) — the
+/// compiler's own reading, exposed for the same one-parser reason as
+/// [`manifest_src`]. Absence yields the empty list: no protection.
+pub fn manifest_protected(root: &Path) -> Result<Vec<String>, Diagnostic> {
+    project::read_manifest(root).map(|m| m.protected)
+}
+
 pub use project::RepoDecl;
 
 /// Compile the project rooted at `root` (the directory holding `archi.toml`).

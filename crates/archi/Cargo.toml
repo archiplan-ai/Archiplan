@@ -1,6 +1,6 @@
 [package]
 name = "archi"
-version = "0.1.9"
+version = "0.1.10"
 edition = "2024"
 description = "Thin CLI runner for Archiplan modeling-language statement batches."
 

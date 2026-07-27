@@ -4,6 +4,8 @@
 //! findings stay advisory and do not withhold it, an empty landscape earns
 //! no read, and an error (archive, compile) withholds it entirely.
 
+mod util;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -39,7 +41,7 @@ fn temp_project(model: &str) -> PathBuf {
     )
     .unwrap();
     fs::write(dir.join("archi/src/model.arch"), model).unwrap();
-    dir
+    util::seat(&dir)
 }
 
 fn run(root: &Path, args: &[&str]) -> (bool, String, String) {

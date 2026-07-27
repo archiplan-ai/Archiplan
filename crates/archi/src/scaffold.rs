@@ -16,9 +16,15 @@ use std::path::{Path, PathBuf};
 use modeling_lang::source::{find_project_root, manifest_src};
 
 /// The briefing, embedded at build time: skill name → SKILL.md text.
-const SKILLS: [(&str, &str); 3] = [
+const SKILLS: [(&str, &str); 6] = [
     ("archi", include_str!("../../../skills/archi.md")),
+    ("archi-plan", include_str!("../../../skills/archi-plan.md")),
+    ("archi-implement", include_str!("../../../skills/archi-implement.md")),
     ("archi-merge", include_str!("../../../skills/archi-merge.md")),
+    (
+        "archi-finish-worktree",
+        include_str!("../../../skills/archi-finish-worktree.md"),
+    ),
     (
         "archi-migrate-fractal",
         include_str!("../../../skills/archi-migrate-fractal.md"),
@@ -147,14 +153,42 @@ pub fn init(target: &Path) -> Result<Outcome, String> {
     };
     steps.push(step(act.0, &target, &claude, act.1));
 
+    // The gitignore: seat artifacts are machine-local and never merged —
+    // create it, append the missing lines once, or leave it as found.
+    let gitignore = target.join(".gitignore");
+    let wanted = ["archi/*.local.toml", "archi/plans/.current"];
+    let act = match fs::read_to_string(&gitignore) {
+        Err(_) => {
+            write_new(&gitignore, &format!("{}\n", wanted.join("\n")))?;
+            (Act::Created, None)
+        }
+        Ok(found) => {
+            let missing: Vec<&str> = wanted
+                .into_iter()
+                .filter(|w| !found.lines().any(|l| l.trim() == *w))
+                .collect();
+            if missing.is_empty() {
+                (Act::Ok, Some("the archi lines are present".into()))
+            } else {
+                let sep = if found.is_empty() || found.ends_with('\n') { "" } else { "\n" };
+                fs::write(&gitignore, format!("{found}{sep}{}\n", missing.join("\n")))
+                    .map_err(|e| format!("cannot write {}: {e}", gitignore.display()))?;
+                (Act::Appended, Some("the archi lines".into()))
+            }
+        }
+    };
+    steps.push(step(act.0, &target, &gitignore, act.1));
+
     // The manifest, last: a tree is a project only once it is whole.
     if manifest.is_file() {
         steps.push(step(Act::Ok, &target, &manifest, Some("present".into())));
     } else {
+        // the seat discipline is on from birth: mutation runs in worktrees,
+        // never in the primary checkout; deleting the line is the opt-out
         write_new(
             &manifest,
             &format!(
-                "[project]\nname = \"{}\"\npreset = \"default\"\n",
+                "[project]\nname = \"{}\"\npreset = \"default\"\nprotected = [\"main\"]\n",
                 toml_escape(&name)
             ),
         )?;
@@ -404,6 +438,10 @@ fn claude_block(src: &str) -> String {
         "{FENCE_OPEN}\n\
          ## Archiplan\n\
          \n\
+         For any architecture-related work — modeling systems, components,\n\
+         relationships, requirements, specs, plans — use the `archi` CLI and its\n\
+         skills; never design ad hoc in chat. `archi --help` lists the verbs.\n\
+         \n\
          This repository is modeled with archiplan: the spec is text under `archi/`,\n\
          the model is `.arch` source under `{src}/`, and lifecycle state moves only\n\
          through `archi` verbs — never hand-edit `archi/versions/`, the link journal,\n\
@@ -414,10 +452,19 @@ fn claude_block(src: &str) -> String {
          - Find anything by phrase: `archi search <phrase>` — ranked hits across\n\
          \x20 elements, intents, requirements, stressors, sessions and decisions,\n\
          \x20 each with its address.\n\
-         - The full workflow (model, stress, version, plan, implement with link\n\
-         \x20 capture) is the `archi` skill in `.claude/skills/archi/`; merging\n\
-         \x20 parallel spec work is `archi-merge`, and crossing a project off the\n\
-         \x20 old fractal client is `archi-migrate-fractal`.\n\
+         - Spec work delegated to subagents or workflows returns as FILES written\n\
+         \x20 under `archi/` (paths, not payloads): a finding that is not a file on\n\
+         \x20 disk does not exist, and every fan-out is gated by `archi check` plus\n\
+         \x20 a count of the files it claims to have written.\n\
+         - The spec workflow (model, stress, version) is the `archi` skill in\n\
+         \x20 `.claude/skills/archi/`; authoring a plan is `archi-plan`; executing\n\
+         \x20 it in waves is `archi-implement`; closing a worktree seat is\n\
+         \x20 `archi-finish-worktree`; merging parallel spec work is `archi-merge`,\n\
+         \x20 and crossing a project off the old fractal client is\n\
+         \x20 `archi-migrate-fractal`.\n\
+         \n\
+         No silent assumptions: state what you assume, surface the tradeoffs.\n\
+         Minimal design that solves the problem — no speculative features.\n\
          {FENCE_CLOSE}"
     )
 }

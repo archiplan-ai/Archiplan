@@ -13,6 +13,7 @@ use serde_json::Value;
 use modeling_lang::Finding;
 
 use crate::docs::DocFinding;
+use crate::plans::PlanFinding;
 
 /// The id of the element a line concerns, tagged by kind so a reader knows how
 /// it resolves back: a `node`/`port`/`edge` through the shared element
@@ -70,9 +71,18 @@ pub fn of_doc_finding(f: &DocFinding) -> Address {
             Address::of(stressor.clone(), "stressor")
         }
         DocFinding::OffListAxis { decision, .. } => Address::of(decision.clone(), "decision"),
-        DocFinding::EmptySession { session } | DocFinding::FoldedAwaitsRemint { session, .. } => {
+        DocFinding::EmptySession { session }
+        | DocFinding::FoldedAwaitsRemint { session, .. }
+        | DocFinding::StaleSessionPin { session, .. } => {
             Address::of(session.clone(), "session")
         }
+    }
+}
+
+/// The plan a plan-lifecycle finding concerns.
+pub fn of_plan_finding(f: &PlanFinding) -> Address {
+    match f {
+        PlanFinding::StalePin { plan, .. } => Address::of(plan.clone(), "plan"),
     }
 }
 

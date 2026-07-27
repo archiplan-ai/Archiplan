@@ -5,6 +5,8 @@
 //! takes `live`; archive diagnostics name their recipes instead of
 //! cascading.
 
+mod util;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -35,6 +37,20 @@ fn temp_project() -> PathBuf {
     fs::write(dir.join("archi/src/model.arch"), MODEL).unwrap();
     fs::write(dir.join("code/gate.rs"), GATE_RS).unwrap();
     dir
+}
+
+/// A committed fixture plus its seat worktree — mutating verbs answer only
+/// from the seat, so tests write and run there. Returns (fixture, seat).
+fn seated() -> (PathBuf, PathBuf) {
+    let fixture = temp_project();
+    let seat = util::seat(&fixture);
+    (fixture, seat)
+}
+
+fn cleanup(fixture: &Path) {
+    let name = fixture.file_name().unwrap().to_str().unwrap();
+    let _ = fs::remove_dir_all(fixture.parent().unwrap().join(format!("{name}-worktrees")));
+    let _ = fs::remove_dir_all(fixture);
 }
 
 /// Run the binary; return (success, stdout, stderr).
@@ -68,7 +84,7 @@ fn write_journal(root: &Path, text: &str) {
 
 #[test]
 fn parallel_adds_union_fold_in_either_order() {
-    let root = temp_project();
+    let (fixture, root) = seated();
 
     // Writer one mints on their branch.
     let (ok, out, err) = run(&root, &["link", "add", "Gate", "code/gate.rs#gate", "--kind", "indirect"]);
@@ -102,12 +118,12 @@ fn parallel_adds_union_fold_in_either_order() {
         assert!(ok, "{err}");
         assert!(out.contains(&id_a) && out.contains(&id_b), "{out}");
     }
-    fs::remove_dir_all(&root).unwrap();
+    cleanup(&fixture);
 }
 
 #[test]
 fn retire_repin_union_folds_both_orders_and_surfaces_the_absorption() {
-    let root = temp_project();
+    let (fixture, root) = seated();
     let (ok, _, err) = run(&root, &["link", "add", "Gate", "code/gate.rs#gate", "--kind", "indirect"]);
     assert!(ok, "{err}");
     let base = read_journal(&root);
@@ -145,7 +161,7 @@ fn retire_repin_union_folds_both_orders_and_surfaces_the_absorption() {
             "verify surfaces exactly the tombstone-landing interleave: {out}"
         );
     }
-    fs::remove_dir_all(&root).unwrap();
+    cleanup(&fixture);
 }
 
 #[test]
@@ -163,12 +179,12 @@ fn an_id_never_minted_still_refuses_the_fold() {
 
 #[test]
 fn the_union_merge_attribute_ships_beside_the_journal() {
-    let root = temp_project();
+    let (fixture, root) = seated();
     let (ok, _, err) = run(&root, &["link", "add", "Gate", "code/gate.rs#gate", "--kind", "indirect"]);
     assert!(ok, "{err}");
     let ga = fs::read_to_string(root.join("archi/links/.gitattributes")).unwrap();
     assert!(ga.contains("journal.jsonl merge=union"), "{ga}");
-    fs::remove_dir_all(&root).unwrap();
+    cleanup(&fixture);
 }
 
 // ---- remint rejoins the lineage ---------------------------------------------
@@ -186,15 +202,14 @@ fn git(root: &Path, args: &[&str]) -> bool {
 
 #[test]
 fn remint_rejoins_the_lineage_and_restamps_the_round() {
-    let root = temp_project();
-    if !git(&root, &["init", "-q"]) {
-        return; // no git in this environment
-    }
+    // Both players branch inside the seat worktree: the binding, not the
+    // branch, licenses the mutation, and the git plumbing stays real.
+    let (fixture, root) = seated();
     let (ok, _, err) = run(&root, &["version", "save", "-m", "base"]);
     assert!(ok, "{err}");
     assert!(git(&root, &["add", "-A"]) && git(&root, &["commit", "-qm", "base"]));
 
-    // The winner lands first: a port on Gate, saved as v0002 on main.
+    // The winner lands first: a port on Gate, saved as v0002.
     assert!(git(&root, &["checkout", "-qb", "winner"]));
     fs::write(
         root.join("archi/src/model.arch"),
@@ -207,7 +222,7 @@ fn remint_rejoins_the_lineage_and_restamps_the_round() {
 
     // The loser runs a whole round from the same base: session, answer
     // (node Loser), save — also v0002, closed: stamped v0002.
-    assert!(git(&root, &["checkout", "-q", "main"]) || git(&root, &["checkout", "-q", "master"]));
+    assert!(git(&root, &["checkout", "-q", "archi/seat"]));
     assert!(git(&root, &["checkout", "-qb", "loser"]));
     let sdir = root.join("archi/stress/loser-round");
     fs::create_dir_all(&sdir).unwrap();
@@ -264,12 +279,12 @@ fn remint_rejoins_the_lineage_and_restamps_the_round() {
     assert!(!out.contains("+  port late"), "the winner's delta is not re-minted: {out}");
     let (ok, _, _) = run(&root, &["check"]);
     assert!(ok, "the merged, reminted tree checks clean");
-    fs::remove_dir_all(&root).unwrap();
+    cleanup(&fixture);
 }
 
 #[test]
 fn remint_refuses_unchanged_unknown_and_open() {
-    let root = temp_project();
+    let (fixture, root) = seated();
     let (ok, _, err) = run(&root, &["version", "save", "-m", "base"]);
     assert!(ok, "{err}");
 
@@ -295,14 +310,14 @@ fn remint_refuses_unchanged_unknown_and_open() {
     let (ok, _, err) = run(&root, &["version", "remint", "-m", "x", "--session", "open-round"]);
     assert!(!ok);
     assert!(err.contains("is open"), "{err}");
-    fs::remove_dir_all(&root).unwrap();
+    cleanup(&fixture);
 }
 
 // ---- merge deltas are reviewable --------------------------------------------
 
 #[test]
 fn diff_live_shows_the_unsaved_delta() {
-    let root = temp_project();
+    let (fixture, root) = seated();
     let (ok, _, err) = run(&root, &["version", "save", "-m", "base"]);
     assert!(ok, "{err}");
     fs::write(root.join("archi/src/model.arch"), format!("{MODEL}def node Extra\n")).unwrap();
@@ -316,14 +331,14 @@ fn diff_live_shows_the_unsaved_delta() {
 
     let (ok, _, err) = run(&root, &["version", "diff", "v0001", "nope"]);
     assert!(!ok, "unknown ids still refuse: {err}");
-    fs::remove_dir_all(&root).unwrap();
+    cleanup(&fixture);
 }
 
 // ---- diagnostics name their recipes ------------------------------------------
 
 #[test]
 fn conflict_markers_name_the_recipe_and_sessions_stay_quiet() {
-    let root = temp_project();
+    let (fixture, root) = seated();
     let (ok, _, err) = run(&root, &["version", "save", "-m", "base"]);
     assert!(ok, "{err}");
     let sdir = root.join("archi/stress/quiet-round");
@@ -348,12 +363,12 @@ fn conflict_markers_name_the_recipe_and_sessions_stay_quiet() {
         !err.contains("names no archived version"),
         "one archive error, no session cascade: {err}"
     );
-    fs::remove_dir_all(&root).unwrap();
+    cleanup(&fixture);
 }
 
 #[test]
 fn a_half_shipped_save_names_the_travel_rule() {
-    let root = temp_project();
+    let (fixture, root) = seated();
     let (ok, out, err) = run(&root, &["version", "save", "-m", "base"]);
     assert!(ok, "{err}");
     assert!(
@@ -364,5 +379,5 @@ fn a_half_shipped_save_names_the_travel_rule() {
     let (ok, _, err) = run(&root, &["check"]);
     assert!(!ok);
     assert!(err.contains("travel as one commit"), "{err}");
-    fs::remove_dir_all(&root).unwrap();
+    cleanup(&fixture);
 }

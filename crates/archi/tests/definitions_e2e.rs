@@ -4,6 +4,8 @@
 //! against its seal with the definitions inside, pre-definition versions
 //! reconstruct unchanged, and changing a definition is a meaning change.
 
+mod util;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -34,7 +36,7 @@ fn temp_project() -> PathBuf {
     )
     .unwrap();
     fs::write(dir.join("archi/src/model.arch"), BARE).unwrap();
-    dir
+    util::seat(&dir)
 }
 
 fn run(root: &Path, args: &[&str]) -> (bool, String, String) {

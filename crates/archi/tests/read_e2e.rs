@@ -3,6 +3,8 @@
 //! envelope out; writes are protocol errors; `--at` reads a version
 //! reconstructed from the sealed archive.
 
+mod util;
+
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -30,7 +32,7 @@ fn temp_project() -> PathBuf {
     fs::create_dir_all(dir.join("archi/src")).unwrap();
     fs::write(dir.join("archi.toml"), "[project]\nname = \"t\"\n").unwrap();
     fs::write(dir.join("archi/src/model.arch"), MODEL).unwrap();
-    dir
+    util::seat(&dir)
 }
 
 /// Run the binary; return (exit code, stdout, stderr).

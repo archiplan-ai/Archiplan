@@ -22,7 +22,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use modeling_lang::{Definition, Model, Statement, Workspace};
+use modeling_lang::{Definition, ElementKind, Model, Statement, Workspace};
 use serde::{Deserialize, Serialize};
 
 use crate::docs;
@@ -45,7 +45,7 @@ pub enum PlanState {
 }
 
 impl PlanState {
-    fn describe(self) -> &'static str {
+    pub(crate) fn describe(self) -> &'static str {
         match self {
             PlanState::Draft => "draft",
             PlanState::Started => "started",
@@ -102,6 +102,12 @@ pub struct Task {
     /// The spec elements it realizes: node paths and canonical edge text,
     /// version-free — the plan's pin applies to all of them.
     pub spec_refs: Vec<String>,
+    /// The requirements this task owns, curated from the derived matched
+    /// set — a strict subset, authored at the plan stage. Verification
+    /// duty counts these, not every match: several tasks may touch one
+    /// element without all of them answering for its requirements.
+    #[serde(default)]
+    pub owns: Vec<String>,
     /// Concrete tech detail for this task.
     #[serde(default)]
     pub stack_details: String,
@@ -127,6 +133,12 @@ pub struct Plan {
     pub name: String,
     /// The pinned spec version (`vNNNN`); `plan repin` moves it.
     pub version: String,
+    /// The pinned version's content hash (`sha256:…`), stamped at use and
+    /// repin — a pin is verified by content, not id alone, so a remint
+    /// cannot silently reinterpret it
+    /// (`archi/requirements/worktree-parallelism/pins-survive-a-remint`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version_hash: Option<String>,
     /// ISO-8601 UTC timestamp of creation.
     pub created: String,
     /// Lifecycle state.
@@ -245,6 +257,21 @@ pub(crate) fn load_active(root: &Path) -> Result<Plan, String> {
     }
 }
 
+/// Every stored plan, sorted by name — the handoff listing `status` prints.
+pub(crate) fn all_plans(root: &Path) -> Result<Vec<Plan>, String> {
+    let dir = plans_dir(root);
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return Ok(Vec::new());
+    };
+    let mut names: Vec<String> = entries
+        .filter_map(Result::ok)
+        .filter(|e| e.path().is_dir())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names.iter().map(|n| load_plan(root, n)).collect()
+}
+
 fn now() -> String {
     versions::iso8601_utc(SystemTime::now())
 }
@@ -295,9 +322,11 @@ pub fn use_plan(root: &Path, model: &Model, name: &str) -> Result<Used, String> 
         return Ok(Used::Switched(plan));
     }
     let version = pinnable_version(root, model)?;
+    let version_hash = pin_hash(root, &version);
     let plan = Plan {
         name: name.to_string(),
         version,
+        version_hash,
         created: now(),
         state: PlanState::Draft,
         closed_waves: 0,
@@ -325,8 +354,56 @@ pub fn repin(root: &Path, model: &Model) -> Result<(Plan, String), String> {
         return Err(format!("already pinned to {to}"));
     }
     let from = std::mem::replace(&mut plan.version, to);
+    plan.version_hash = pin_hash(root, &plan.version);
     store_plan(root, &plan)?;
     Ok((plan, from))
+}
+
+/// The archived content hash a pin records; `None` leaves an unhashed pin,
+/// which `check` treats as silent (pre-hash plans keep working).
+fn pin_hash(root: &Path, version: &str) -> Option<String> {
+    versions::Archive::open(root)
+        .ok()
+        .flatten()
+        .and_then(|a| a.entry(version).map(|e| e.model.clone()))
+}
+
+/// A plan whose pin no longer means what it meant
+/// (`archi/requirements/worktree-parallelism/pins-survive-a-remint`).
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PlanFinding {
+    StalePin { plan: String, version: String },
+}
+
+impl std::fmt::Display for PlanFinding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PlanFinding::StalePin { plan, version } => write!(
+                f,
+                "stale plan pin: `{plan}` pins {version}, whose archived content changed \
+                 since the pin — `archi plan repin`"
+            ),
+        }
+    }
+}
+
+/// Compare every stored plan's pin hash against the archive. Hash-less
+/// plans and ids the archive no longer holds stay silent — the lazy
+/// `compile_pinned` error owns those.
+pub(crate) fn check(root: &Path) -> Result<Vec<PlanFinding>, String> {
+    let Some(archive) = versions::Archive::open(root)? else {
+        return Ok(Vec::new());
+    };
+    let mut out = Vec::new();
+    for p in all_plans(root)? {
+        if let (Some(stored), Some(entry)) = (&p.version_hash, archive.entry(&p.version)) {
+            if stored != &entry.model {
+                out.push(PlanFinding::StalePin { plan: p.name.clone(), version: p.version.clone() });
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// `archi plan task add <node>`: mint a task pinned to a node of the
@@ -355,6 +432,7 @@ pub fn task_add(root: &Path, node: &str, description: Option<&str>) -> Result<Ta
         node: node.to_string(),
         description: description.unwrap_or_default().to_string(),
         spec_refs: seed_spec_refs(model, node),
+        owns: Vec::new(),
         stack_details: String::new(),
         inputs: BTreeMap::new(),
         outputs: Vec::new(),
@@ -440,6 +518,10 @@ pub struct MatchedReq {
     pub req: String,
     /// Which of the task's own spec_refs pulled it in.
     pub matched_refs: Vec<String>,
+    /// Whether the task owns this match (`owns` in plan.json) — the match
+    /// is the candidate, ownership is the curation.
+    #[serde(default)]
+    pub owned: bool,
 }
 
 /// Everything derived from a plan against the spec — recomputed, never
@@ -509,6 +591,20 @@ fn matched_requirements(
         for entry in entries {
             if let Some(terms) = pinned.term_surface(entry) {
                 surface.extend(terms);
+            } else if let Some((s, d)) = endpoints
+                .get(entry.as_str())
+                .or_else(|| endpoints.get(links::normalize_ref(entry).as_str()))
+            {
+                // canonical edge text: the claim rides its endpoints
+                surface.insert(s.clone());
+                surface.insert(d.clone());
+            } else if pinned.resolve_element(entry) == Some(ElementKind::Port) {
+                // a port names its owning node's interface — fold to the node
+                if let Some((node, _)) = entry.rsplit_once('.') {
+                    if let Some(terms) = pinned.term_surface(node) {
+                        surface.extend(terms);
+                    }
+                }
             }
         }
         if surface.is_empty() {
@@ -524,6 +620,7 @@ fn matched_requirements(
                 slot: format!("r{}", out.len() + 1),
                 req: r.slug.clone(),
                 matched_refs,
+                owned: false,
             });
         }
     }
@@ -556,6 +653,295 @@ fn layer(tasks: &[Task]) -> Result<Vec<Vec<String>>, String> {
         remaining = rest;
     }
     Ok(waves)
+}
+
+// ---- verbs: authoring --------------------------------------------------------
+//
+// The full free-fractal authoring surface, re-homed onto text: every verb
+// is a validated read-modify-write of plan.json — the file stays the truth,
+// the verb spares the author the schema.
+
+/// Authoring is a draft-stage act — a started plan restructures through
+/// `plan reset`, a completed one is history.
+fn authoring_plan(root: &Path) -> Result<Plan, String> {
+    let plan = load_active(root)?;
+    if plan.state != PlanState::Draft {
+        return Err(format!(
+            "the plan is {}: authoring happens in draft — `plan reset` restructures",
+            plan.state.describe()
+        ));
+    }
+    Ok(plan)
+}
+
+pub fn set_problem(root: &Path, text: &str) -> Result<(), String> {
+    let mut plan = authoring_plan(root)?;
+    plan.problem = text.to_string();
+    store_plan(root, &plan)
+}
+
+pub fn tech_add(root: &Path, tech: &str, provenance: &str) -> Result<(), String> {
+    let mut plan = authoring_plan(root)?;
+    if plan.technology_stack.iter().any(|t| t.tech == tech) {
+        return Err(format!("`{tech}` is already in the stack"));
+    }
+    plan.technology_stack.push(TechChoice {
+        tech: tech.to_string(),
+        provenance: provenance.to_string(),
+    });
+    store_plan(root, &plan)
+}
+
+pub fn summary_add(root: &Path, node: &str, role: &str) -> Result<(), String> {
+    let mut plan = authoring_plan(root)?;
+    if plan.architecture_summary.iter().any(|s| s.node == node) {
+        return Err(format!("`{node}` already carries a summary line"));
+    }
+    plan.architecture_summary.push(SummaryLine {
+        node: node.to_string(),
+        role: role.to_string(),
+    });
+    store_plan(root, &plan)
+}
+
+pub fn mapping_add(root: &Path, node: &str, tech: &str) -> Result<(), String> {
+    let mut plan = authoring_plan(root)?;
+    if plan.stack_mapping.iter().any(|m| m.node == node && m.tech == tech) {
+        return Err(format!("`{tech}` already realizes `{node}`"));
+    }
+    plan.stack_mapping.push(StackMapping {
+        tech: tech.to_string(),
+        node: node.to_string(),
+    });
+    store_plan(root, &plan)
+}
+
+pub fn scenarios_add(root: &Path, text: &str) -> Result<(), String> {
+    let mut plan = authoring_plan(root)?;
+    plan.scenarios.push(text.to_string());
+    store_plan(root, &plan)
+}
+
+/// 1-based, as `scenarios list` numbers them.
+pub fn scenarios_remove(root: &Path, index: usize) -> Result<String, String> {
+    let mut plan = authoring_plan(root)?;
+    if index == 0 || index > plan.scenarios.len() {
+        return Err(format!(
+            "no scenario {index} — `archi plan scenarios list` numbers {} of them",
+            plan.scenarios.len()
+        ));
+    }
+    let removed = plan.scenarios.remove(index - 1);
+    store_plan(root, &plan)?;
+    Ok(removed)
+}
+
+fn task_entry<'a>(plan: &'a mut Plan, id: &str) -> Result<&'a mut Task, String> {
+    plan.tasks
+        .iter_mut()
+        .find(|t| t.id == id)
+        .ok_or_else(|| format!("no task `{id}` — `archi plan show` lists them"))
+}
+
+pub fn task_desc(root: &Path, id: &str, text: &str) -> Result<(), String> {
+    let mut plan = authoring_plan(root)?;
+    task_entry(&mut plan, id)?.description = text.to_string();
+    store_plan(root, &plan)
+}
+
+pub fn task_stack_detail_add(root: &Path, id: &str, text: &str) -> Result<(), String> {
+    let mut plan = authoring_plan(root)?;
+    let t = task_entry(&mut plan, id)?;
+    if t.stack_details.is_empty() {
+        t.stack_details = text.to_string();
+    } else {
+        t.stack_details.push('\n');
+        t.stack_details.push_str(text);
+    }
+    store_plan(root, &plan)
+}
+
+pub fn task_input_add(root: &Path, id: &str, from: &str, note: &str) -> Result<(), String> {
+    let mut plan = authoring_plan(root)?;
+    if id == from {
+        return Err(format!("`{id}` cannot input itself"));
+    }
+    if !plan.tasks.iter().any(|t| t.id == from) {
+        return Err(format!("no producer `{from}` — `archi plan show` lists the tasks"));
+    }
+    task_entry(&mut plan, id)?
+        .inputs
+        .insert(from.to_string(), note.to_string());
+    store_plan(root, &plan)
+}
+
+pub fn task_output_add(root: &Path, id: &str, path: &str) -> Result<(), String> {
+    let mut plan = authoring_plan(root)?;
+    let t = task_entry(&mut plan, id)?;
+    if t.outputs.iter().any(|o| o == path) {
+        return Err(format!("`{path}` is already an output of {id}"));
+    }
+    t.outputs.push(path.to_string());
+    store_plan(root, &plan)
+}
+
+pub fn task_spec_ref_add(root: &Path, id: &str, r: &str) -> Result<(), String> {
+    let mut plan = authoring_plan(root)?;
+    if r.contains('@') {
+        return Err(format!(
+            "`{r}` carries a version — spec_refs are version-free; the plan's pin applies"
+        ));
+    }
+    let canonical = links::normalize_ref(r);
+    if r != canonical {
+        return Err(format!("`{r}` is not canonical — write `{canonical}`"));
+    }
+    let ws = compile_pinned(root, &plan.version)?;
+    let spec = links::SpecRef { path: canonical.clone(), version: None };
+    if !links::resolves_in(ws.model(), &spec) {
+        return Err(format!(
+            "`{r}` names no element of {} (E_MODEL_REF)",
+            plan.version
+        ));
+    }
+    let t = task_entry(&mut plan, id)?;
+    if t.spec_refs.iter().any(|s| s == &canonical) {
+        return Err(format!("`{r}` is already a spec_ref of {id}"));
+    }
+    t.spec_refs.push(canonical);
+    store_plan(root, &plan)?;
+    Ok(())
+}
+
+/// Resolve a requirement handle — a slug, or a per-task slot (`r1`) — against
+/// the task's matched set.
+fn resolve_req<'a>(matched: &'a [MatchedReq], handle: &str) -> Option<&'a MatchedReq> {
+    matched.iter().find(|m| m.req == handle || m.slot == handle)
+}
+
+pub fn own_add(root: &Path, live: &Model, id: &str, handle: &str) -> Result<String, String> {
+    let mut plan = authoring_plan(root)?;
+    let report = verify_plan(root, live, &plan)?;
+    let matched = report.derived.matched.get(id).map(Vec::as_slice).unwrap_or_default();
+    let Some(m) = resolve_req(matched, handle) else {
+        return Err(format!(
+            "`{handle}` is not among {id}'s matched requirements — \
+             `archi plan task req suggest {id}` lists the candidates; a missing candidate \
+             wants a spec_ref (`archi plan task spec-ref add`)"
+        ));
+    };
+    let slug = m.req.clone();
+    let t = task_entry(&mut plan, id)?;
+    if t.owns.contains(&slug) {
+        return Err(format!("{id} already owns `{slug}`"));
+    }
+    t.owns.push(slug.clone());
+    store_plan(root, &plan)?;
+    Ok(slug)
+}
+
+pub fn own_remove(root: &Path, id: &str, handle: &str) -> Result<String, String> {
+    let mut plan = authoring_plan(root)?;
+    let t = task_entry(&mut plan, id)?;
+    let Some(pos) = t.owns.iter().position(|s| s == handle) else {
+        return Err(format!("{id} does not own `{handle}` — `archi plan task req-list {id}`"));
+    };
+    let slug = t.owns.remove(pos);
+    t.verifications.remove(&slug);
+    store_plan(root, &plan)?;
+    Ok(slug)
+}
+
+pub fn verification_add(
+    root: &Path,
+    live: &Model,
+    id: &str,
+    handle: &str,
+    text: &str,
+) -> Result<String, String> {
+    let mut plan = authoring_plan(root)?;
+    let report = verify_plan(root, live, &plan)?;
+    let matched = report.derived.matched.get(id).map(Vec::as_slice).unwrap_or_default();
+    let slug = resolve_req(matched, handle)
+        .map(|m| m.req.clone())
+        .unwrap_or_else(|| handle.to_string());
+    let t = task_entry(&mut plan, id)?;
+    if !t.owns.contains(&slug) {
+        return Err(format!(
+            "{id} does not own `{slug}` — own it first: `archi plan task req add {id} {slug}`"
+        ));
+    }
+    t.verifications.entry(slug.clone()).or_default().push(text.to_string());
+    store_plan(root, &plan)?;
+    Ok(slug)
+}
+
+pub fn verification_remove(
+    root: &Path,
+    live: &Model,
+    id: &str,
+    handle: &str,
+    index: Option<usize>,
+) -> Result<String, String> {
+    let mut plan = authoring_plan(root)?;
+    let report = verify_plan(root, live, &plan)?;
+    let matched = report.derived.matched.get(id).map(Vec::as_slice).unwrap_or_default();
+    let slug = resolve_req(matched, handle)
+        .map(|m| m.req.clone())
+        .unwrap_or_else(|| handle.to_string());
+    let t = task_entry(&mut plan, id)?;
+    let Some(list) = t.verifications.get_mut(&slug) else {
+        return Err(format!("{id} has no verifications for `{slug}`"));
+    };
+    match index {
+        Some(i) => {
+            if i == 0 || i > list.len() {
+                return Err(format!("no verification {i} — {slug} carries {}", list.len()));
+            }
+            list.remove(i - 1);
+            if list.is_empty() {
+                t.verifications.remove(&slug);
+            }
+        }
+        None => {
+            t.verifications.remove(&slug);
+        }
+    }
+    store_plan(root, &plan)?;
+    Ok(slug)
+}
+
+/// The standalone brief `archi plan task show` renders: everything a
+/// sub-agent needs, no implicit context.
+pub fn render_task_show(plan: &Plan, report: &PlanReport, id: &str) -> Result<String, String> {
+    let Some(t) = plan.tasks.iter().find(|t| t.id == id) else {
+        return Err(format!("no task `{id}` — `archi plan show` lists them"));
+    };
+    let mut out = format!("{} {} — {}\n", t.id, t.node, t.description);
+    out.push_str(&format!("pinned: {}\n", plan.version));
+    out.push_str(&format!("spec_refs: {}\n", t.spec_refs.join(", ")));
+    if !t.stack_details.is_empty() {
+        out.push_str(&format!("stack: {}\n", t.stack_details.replace('\n', "; ")));
+    }
+    for (from, note) in &t.inputs {
+        out.push_str(&format!("input ← {from}: {note}\n"));
+    }
+    for o in &t.outputs {
+        out.push_str(&format!("output: {o}\n"));
+    }
+    for m in report.derived.matched.get(id).into_iter().flatten() {
+        let owned = if m.owned { "owned" } else { "unowned" };
+        out.push_str(&format!(
+            "{} {} ({owned}, via {})\n",
+            m.slot,
+            m.req,
+            m.matched_refs.join(", ")
+        ));
+        for v in t.verifications.get(&m.req).into_iter().flatten() {
+            out.push_str(&format!("  verify: {v}\n"));
+        }
+    }
+    Ok(out)
 }
 
 // ---- verify ------------------------------------------------------------------
@@ -632,6 +1018,16 @@ pub(crate) fn verify_plan(root: &Path, live: &Model, plan: &Plan) -> Result<Plan
                 t.id, t.node, plan.version
             ));
         }
+        if t.description.trim().is_empty() {
+            errors.push(format!("{}: empty description — say what the task does", t.id));
+        }
+        if t.outputs.is_empty() {
+            notes.push(format!(
+                "{}: no outputs declared — capture cannot attribute its delta; \
+                 name the files it will write",
+                t.id
+            ));
+        }
         for r in &t.spec_refs {
             if r.contains('@') {
                 errors.push(format!(
@@ -676,6 +1072,19 @@ pub(crate) fn verify_plan(root: &Path, live: &Model, plan: &Plan) -> Result<Plan
         }
     }
 
+    // The envelope: every summary node mapped, every mapping summarized.
+    let summary: BTreeSet<&str> =
+        plan.architecture_summary.iter().map(|s| s.node.as_str()).collect();
+    let mapped: BTreeSet<&str> = plan.stack_mapping.iter().map(|m| m.node.as_str()).collect();
+    for s in summary.difference(&mapped) {
+        errors.push(format!("summary node `{s}` has no stack mapping"));
+    }
+    for m in mapped.difference(&summary) {
+        errors.push(format!(
+            "stack mapping realizes `{m}`, which the summary does not name"
+        ));
+    }
+
     // Waves.
     let waves = match layer(&plan.tasks) {
         Ok(w) => w,
@@ -703,17 +1112,70 @@ pub(crate) fn verify_plan(root: &Path, live: &Model, plan: &Plan) -> Result<Plan
     let endpoints = edge_endpoints(pinned);
     let mut matched = BTreeMap::new();
     for t in &plan.tasks {
-        let m = matched_requirements(pinned, &tree, &endpoints, t);
-        for slug in t.verifications.keys() {
+        let mut m = matched_requirements(pinned, &tree, &endpoints, t);
+        // Curation: the matched set is the candidate list, `owns` the
+        // authored selection — a strict subset, at least one when
+        // candidates exist. Verification duty follows ownership.
+        for slug in &t.owns {
             if !m.iter().any(|mr| &mr.req == slug) {
                 errors.push(format!(
-                    "{}: verification for `{slug}`, which the reverse lookup does not match — \
-                     a stale key, or the requirement moved",
+                    "{}: owns `{slug}`, which the reverse lookup does not match — \
+                     drop it, or restore the spec_ref that carried it",
+                    t.id
+                ));
+            }
+        }
+        if t.owns.is_empty() && !m.is_empty() {
+            errors.push(format!(
+                "{}: {} matched requirement{} and none owned — `owns` in plan.json \
+                 selects the ones this task answers for; own at least one",
+                t.id,
+                m.len(),
+                if m.len() == 1 { "" } else { "s" }
+            ));
+        }
+        for mr in &mut m {
+            mr.owned = t.owns.contains(&mr.req);
+        }
+        for slug in t.verifications.keys() {
+            if !t.owns.contains(slug) {
+                errors.push(format!(
+                    "{}: verification for `{slug}`, which the task does not own — \
+                     own it, or drop the stale key",
+                    t.id
+                ));
+            }
+        }
+        for slug in &t.owns {
+            if m.iter().any(|mr| &mr.req == slug)
+                && t.verifications.get(slug).is_none_or(Vec::is_empty)
+            {
+                errors.push(format!(
+                    "{}: owned `{slug}` has no verification — author the observable check",
                     t.id
                 ));
             }
         }
         matched.insert(t.id.clone(), m);
+    }
+
+    // A requirement no task reaches is visible, never silent — outside the
+    // plan's scope, or a missing task or spec_ref; the reader decides which.
+    if !plan.tasks.is_empty() {
+        let reached: BTreeSet<&str> =
+            matched.values().flatten().map(|m| m.req.as_str()).collect();
+        for r in &tree.requirements {
+            let Some(f) = &r.fields else { continue };
+            let Some((entries, _)) = &f.satisfied_by else { continue };
+            if entries.is_empty() || f.deferred() || reached.contains(r.slug.as_str()) {
+                continue;
+            }
+            notes.push(format!(
+                "requirement `{}` reaches no task — outside this plan's scope, or a \
+                 missing task or spec_ref",
+                r.slug
+            ));
+        }
     }
 
     // A stale pin is advisory: the plan may finish against the version it
@@ -750,26 +1212,6 @@ fn gate_structure(report: &PlanReport) -> Result<(), String> {
     ))
 }
 
-/// Every matched requirement of every task carries at least one authored
-/// verification — the plan refuses to start half-promised.
-fn gate_verifications(plan: &Plan, report: &PlanReport) -> Result<(), String> {
-    let mut missing = Vec::new();
-    for t in &plan.tasks {
-        for m in report.derived.matched.get(&t.id).into_iter().flatten() {
-            if t.verifications.get(&m.req).is_none_or(Vec::is_empty) {
-                missing.push(format!("{}: {} ({})", t.id, m.req, m.slot));
-            }
-        }
-    }
-    if missing.is_empty() {
-        Ok(())
-    } else {
-        Err(format!(
-            "every matched requirement needs a verification before start; missing:\n  {}",
-            missing.join("\n  ")
-        ))
-    }
-}
 
 /// Asserted code-link coverage, scoped to the delta: a ref gates only when
 /// the closing capture pressed it — some claimed changed item of its task
@@ -841,7 +1283,6 @@ pub fn start(root: &Path, model: &Model) -> Result<(Plan, Vec<String>), String> 
     }
     let report = verify_plan(root, model, &plan)?;
     gate_structure(&report)?;
-    gate_verifications(&plan, &report)?;
     links::capture::write_index(root, &plan.name, 1)?;
     plan.state = PlanState::Started;
     plan.closed_waves = 0;
@@ -1080,9 +1521,10 @@ pub fn render_show(plan: &Plan, report: &PlanReport) -> String {
             for m in report.derived.matched.get(id).into_iter().flatten() {
                 let proofs = task.verifications.get(&m.req).map_or(0, Vec::len);
                 out.push_str(&format!(
-                    "    {} {} (via {}) — {} verification{}\n",
+                    "    {} {}{} (via {}) — {} verification{}\n",
                     m.slot,
                     m.req,
+                    if m.owned { "" } else { " (unowned)" },
                     m.matched_refs.join(", "),
                     proofs,
                     if proofs == 1 { "" } else { "s" }
@@ -1202,6 +1644,27 @@ mod tests {
         load_active(root).unwrap()
     }
 
+    /// Author the curation whole: descriptions, own every matched
+    /// requirement, one verification per owned — the old own-everything
+    /// behavior, spelled out.
+    fn curate_all(root: &Path, model: &Model) {
+        let mut plan = active(root);
+        let report = verify_plan(root, model, &plan).unwrap();
+        for t in &mut plan.tasks {
+            if t.description.trim().is_empty() {
+                t.description = format!("realize {}", t.node);
+            }
+            let matched = report.derived.matched.get(&t.id).into_iter().flatten();
+            t.owns = matched.clone().map(|m| m.req.clone()).collect();
+            for m in matched {
+                t.verifications
+                    .entry(m.req.clone())
+                    .or_insert_with(|| vec![format!("test — proves {}", m.req)]);
+            }
+        }
+        store_plan(root, &plan).unwrap();
+    }
+
     #[test]
     fn use_pins_a_hardened_version_and_switches() {
         let root = temp_project();
@@ -1297,6 +1760,7 @@ mod tests {
         use_plan(&root, ws.model(), "mvp").unwrap();
         task_add(&root, "Store", None).unwrap();
         task_add(&root, "Auth", None).unwrap();
+        curate_all(&root, ws.model());
 
         let report = verify(&root, ws.model()).unwrap();
         assert_eq!(report.errors, Vec::<String>::new());
@@ -1370,18 +1834,12 @@ mod tests {
         plan.tasks[1].inputs.insert("t1".into(), "the store api".into());
         store_plan(&root, &plan).unwrap();
 
-        // The start gate: every matched requirement wants a verification.
+        // The start gate: unowned matches and empty descriptions refuse —
+        // curation is authored before the plan runs.
         let err = start(&root, ws.model()).unwrap_err();
-        assert!(err.contains("needs a verification"), "{err}");
-        let mut plan = active(&root);
-        let report = verify_plan(&root, ws.model(), &plan).unwrap();
-        for t in &mut plan.tasks {
-            for m in &report.derived.matched[&t.id] {
-                t.verifications
-                    .insert(m.req.clone(), vec![format!("test — proves {}", m.req)]);
-            }
-        }
-        store_plan(&root, &plan).unwrap();
+        assert!(err.contains("none owned"), "{err}");
+        assert!(err.contains("empty description"), "{err}");
+        curate_all(&root, ws.model());
         let (started, wave1) = start(&root, ws.model()).unwrap();
         assert_eq!(started.state, PlanState::Started);
         assert_eq!(wave1, vec!["t1".to_string()]);
@@ -1500,14 +1958,8 @@ mod tests {
 
         let mut plan = active(&root);
         plan.tasks[0].outputs.push("code/auth.rs".into());
-        let report = verify_plan(&root, ws.model(), &plan).unwrap();
-        for t in &mut plan.tasks {
-            for m in &report.derived.matched[&t.id] {
-                t.verifications
-                    .insert(m.req.clone(), vec![format!("test — proves {}", m.req)]);
-            }
-        }
         store_plan(&root, &plan).unwrap();
+        curate_all(&root, ws.model());
         start(&root, ws.model()).unwrap();
 
         // The delta names the incoming wire's ports but never the node:
@@ -1546,6 +1998,123 @@ mod tests {
             "{:?}",
             outcome.checklist
         );
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn curation_selects_from_matched_and_scopes_the_verification_duty() {
+        let root = temp_project();
+        let ws = compiled(&root);
+        save_version(&root);
+        put_requirements(&root);
+        use_plan(&root, ws.model(), "mvp").unwrap();
+        task_add(&root, "Store", Some("keep the creds")).unwrap();
+
+        // Own one of the two matches: the unowned one demands nothing.
+        let mut plan = active(&root);
+        plan.tasks[0].owns = vec!["store-encrypted".into()];
+        plan.tasks[0]
+            .verifications
+            .insert("store-encrypted".into(), vec!["test — encrypted at rest".into()]);
+        store_plan(&root, &plan).unwrap();
+        let report = verify(&root, ws.model()).unwrap();
+        assert_eq!(report.errors, Vec::<String>::new(), "{:?}", report.errors);
+        let flags: Vec<(String, bool)> = report.derived.matched["t1"]
+            .iter()
+            .map(|m| (m.req.clone(), m.owned))
+            .collect();
+        assert_eq!(
+            flags,
+            vec![
+                ("service-hardening".to_string(), false),
+                ("store-encrypted".to_string(), true)
+            ]
+        );
+        // The show surface marks the unowned candidate; the missing
+        // outputs ride as a note, never an error.
+        let rendered = render_show(&active(&root), &report);
+        assert!(rendered.contains("service-hardening (unowned)"), "{rendered}");
+        assert!(!rendered.contains("store-encrypted (unowned)"), "{rendered}");
+        assert!(report.notes.join("\n").contains("no outputs declared"), "{:?}", report.notes);
+
+        // The envelope cross-check: a summary node without a mapping and a
+        // mapping outside the summary both refuse.
+        let mut plan = active(&root);
+        plan.architecture_summary.push(SummaryLine {
+            node: "Store".into(),
+            role: "keeps the rows".into(),
+        });
+        plan.stack_mapping.push(StackMapping { tech: "sqlite".into(), node: "Auth".into() });
+        store_plan(&root, &plan).unwrap();
+        let report = verify(&root, ws.model()).unwrap();
+        let all = report.errors.join("\n");
+        assert!(all.contains("summary node `Store` has no stack mapping"), "{all}");
+        assert!(all.contains("stack mapping realizes `Auth`"), "{all}");
+        let mut plan = active(&root);
+        plan.architecture_summary.clear();
+        plan.stack_mapping.clear();
+        store_plan(&root, &plan).unwrap();
+
+        // A verification for an unowned match is a stale key; owning a
+        // requirement the lookup never matched is a lie — both refuse.
+        let mut plan = active(&root);
+        plan.tasks[0]
+            .verifications
+            .insert("service-hardening".into(), vec!["test — hardened".into()]);
+        plan.tasks[0].owns.push("ghost-req".into());
+        store_plan(&root, &plan).unwrap();
+        let report = verify(&root, ws.model()).unwrap();
+        let all = report.errors.join("\n");
+        assert!(
+            all.contains("`service-hardening`, which the task does not own"),
+            "{all}"
+        );
+        assert!(all.contains("owns `ghost-req`"), "{all}");
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn port_and_edge_pins_fold_to_their_nodes_and_orphans_surface() {
+        let root = temp_project();
+        let ws = compiled(&root);
+        save_version(&root);
+        put(
+            &root,
+            "archi/requirements/hardening/hardening.md",
+            "# Hardening\n\nThe area.\n",
+        );
+        put(
+            &root,
+            "archi/requirements/hardening/port-pinned.md",
+            &requirement("Store.inn", "Port pinned"),
+        );
+        put(
+            &root,
+            "archi/requirements/hardening/edge-pinned.md",
+            &requirement("Auth.creds wire Store.inn", "Edge pinned"),
+        );
+        put(
+            &root,
+            "archi/requirements/hardening/gate-throughput.md",
+            &requirement("Gate", "Gate throughput"),
+        );
+        use_plan(&root, ws.model(), "mvp").unwrap();
+        task_add(&root, "Store", Some("persist rows")).unwrap();
+        curate_all(&root, ws.model());
+
+        let report = verify(&root, ws.model()).unwrap();
+        assert_eq!(report.errors, Vec::<String>::new(), "{:?}", report.errors);
+        let reqs: Vec<&str> =
+            report.derived.matched["t1"].iter().map(|m| m.req.as_str()).collect();
+        assert!(reqs.contains(&"port-pinned"), "a port folds to its node: {reqs:?}");
+        assert!(reqs.contains(&"edge-pinned"), "an edge folds to its endpoints: {reqs:?}");
+
+        // The requirement nothing reaches is a note, never a silence.
+        let notes = report.notes.join("\n");
+        assert!(notes.contains("`gate-throughput` reaches no task"), "{notes}");
+        assert!(!notes.contains("`port-pinned`"), "{notes}");
 
         fs::remove_dir_all(&root).unwrap();
     }
@@ -1590,6 +2159,7 @@ mod tests {
         plan.tasks[1].inputs.remove("t9");
         plan.tasks[1].spec_refs.retain(|r| !r.contains('@'));
         store_plan(&root, &plan).unwrap();
+        curate_all(&root, ws.model());
         fs::write(
             root.join("archi/src/model.arch"),
             MODEL.replace("def node Store:\n  port inn\n", "def node Safe:\n  port inn\n")

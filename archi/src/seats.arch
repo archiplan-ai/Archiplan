@@ -1,0 +1,79 @@
+import data
+import conns
+import views
+import tool (Cli, Archive, Members, SourceTree)
+
+// crates/archi/src/worktrees.rs — the seat discipline: parallel units of
+// work ride git worktrees, and the machine-local registry is the ownership
+// truth every verb consults.
+
+// The seat machinery: registry, guard, mint and landing behind the worktree and status verbs.
+def node Seats:
+  port guard      // the router's gate before every mutating verb
+  port verdict    // check and build refuse a dirty spec outside a seat
+  port mint       // seat plus cascaded member worktrees, overlay and registry row
+  port land       // close the seat: merge or --to, members by push, retire last
+  port survey     // every worktree with its binding — the ls rows and the status line
+  port bind       // plan use joins this checkout's binding
+  port locate     // member resolution and recorded baselines for the cascade
+  port write_over // the seat's overlay rows into its tree
+  port read_plan  // the landing's plan gate reads the plan the seat carries
+
+  def node Registry: // machine-local rows under the shared git dir, reconciled against the worktree list on every read
+    port lookup  // binding and plan-ownership reads: the license the guard checks
+    port record  // mint writes, landing clears, drop repairs
+    port rows    // the ls and status read: every worktree with its binding
+    port join    // plan use upserts this checkout's row
+
+  def node Guard: // the binding, not the branch, is the license to mutate
+    port license  // three outcomes: bound here, bound elsewhere, unbound toward a seat
+    port verdict  // a verdict on ungoverned work is a lie: uncommitted spec edits outside a seat refuse
+    port read_reg // the registry read behind both gates
+
+  def node Mint: // branch created or attached, sibling worktree; the cascade plans whole and rolls back whole
+    port seat        // the spec worktree and its branch
+    port cascade     // one worktree per member repository, grown from recorded baselines
+    port overlay     // the seat's member rows: cascaded members point at their worktrees
+    port record_seat // the registry row lands last: no failure leaves a half-minted entry
+
+  def node Landing: // one verb closes the seat; no path leaves a dangling binding
+    port merge        // into the current branch or --to a new one; a protected branch receives no local merge
+    port plan_gate    // an open plan refuses the landing: the unit lands whole
+    port push_members // a member's retirement is its push to its remote
+    port retire       // worktree removed, entry cleared, seat artifacts scrubbed
+
+  guard = Guard.license
+  verdict = Guard.verdict
+  mint = Mint.seat
+  land = Landing.merge
+  survey = Registry.rows
+  bind = Registry.join
+  locate = Mint.cascade
+  write_over = Mint.overlay
+  read_plan = Landing.plan_gate
+
+  Guard.read_reg recall(SeatBinding) Registry.lookup in seat_flow
+  Mint.record_seat persist(SeatBinding) Registry.record in seat_flow
+  Landing.push_members recall(SeatBinding) Registry.lookup in seat_flow
+  Landing.retire persist(SeatBinding) Registry.record in seat_flow
+
+Service type_of Seats
+Storage type_of Seats.Registry
+
+// the router consults the gate, the seat verbs drive the machinery
+Cli.drive consult(->Command, <-Report) Seats.guard in seat_flow
+Cli.drive consult(->Command, <-Report) Seats.verdict in seat_flow
+Cli.drive consult(->Command, <-Report) Seats.mint in seat_flow
+Cli.drive consult(->Command, <-Report) Seats.land in seat_flow
+Cli.drive consult(->Command, <-Report) Seats.survey in seat_flow
+Cli.drive consult(->Command, <-Report) Seats.bind in seat_flow
+
+// the cascade resolves members and grows their branches from recorded baselines
+Seats.locate recall(MemberSet) Members.resolve in seat_flow
+Seats.locate recall(MemberBaseline) Archive.serve in seat_flow
+
+// the seat's overlay rows are member mapping rows in its tree
+Seats.write_over persist(MemberDecl) SourceTree.store in seat_flow
+
+// the landing's plan gate reads the plan the seat carries
+Seats.read_plan recall(PlanFile) SourceTree.serve in seat_flow

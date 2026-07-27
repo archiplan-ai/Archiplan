@@ -47,6 +47,7 @@
 
 mod addressing;
 mod axes;
+mod batch;
 mod docs;
 mod incidence;
 mod links;
@@ -58,6 +59,7 @@ mod sessions;
 mod tradeoffs;
 mod versions;
 mod visualizer;
+mod worktrees;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -100,8 +102,21 @@ const USAGE: &str = "usage:
   archi link audit [--scope <path>] [--since [<member>=]<rev>] [--repo <member>] [--prune] [--json] [--project <dir>]
   archi repo ls [--json] [--project <dir>]
   archi repo map <member> <dir> [--project <dir>]
-  archi plan use <name> | repin | show [--json] | verify [--json] [--project <dir>]
-  archi plan task add <node> [--desc <text>] [--project <dir>]
+  archi batch [-] [--project <dir>]   # commands from stdin, one per line, fail-fast
+  archi status [--project <dir>]
+  archi worktree mint <slug> [--plan <name>] [--repos <a,b>] [--base [<member>=]<branch>]... [--project <dir>]
+  archi worktree ls [--plan <slug>] [--spec <effort>] [--json] [--project <dir>]
+  archi worktree drop <slug|path> [--project <dir>]
+  archi worktree merge <slug|path> [--to [<member>=]<branch>]... [--project <dir>]
+  archi plan use <name> | repin | show [--json] | verify [--json] | list | status [--project <dir>]
+  archi plan problem <text> | tech add <tech> [--provenance <why>] [--project <dir>]
+  archi plan architecture-summary add <node> <role> | stack-mapping add <node> <tech> [--project <dir>]
+  archi plan scenarios add <text> | list | remove <index> [--project <dir>]
+  archi plan task add <node> [--desc <text>] | desc <id> <text> | show <id> [--project <dir>]
+  archi plan task stack-detail add <id> <text> | spec-ref add <id> <ref> [--project <dir>]
+  archi plan task input add <id> <note> --from <producer> | output add <id> <path> [--project <dir>]
+  archi plan task req suggest <id> | add <id> <req|slot> | remove <id> <req> | req-list <id> [--project <dir>]
+  archi plan task verification add <id> <req|slot> <text> | remove <id> <req|slot> [<n>] [--project <dir>]
   archi plan start | next | current-wave | close | reset [--project <dir>]
   archi read [<request.json> | -] [--at <id>] [--project <dir>]
   archi query [--scope <path>]... [--type <path>]... [--kind <k>]... [--view <v>]...
@@ -166,6 +181,12 @@ struct Args {
     prune: bool,
     details: bool,
     max_nodes: Option<usize>,
+    repos: Option<String>,
+    base: Vec<String>,
+    to_many: Vec<String>,
+    plan_flag: Option<String>,
+    provenance: Option<String>,
+    from_task: Option<String>,
     positional: Vec<String>,
 }
 
@@ -227,6 +248,12 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         prune: false,
         details: false,
         max_nodes: None,
+        repos: None,
+        base: Vec::new(),
+        to_many: Vec::new(),
+        plan_flag: None,
+        provenance: None,
+        from_task: None,
         positional: Vec::new(),
     };
     let mut it = argv.iter().peekable();
@@ -282,7 +309,17 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--details" => args.details = true,
             "--max-nodes" => args.max_nodes = Some(int(value(&mut it, "--max-nodes")?, "--max-nodes")?),
             "--spec" => args.spec = Some(value(&mut it, "--spec")?),
+            // `worktree merge` receives per-member branches; link repin
+            // keeps the single --to.
+            "--to" if args.verb == "worktree" => {
+                args.to_many.push(value(&mut it, "--to")?)
+            }
             "--to" => args.to = Some(value(&mut it, "--to")?),
+            "--repos" => args.repos = Some(value(&mut it, "--repos")?),
+            "--base" => args.base.push(value(&mut it, "--base")?),
+            "--plan" => args.plan_flag = Some(value(&mut it, "--plan")?),
+            "--provenance" => args.provenance = Some(value(&mut it, "--provenance")?),
+            "--from" => args.from_task = Some(value(&mut it, "--from")?),
             "--into" => args.into = Some(value(&mut it, "--into")?),
             "--keep" => args.keep = Some(value(&mut it, "--keep")?),
             "--task" => args.task = Some(value(&mut it, "--task")?),
@@ -322,6 +359,8 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
                     | "repo"
                     | "tradeoffs"
                     | "viz"
+                    | "worktree"
+                    | "batch"
             ) =>
             {
                 args.positional.push(other.to_string())
@@ -408,6 +447,12 @@ fn run_check(args: &Args) -> ExitCode {
     // the model and cross-check against it; their errors fail the check,
     // their findings are advisory (archi/requirements/self-hosting/docs-compile-with-the-model.md).
     let doc = docs::check(&root, ws.model());
+    // Plan pins are verified by content: a remint that changed what an id
+    // resolves to surfaces here, advisory like every finding.
+    let plan_findings = plans::check(&root).unwrap_or_else(|e| {
+        eprintln!("archi: warning: {e}");
+        Vec::new()
+    });
     let clean = archive_errors.is_empty() && doc.diagnostics.is_empty();
     // A check with no errors closes on the landscape read: the NKP scoring
     // and the refactoring directions it implies, over the default slice.
@@ -444,6 +489,11 @@ fn run_check(args: &Args) -> ExitCode {
             addressing::of_doc_finding(f).stamp(&mut v);
             v
         }));
+        all.extend(plan_findings.iter().map(|f| {
+            let mut v = serde_json::to_value(f).expect("serializes");
+            addressing::of_plan_finding(f).stamp(&mut v);
+            v
+        }));
         let mut envelope = json!({ "status": "ok", "findings": all });
         if !archive_errors.is_empty() {
             envelope["status"] = json!("error");
@@ -472,7 +522,7 @@ fn run_check(args: &Args) -> ExitCode {
             serde_json::to_string_pretty(&envelope).expect("serializes")
         );
     } else {
-        if findings.is_empty() && doc.findings.is_empty() {
+        if findings.is_empty() && doc.findings.is_empty() && plan_findings.is_empty() {
             println!("no findings");
         } else {
             for f in &findings {
@@ -480,6 +530,9 @@ fn run_check(args: &Args) -> ExitCode {
             }
             for f in &doc.findings {
                 println!("{f}  [{}]", addressing::of_doc_finding(f).id);
+            }
+            for f in &plan_findings {
+                println!("{f}  [{}]", addressing::of_plan_finding(f).id);
             }
         }
         if let Some(report) = &nkp {
@@ -921,6 +974,363 @@ fn run_repo(args: &Args) -> ExitCode {
     }
 }
 
+fn run_status(args: &Args) -> ExitCode {
+    let root = match locate_project(args) {
+        Ok(r) => r,
+        Err(e) => return usage_err(&e),
+    };
+    // Checkout identity: where am I, per git and the registry. Every read
+    // here is lenient — status answers from whatever state exists.
+    match worktrees::toplevel(&root) {
+        Some(top) => {
+            let branch =
+                worktrees::current_branch(&top).unwrap_or_else(|| "(detached)".to_string());
+            println!("checkout: {} on {branch}", top.display());
+            match worktrees::Registry::load(&root) {
+                Ok(Some(reg)) => match reg.binding_of(&top) {
+                    Some(b) => {
+                        let mut parts = Vec::new();
+                        if let Some(p) = &b.plan {
+                            parts.push(format!("plan {p}"));
+                        }
+                        if let Some(s) = &b.effort {
+                            parts.push(format!("spec {s}"));
+                        }
+                        let work =
+                            if parts.is_empty() { "bound".to_string() } else { parts.join("  ") };
+                        println!("binding: {work} on {}", b.branch);
+                        for (name, m) in &b.members {
+                            let state = if m.path.is_dir() { "ok" } else { "worktree missing" };
+                            println!(
+                                "member {name}: {} on {} (base {}) — {state}",
+                                m.path.display(),
+                                m.branch,
+                                m.base
+                            );
+                        }
+                    }
+                    None => println!("binding: none — this checkout is unbound"),
+                },
+                Ok(None) => {}
+                Err(e) => eprintln!("archi: warning: {e}"),
+            }
+        }
+        None => println!(
+            "checkout: {} (not a git repository — the seat model needs one; \
+             `git init` enables it, ask the user before creating)",
+            root.display()
+        ),
+    }
+    match plans::load_active(&root) {
+        Ok(p) => {
+            let wave = match p.state {
+                plans::PlanState::Started => format!(", wave {}", p.closed_waves + 1),
+                _ => String::new(),
+            };
+            println!("plan: {} @ {} ({}{wave})", p.name, p.version, p.state.describe());
+        }
+        Err(_) => println!("plan: none active here"),
+    }
+    match compile_project(&root) {
+        Ok(c) => match versions::current(&root, c.workspace.model()) {
+            Ok(versions::Current::NoVersions) => println!("version: none saved"),
+            Ok(versions::Current::At(id)) => println!("version: at {id}"),
+            Ok(versions::Current::DirtySince(id)) => println!("version: dirty since {id}"),
+            Err(e) => eprintln!("archi: warning: {e}"),
+        },
+        Err(_) => println!("version: the model does not compile — `archi check` locates it"),
+    }
+    let tree = docs::discover_tree(&root);
+    match tree.sessions.iter().find(|s| s.open()) {
+        Some(s) => println!("stress: round `{}` open", s.slug),
+        None => println!("stress: no open round"),
+    }
+    // The handoff listing: every plan of this branch with open lifecycle.
+    match plans::all_plans(&root) {
+        Ok(all) => {
+            let open: Vec<_> =
+                all.iter().filter(|p| p.state != plans::PlanState::Completed).collect();
+            if open.is_empty() {
+                println!("open plans: none");
+            } else {
+                for p in open {
+                    let wave = match p.state {
+                        plans::PlanState::Started => format!(", wave {}", p.closed_waves + 1),
+                        _ => String::new(),
+                    };
+                    println!("open plan: {} @ {} ({}{wave})", p.name, p.version, p.state.describe());
+                }
+            }
+        }
+        Err(e) => eprintln!("archi: warning: {e}"),
+    }
+    ExitCode::SUCCESS
+}
+
+fn run_worktree(args: &Args) -> ExitCode {
+    let fail = |e: String| -> ExitCode {
+        eprintln!("archi: {e}");
+        ExitCode::from(1)
+    };
+    let root = match locate_project(args) {
+        Ok(r) => r,
+        Err(e) => return usage_err(&e),
+    };
+    let load = || -> Result<worktrees::Registry, String> {
+        worktrees::Registry::load(&root)?
+            .ok_or_else(|| "not a git repository — worktrees need git".to_string())
+    };
+    let sub = args.positional.first().map(String::as_str);
+    let rest = args.positional.get(1..).unwrap_or_default();
+    match (sub, rest) {
+        (Some("mint"), [slug]) => {
+            let plan = args.plan_flag.as_deref();
+            let effort = if plan.is_none() { Some(slug.as_str()) } else { None };
+            let repos: Vec<String> = args
+                .repos
+                .as_deref()
+                .map(|r| {
+                    r.split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default();
+            let mut bases = std::collections::BTreeMap::new();
+            for b in &args.base {
+                let Some((m, br)) = b.split_once('=') else {
+                    return usage_err("`--base` names its member: --base <member>=<branch>");
+                };
+                bases.insert(m.to_string(), br.to_string());
+            }
+            let m = match worktrees::mint(&root, slug, plan, effort, &repos, &bases) {
+                Ok(m) => m,
+                Err(e) => return fail(e),
+            };
+            if m.seated {
+                println!("seated: {} carries `{slug}` on {}", m.path.display(), m.branch);
+            } else {
+                println!(
+                    "minted {} on branch {}{} — cd {} to work there; \
+                     the CLI never changes your directory",
+                    m.path.display(),
+                    m.branch,
+                    if m.attached { " (existing branch attached)" } else { "" },
+                    m.path.display()
+                );
+            }
+            if let Ok(Some(reg)) = worktrees::Registry::load(&root) {
+                if let Some(b) = reg.binding_of(&m.path) {
+                    for (name, mb) in &b.members {
+                        println!(
+                            "member {name}: {} on {} (base {})",
+                            mb.path.display(),
+                            mb.branch,
+                            mb.base
+                        );
+                    }
+                }
+            }
+            ExitCode::SUCCESS
+        }
+        (Some("ls"), []) => {
+            let reg = match load() {
+                Ok(r) => r,
+                Err(e) => return fail(e),
+            };
+            let matches = |b: Option<&worktrees::Binding>| -> bool {
+                match (args.plan_flag.as_deref(), args.spec.as_deref()) {
+                    (None, None) => true,
+                    (p, s) => b.is_some_and(|b| {
+                        p.map_or(true, |p| b.plan.as_deref() == Some(p))
+                            && s.map_or(true, |s| b.effort.as_deref() == Some(s))
+                    }),
+                }
+            };
+            let wts = worktrees::list_worktrees(&root);
+            if args.json {
+                let rows: Vec<Value> = wts
+                    .iter()
+                    .filter(|w| matches(reg.binding_of(&w.path)))
+                    .map(|w| {
+                        let b = reg.binding_of(&w.path);
+                        json!({
+                            "path": w.path.display().to_string(),
+                            "branch": w.branch,
+                            "plan": b.and_then(|b| b.plan.clone()),
+                            "spec": b.and_then(|b| b.effort.clone()),
+                            "bound": b.is_some(),
+                        })
+                    })
+                    .collect();
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({ "worktrees": rows }))
+                        .expect("serializes")
+                );
+                return ExitCode::SUCCESS;
+            }
+            let mut shown = 0usize;
+            for wt in &wts {
+                let b = reg.binding_of(&wt.path);
+                if !matches(b) {
+                    continue;
+                }
+                shown += 1;
+                let branch = wt.branch.clone().unwrap_or_else(|| "(detached)".to_string());
+                let work = match b {
+                    Some(b) => {
+                        let mut parts = Vec::new();
+                        if let Some(p) = &b.plan {
+                            parts.push(format!("plan {p}"));
+                        }
+                        if let Some(s) = &b.effort {
+                            parts.push(format!("spec {s}"));
+                        }
+                        if parts.is_empty() { "bound".to_string() } else { parts.join("  ") }
+                    }
+                    None => "unbound".to_string(),
+                };
+                println!("{}  {branch}  {work}", wt.path.display());
+                if let Some(b) = b {
+                    for (name, m) in &b.members {
+                        let state = if !m.checkout.is_dir() {
+                            "checkout unresolved"
+                        } else if m.path.is_dir() {
+                            "ok"
+                        } else {
+                            "worktree missing"
+                        };
+                        println!(
+                            "  member {name}: {} {} (base {}) — {state}",
+                            m.path.display(),
+                            m.branch,
+                            m.base
+                        );
+                    }
+                }
+            }
+            if shown == 0 {
+                println!("no worktrees match");
+            }
+            ExitCode::SUCCESS
+        }
+        (Some("drop"), [handle]) => {
+            let mut reg = match load() {
+                Ok(r) => r,
+                Err(e) => return fail(e),
+            };
+            let Some(key) = reg.resolve_key(handle) else {
+                return fail(format!(
+                    "`{handle}` matches no registry entry — `archi worktree ls` shows them"
+                ));
+            };
+            let binding = reg.get_mut(&key).expect("resolved key").clone();
+            for (name, m) in &binding.members {
+                let repo = if m.checkout.is_dir() { &m.checkout } else { &m.path };
+                if worktrees::list_worktrees(repo).iter().any(|w| w.path == m.path) {
+                    if let Err(e) = worktrees::worktree_remove(repo, &m.path, false) {
+                        return fail(format!(
+                            "{name}: {e}\nnothing dropped; commit or stash the member \
+                             worktree's changes (or remove it by hand), then re-run"
+                        ));
+                    }
+                }
+                if worktrees::branch_exists(repo, &m.branch) {
+                    println!(
+                        "member {name}: branch {} stays — unpushed work is yours to \
+                         delete by hand",
+                        m.branch
+                    );
+                }
+            }
+            let path = PathBuf::from(&key);
+            if worktrees::list_worktrees(&root).iter().any(|w| w.path == path) {
+                if let Some(top) = worktrees::toplevel(&root) {
+                    let rel = root.strip_prefix(&top).unwrap_or(Path::new(""));
+                    worktrees::scrub_seat(&path.join(rel));
+                }
+                if let Err(e) = worktrees::worktree_remove(&root, &path, false) {
+                    return fail(format!(
+                        "{e}\nthe worktree stays bound; commit or stash its changes \
+                         (or remove it by hand), then re-run"
+                    ));
+                }
+            }
+            let b = reg.remove(&key).expect("resolved key");
+            if let Err(e) = reg.save() {
+                return fail(e);
+            }
+            println!("dropped {key} ({})", b.branch);
+            if worktrees::branch_exists(&root, &b.branch) {
+                println!(
+                    "branch {} stays — delete it by hand once its work is integrated",
+                    b.branch
+                );
+            }
+            ExitCode::SUCCESS
+        }
+        (Some("merge"), [handle]) => {
+            let mut to = std::collections::BTreeMap::new();
+            for t in &args.to_many {
+                match t.split_once('=') {
+                    Some((m, b)) => to.insert(m.to_string(), b.to_string()),
+                    None => to.insert(String::new(), t.clone()),
+                };
+            }
+            let report = match worktrees::merge(&root, handle, &to) {
+                Ok(r) => r,
+                Err(e) => return fail(e),
+            };
+            let mut failed = false;
+            for (name, outcome) in &report.members {
+                match outcome {
+                    worktrees::RepoOutcome::Pushed { remote_branch } => println!(
+                        "member {name}: pushed {} -> origin/{remote_branch}, worktree retired",
+                        report.branch
+                    ),
+                    worktrees::RepoOutcome::Refused { detail } => {
+                        failed = true;
+                        println!("member {name}: kept — {detail}");
+                    }
+                    _ => {}
+                }
+            }
+            match &report.spec {
+                worktrees::RepoOutcome::Merged => println!("merged {}", report.branch),
+                worktrees::RepoOutcome::Landed { branch } => {
+                    println!("landed {} on new branch {branch}", report.branch)
+                }
+                worktrees::RepoOutcome::Conflict { detail } => {
+                    failed = true;
+                    println!("{detail}");
+                    println!(
+                        "the merge of {} stopped — finish the join by hand:\n\
+                         \x20 1. resolve the conflicts and `git commit` the merge\n\
+                         \x20 2. both sides minted a version? `archi version remint -m <note> [--session <slug>]`\n\
+                         \x20 3. `archi check` — stale pins surface there; `archi plan repin` re-pins\n\
+                         \x20 4. concurrent stress rounds? `archi session fold <slug>`\n\
+                         \x20 5. re-run `archi worktree merge {handle}` — the worktree and its binding stay until the join lands clean",
+                        report.branch
+                    );
+                }
+                _ => {}
+            }
+            if report.retired {
+                println!("retired {} — binding cleared", report.worktree.display());
+            } else if !failed {
+                println!(
+                    "not retired yet — repair the refusals above and re-run `archi worktree merge {handle}`"
+                );
+            }
+            if failed { ExitCode::from(1) } else { ExitCode::SUCCESS }
+        }
+        _ => usage_err(
+            "usage: archi worktree mint <slug> [--plan <name>] | ls [--plan <slug>] [--spec <effort>] [--json] | drop <slug|path> | merge <slug|path> [--to [<member>=]<branch>]...",
+        ),
+    }
+}
+
 fn run_link(args: &Args) -> ExitCode {
     let fail = |e: String| -> ExitCode {
         eprintln!("archi: {e}");
@@ -1356,10 +1766,12 @@ fn run_plan(args: &Args) -> ExitCode {
             };
             match plans::use_plan(&root, ws.model(), name) {
                 Ok(plans::Used::Created(p)) => {
+                    worktrees::bind_plan(&root, &p.name);
                     println!("created plan `{}` @ {} — now current", p.name, p.version);
                     ExitCode::SUCCESS
                 }
                 Ok(plans::Used::Switched(p)) => {
+                    worktrees::bind_plan(&root, &p.name);
                     println!("switched to plan `{}` @ {}", p.name, p.version);
                     ExitCode::SUCCESS
                 }
@@ -1388,6 +1800,190 @@ fn run_plan(args: &Args) -> ExitCode {
                     println!("added {} {} — spec_refs: {}", t.id, t.node, t.spec_refs.join(", "));
                     ExitCode::SUCCESS
                 }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("task"), [desc, id, text]) if desc == "desc" => {
+            match plans::task_desc(&root, id, text) {
+                Ok(()) => {
+                    println!("{id} described");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("task"), [sd, add, id, text]) if sd == "stack-detail" && add == "add" => {
+            match plans::task_stack_detail_add(&root, id, text) {
+                Ok(()) => {
+                    println!("{id} stack + {text}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("task"), [input, add, id, note]) if input == "input" && add == "add" => {
+            let Some(from) = args.from_task.as_deref() else {
+                return usage_err("`task input add` names its producer: --from <task_id>");
+            };
+            match plans::task_input_add(&root, id, from, note) {
+                Ok(()) => {
+                    println!("{id} ← {from}: {note}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("task"), [output, add, id, path]) if output == "output" && add == "add" => {
+            match plans::task_output_add(&root, id, path) {
+                Ok(()) => {
+                    println!("{id} output + {path}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("task"), [sr, add, id, r]) if sr == "spec-ref" && add == "add" => {
+            match plans::task_spec_ref_add(&root, id, r) {
+                Ok(()) => {
+                    println!("{id} spec_ref + {r}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("task"), [req, suggest, id]) if req == "req" && suggest == "suggest" => {
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            match plans::show(&root, ws.model()) {
+                Ok((plan, report)) => {
+                    let Some(t) = plan.tasks.iter().find(|t| &t.id == id) else {
+                        return fail(format!("no task `{id}` — `archi plan show` lists them"));
+                    };
+                    let matched = report.derived.matched.get(&t.id).into_iter().flatten();
+                    let mut any = false;
+                    for m in matched {
+                        any = true;
+                        println!(
+                            "{} {} ({}) via {}",
+                            m.slot,
+                            m.req,
+                            if m.owned { "owned" } else { "candidate" },
+                            m.matched_refs.join(", ")
+                        );
+                    }
+                    if !any {
+                        println!("no candidates — the task's elements carry no requirements");
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("task"), [req, add, id, handle]) if req == "req" && add == "add" => {
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            match plans::own_add(&root, ws.model(), id, handle) {
+                Ok(slug) => {
+                    println!("{id} owns {slug}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("task"), [req, remove, id, handle]) if req == "req" && remove == "remove" => {
+            match plans::own_remove(&root, id, handle) {
+                Ok(slug) => {
+                    println!("{id} disowned {slug} (its verifications went with it)");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("task"), [rl, id]) if rl == "req-list" => {
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            match plans::show(&root, ws.model()) {
+                Ok((plan, report)) => {
+                    let Some(t) = plan.tasks.iter().find(|t| &t.id == id) else {
+                        return fail(format!("no task `{id}` — `archi plan show` lists them"));
+                    };
+                    if t.owns.is_empty() {
+                        println!("{id} owns nothing — `archi plan task req suggest {id}`");
+                    }
+                    for m in report.derived.matched.get(&t.id).into_iter().flatten() {
+                        if !m.owned {
+                            continue;
+                        }
+                        let proofs = t.verifications.get(&m.req).map_or(0, Vec::len);
+                        println!(
+                            "{} {} — {} verification{}",
+                            m.slot,
+                            m.req,
+                            proofs,
+                            if proofs == 1 { "" } else { "s" }
+                        );
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("task"), [verification, add, id, handle, text])
+            if verification == "verification" && add == "add" =>
+        {
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            match plans::verification_add(&root, ws.model(), id, handle, text) {
+                Ok(slug) => {
+                    println!("{id} {slug} verify + {text}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("task"), [verification, remove, id, handle, rest @ ..])
+            if verification == "verification" && remove == "remove" && rest.len() <= 1 =>
+        {
+            let index = match rest.first() {
+                None => None,
+                Some(n) => match n.parse::<usize>() {
+                    Ok(i) => Some(i),
+                    Err(_) => return usage_err("`verification remove` takes a 1-based index"),
+                },
+            };
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            match plans::verification_remove(&root, ws.model(), id, handle, index) {
+                Ok(slug) => {
+                    println!("{id} {slug} verification removed");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("task"), [show, id]) if show == "show" => {
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            match plans::show(&root, ws.model()) {
+                Ok((plan, report)) => match plans::render_task_show(&plan, &report, id) {
+                    Ok(text) => {
+                        print!("{text}");
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => fail(e),
+                },
                 Err(e) => fail(e),
             }
         }
@@ -1524,6 +2120,100 @@ fn run_plan(args: &Args) -> ExitCode {
                 Err(e) => fail(e),
             }
         }
+        (Some("problem"), [text]) => match plans::set_problem(&root, text) {
+            Ok(()) => {
+                println!("problem set");
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e),
+        },
+        (Some("tech"), [add, tech]) if add == "add" => {
+            let prov = args.provenance.clone().unwrap_or_default();
+            match plans::tech_add(&root, tech, &prov) {
+                Ok(()) => {
+                    println!("stack + {tech}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("architecture-summary"), [add, node, role]) if add == "add" => {
+            match plans::summary_add(&root, node, role) {
+                Ok(()) => {
+                    println!("summary + {node}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("stack-mapping"), [add, node, tech]) if add == "add" => {
+            match plans::mapping_add(&root, node, tech) {
+                Ok(()) => {
+                    println!("mapping + {tech} realizes {node}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("scenarios"), [add, text]) if add == "add" => {
+            match plans::scenarios_add(&root, text) {
+                Ok(()) => {
+                    println!("scenario added");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("scenarios"), [list]) if list == "list" => match plans::load_active(&root) {
+            Ok(p) => {
+                if p.scenarios.is_empty() {
+                    println!("no scenarios");
+                }
+                for (i, s) in p.scenarios.iter().enumerate() {
+                    println!("{}. {s}", i + 1);
+                }
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e),
+        },
+        (Some("scenarios"), [remove, idx]) if remove == "remove" => {
+            let Ok(i) = idx.parse::<usize>() else {
+                return usage_err("`scenarios remove` takes the 1-based index from `list`");
+            };
+            match plans::scenarios_remove(&root, i) {
+                Ok(s) => {
+                    println!("removed: {s}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("list"), []) => match plans::all_plans(&root) {
+            Ok(all) => {
+                if all.is_empty() {
+                    println!("no plans — `archi plan use <name>` creates one");
+                }
+                for p in all {
+                    println!("{} @ {} ({})", p.name, p.version, p.state.describe());
+                }
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e),
+        },
+        (Some("status"), []) => match plans::load_active(&root) {
+            Ok(p) => {
+                println!(
+                    "plan `{}` @ {} ({}), {} wave{} closed",
+                    p.name,
+                    p.version,
+                    p.state.describe(),
+                    p.closed_waves,
+                    if p.closed_waves == 1 { "" } else { "s" }
+                );
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e),
+        },
         (Some("close"), []) => match plans::close(&root) {
             Ok(p) => {
                 println!("closed plan `{}`", p.name);
@@ -1539,7 +2229,9 @@ fn run_plan(args: &Args) -> ExitCode {
             Err(e) => fail(e),
         },
         _ => usage_err(
-            "`plan` takes: use <name> | repin | show | verify | task add <node> [--desc <text>] | \
+            "`plan` takes: use <name> | repin | show | verify | list | status | problem | tech add | \
+             architecture-summary add | stack-mapping add | scenarios add|list|remove | \
+             task add|desc|show|stack-detail|spec-ref|input|output|req|req-list|verification | \
              start | next | current-wave | close | reset",
         ),
     }
@@ -2021,6 +2713,51 @@ fn run_axes(args: &Args) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// The plan-ownership hint a guarded route hands the seat gate.
+enum PlanHint<'a> {
+    /// Mutation with no plan identity of its own (version, session, link…).
+    None,
+    /// `plan use <name>` — the name is on the command line.
+    Named(&'a str),
+    /// Any other plan mutation — the hint is whatever plan is active.
+    Active,
+}
+
+/// The router's single answer to "is this route guarded?" — `None` is a
+/// free route. Mutations of governed state (versions, sessions, links, the
+/// repo map, plans) are guarded; reads, bootstrap (`init`, `sync-skills`)
+/// and the seat verbs themselves (`worktree`, `status`, `batch` — each
+/// batch line re-enters the router on its own) stay free. Verb bodies
+/// never guard themselves.
+fn guarded_route(args: &Args) -> Option<PlanHint<'_>> {
+    let sub = |i: usize| args.positional.get(i).map(String::as_str);
+    match args.verb.as_str() {
+        "version" if matches!(sub(0), Some("save" | "remint" | "anchor")) => Some(PlanHint::None),
+        "session" if sub(0) == Some("fold") => Some(PlanHint::None),
+        "link" if matches!(sub(0), Some("add" | "confirm" | "rm" | "repin" | "capture")) => {
+            Some(PlanHint::None)
+        }
+        // The audit reads — until `--prune` lets it retire journal entries.
+        "link" if sub(0) == Some("audit") && args.prune => Some(PlanHint::None),
+        "repo" if sub(0) == Some("map") => Some(PlanHint::None),
+        "plan" => match sub(0) {
+            Some("use") => Some(args.positional.get(1).map_or(PlanHint::None, |n| PlanHint::Named(n))),
+            Some(
+                "repin" | "start" | "next" | "close" | "reset" | "problem" | "tech"
+                | "architecture-summary" | "stack-mapping",
+            ) => Some(PlanHint::Active),
+            Some("scenarios") if sub(1) != Some("list") => Some(PlanHint::Active),
+            Some("task") => match sub(1) {
+                Some("show") | Some("req-list") => None,
+                Some("req") if sub(2) == Some("suggest") => None,
+                _ => Some(PlanHint::Active),
+            },
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     // The standalone meta flags answer before any parsing or project
@@ -2041,6 +2778,35 @@ fn main() -> ExitCode {
         Ok(a) => a,
         Err(e) => return usage_err(&e),
     };
+    // The seat gate, wired once: a guarded route refuses before its runner
+    // is entered.
+    if let Some(hint) = guarded_route(&args) {
+        let root = match locate_project(&args) {
+            Ok(r) => r,
+            Err(e) => return usage_err(&e),
+        };
+        let work = match hint {
+            PlanHint::Named(name) => Some(name.to_string()),
+            PlanHint::Active => plans::active_name(&root).ok().flatten(),
+            PlanHint::None => None,
+        };
+        if let Err(e) = worktrees::guard_mutation(&root, work.as_deref()) {
+            eprintln!("archi: {e}");
+            return ExitCode::from(1);
+        }
+    }
+    // The verdict gate: `check` and `build` answer anywhere, but refuse to
+    // bless uncommitted spec edits sitting outside a seat.
+    if matches!(args.verb.as_str(), "check" | "build") {
+        let root = match locate_project(&args) {
+            Ok(r) => r,
+            Err(e) => return usage_err(&e),
+        };
+        if let Err(e) = worktrees::guard_verdict(&root) {
+            eprintln!("archi: {e}");
+            return ExitCode::from(1);
+        }
+    }
     match args.verb.as_str() {
         "init" => run_init(&args),
         "sync-skills" => run_sync_skills(&args),
@@ -2052,6 +2818,19 @@ fn main() -> ExitCode {
         "session" => run_session(&args),
         "link" => run_link(&args),
         "repo" => run_repo(&args),
+        "worktree" => run_worktree(&args),
+        "status" => run_status(&args),
+        "batch" => {
+            let well_formed = match args.positional.as_slice() {
+                [] => true,
+                [p] => p == "-",
+                _ => false,
+            };
+            if !well_formed {
+                return usage_err("`batch` reads its commands from stdin: archi batch [-]");
+            }
+            batch::run(args.project.as_deref())
+        }
         "plan" => run_plan(&args),
         "read" => run_read(&args),
         "query" => run_query(&args),

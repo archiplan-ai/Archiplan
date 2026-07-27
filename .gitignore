@@ -2,4 +2,5 @@
 /target
 dist/
 archi/*.local.toml
+archi/plans/.current
 

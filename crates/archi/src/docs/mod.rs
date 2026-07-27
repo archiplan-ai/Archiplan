@@ -156,6 +156,15 @@ pub enum DocFinding {
         /// The folded round's label.
         label: String,
     },
+    /// A closed stamp verified by content: the id now resolves to a
+    /// different render than the one the round closed against
+    /// (`archi/requirements/worktree-parallelism/pins-survive-a-remint`).
+    StaleSessionPin {
+        /// The session's slug.
+        session: String,
+        /// The stamped version id.
+        version: String,
+    },
 }
 
 impl fmt::Display for DocFinding {
@@ -195,6 +204,12 @@ impl fmt::Display for DocFinding {
             DocFinding::FoldedAwaitsRemint { session, label } => write!(
                 f,
                 "folded round awaits remint: `{label}` in session `{session}` — \
+                 `archi version remint -m <note> --session {session}` re-stamps it"
+            ),
+            DocFinding::StaleSessionPin { session, version } => write!(
+                f,
+                "stale session stamp: `{session}` closed at {version}, whose archived \
+                 content changed since the stamp — \
                  `archi version remint -m <note> --session {session}` re-stamps it"
             ),
         }
@@ -827,7 +842,28 @@ fn cross_check(
         }
     }
 
-    findings(tree)
+    let mut out = findings(tree);
+    // Closed stamps are verified by content, not id alone: a remint that
+    // moved an id out from under a record surfaces as a finding naming the
+    // repair verb, never as silent reinterpretation. Hash-less records stay
+    // silent (pins-survive-a-remint).
+    for s in &tree.sessions {
+        let (Some((c, _)), Some((h, _))) = (&s.closed, &s.version_hash) else {
+            continue;
+        };
+        if c.is_empty() || c == "pending remint" {
+            continue;
+        }
+        if let Some(entry) = archive.as_ref().and_then(|a| a.entry(c)) {
+            if &entry.model != h {
+                out.push(DocFinding::StaleSessionPin {
+                    session: s.slug.clone(),
+                    version: c.clone(),
+                });
+            }
+        }
+    }
+    out
 }
 
 /// Reconstruct an archived version and compile it against the preset it was
@@ -1037,7 +1073,7 @@ pub fn close_open_session(root: &Path, version_id: &str) -> Result<Option<String
     match open.as_mut_slice() {
         [] => Ok(None),
         [(slug, path)] => {
-            stamp_closed(path, version_id)?;
+            stamp_closed(path, version_id, entry_hash(root, version_id).as_deref())?;
             Ok(Some(std::mem::take(slug)))
         }
         more => Err(format!(
@@ -1132,18 +1168,37 @@ pub fn restamp_session(root: &Path, slug: &str, version_id: &str) -> Result<Path
     if stamped_folded {
         fs::write(&anchor, out).map_err(|e| format!("cannot write `{}`: {e}", anchor.display()))?;
     } else {
-        stamp_closed(&anchor, version_id)?;
+        stamp_closed(&anchor, version_id, entry_hash(root, version_id).as_deref())?;
     }
     Ok(anchor)
 }
 
-fn stamp_closed(path: &Path, id: &str) -> Result<(), String> {
+/// The archived content hash a closing stamp records beside its id; `None`
+/// leaves the record hash-less, which the cross-check treats as silent.
+fn entry_hash(root: &Path, id: &str) -> Option<String> {
+    versions::Archive::open(root)
+        .ok()
+        .flatten()
+        .and_then(|a| a.entry(id).map(|e| e.model.clone()))
+}
+
+fn stamp_closed(path: &Path, id: &str, hash: Option<&str>) -> Result<(), String> {
     let text =
         fs::read_to_string(path).map_err(|e| format!("cannot read `{}`: {e}", path.display()))?;
-    let mut out = String::with_capacity(text.len() + id.len() + 1);
+    let mut out = String::with_capacity(text.len() + id.len() + 80);
     let mut in_frontmatter = false;
+    let mut hash_written = false;
     for (i, line) in text.lines().enumerate() {
         if line.trim_end() == "---" {
+            // leaving the frontmatter: a record without the hash line gains it
+            if in_frontmatter && !hash_written {
+                if let Some(h) = hash {
+                    out.push_str("version-hash: ");
+                    out.push_str(h);
+                    out.push('\n');
+                }
+                hash_written = true;
+            }
             in_frontmatter = i == 0;
             out.push_str(line);
         } else if in_frontmatter
@@ -1153,6 +1208,19 @@ fn stamp_closed(path: &Path, id: &str) -> Result<(), String> {
         {
             out.push_str("closed: ");
             out.push_str(id);
+        } else if in_frontmatter
+            && line
+                .split_once(':')
+                .is_some_and(|(k, _)| k.trim() == "version-hash")
+        {
+            hash_written = true;
+            match hash {
+                Some(h) => {
+                    out.push_str("version-hash: ");
+                    out.push_str(h);
+                }
+                None => continue, // a stale hash never outlives its stamp
+            }
         } else {
             out.push_str(line);
         }

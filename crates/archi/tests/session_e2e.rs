@@ -5,6 +5,8 @@
 //! folded stamp waits for `version remint --session` to make it true
 //! (fold-pressure; rounds-fold-deliberately, parallel-editing-discipline).
 
+mod util;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -30,7 +32,7 @@ fn temp_project() -> PathBuf {
     )
     .unwrap();
     fs::write(dir.join("archi/src/model.arch"), MODEL).unwrap();
-    dir
+    util::seat(&dir)
 }
 
 fn session_file(root: &Path, slug: &str) -> PathBuf {

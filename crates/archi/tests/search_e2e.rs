@@ -4,6 +4,8 @@
 //! states search fine, and a search perturbs nothing a `version save`
 //! could notice.
 
+mod util;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -28,7 +30,7 @@ fn temp_project() -> PathBuf {
     )
     .unwrap();
     fs::write(dir.join("archi/src/model.arch"), MODEL).unwrap();
-    dir
+    util::seat(&dir)
 }
 
 fn put(root: &Path, rel_path: &str, text: &str) {

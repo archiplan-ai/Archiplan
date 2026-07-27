@@ -1,6 +1,7 @@
-// The four stories the workflow tells.
+// The five stories the workflow tells.
 
 def view compile_flow // source to model: the compiler pipeline and the engine
 def view read_flow    // agents interrogating the model: queries, envelope, nkp
 def view harden_flow  // versions, docs, stress and incidence: the harden loop
 def view trace_flow   // links, plans, capture: spec to code and back
+def view seat_flow    // worktree seats: parallel units minted, guarded and landed
