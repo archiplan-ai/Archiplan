@@ -21,9 +21,9 @@ Windows (PowerShell):
 irm https://archiplan.ai/install.ps1 | iex
 ```
 
-The installer resolves the latest release for your platform, verifies the checksum,
-and drops the binary into `~/.local/bin` — make sure it is on your `PATH`, then
-confirm with `archi --version`. Pin a version with `ARCHI_VERSION=x.y.z`.
+The installer resolves the latest release for your platform and drops the binary
+into `~/.local/bin` — make sure it is on your `PATH`, then confirm with
+`archi --version`. Pin a version with `ARCHI_VERSION=x.y.z`.
 
 ## 02 — Getting started
 
@@ -74,8 +74,8 @@ instead.
 
 ## 03 — Every skill, by what you're doing
 
-`archi init` drops six skills into your agent, all invoked with a slash command.
-Grouped by the job at hand.
+The install drops the workflow skills into your agent, all invoked with a slash
+command. Grouped by the job at hand.
 
 ### Design the architecture
 
@@ -112,70 +112,6 @@ merge.
 `check`, resolve version-archive collisions with `remint`, read the journal's absorbed
 residue, fold concurrent stress rounds. The contract is the canonical render — git
 merging clean proves nothing until the composition compiles.
-
-### Migrate
-
-**`/archi-migrate-fractal`** — crosses a machine and its projects off the old fractal
-client: swaps the binaries, then translates each `.fractal/` project into a standing,
-checkable archiplan spec with a brief of what didn't map. The old tree is never
-mutated — it stays on disk as the frozen reference.
-
-## 04 — See it in action
-
-Run `/archi` in your agent. Archiplan walks the conversation from problem statement to
-a hardened spec — services, constraints, requirements, all named, all compiled:
-
-```
-def conn login := * ->LoginForm, <-Token *   // the form goes out, the token comes back
-
-// The service guarding the credential boundary.
-def node AuthService:
-  port handle_login   // receives the submitted credential pair
-
-def node UI:          // the human-facing client
-  port login
-
-UI.login login AuthService.handle_login
-```
-
-Rename `Token` and the build breaks at everything that names it — connections,
-requirements, code links. The spec cannot rot silently.
-
-## 05 — What you get
-
-A complete system design environment inside your agent. Architecture as code. A system
-knowledge-base. Decisions you can trace.
-
-### Pre-mortem on every design
-
-Archiplan throws traffic spikes, partial outages, hostile users, and regulators at the
-spec — before you ship code that pretended those don't exist. Anything that breaks
-becomes a new requirement, or a sacrifice signed by a decision.
-
-### Never lose context
-
-Every requirement remembers its origin — the initial problem, a specific stressor, a
-stakeholder concern. Six months later, when someone asks *why did we split this from
-that?*, the answer is an artifact, not a lost Slack thread.
-
-### Fine-tune your architecture
-
-Archiplan flags when your design is heading toward a god-service or
-microservices-for-microservices' sake — before "we should refactor" turns into "we
-have to rewrite."
-
-### Code with receipts
-
-As each wave lands, archi captures what changed and links spec elements to the code
-symbols that realize them. Verification re-hashes every link in CI and grades the
-drift; the audit sweeps for dark code, dark spec, and stale evidence. Not a document
-asserting the code matches the design — a build that fails when it doesn't.
-
-### One spec, any number of repos
-
-Declare each code repository as a member: links carry repo-qualified identities, every
-version records where each member's code stood, and worktree seats cascade across all
-of them. A checkout missing on one machine is a reported state, never an error.
 
 ---
 
