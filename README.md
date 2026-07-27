@@ -27,50 +27,39 @@ into `~/.local/bin` — make sure it is on your `PATH`, then confirm with
 
 ## 02 — Getting started
 
-Everything after the install happens inside your agent: you talk, it drives the
-`archi` CLI, the skills carry the discipline. No commands to memorize.
+Everything after the install happens inside your agent — no commands to memorize.
 
 ### New project
 
-Open your agent in the project folder and run `/archi`. Describe the system you want
-in one sentence — the agent stands the project up (repository included, with your
-consent), captures the intent in your own words, derives requirements, models the
-architecture, stress-tests it with you and seals a hardened version. Every choice
-that matters comes back as a question with priced options — nothing is assumed
-silently.
+Open your agent in the project folder, run `/archi`, describe the system in one
+sentence. The agent takes it from there:
 
-Then `/archi-plan` turns the hardened spec into an implementation plan — the agent
-polls you for the stack, the test frameworks and the infrastructure — and
-`/archi-implement` builds it wave by wave, sub-agents in parallel, until the plan
-reports done and the scenarios have run against a live stack.
+- intent → requirements → model → stress rounds → a hardened, versioned spec
+- every choice that matters comes back as a question with priced options
+- `/archi-plan` — the implementation plan; stack, tests and infrastructure polled from you
+- `/archi-implement` — waves of parallel sub-agents until done, scenarios run on a live stack
 
 ### Existing project
 
-Open your agent in the repo and run `/archi`, then name the change you want. The
-agent recovers the model from the code — only the slice your change touches, the
-boundaries as single nodes — writes requirements for the behavior that must not
-break, and anchors the load-bearing existing code with links from day one. From
-there the loop is the same: stress, version, `/archi-plan`, `/archi-implement`. The
-audit keeps score: code that moves with no architectural account is where the model
-grows next.
+Run `/archi` in the repo and name the change you want:
+
+- the model is recovered from the code — only the slice your change touches
+- requirements pin the behavior that must not break; links anchor the load-bearing code
+- from there the loop is the same: stress, version, `/archi-plan`, `/archi-implement`
 
 ### Multi-repo
 
-Spec in one repository, code in several. Tell the agent which repositories
-participate — it declares them as members, records where each one stood at every
-version, and when the work starts it seats every member beside its checkout: the
-same branch across all of them, each grown from its recorded baseline. When a base
-is ambiguous, the agent brings you the candidate branches instead of guessing. At
-the close, member branches land by push and PR on their own forges — never by a
-local merge into your checkout — and the spec lands once, whole.
+Spec in one repository, code in several. Tell the agent which repos participate:
+
+- each member is seated beside its checkout — same branch, grown from its recorded baseline
+- an ambiguous base comes back as candidate branches, never a guess
+- members land by push and PR on their forges; the spec lands once, whole
 
 ### The worktree seat
 
-All work rides git worktrees the agent manages for you: one unit — spec, then its
-plan, then the code — lives in one seat and lands once, at the end. Parallel efforts
-are parallel seats. Nothing mutates your main checkout, and the tools refuse to
-bless work done outside the discipline — the agent is told exactly where to go
-instead.
+- one unit — spec, then plan, then code — rides one worktree and lands once
+- parallel efforts are parallel seats; your main checkout is never mutated
+- the tools refuse work done outside the discipline — and say where to go
 
 ## 03 — Every skill, by what you're doing
 
