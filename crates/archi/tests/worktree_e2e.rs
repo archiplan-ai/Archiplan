@@ -574,6 +574,41 @@ fn a_doctored_session_stamp_surfaces_as_a_stale_stamp_finding() {
 }
 
 #[test]
+fn a_dirty_spec_outside_a_seat_fails_check_and_build() {
+    let (_ws, spec) = open_repo("verdict");
+    // clean unbound tree: both verdicts answer
+    ok(&spec, &["check"]);
+    ok(&spec, &["build"]);
+    // an ungoverned spec edit: both refuse with the seat recipe
+    fs::write(
+        spec.join("archi/src/model.arch"),
+        format!("{MODEL}def node Rogue:\n  port x\n"),
+    )
+    .unwrap();
+    for verb in ["check", "build"] {
+        let (success, _out, err) = run(&spec, &[verb]);
+        assert!(!success, "{verb} blessed ungoverned work");
+        assert!(err.contains("uncommitted"), "{err}");
+        assert!(err.contains("model.arch"), "{err}");
+        assert!(err.contains("worktree mint"), "{err}");
+    }
+    // a non-spec edit alone never trips it
+    git(&spec, &["add", "-A"]);
+    git(&spec, &["commit", "-qm", "grow"]);
+    fs::write(spec.join("notes.md"), "scratch\n").unwrap();
+    ok(&spec, &["check"]);
+    // the same edit inside a seat is governed work: check answers
+    ok(&spec, &["worktree", "mint", "grow"]);
+    let wt = spec.parent().unwrap().join("spec-worktrees/grow");
+    fs::write(
+        wt.join("archi/src/model.arch"),
+        format!("{MODEL}def node Seated:\n  port x\n"),
+    )
+    .unwrap();
+    ok(&wt, &["check"]);
+}
+
+#[test]
 fn a_hand_removed_worktree_heals_out_of_the_registry() {
     let (_ws, spec) = protected_repo("heal");
     ok(&spec, &["worktree", "mint", "storm"]);

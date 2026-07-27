@@ -975,6 +975,76 @@ pub fn guard_mutation(root: &Path, work: Option<&str>) -> Result<(), String> {
     }
 }
 
+/// The verdict gate `check` and `build` pass at the router: reads answer
+/// anywhere, but a verdict on ungoverned work is a lie — an unbound
+/// checkout whose spec carries uncommitted edits refuses with the seat
+/// recipe instead of blessing them. A bound seat never trips it; a clean
+/// tree passes (CI, the receiving checkout after a landing); a tree
+/// mid-merge is exempt — the join triage (`archi-merge`) needs `check`
+/// exactly while `archi/` is conflicted. Gitless stays free: branch
+/// governance is the mutation guard's and the skill's full stop, and the
+/// post-init smoke (`archi build`) predates the repository.
+pub fn guard_verdict(root: &Path) -> Result<(), String> {
+    let root = canon(root);
+    let Some(top) = toplevel(&root) else {
+        return Ok(());
+    };
+    if let Some(reg) = Registry::load(&root)? {
+        if reg.binding_of(&top).is_some() {
+            return Ok(());
+        }
+    }
+    if let Some(p) = git_out(&top, &["rev-parse", "--git-path", "MERGE_HEAD"]) {
+        let p = PathBuf::from(p);
+        let p = if p.is_absolute() { p } else { top.join(p) };
+        if p.exists() {
+            return Ok(());
+        }
+    }
+    let dirty = dirty_spec(&root, &top);
+    if dirty.is_empty() {
+        return Ok(());
+    }
+    let shown: Vec<String> = dirty.iter().take(8).map(|f| format!("  {f}")).collect();
+    let more = dirty.len().saturating_sub(8);
+    let tail = if more > 0 { format!("\n  …and {more} more") } else { String::new() };
+    Err(format!(
+        "the spec carries uncommitted edits outside a seated worktree:\n{}{tail}\n\
+         a passing report here would bless ungoverned work — continue in an \
+         existing seat (`archi worktree ls`) or mint one (`archi worktree \
+         mint <slug>`), carry the edits there, and re-run",
+        shown.join("\n")
+    ))
+}
+
+/// Uncommitted paths under the governed spec surface — `archi/`, the
+/// manifest, and the model source dir when it lives elsewhere — relative
+/// to the repository top. Machine-local files are gitignored and never
+/// appear; a broken manifest falls back to the default layout (the real
+/// diagnostic belongs to the compile that follows).
+fn dirty_spec(root: &Path, top: &Path) -> Vec<String> {
+    let rel = root.strip_prefix(top).unwrap_or(Path::new(""));
+    let src = modeling_lang::source::manifest_src(root)
+        .unwrap_or_else(|_| "archi/src".to_string());
+    let mut specs = vec![
+        rel.join("archi").display().to_string(),
+        rel.join("archi.toml").display().to_string(),
+    ];
+    let src_rel = rel.join(&src);
+    if !src_rel.starts_with(rel.join("archi")) {
+        specs.push(src_rel.display().to_string());
+    }
+    let mut args = vec!["status", "--porcelain", "--"];
+    args.extend(specs.iter().map(String::as_str));
+    let Some(out) = git_out(top, &args) else {
+        return Vec::new();
+    };
+    out.lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.get(3..).unwrap_or(l).to_string())
+        .collect()
+}
+
 /// Record that this checkout carries `plan`. Lenient: no git, no registry —
 /// no record; ownership questions then have nothing to refuse on, which is
 /// exactly the single-checkout workflow.
@@ -1165,6 +1235,46 @@ mod tests {
         let e = guard_mutation(&spec, None).unwrap_err();
         assert!(e.contains("plan use"), "{e}");
         assert!(e.contains("worktree mint"), "{e}");
+    }
+
+    #[test]
+    fn the_verdict_gate_refuses_only_a_dirty_spec_outside_a_seat() {
+        // gitless: free — the post-init smoke predates the repository
+        let plain = scratch();
+        manifest(&plain, "");
+        assert!(guard_verdict(&plain).is_ok());
+
+        let outer = scratch();
+        let spec = repo(&outer, "spec");
+        manifest(&spec, "");
+        fs::create_dir_all(spec.join("archi/src")).unwrap();
+        fs::write(spec.join("archi/src/model.arch"), "def node A\n").unwrap();
+        git(&spec, &["add", "-A"]);
+        git(&spec, &["commit", "-qm", "spec"]);
+        // clean unbound tree: passes (CI, the receiving checkout)
+        assert!(guard_verdict(&spec).is_ok());
+        // a non-spec edit does not trip it
+        fs::write(spec.join("notes.md"), "scratch\n").unwrap();
+        assert!(guard_verdict(&spec).is_ok());
+        // an uncommitted spec edit outside a seat refuses with the recipe
+        fs::write(spec.join("archi/src/model.arch"), "def node A\ndef node B\n").unwrap();
+        let e = guard_verdict(&spec).unwrap_err();
+        assert!(e.contains("uncommitted"), "{e}");
+        assert!(e.contains("model.arch"), "{e}");
+        assert!(e.contains("worktree mint"), "{e}");
+        // mid-merge the triage is exempt
+        let merge_head = spec.join(".git/MERGE_HEAD");
+        fs::write(&merge_head, "0000000000000000000000000000000000000000\n").unwrap();
+        assert!(guard_verdict(&spec).is_ok());
+        fs::remove_file(&merge_head).unwrap();
+        // committed, it passes again
+        git(&spec, &["add", "-A"]);
+        git(&spec, &["commit", "-qm", "grow"]);
+        assert!(guard_verdict(&spec).is_ok());
+        // the same edit inside a bound seat never trips the gate
+        let minted = mint_plain(&spec, "work", None, Some("work")).unwrap();
+        fs::write(minted.path.join("archi/src/model.arch"), "def node C\n").unwrap();
+        assert!(guard_verdict(&minted.path).is_ok());
     }
 
     #[test]

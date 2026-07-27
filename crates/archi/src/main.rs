@@ -2795,6 +2795,18 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     }
+    // The verdict gate: `check` and `build` answer anywhere, but refuse to
+    // bless uncommitted spec edits sitting outside a seat.
+    if matches!(args.verb.as_str(), "check" | "build") {
+        let root = match locate_project(&args) {
+            Ok(r) => r,
+            Err(e) => return usage_err(&e),
+        };
+        if let Err(e) = worktrees::guard_verdict(&root) {
+            eprintln!("archi: {e}");
+            return ExitCode::from(1);
+        }
+    }
     match args.verb.as_str() {
         "init" => run_init(&args),
         "sync-skills" => run_sync_skills(&args),
