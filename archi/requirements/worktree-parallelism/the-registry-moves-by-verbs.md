@@ -1,7 +1,7 @@
 ---
 kind: functional
 origin: intent
-satisfied-by: []
+satisfied-by: [Cli, Seats.Registry]
 deferred:
 ---
 
@@ -19,3 +19,9 @@ repair for what self-healing against `git worktree list` cannot decide
 (the-registry-binds-the-worktree).
 
 ## Satisfy
+
+`Cli.worktree` is the only writer's surface: `ls` lists every worktree with its binding,
+`drop` repairs a stale row, mint writes, merge clears — no hand edits.
+
+- test — mint records, ls shows, drop retires the row and the worktree (`mint_without_a_plan_seats_spec_work_and_drop_retires_it`)
+- test — drop cascades over member worktrees (`drop_cascades_over_member_worktrees`)

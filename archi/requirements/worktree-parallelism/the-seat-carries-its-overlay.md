@@ -1,7 +1,7 @@
 ---
 kind: functional
 origin: intent
-satisfied-by: []
+satisfied-by: [Seats.Mint, Members]
 deferred:
 ---
 
@@ -22,3 +22,10 @@ worktree shares, so an agent's `git add -A` cannot leak machine paths into a
 branch (branches-stay-transport).
 
 ## Satisfy
+
+`Seats.Mint` writes the overlay into the minted worktree — every cascaded member points at
+its member worktree, members outside the cascade get no row — and teaches the repository's
+shared exclude the seat artifacts; `Members` resolves through the overlay first. Retire
+scrubs before removal.
+
+- test — the seat overlay resolves members to their worktrees from inside the seat (`the_cascade_mints_member_worktrees_and_the_seat_overlay`)

@@ -1,7 +1,7 @@
 ---
 kind: non-functional
 origin: intent
-satisfied-by: []
+satisfied-by: [Scaffold, SourceTree]
 deferred:
 ---
 
@@ -24,3 +24,9 @@ delegates, while lifecycle verbs stay with one orchestrator
 rule to every agent in a project.
 
 ## Satisfy
+
+`Scaffold` carries the rule into every project through the skills and the CLAUDE.md block;
+`SourceTree` is the only return channel — a finding that is not a file on disk does not
+exist, and the orchestrator gates every fan-out on `archi check` plus a file count.
+
+- test — the scaffolded brief and skills state the materialization gate (`the_briefing_lands_verbatim_and_the_fence_appends_once`)

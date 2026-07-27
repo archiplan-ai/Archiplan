@@ -1,7 +1,7 @@
 ---
 kind: functional
 origin: intent
-satisfied-by: []
+satisfied-by: [Seats.Mint, Members, Archive]
 deferred:
 ---
 
@@ -24,3 +24,14 @@ share one worktree; the registry records every member seat
 (the-registry-binds-the-worktree).
 
 ## Satisfy
+
+`Seats.Mint` cascades to the members `--repos` names: resolution through `Members`, each
+branch grown from the baseline `Archive` recorded, the whole cascade validated before
+anything is created and rolled back whole on partial failure; a re-mint extends the seat and
+resolves members from the invoked root — the seat's own manifest and overlay mid-unit.
+
+- test — the cascade mints member worktrees and the seat overlay (`the_cascade_mints_member_worktrees_and_the_seat_overlay`)
+- test — an off-branch baseline refuses with candidate branches and the `--base` escape (`a_baseline_off_the_branch_refuses_with_the_base_escape`)
+- test — a missing baseline names both repairs (`a_missing_baseline_names_both_repairs`)
+- test — a partial cascade rolls back whole (`a_partial_cascade_rolls_back_whole`)
+- test — a seat extension resolves members from the seat, not the primary (`a_seat_extension_resolves_members_from_the_seat`)

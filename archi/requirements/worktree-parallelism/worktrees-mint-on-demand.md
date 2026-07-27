@@ -1,7 +1,7 @@
 ---
 kind: functional
 origin: intent
-satisfied-by: []
+satisfied-by: [Seats.Mint, Seats.Guard]
 deferred:
 ---
 
@@ -21,3 +21,10 @@ an existing branch instead of forking a duplicate is what makes pushed work resu
 machine (one-plan-one-worktree).
 
 ## Satisfy
+
+`Seats.Mint` creates the branch or attaches the existing one, adds the sibling worktree,
+writes the row last and prints the path — the CLI never changes the caller's directory;
+`Seats.Guard`'s refusal lists standing seats first and mints only work nothing carries.
+
+- test — the guard mints for an unbound checkout and names the seat; standing seats list instead of minting over (`the_guard_mints_for_an_unbound_checkout_and_names_the_seat`)
+- test — a pushed branch re-attaches instead of forking a duplicate (`an_unbound_checkout_mints_the_seat_and_the_worktree_proceeds`)

@@ -23,6 +23,8 @@ def node Cli:
   port read        // the agent read envelope over stdin/argv
   port search      // ranked retrieval by phrase across model defs and doc objects
   port init        // manifest + source dir + starter + briefing, create-only — the verb before a project exists
+  port worktree    // mint, ls, drop, merge: the seat lifecycle
+  port status      // where am I: checkout, binding, version state, open work
   port compile_src // drives the compiler
   port exec        // replays the lowered batch on the engine
   port ask         // read statements to the engine's envelope

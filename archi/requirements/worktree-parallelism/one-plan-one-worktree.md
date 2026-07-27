@@ -1,7 +1,7 @@
 ---
 kind: non-functional
 origin: intent
-satisfied-by: []
+satisfied-by: [Seats.Registry, Seats.Guard]
 deferred:
 ---
 
@@ -19,3 +19,9 @@ parallel-editing-discipline left open: PlanFile lifecycle and wave snapshots hav
 verb, so they must never see two concurrent writers in the first place.
 
 ## Satisfy
+
+`Seats.Registry` records which worktree carries which plan; `Seats.Guard` refuses a mutating
+plan verb from any other checkout, naming the owning path — backed by git's one-branch-one-
+checkout rule.
+
+- test — a second checkout mutating a bound plan refuses with the owner's path (`an_unbound_checkout_mints_the_seat_and_the_worktree_proceeds`)

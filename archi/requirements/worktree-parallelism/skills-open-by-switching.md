@@ -1,7 +1,7 @@
 ---
 kind: functional
 origin: intent
-satisfied-by: []
+satisfied-by: [Scaffold, Seats]
 deferred:
 ---
 
@@ -21,3 +21,10 @@ context-follows-the-checkout). Scaffold ships the step at the head of every work
 installs (AgentBrief).
 
 ## Satisfy
+
+`Scaffold` ships the opening step at the head of every workflow skill it installs: status,
+find the seat, switch into it, mint only work nothing carries; `Seats` answers the lookup
+and the mint. Each skill also polices its own freshness — `sync-skills` first, re-read on
+`updated`.
+
+- test — the installed skills carry the opening protocol verbatim from the binary (`the_briefing_lands_verbatim_and_the_fence_appends_once`)

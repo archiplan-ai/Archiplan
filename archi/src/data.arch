@@ -27,6 +27,8 @@ def node NkpReport       // the NKP landscape read: regime, hotspots, corridors
 def node IncidenceReport // stressor × component matrix and its typed findings
 def node SearchReport    // the ranked answer: hit cards with slugs, scores, snippets and next-hop refs
 def node AgentBrief      // the briefing archi installs beside a tree: the workflow skills and the CLAUDE.md block
+def node SeatBinding     // one registry row: worktree path to branch, spec effort, plan and member seats — machine-local, never merged
+def node MemberBaseline  // one member's recorded commit for a version: save-born or anchor-born, the base a cascade grows from
 
 Data type_of ArchSource
 Data type_of Tokens
@@ -54,3 +56,5 @@ Data type_of NkpReport
 Data type_of IncidenceReport
 Data type_of SearchReport
 Data type_of AgentBrief
+Data type_of SeatBinding
+Data type_of MemberBaseline

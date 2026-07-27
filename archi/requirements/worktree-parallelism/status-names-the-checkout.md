@@ -1,7 +1,7 @@
 ---
 kind: functional
 origin: intent
-satisfied-by: []
+satisfied-by: [Cli, Seats]
 deferred:
 ---
 
@@ -18,3 +18,10 @@ current, Sessions' open round, PlanFile state. The open-plans listing is what ma
 fresh checkout of a pushed branch discovers mid-flight work without verbal instructions.
 
 ## Satisfy
+
+`Cli.status` composes what the subsystems already hold: the checkout and branch, this
+checkout's binding from `Seats`, the active plan and wave, version state, the open stress
+round, and every plan with open lifecycle — the first verb of any working session.
+
+- test — status names the seat, its plan, wave, version state and open round (`status_names_the_checkout_and_its_open_work`)
+- test — gitless status names the missing repository instead of guessing (`a_gitless_project_refuses_mutation_loudly`)

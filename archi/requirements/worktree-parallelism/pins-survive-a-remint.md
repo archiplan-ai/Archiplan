@@ -1,7 +1,7 @@
 ---
 kind: functional
 origin: intent
-satisfied-by: []
+satisfied-by: [Planner, Sessions, Archive]
 deferred:
 ---
 
@@ -19,3 +19,10 @@ someone else's render. The Archive already hashes every entry; the pin must carr
 check can compare. Repair stays a verb: plan repin.
 
 ## Satisfy
+
+`Planner` stamps the pinned version's content hash into the plan and `Sessions`' closing
+stamp carries one; `Archive` serves the entry hash `check` compares against — a mismatch is
+a finding naming `plan repin` or `version remint --session`, never silent reinterpretation.
+
+- test — a doctored plan pin surfaces as a stale-pin finding naming the repair (`a_doctored_plan_pin_surfaces_as_a_stale_pin_finding`)
+- test — a doctored session stamp surfaces the same way (`a_doctored_session_stamp_surfaces_as_a_stale_stamp_finding`)

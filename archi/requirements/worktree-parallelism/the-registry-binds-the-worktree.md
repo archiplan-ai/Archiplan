@@ -1,7 +1,7 @@
 ---
 kind: functional
 origin: intent
-satisfied-by: []
+satisfied-by: [Seats.Registry]
 deferred:
 ---
 
@@ -21,3 +21,9 @@ entries whose paths git no longer lists. The binding is the ownership truth
 one-plan-one-worktree enforces and the mutation license mutation-needs-a-seat checks.
 
 ## Satisfy
+
+`Seats.Registry` (rows under the shared git dir, born at archi's first touch; every read
+reconciles against `git worktree list` and drops entries git no longer backs; the file
+never enters history).
+
+- test — a hand-removed worktree heals out of the registry on the next read (`a_hand_removed_worktree_heals_out_of_the_registry`)
