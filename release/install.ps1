@@ -1,17 +1,17 @@
 #Requires -Version 5
 $ErrorActionPreference = 'Stop'
 
-# Archiplan installer. Downloads the archi tarball for this platform from
-# GitHub Releases and installs it to %USERPROFILE%\.local\bin. Pin a version
-# with $env:ARCHI_VERSION; point at another asset host with $env:ARCHI_BASE_URL.
+# Archiplan installer, served at https://archiplan.ai/install.ps1 (downloads ride api.archiplan.ai). Downloads
+# the archi tarball for Windows x64 and installs archi.exe to %USERPROFILE%\.local\bin.
+# Pin a version with $env:ARCHI_VERSION; point at another host with $env:ARCHI_BASE_URL.
 
-$Repo = 'archiplan-ai/Archiplan'
-$Base = if ($env:ARCHI_BASE_URL) { $env:ARCHI_BASE_URL } else { "https://github.com/$Repo/releases/download" }
+$Base = if ($env:ARCHI_BASE_URL) { $env:ARCHI_BASE_URL } else { 'https://api.archiplan.ai' }
+$Version = if ($env:ARCHI_VERSION) { $env:ARCHI_VERSION } else { '__INJECT_AT_DEPLOY__' }
 
 $arch = $env:PROCESSOR_ARCHITECTURE
 if ($env:PROCESSOR_ARCHITEW6432) { $arch = $env:PROCESSOR_ARCHITEW6432 }
 switch ($arch) {
-    'AMD64' { $plat = 'windows-x64' }
+    'AMD64'  { $plat = 'windows-x64' }
     'x86_64' { $plat = 'windows-x64' }
     default {
         Write-Error "Unsupported platform: Windows-$arch. Supported: Windows x86_64."
@@ -19,32 +19,14 @@ switch ($arch) {
     }
 }
 
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-
-$Version = $env:ARCHI_VERSION
-if (-not $Version) {
-    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest" -UseBasicParsing
-    $Version = $release.tag_name -replace '^v', ''
-    if (-not $Version) {
-        Write-Error "Could not resolve the latest release. Set `$env:ARCHI_VERSION and retry."
-        exit 1
-    }
-}
-
 $tarball = "archi-$Version-$plat.tar.gz"
 $tmp = New-Item -ItemType Directory -Path (Join-Path $env:TEMP ("archi-install-" + [Guid]::NewGuid().ToString('N')))
 try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
     Write-Host "Downloading $tarball..."
     $dst = Join-Path $tmp.FullName $tarball
-    Invoke-WebRequest -Uri "$Base/v$Version/$tarball" -OutFile $dst -UseBasicParsing
-    Invoke-WebRequest -Uri "$Base/v$Version/$tarball.sha256" -OutFile "$dst.sha256" -UseBasicParsing
-
-    $expected = ((Get-Content "$dst.sha256" -TotalCount 1) -split '\s+')[0]
-    $actual = (Get-FileHash -Algorithm SHA256 -Path $dst).Hash
-    if ($expected -ne $actual) {
-        Write-Error "Checksum mismatch for $tarball — aborting."
-        exit 1
-    }
+    Invoke-WebRequest -Uri "$Base/download/$tarball" -OutFile $dst -UseBasicParsing
 
     # tar.exe ships with Windows 10 1803+ / Windows 11 / Server 2019+.
     if (-not (Get-Command tar.exe -ErrorAction SilentlyContinue)) {
@@ -59,25 +41,19 @@ try {
     New-Item -ItemType Directory -Force -Path $binDir | Out-Null
     Copy-Item -Force -Path (Join-Path $src 'archi.exe') -Destination (Join-Path $binDir 'archi.exe')
 
-    # Add $binDir to User PATH (persistent) and current process PATH (so
-    # `archi` works in the shell we were just launched from). Case-insensitive
-    # contains check on a semicolon-padded form to avoid partial-prefix matches.
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-    if (-not ($userPath)) { $userPath = '' }
-    if (-not ";$userPath;".ToLower().Contains(";$($binDir.ToLower());")) {
-        $newPath = if ($userPath) { "$userPath;$binDir" } else { $binDir }
-        [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
-        Write-Host "Added $binDir to your User PATH."
-    }
-    if (-not ";$env:Path;".ToLower().Contains(";$($binDir.ToLower());")) {
-        $env:Path = "$env:Path;$binDir"
+    if ($userPath -notlike "*$binDir*") {
+        [Environment]::SetEnvironmentVariable('Path', "$binDir;$userPath", 'User')
+        Write-Host ""
+        Write-Host "Added $binDir to your user PATH — restart the terminal to pick it up."
     }
 
     Write-Host ""
     Write-Host "Archiplan $Version is installed."
     Write-Host ""
-    Write-Host "Get started: run 'archi init' in a project directory."
+    Write-Host "Next: open your coding agent in a project and run /archi —"
+    Write-Host "the agent drives everything from there. 'archi --help' lists the verbs."
 }
 finally {
-    Remove-Item -Recurse -Force $tmp.FullName -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }

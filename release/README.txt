@@ -9,7 +9,8 @@ Example:
 
 Windows: copy archi.exe into a directory on %PATH%.
 
-Then get started by running 'archi init' in a project directory.
+Then open your coding agent in a project and run /archi — or start
+by hand with 'archi init'.
 
 Most users should use the scripted installer instead (install.sh or
 install.ps1, bundled in this archive); this manual copy is the fallback.
