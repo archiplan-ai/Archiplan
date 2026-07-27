@@ -1,25 +1,128 @@
 # Archiplan
 
-**Unslop your software**
+**Turn your coding agent into a system architect**
 
-Archiplan is a software hardening environment: a CLI (`archi`) and a small modeling
-language that turn software architecture from a stale diagram into a living, verified
-artifact. You model the system as source code, attack the design while failure still
-costs nothing, and ship code that stays verifiably tied to the spec it implements.
+Connect Archiplan to your agent and the code it writes gets a real
+architecture behind it — stress-tested and traceable before anything ships.
 
 ![](archiplan.svg)
 
-## What you get
+## 01 — Install
 
-### An architecture that compiles
+Install the `archi` CLI:
 
-The model is source code: nodes, ports, typed connections and relations, each element
-carrying one sentence of identity prose. It lives in your repo, splits into modules,
-reads in review like any other diff — and it *compiles*. Every reference is resolved
-and checked.
+```sh
+curl -sSf https://archiplan.ai/install.sh | sh
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://archiplan.ai/install.ps1 | iex
+```
+
+The installer resolves the latest release for your platform, verifies the checksum,
+and drops the binary into `~/.local/bin` — make sure it is on your `PATH`, then
+confirm with `archi --version`. Pin a version with `ARCHI_VERSION=x.y.z`.
+
+## 02 — Set up
+
+### New project
+
+```sh
+cd my-system
+git init && git commit --allow-empty -m "seed"   # the seat discipline stands on git
+archi init
+archi build
+```
+
+`archi init` scaffolds it all: `archi.toml` (with `protected = ["main"]` — branches
+that never receive a local merge), a starter model, the six workflow skills in
+`.claude/skills/`, the `CLAUDE.md` brief, and the `.gitignore` lines for machine-local
+state. Create-only and safe to re-run. `archi build` must pass before anything else —
+then open your agent and run `/archi`.
+
+### Existing project
+
+```sh
+cd existing-repo
+archi init
+```
+
+Same verb, inside the repo that already has code. `/archi` then works brownfield: it
+captures the intent of the *change being asked* — not the whole legacy — recovers just
+the slice of the model that change touches, and anchors the load-bearing existing code
+with links from day one. From there the audit is the ratchet: wherever code moves with
+no architectural account, that is where the model grows next.
+
+### The worktree seat
+
+All spec work rides a git worktree. The first mutating verb in an unbound checkout
+mints a seat and prints where to go; `check` and `build` refuse to bless uncommitted
+spec edits sitting outside one. One seat carries one whole unit — spec, then its plan,
+then the code — and lands once, at the end (`archi worktree merge`). Parallel efforts
+are parallel seats; code spread across repositories cascades member worktrees beside
+their checkouts (`--repos`).
+
+After a binary upgrade, run `archi sync-skills` in a project — it refreshes the
+installed briefing to the new binary's copies. Every skill runs it as its first move,
+so a stale briefing corrects itself.
+
+## 03 — Every skill, by what you're doing
+
+`archi init` drops six skills into your agent, all invoked with a slash command.
+Grouped by the job at hand.
+
+### Design the architecture
+
+**`/archi`** — the main entry point. Guides a full architecture session with the
+archiplan methodology — from a one-line problem statement, through intent and
+requirements, to a hardened, versioned spec. Greenfield or brownfield. Tracks coupling
+live with the NKP scoring line, steering you toward the **CRITICAL** regime — the
+evolvable edge where changes propagate without cascading. Stress rounds live here too:
+each round discovers stressors — failure modes, scale concerns, hostile users,
+regulators — names the components each one presses, applies verdicts, and turns every
+break into a derived requirement or a deliberately signed trade-off. You loop until a
+round survives; that version is the hardened spec.
+
+### Plan & build
+
+**`/archi-plan`** — turns a hardened spec into an implementation plan, authored
+entirely through the `archi plan` verbs: an envelope with a user-polled stack and its
+infrastructure, one task per node, requirement ownership curated from the spec's own
+reverse lookup, named verifications, end-to-end scenarios. Refuses on an unsaved model.
+
+**`/archi-implement`** — drives the build of a started plan wave by wave, every task in
+its own sub-agent, until `archi plan next` reports `DONE`. The plan stays the source of
+truth — task briefs come from `archi plan task show`; every wave commits inside the
+seat before the join, and code-link evidence is captured as each wave closes.
+
+### Land & merge
+
+**`/archi-finish-worktree`** — closes a seat: lands its spec/plan/code unit, pushes
+member branches for their PRs, retires the worktree and its registry binding in one
+move. A protected receiving branch lands sideways (`--to` + push + PR), never by local
+merge.
+
+**`/archi-merge`** — two branches that both mutated the spec: triage the join with
+`check`, resolve version-archive collisions with `remint`, read the journal's absorbed
+residue, fold concurrent stress rounds. The contract is the canonical render — git
+merging clean proves nothing until the composition compiles.
+
+### Migrate
+
+**`/archi-migrate-fractal`** — crosses a machine and its projects off the old fractal
+client: swaps the binaries, then translates each `.fractal/` project into a standing,
+checkable archiplan spec with a brief of what didn't map. The old tree is never
+mutated — it stays on disk as the frozen reference.
+
+## 04 — See it in action
+
+Run `/archi` in your agent. Archiplan walks the conversation from problem statement to
+a hardened spec — services, constraints, requirements, all named, all compiled:
 
 ```
-def conn login := * ->LoginForm, <-Token *   // request/response: the form goes out, the token comes back
+def conn login := * ->LoginForm, <-Token *   // the form goes out, the token comes back
 
 // The service guarding the credential boundary.
 def node AuthService:
@@ -28,167 +131,58 @@ def node AuthService:
 def node UI:          // the human-facing client
   port login
 
-def node LoginForm    // the credential pair as submitted
-def node Token        // the session grant returned on success
-
 UI.login login AuthService.handle_login
 ```
 
-Diagrams-as-code tools render pictures; archi compiles a model. Rename `Token` and the
-build breaks at everything that names it — connections, requirements, code links. The
-spec cannot rot silently.
+Rename `Token` and the build breaks at everything that names it — connections,
+requirements, code links. The spec cannot rot silently.
 
-### Requirements wired into the build
+## 05 — What you get
 
-Requirements are small markdown files, one claim each, and every one names the model
-elements that satisfy it — an architectural commitment made before any code exists. The
-compiler verifies every name, so a requirement can't quietly point at something that no
-longer exists. Unsatisfied requirements stay visible as findings: a worklist you can see,
-not a TODO you forgot.
+A complete system design environment inside your agent. Architecture as code. A system
+knowledge-base. Decisions you can trace.
 
-### A stress room for your design
+### Pre-mortem on every design
 
-You wouldn't ship code without tests. Archiplan gives the *design* its tests: a stress
-round pins a snapshot of the model and attacks it — traffic bursts, scale cliffs,
-regulatory shifts, hostile stakeholders. Each pressure is written down, aimed at named
-parts of the design, and resolved *surviving* or *breaking*. A breaking pressure demands
-an answer — new requirements, model changes — and stays flagged until it has one; each
-round closes with an incidence report of where pressure landed and what it found. You
-loop until a round survives. What comes out is a hardened spec: a design that has already
-lived through its worst day, at the cost of an afternoon on paper instead of an incident
-in production.
+Archiplan throws traffic spikes, partial outages, hostile users, and regulators at the
+spec — before you ship code that pretended those don't exist. Anything that breaks
+becomes a new requirement, or a sacrifice signed by a decision.
 
-### A map of where change is safe
+### Never lose context
 
-Archi scores the model as a fitness landscape — a technique borrowed from complexity
-science. One line tells you how far the average change ripples and which regime the
-design is in: **ordered** (changes stay local), **critical** (the evolvable edge — the
-target), or **chaotic** (everything cascades). The full report names the coupling
-hotspots — the components where risk concentrates — and the neutral corridors, whole
-regions safe to restructure freely. Refactoring priorities stop being a matter of taste.
+Every requirement remembers its origin — the initial problem, a specific stressor, a
+stakeholder concern. Six months later, when someone asks *why did we split this from
+that?*, the answer is an artifact, not a lost Slack thread.
 
-### Versions of meaning, not files
+### Fine-tune your architecture
 
-A version is a snapshot of what the design *means* — content-addressed, minted only when
-the meaning actually moves, sealed against tampering, immune to git rewrites, and cheap
-enough to keep forever. Diff any two versions — or a version against the live tree — and
-read a semantic delta, not text churn. Stress rounds, plans, and code links all pin
-versions, so "what exactly did we agree to?" always has a reconstructable answer.
-
-### Plans that can't drift from the spec
-
-An implementation plan pins a hardened version: code is written against a frozen spec,
-never a moving one. Cut a task per element to build, and its spec references and
-requirements arrive by lookup — nothing is retyped, so nothing can be mistyped. A plan
-refuses to start until every requirement it touches carries a verification, then
-execution proceeds in waves with a gate between each.
+Archiplan flags when your design is heading toward a god-service or
+microservices-for-microservices' sake — before "we should refactor" turns into "we
+have to rewrite."
 
 ### Code with receipts
 
-As each wave of code lands, archi captures what actually changed and turns it into
-candidate links between spec elements and the code symbols that realize them — already
-attributed to the task that produced them. You confirm the load-bearing ones, discard the
-drive-bys, and the wave doesn't close until the evidence does. From then on traceability
-is machine-checked: verification re-hashes every link in CI and grades the drift, and the
-audit sweeps for dark code (moved with no architectural account), dark spec (claimed but
-never realized), and evidence gone stale. Not a document asserting the code matches the
-design — a build that fails when it doesn't.
-
-### Meets your system where it is
-
-No big-bang adoption. On an existing codebase you capture the intent of the change being
-asked — not the whole legacy — recover just the slice of the model that change touches,
-and anchor the load-bearing existing code with links from day one. From there the audit
-is the ratchet: wherever code moves with no architectural account, that is where the
-model grows next.
-
-### Built for the agent era
-
-Everything is text — the model is a small language, requirements and stressors are
-markdown, the plan is JSON — so humans and agents edit the same files, and every
-lifecycle move goes through a verb that validates it. Agents get ranked search over every
-object in the project and a structured JSON read surface; a hallucinated reference
-becomes a build error, not a buried lie. Archiplan ships with a skill that drives the
-whole loop end to end, so the discipline lives in the tool — not in anyone's memory,
-human or model.
+As each wave lands, archi captures what changed and links spec elements to the code
+symbols that realize them. Verification re-hashes every link in CI and grades the
+drift; the audit sweeps for dark code, dark spec, and stale evidence. Not a document
+asserting the code matches the design — a build that fails when it doesn't.
 
 ### One spec, any number of repos
 
-Code spread across repositories is the normal case, not an afterthought. Declare each
-code repo as a member and links carry repo-qualified identities; every version records
-where each member's code stood, and anything it can't record is named along with its
-recovery — never silent. A checkout missing on one machine is a reported state, not an
-error.
+Declare each code repository as a member: links carry repo-qualified identities, every
+version records where each member's code stood, and worktree seats cascade across all
+of them. A checkout missing on one machine is a reported state, never an error.
 
-## The shape of the loop
+---
 
-```
-HARDEN    intent → requirements → model → version → stress round
-             ↑                                          │
-             └────────── answers to what broke ─────────┘
-                       …until a round survives
+Archi is in beta. It's rough in places — that's the point. We're hardening it the way
+archi hardens a spec, and the fastest way to make it better is to hear what breaks for
+you. Try it on a real design and tell us where it bends.
 
-EXECUTE   hardened spec → plan → waves of code → confirmed evidence links
-                → scenarios verified end to end → CI gates, forever
-```
-
-The through-line: each stage's output is the next stage's checked input. Requirements
-name model elements the compiler verifies. Stress rounds pin versions the archive
-reconstructs. Tasks pin spec elements the plan verifies. Links pin code symbols the
-verifier re-hashes. Nothing is retyped — so every drift has exactly one place it can
-surface, and a machine watching that place.
-
-## Install
-
-The repository is private, so releases install through an authenticated GitHub CLI:
-each machine needs read access to `archiplan-ai/Archiplan` and a logged-in `gh`
-(`gh auth login`). The steps resolve the latest release, verify the checksum, and
-drop the binary on `$PATH`.
-
-### macOS (Apple Silicon) / Linux
-
-```sh
-REPO=archiplan-ai/Archiplan
-PLAT=macos-arm64                      # or: linux-x64 · linux-arm64
-V=$(gh release view -R "$REPO" --json tagName -q .tagName | sed 's/^v//')
-
-gh release download "v$V" -R "$REPO" -p "archi-$V-$PLAT.tar.gz*"
-shasum -a 256 -c "archi-$V-$PLAT.tar.gz.sha256"   # Linux: sha256sum -c
-tar -xzf "archi-$V-$PLAT.tar.gz"
-mkdir -p "$HOME/.local/bin"
-install -m 755 "archi-$V-$PLAT/archi" "$HOME/.local/bin/archi"
-```
-
-Make sure `~/.local/bin` is on your `PATH` (`export PATH="$HOME/.local/bin:$PATH"`
-in your shell rc). Confirm with `archi --version`.
-
-### Windows (PowerShell)
-
-```powershell
-$REPO = "archiplan-ai/Archiplan"
-$V = (gh release view -R $REPO --json tagName -q .tagName) -replace '^v',''
-gh release download "v$V" -R $REPO -p "archi-$V-windows-x64.tar.gz"
-tar -xzf "archi-$V-windows-x64.tar.gz"
-# copy archi-$V-windows-x64\archi.exe into a directory on %PATH%
-```
-
-> If the repository is ever made public, the scripted installer works with no auth:
-> `curl -fsSL https://raw.githubusercontent.com/archiplan-ai/Archiplan/main/release/install.sh | sh`
-> (PowerShell: `irm https://raw.githubusercontent.com/archiplan-ai/Archiplan/main/release/install.ps1 | iex`).
-
-## First steps
-
-Run `archi init` in a project directory. It scaffolds everything — config, a starter
-model, and the `archi` skill: a complete operating manual for the loop that your coding
-agent can follow end to end.
-
-When you upgrade the `archi` binary, run `archi sync-skills` in a project to bring that
-installed briefing — the skills and the `CLAUDE.md` block — up to the new version. It
-overwrites the briefing with the binary's copies and touches nothing else, so `init`
-stays create-only and re-running the sync is always safe.
-
-Then go deeper:
+Go deeper:
 
 - [skills/archi.md](skills/archi.md) — the full workflow, greenfield and brownfield, and the modeling language in brief
 - [docs/versioning.md](docs/versioning.md) — what a version is and why the archive is durable
 - [docs/multi-repo-workflow.md](docs/multi-repo-workflow.md) — the loop when code lives in repositories of its own
+
+*Archiplan — plan mode on steroids.*
