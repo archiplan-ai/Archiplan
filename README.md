@@ -25,48 +25,52 @@ The installer resolves the latest release for your platform, verifies the checks
 and drops the binary into `~/.local/bin` — make sure it is on your `PATH`, then
 confirm with `archi --version`. Pin a version with `ARCHI_VERSION=x.y.z`.
 
-## 02 — Set up
+## 02 — Getting started
+
+Everything after the install happens inside your agent: you talk, it drives the
+`archi` CLI, the skills carry the discipline. No commands to memorize.
 
 ### New project
 
-```sh
-cd my-system
-git init && git commit --allow-empty -m "seed"   # the seat discipline stands on git
-archi init
-archi build
-```
+Open your agent in the project folder and run `/archi`. Describe the system you want
+in one sentence — the agent stands the project up (repository included, with your
+consent), captures the intent in your own words, derives requirements, models the
+architecture, stress-tests it with you and seals a hardened version. Every choice
+that matters comes back as a question with priced options — nothing is assumed
+silently.
 
-`archi init` scaffolds it all: `archi.toml` (with `protected = ["main"]` — branches
-that never receive a local merge), a starter model, the six workflow skills in
-`.claude/skills/`, the `CLAUDE.md` brief, and the `.gitignore` lines for machine-local
-state. Create-only and safe to re-run. `archi build` must pass before anything else —
-then open your agent and run `/archi`.
+Then `/archi-plan` turns the hardened spec into an implementation plan — the agent
+polls you for the stack, the test frameworks and the infrastructure — and
+`/archi-implement` builds it wave by wave, sub-agents in parallel, until the plan
+reports done and the scenarios have run against a live stack.
 
 ### Existing project
 
-```sh
-cd existing-repo
-archi init
-```
+Open your agent in the repo and run `/archi`, then name the change you want. The
+agent recovers the model from the code — only the slice your change touches, the
+boundaries as single nodes — writes requirements for the behavior that must not
+break, and anchors the load-bearing existing code with links from day one. From
+there the loop is the same: stress, version, `/archi-plan`, `/archi-implement`. The
+audit keeps score: code that moves with no architectural account is where the model
+grows next.
 
-Same verb, inside the repo that already has code. `/archi` then works brownfield: it
-captures the intent of the *change being asked* — not the whole legacy — recovers just
-the slice of the model that change touches, and anchors the load-bearing existing code
-with links from day one. From there the audit is the ratchet: wherever code moves with
-no architectural account, that is where the model grows next.
+### Multi-repo
+
+Spec in one repository, code in several. Tell the agent which repositories
+participate — it declares them as members, records where each one stood at every
+version, and when the work starts it seats every member beside its checkout: the
+same branch across all of them, each grown from its recorded baseline. When a base
+is ambiguous, the agent brings you the candidate branches instead of guessing. At
+the close, member branches land by push and PR on their own forges — never by a
+local merge into your checkout — and the spec lands once, whole.
 
 ### The worktree seat
 
-All spec work rides a git worktree. The first mutating verb in an unbound checkout
-mints a seat and prints where to go; `check` and `build` refuse to bless uncommitted
-spec edits sitting outside one. One seat carries one whole unit — spec, then its plan,
-then the code — and lands once, at the end (`archi worktree merge`). Parallel efforts
-are parallel seats; code spread across repositories cascades member worktrees beside
-their checkouts (`--repos`).
-
-After a binary upgrade, run `archi sync-skills` in a project — it refreshes the
-installed briefing to the new binary's copies. Every skill runs it as its first move,
-so a stale briefing corrects itself.
+All work rides git worktrees the agent manages for you: one unit — spec, then its
+plan, then the code — lives in one seat and lands once, at the end. Parallel efforts
+are parallel seats. Nothing mutates your main checkout, and the tools refuse to
+bless work done outside the discipline — the agent is told exactly where to go
+instead.
 
 ## 03 — Every skill, by what you're doing
 
