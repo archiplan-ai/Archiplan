@@ -12,18 +12,23 @@ architecture behind it — stress-tested and traceable before anything ships.
 Install the `archi` CLI:
 
 ```sh
-curl -sSf https://archiplan.ai/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/archiplan-ai/Archiplan/main/release/install.sh | sh
 ```
 
 Windows (PowerShell):
 
 ```powershell
-irm https://archiplan.ai/install.ps1 | iex
+irm https://raw.githubusercontent.com/archiplan-ai/Archiplan/main/release/install.ps1 | iex
 ```
 
-The installer resolves the latest release for your platform and drops the binary
-into `~/.local/bin` — make sure it is on your `PATH`, then confirm with
+The installer resolves the latest [GitHub release](https://github.com/archiplan-ai/Archiplan/releases)
+for your platform, verifies its checksum, and drops the binary into
+`~/.local/bin` — make sure it is on your `PATH`, then confirm with
 `archi --version`. Pin a version with `ARCHI_VERSION=x.y.z`.
+
+Prefer to do it by hand? Every release publishes a tarball per platform
+(`macos-arm64`, `linux-x64`, `linux-arm64`, `windows-x64`) with a `.sha256`
+beside it — download one, unpack it, and move `archi` onto your `PATH`.
 
 ## 02 — Getting started
 

@@ -14,4 +14,7 @@ by hand with 'archi init'.
 
 Most users should use the scripted installer instead (install.sh or
 install.ps1, bundled in this archive); this manual copy is the fallback.
-A .sha256 file published next to this tarball verifies the download.
+It pulls the newest tarball from the GitHub releases of
+archiplan-ai/Archiplan and checks it against the .sha256 published
+beside it — the same checksum file that sits next to this tarball on
+https://github.com/archiplan-ai/Archiplan/releases.

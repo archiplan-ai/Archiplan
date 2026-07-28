@@ -1,12 +1,16 @@
 #Requires -Version 5
 $ErrorActionPreference = 'Stop'
 
-# Archiplan installer, served at https://archiplan.ai/install.ps1 (downloads ride api.archiplan.ai). Downloads
-# the archi tarball for Windows x64 and installs archi.exe to %USERPROFILE%\.local\bin.
-# Pin a version with $env:ARCHI_VERSION; point at another host with $env:ARCHI_BASE_URL.
+# Archiplan installer. Resolves the latest GitHub release of
+# archiplan-ai/Archiplan, downloads the archi tarball for Windows x64,
+# verifies its checksum and installs archi.exe to %USERPROFILE%\.local\bin:
+#
+#   irm https://raw.githubusercontent.com/archiplan-ai/Archiplan/main/release/install.ps1 | iex
+#
+# Pin a version with $env:ARCHI_VERSION; install from a fork or mirror with
+# $env:ARCHI_REPO.
 
-$Base = if ($env:ARCHI_BASE_URL) { $env:ARCHI_BASE_URL } else { 'https://api.archiplan.ai' }
-$Version = if ($env:ARCHI_VERSION) { $env:ARCHI_VERSION } else { '__INJECT_AT_DEPLOY__' }
+$Repo = if ($env:ARCHI_REPO) { $env:ARCHI_REPO } else { 'archiplan-ai/Archiplan' }
 
 $arch = $env:PROCESSOR_ARCHITECTURE
 if ($env:PROCESSOR_ARCHITEW6432) { $arch = $env:PROCESSOR_ARCHITEW6432 }
@@ -19,14 +23,39 @@ switch ($arch) {
     }
 }
 
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+$Version = $env:ARCHI_VERSION
+if (-not $Version) {
+    try {
+        $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest" `
+            -Headers @{ 'User-Agent' = 'archiplan-installer'; 'Accept' = 'application/vnd.github+json' }
+        $Version = $rel.tag_name -replace '^v', ''
+    } catch {
+        Write-Error ("Could not resolve the latest archi release from {0}: {1}`n" -f $Repo, $_.Exception.Message +
+            "See https://github.com/$Repo/releases, then retry pinned:`n" +
+            "  `$env:ARCHI_VERSION = 'x.y.z'; irm https://raw.githubusercontent.com/$Repo/main/release/install.ps1 | iex")
+        exit 1
+    }
+}
+
 $tarball = "archi-$Version-$plat.tar.gz"
+$base = "https://github.com/$Repo/releases/download/v$Version"
 $tmp = New-Item -ItemType Directory -Path (Join-Path $env:TEMP ("archi-install-" + [Guid]::NewGuid().ToString('N')))
 try {
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-
     Write-Host "Downloading $tarball..."
     $dst = Join-Path $tmp.FullName $tarball
-    Invoke-WebRequest -Uri "$Base/download/$tarball" -OutFile $dst -UseBasicParsing
+    $shaDst = "$dst.sha256"
+    Invoke-WebRequest -Uri "$base/$tarball" -OutFile $dst -UseBasicParsing
+    Invoke-WebRequest -Uri "$base/$tarball.sha256" -OutFile $shaDst -UseBasicParsing
+
+    $expected = ((Get-Content $shaDst -Raw).Trim() -split '\s+')[0]
+    $actual = (Get-FileHash -Path $dst -Algorithm SHA256).Hash
+    if ($actual -ne $expected) {
+        Write-Error ("Checksum mismatch for {0} — refusing to install.`n  expected {1}`n  actual   {2}" -f `
+            $tarball, $expected.ToLower(), $actual.ToLower())
+        exit 1
+    }
 
     # tar.exe ships with Windows 10 1803+ / Windows 11 / Server 2019+.
     if (-not (Get-Command tar.exe -ErrorAction SilentlyContinue)) {

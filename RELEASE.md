@@ -160,12 +160,14 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/archiplan-ai/Archiplan/main/release/install.ps1 | iex
 ```
 
-The installer resolves the latest release, verifies the checksum, and installs
-to `~/.local/bin`. Pin a version with `ARCHI_VERSION=x.y.z`; point at a
-different asset host with `ARCHI_BASE_URL`.
+The installer resolves the newest tag from `/releases/latest` (falling back to
+the GitHub API when a network eats the redirect), downloads the platform
+tarball and its `.sha256` from that release's assets, verifies the checksum,
+and installs to `~/.local/bin`. Pin a version with `ARCHI_VERSION=x.y.z`;
+install from a fork or mirror with `ARCHI_REPO=owner/repo`.
 
-While the repository is private, anonymous downloads 404. Authenticated users
-install with:
+The repository is public, so release assets download anonymously. The manual
+path, for anyone who would rather not pipe a script into a shell:
 
 ```sh
 gh release download v$V -R archiplan-ai/Archiplan -p "archi-$V-macos-arm64.tar.gz"
