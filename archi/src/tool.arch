@@ -223,7 +223,9 @@ Links.pin_spec recall(ModelGraph) DocsCompiler.serve_pin in trace_flow
 // plans: pin, author, execute in waves, gate on asserted coverage
 Planner.pin_model recall(ModelGraph) DocsCompiler.serve_pin in trace_flow
 Planner.store_plan persist(PlanFile) SourceTree.store in trace_flow
+Planner.store_plan persist(PlanState) SourceTree.store in trace_flow
 Planner.store_plan persist(ItemHashIndex) SourceTree.store in trace_flow
 Planner.load_plan recall(PlanFile) SourceTree.serve in trace_flow
+Planner.load_plan recall(PlanState) SourceTree.serve in trace_flow
 Planner.run_capture consult(->ItemHashIndex, <-LinkEvent) Links.capture in trace_flow
 Planner.coverage recall(LinkEvent) Links.serve_links in trace_flow

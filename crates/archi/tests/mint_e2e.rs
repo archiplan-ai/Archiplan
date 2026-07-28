@@ -221,7 +221,12 @@ fn requirements_mint_explicitly_and_removals_preflight() {
     ok(&root, &["version", "save", "-m", "wire"]);
     ok(&root, &["plan", "use", "guard"]);
     ok(&root, &["plan", "task", "add", "Gate"]);
-    ok(&root, &["plan", "task", "req", "add", "t1", "gate-throttles"]);
+    // ownership is authored in the task file now — edit its `owns`
+    let task = root.join("archi/plans/guard/t1-gate.md");
+    let owned = fs::read_to_string(&task)
+        .unwrap()
+        .replace("owns: []", "owns: [gate-throttles]");
+    fs::write(&task, owned).unwrap();
     let e = refuse(&root, &["req", "rm", "gate-throttles"]);
     assert!(e.contains("plan `guard`"), "{e}");
     assert!(e.contains("t1"), "{e}");

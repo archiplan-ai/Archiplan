@@ -1,0 +1,154 @@
+{
+  "name": "plan-on-md",
+  "version": "v0016",
+  "version_hash": "sha256:c146873e1060c8bc9f53d7b66b6875feeb90878e2d39c7efbb9eef7a63a8bb0e",
+  "created": "2026-07-28T17:10:32Z",
+  "state": "started",
+  "closed_waves": 0,
+  "problem": "The plan becomes a folder of markdown records with lifecycle in state.json: same reads, mint/rm/lifecycle verbs, prose edited in place, legacy plan.json readable forever",
+  "technology_stack": [
+    {
+      "tech": "Rust",
+      "provenance": "the repository's standing stack"
+    },
+    {
+      "tech": "cargo test",
+      "provenance": "the repository's standing test harness"
+    }
+  ],
+  "architecture_summary": [
+    {
+      "node": "Planner",
+      "role": "loads folder plans, mints records, pre-flights removals"
+    },
+    {
+      "node": "Cli",
+      "role": "the trimmed plan verb surface: mint, rm, lifecycle, untouched reads"
+    },
+    {
+      "node": "Scaffold",
+      "role": "carries the rewritten briefing to every project"
+    }
+  ],
+  "stack_mapping": [
+    {
+      "tech": "crates/archi/src/plans",
+      "node": "Planner"
+    },
+    {
+      "tech": "crates/archi/src/main.rs",
+      "node": "Cli"
+    },
+    {
+      "tech": "skills/archi-plan.md via include_str",
+      "node": "Scaffold"
+    }
+  ],
+  "scenarios": [
+    "A plan authors end-to-end in the record form: use mints the folder, task add mints seeded files, the author fills prose and ownership, verify comes clean, start/next/close walk the waves. Runs on cargo test (plan_e2e).",
+    "The legacy plan.json driving this very migration keeps advancing: its lifecycle verbs work untouched through the dual read. Runs on cargo test (plan_e2e legacy case)."
+  ],
+  "scenarios_displayed": false,
+  "scenarios_closed": false,
+  "tasks": [
+    {
+      "id": "t1",
+      "node": "Planner",
+      "description": "The storage and mint layer — additive, the tree keeps compiling. Folder form under archi/plans/<name>/: charter <name>.md (problem prose; Stack/Architecture sections as bullets), one t<N>-<node-slug>.md per task (frontmatter: node, owns inline list; sections: desc prose, Spec/Inputs/Outputs/Stack bullets, Verifications keyed by owned slug), scenarios.md (bullets), state.json (state, closed_waves, version, version_hash, created — serde, shape-validated on load, unknown fields refuse). load_plan reads folder or legacy plan.json into the existing Plan struct unchanged (legacy read-only forever); both forms at once is a load error naming the choice; duplicate task ids across files is a load error naming both. save paths route by form: folder plans persist state via state.json alone, legacy keeps writing plan.json. Mint layer: use_plan mints the folder (idempotent on byte-equal skeletons), task_add mints a seeded task file (spec_refs from the node as today), task_rm pre-flights: inputs of other tasks naming it, or state past draft, refuse with the list. Old authoring functions stay compiling untouched — t2 deletes them with their dispatch. Unit tests cover the new layer; plan_e2e gains the record round-trip, legacy and both-forms cases.",
+      "spec_refs": [
+        "Planner",
+        "Service type_of Planner",
+        "Cli.drive consult(->Command, <-Report) Planner.advance",
+        "Cli.drive consult(->Command, <-Report) Planner.author"
+      ],
+      "owns": [
+        "a-plan-is-a-folder-of-records"
+      ],
+      "stack_details": "",
+      "inputs": {},
+      "outputs": [
+        "crates/archi/src/plans/mod.rs",
+        "crates/archi/src/plans/records.rs",
+        "crates/archi/tests/plan_e2e.rs"
+      ],
+      "verifications": {
+        "a-plan-is-a-folder-of-records": [
+          "cargo test plan_e2e — a record plan round-trips: mint, fill files, verify clean, start/next/close walk the waves",
+          "cargo test plan_e2e — a legacy plan.json loads read-only and its lifecycle verbs still advance it",
+          "cargo test plan_e2e — plan.json beside the folder refuses loudly naming the choice; duplicate task ids across files refuse naming both"
+        ]
+      }
+    },
+    {
+      "id": "t2",
+      "node": "Cli",
+      "description": "The surface trim, one cut with the dispatch. plans/mod.rs: delete the prose-transport authoring functions (set_problem, tech_add, summary_add, mapping_add, scenarios_add/remove, task_desc, stack_detail_add, input_add, output_add, spec_ref_add, own_add/remove, verification_add/remove) — folder plans never call them, legacy is read-only. main.rs: dispatch arms and USAGE drop the dead verbs; plan use/task add wire to the mints, plan task rm lands with its refusal texts; guarded_route keeps use/task add/task rm/lifecycle as mutations, every read stays free; batch inherits the surface. verify holds owns outside the matched set as the error gating start. plan_e2e and batch tests rewrite their authoring flow as file edits between mints.",
+      "spec_refs": [
+        "Cli",
+        "Service type_of Cli",
+        "Agent.drive invoke(->Command, <-Report) Cli.build",
+        "Agent.drive invoke(->Command, <-Report) Cli.check",
+        "Agent.drive invoke(->Command, <-Report) Cli.incidence",
+        "Agent.drive invoke(->Command, <-Report) Cli.init",
+        "Agent.drive invoke(->Command, <-Report) Cli.link",
+        "Agent.drive invoke(->Command, <-Report) Cli.nkp",
+        "Agent.drive invoke(->Command, <-Report) Cli.plan",
+        "Agent.drive invoke(->Command, <-Report) Cli.query",
+        "Agent.drive invoke(->Command, <-Report) Cli.read",
+        "Agent.drive invoke(->Command, <-Report) Cli.repo",
+        "Agent.drive invoke(->Command, <-Report) Cli.req",
+        "Agent.drive invoke(->Command, <-Report) Cli.search",
+        "Agent.drive invoke(->Command, <-Report) Cli.session",
+        "Agent.drive invoke(->Command, <-Report) Cli.status",
+        "Agent.drive invoke(->Command, <-Report) Cli.stress",
+        "Agent.drive invoke(->Command, <-Report) Cli.version",
+        "Agent.drive invoke(->Command, <-Report) Cli.worktree"
+      ],
+      "owns": [
+        "plan-records-mint-by-verb"
+      ],
+      "stack_details": "",
+      "inputs": {
+        "t1": "the new plans API surface: load/mint/rm signatures and what died"
+      },
+      "outputs": [
+        "crates/archi/src/main.rs",
+        "crates/archi/tests/plan_e2e.rs"
+      ],
+      "verifications": {
+        "plan-records-mint-by-verb": [
+          "cargo test plan_e2e — task add mints a seeded skeleton, an identical re-mint converges, an edited file refuses",
+          "cargo test plan_e2e — task rm refuses while another task's inputs name it and outside draft, with the list",
+          "cargo test plan_e2e — a hand-typed owns outside the matched set fails verify and start refuses on it"
+        ]
+      }
+    },
+    {
+      "id": "t3",
+      "node": "Scaffold",
+      "description": "The briefing. skills/archi-plan.md rewritten to the record flow: mint the envelope and tasks by batch, fill the files (charter prose, task frontmatter and sections, scenarios bullets), verify as the worklist, lifecycle verbs unchanged; skills/archi.md ground rule updates its plan sentence (records mint by verb, prose edited in place, lifecycle via verbs). cargo build re-embeds; sync-skills refreshes the seat copy; init_e2e briefing byte-checks stay green via include_str.",
+      "spec_refs": [
+        "Scaffold",
+        "Function type_of Scaffold",
+        "Cli.drive consult(->Command, <-Report) Scaffold.stand_up"
+      ],
+      "owns": [
+        "the-agent-arrives-briefed"
+      ],
+      "stack_details": "",
+      "inputs": {
+        "t2": "the final verb surface as shipped: what mints, what edits, what reads"
+      },
+      "outputs": [
+        "skills/archi-plan.md",
+        "skills/archi.md"
+      ],
+      "verifications": {
+        "the-agent-arrives-briefed": [
+          "cargo test init_e2e — the installed briefing stays byte-equal to the binary's embedded copies after the rewrite",
+          "manual — skills/archi-plan.md describes the record flow: batch mints, file fills, verify worklist, lifecycle verbs"
+        ]
+      }
+    }
+  ]
+}

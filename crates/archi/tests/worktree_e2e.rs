@@ -556,15 +556,15 @@ fn a_doctored_plan_pin_surfaces_as_a_stale_pin_finding() {
     let spec = util::seat(&spec);
     ok(&spec, &["version", "save", "-m", "seed"]);
     ok(&spec, &["plan", "use", "auth"]);
-    let plan_path = spec.join("archi/plans/auth/plan.json");
-    let text = fs::read_to_string(&plan_path).unwrap();
+    let state_path = spec.join("archi/plans/auth/state.json");
+    let text = fs::read_to_string(&state_path).unwrap();
     assert!(text.contains("\"version_hash\": \"sha256:"), "use stamps the hash: {text}");
 
     let out = ok(&spec, &["check"]);
     assert!(!out.contains("stale plan pin"), "an honest pin is silent: {out}");
 
     let doctored = text.replace("\"version_hash\": \"sha256:", "\"version_hash\": \"sha256:0000");
-    fs::write(&plan_path, doctored).unwrap();
+    fs::write(&state_path, doctored).unwrap();
     let out = ok(&spec, &["check"]);
     assert!(out.contains("stale plan pin"), "{out}");
     assert!(out.contains("archi plan repin"), "{out}");
