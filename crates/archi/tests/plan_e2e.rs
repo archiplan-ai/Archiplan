@@ -572,3 +572,79 @@ fn both_forms_at_once_refuse_and_duplicate_ids_name_both_files() {
 
     fs::remove_dir_all(&root).unwrap();
 }
+
+/// `plan show <name>` is a pure read: it renders any stored plan without
+/// consulting or rewriting `.current`, and an unknown name lists what
+/// exists.
+#[test]
+fn a_named_show_reads_any_plan_without_moving_the_marker() {
+    let root = temp_project();
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "alpha"]);
+    ok(&root, &["plan", "use", "beta"]);
+
+    let marker = root.join("archi/plans/.current");
+    let before = fs::read_to_string(&marker).unwrap();
+    assert_eq!(before.trim(), "beta");
+
+    // The non-active plan renders under its own name and version…
+    let out = ok(&root, &["plan", "show", "alpha"]);
+    assert!(out.contains("plan `alpha` @ v0001"), "{out}");
+    // …and the marker is untouched: `beta` stays current.
+    assert_eq!(fs::read_to_string(&marker).unwrap(), before);
+
+    // The nameless form still answers with the active plan.
+    let out = ok(&root, &["plan", "show"]);
+    assert!(out.contains("plan `beta` @ v0001"), "{out}");
+
+    // JSON rides along the named form unchanged.
+    let out = ok(&root, &["plan", "show", "alpha", "--json"]);
+    let v: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["plan"]["name"], "alpha");
+    assert_eq!(fs::read_to_string(&marker).unwrap(), before);
+
+    // An unknown name lists the plans that do exist.
+    let (_, err) = fails(&root, &["plan", "show", "nope"]);
+    assert!(err.contains("no plan `nope` — plans: alpha, beta"), "{err}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The named show is what an unbound checkout gets: once the seat's plan
+/// lands on `main`, the primary — no seat, no `.current` — reads it by
+/// name; the read never mints a marker, and the nameless form still
+/// needs one.
+#[test]
+fn a_named_show_answers_from_an_unbound_checkout() {
+    let seat = temp_project();
+    ok(&seat, &["version", "save", "-m", "first"]);
+    ok(&seat, &["plan", "use", "mvp"]);
+
+    // Land the seat's work on the primary checkout's branch.
+    util::git(&seat, &["add", "-A"]);
+    util::git(&seat, &["commit", "-qm", "plan"]);
+    let wt_dir = seat.parent().unwrap();
+    let name = wt_dir.file_name().unwrap().to_str().unwrap();
+    let primary = wt_dir
+        .parent()
+        .unwrap()
+        .join(name.strip_suffix("-worktrees").unwrap());
+    util::git(&primary, &["merge", "-q", "archi/seat"]);
+
+    // The marker is machine-local by construction — mint's repo-local
+    // exclude keeps it out of any commit — so the primary carries none.
+    let marker = primary.join("archi/plans/.current");
+    assert!(!marker.exists(), "the marker never travels");
+
+    let out = ok(&primary, &["plan", "show", "mvp"]);
+    assert!(out.contains("plan `mvp` @ v0001"), "{out}");
+    assert!(!marker.exists(), "a named show never writes the marker");
+
+    // The nameless form still needs the marker — the named form is the
+    // unbound checkout's read.
+    let (_, err) = fails(&primary, &["plan", "show"]);
+    assert!(err.contains("no active plan"), "{err}");
+
+    fs::remove_dir_all(&seat).unwrap();
+    fs::remove_dir_all(&primary).unwrap();
+}

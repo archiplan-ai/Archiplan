@@ -27,7 +27,7 @@
 //! archi link repin <id> [--to <file[#symbol]>]
 //! archi link capture --task <TASK> [--json]
 //! archi link audit [--scope <path>] [--since <rev>] [--prune] [--json]
-//! archi plan use <name> | repin | show [--json] | verify [--json]
+//! archi plan use <name> | repin | show [<name>] [--json] | verify [--json]
 //! archi plan task add <node> [--desc <text>] | rm <id>
 //! archi plan start | next | current-wave | close | reset
 //! archi read  [<request.json> | -] [--at <id>]
@@ -113,7 +113,7 @@ const USAGE: &str = "usage:
   archi worktree ls [--plan <slug>] [--spec <effort>] [--json] [--project <dir>]
   archi worktree drop <slug|path> [--project <dir>]
   archi worktree merge <slug|path> [--to [<member>=]<branch>]... [--project <dir>]
-  archi plan use <name> | repin | show [--json] | verify [--json] | list | status [--project <dir>]
+  archi plan use <name> | repin | show [<name>] [--json] | verify [--json] | list | status [--project <dir>]
   archi plan task add <node> [--desc <text>] | rm <id> | show <id> [--project <dir>]
   archi plan task req suggest <id> | req-list <id> [--project <dir>]
   archi plan scenarios list [--project <dir>]
@@ -1919,12 +1919,16 @@ fn run_plan(args: &Args) -> ExitCode {
                 Err(e) => fail(e),
             }
         }
-        (Some("show"), []) => {
+        (Some("show"), tail @ ([] | [_])) => {
             let ws = match live_model() {
                 Ok(ws) => ws,
                 Err(code) => return code,
             };
-            match plans::show(&root, ws.model()) {
+            let shown = match tail.first() {
+                Some(name) => plans::show_named(&root, ws.model(), name),
+                None => plans::show(&root, ws.model()),
+            };
+            match shown {
                 Ok((plan, report)) => {
                     if args.json {
                         println!(

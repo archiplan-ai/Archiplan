@@ -775,6 +775,23 @@ pub fn show(root: &Path, model: &Model) -> Result<(Plan, PlanReport), String> {
     Ok((plan, report))
 }
 
+/// `archi plan show <name>`: the same view for a named plan — a pure read
+/// that never consults or rewrites `.current`, so any checkout, seated or
+/// not, reads any stored plan. An unknown name lists what exists.
+pub fn show_named(root: &Path, model: &Model, name: &str) -> Result<(Plan, PlanReport), String> {
+    if !plan_path(root, name).exists() && !records::is_record(root, name) {
+        let names: Vec<String> = all_plans(root)?.into_iter().map(|p| p.name).collect();
+        return Err(if names.is_empty() {
+            format!("no plan `{name}` — none exist; `archi plan use <name>` creates one")
+        } else {
+            format!("no plan `{name}` — plans: {}", names.join(", "))
+        });
+    }
+    let plan = load_plan(root, name)?;
+    let report = verify_plan(root, model, &plan)?;
+    Ok((plan, report))
+}
+
 pub(crate) fn verify_plan(root: &Path, live: &Model, plan: &Plan) -> Result<PlanReport, String> {
     let mut errors = Vec::new();
     let mut notes = Vec::new();
