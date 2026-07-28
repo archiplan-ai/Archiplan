@@ -142,4 +142,6 @@ Go deeper:
 - [docs/versioning.md](docs/versioning.md) — what a version is and why the archive is durable
 - [docs/multi-repo-workflow.md](docs/multi-repo-workflow.md) — the loop when code lives in repositories of its own
 
+Licensed under the [MIT License](LICENSE).
+
 *Archiplan — plan mode on steroids.*
