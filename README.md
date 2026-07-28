@@ -5,7 +5,7 @@
 Connect Archiplan to your agent and the code it writes gets a real
 architecture behind it — stress-tested and traceable before anything ships.
 
-![](archiplan.svg)
+![](assets/quickstart-new-project.svg)
 
 ## 01 — Install
 
@@ -46,6 +46,8 @@ Run `/archi` in the repo and name the change you want:
 - the model is recovered from the code — only the slice your change touches
 - requirements pin the behavior that must not break; links anchor the load-bearing code
 - from there the loop is the same: stress, version, `/archi-plan`, `/archi-implement`
+
+![](assets/quickstart-existing-project.svg)
 
 ### Multi-repo
 
@@ -101,6 +103,32 @@ merge.
 `check`, resolve version-archive collisions with `remint`, read the journal's absorbed
 residue, fold concurrent stress rounds. The contract is the canonical render — git
 merging clean proves nothing until the composition compiles.
+
+## 04 - See it in action
+
+### Pre-mortem on every design
+
+Archiplan throws traffic spikes, partial outages, hostile users, and regulators at the spec — before you ship code that pretended those don't exist. Anything that breaks becomes a new requirement.
+
+![](assets/quickstart-stress-session.svg)
+
+### Never lose context
+
+Every requirement remembers its origin — the initial problem, a specific stressor, a stakeholder concern. Six months later, when someone asks why did we split this from that?, the answer is an artifact, not a lost Slack thread.
+
+![](assets/quickstart-decision-trace.svg)
+
+### Fine-tune your architecture
+
+Archiplan flags when your design is heading toward a god-service or microservices-for-microservices' sake — before "we should refactor" turns into "we have to rewrite."
+
+![](assets/quickstart-fine-tune.svg)
+
+## 05 - How Archiplan integrates into software development life cycle
+
+Evolutionary approach to system design, then continous tracking of cause-and-effect:
+
+![](assets/archiplan.svg)
 
 ---
 

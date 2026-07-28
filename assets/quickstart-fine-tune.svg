@@ -1,0 +1,241 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 800" width="820" height="800" role="img" aria-label="Claude Code session: /archi:report architecture health dashboard for blockchain-event-gateway">
+  <defs>
+    <linearGradient id="winBg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0d1016"/>
+      <stop offset="1" stop-color="#08090d"/>
+    </linearGradient>
+    <linearGradient id="titleBar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#15181f"/>
+      <stop offset="1" stop-color="#0e1116"/>
+    </linearGradient>
+    <filter id="winShadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="14"/>
+      <feOffset dx="0" dy="10"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.55"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <style>
+      .mono { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .ink     { fill: #ecece8; }
+      .dim     { fill: #a7a9a4; }
+      .quiet   { fill: #6b6e69; }
+      .accent  { fill: #d9ff3a; }
+      .ok      { fill: #7fe39a; }
+      .warn    { fill: #ffc46b; }
+      .alert   { fill: #ff7a7a; }
+      .ctrl    { fill: #e6a8ff; }
+      .store   { fill: #8ab4ff; }
+      .chain   { fill: #ffb347; }
+      .muted   { fill: #5b5e58; }
+      .barBg   { fill: rgba(236,236,232,0.06); }
+    </style>
+  </defs>
+
+  <!-- Window -->
+  <g filter="url(#winShadow)">
+    <rect x="20" y="16" width="780" height="768" rx="14" fill="url(#winBg)" stroke="rgba(236,236,232,0.14)"/>
+    <!-- Title bar -->
+    <path d="M20 30 a14 14 0 0 1 14 -14 h752 a14 14 0 0 1 14 14 v22 h-780 z" fill="url(#titleBar)"/>
+    <line x1="20" y1="52" x2="800" y2="52" stroke="rgba(236,236,232,0.08)"/>
+    <!-- Traffic lights -->
+    <circle cx="40"  cy="34" r="6" fill="#ff5f57"/>
+    <circle cx="60"  cy="34" r="6" fill="#febc2e"/>
+    <circle cx="80"  cy="34" r="6" fill="#28c840"/>
+    <!-- Title text -->
+    <text x="410" y="38" text-anchor="middle" class="mono quiet" font-size="11">claude  —  ~/dev/blockchain-event-gateway</text>
+    <!-- Status pill -->
+    <g transform="translate(648,24)">
+      <rect width="145" height="21" rx="10" fill="rgba(127,227,154,0.10)" stroke="rgba(127,227,154,0.30)"/>
+      <circle cx="11" cy="10" r="3" class="ok"/>
+      <text x="20" y="14" class="mono ok" font-size="10">archi · report card</text>
+    </g>
+  </g>
+
+  <!-- Content -->
+  <g class="mono" font-size="12.5">
+    <!-- Prompt -->
+    <text x="40"  y="84" class="accent">&gt;</text>
+    <text x="58"  y="84" class="accent">/archi-report</text>
+    <text x="166" y="84" class="ink">latest version</text>
+
+    <!-- Divider -->
+    <line x1="40" y1="106" x2="780" y2="106" stroke="rgba(236,236,232,0.06)"/>
+
+    <!-- Response header -->
+    <text x="40" y="130" class="ok">●</text>
+    <text x="58" y="130" class="ink" font-weight="600">Architecture report</text>
+    <text x="208" y="130" class="quiet">·  v10  ·  17 nodes · 39 edges · 144 / 144 requirements satisfied</text>
+
+    <!-- Score line / headline numbers -->
+    <text x="40" y="160" class="quiet">⎿</text>
+    <text x="58" y="160" class="ink" font-weight="600">Headline numbers</text>
+    <text x="216" y="160" class="quiet">at-a-glance health of the spec</text>
+
+    <g transform="translate(58,182)">
+      <!-- health -->
+      <text y="0"   class="dim">health</text>
+      <g transform="translate(220,-10)">
+        <rect width="180" height="10" rx="5" class="barBg"/>
+        <rect width="150" height="10" rx="5" fill="#7fe39a" opacity="0.85"/>
+      </g>
+      <text x="410" y="0" class="ok">balanced</text>
+      <text x="500" y="0" class="quiet">neither isolated nor tangled</text>
+
+      <!-- avg deps -->
+      <text y="22"  class="dim">avg dependencies / component</text>
+      <g transform="translate(220,12)">
+        <rect width="180" height="10" rx="5" class="barBg"/>
+        <rect width="78"  height="10" rx="5" fill="#d9ff3a" opacity="0.80"/>
+      </g>
+      <text x="410" y="22" class="ink">1.94</text>
+      <text x="500" y="22" class="quiet">inside the healthy band</text>
+
+      <!-- change isolation -->
+      <text y="44"  class="dim">change-isolation</text>
+      <g transform="translate(220,34)">
+        <rect width="180" height="10" rx="5" class="barBg"/>
+        <rect width="130" height="10" rx="5" fill="#d9ff3a" opacity="0.80"/>
+      </g>
+      <text x="410" y="44" class="ink">72%</text>
+      <text x="500" y="44" class="quiet">safely changeable surface</text>
+
+      <!-- modularity -->
+      <text y="66"  class="dim">module separation</text>
+      <g transform="translate(220,56)">
+        <rect width="180" height="10" rx="5" class="barBg"/>
+        <rect width="169" height="10" rx="5" fill="#7fe39a" opacity="0.85"/>
+      </g>
+      <text x="410" y="66" class="ok">0.94</text>
+      <text x="500" y="66" class="quiet">clean partition into groups</text>
+
+      <!-- requirements -->
+      <text y="88"  class="dim">requirements</text>
+      <g transform="translate(220,78)">
+        <rect width="180" height="10" rx="5" class="barBg"/>
+        <rect width="180" height="10" rx="5" fill="#7fe39a" opacity="0.85"/>
+      </g>
+      <text x="410" y="88" class="ok">144 / 144</text>
+      <text x="500" y="88" class="quiet">zero unsatisfied promises</text>
+    </g>
+
+    <!-- ============================================== -->
+    <!-- Hardening journey -->
+    <text x="40" y="304" class="quiet">⎿</text>
+    <text x="58" y="304" class="ink" font-weight="600">Hardening journey</text>
+    <text x="218" y="304" class="quiet">5 stress sessions · 61 catastrophes imagined · 61 broke · 100% bite rate</text>
+
+    <g transform="translate(58,326)">
+      <text y="0"   class="warn">⚠</text>
+      <text x="22"  y="0"  class="ink">session 1</text>
+      <text x="105" y="0"  class="quiet">vs v0</text>
+      <text x="160" y="0"  class="alert">16 broke</text>
+      <text x="240" y="0"  class="ok">→ +28 reqs</text>
+      <text x="345" y="0"  class="dim">naïve baseline shattered on first contact</text>
+
+      <text y="18"  class="warn">⚠</text>
+      <text x="22"  y="18" class="ink">session 2</text>
+      <text x="105" y="18" class="quiet">vs v1</text>
+      <text x="160" y="18" class="alert">8 broke</text>
+      <text x="240" y="18" class="ok">→ +13 reqs</text>
+      <text x="345" y="18" class="dim">split-brain · quotas · cross-region cursors</text>
+
+      <text y="36"  class="warn">⚠</text>
+      <text x="22"  y="36" class="ink">session 3</text>
+      <text x="105" y="36" class="quiet">vs v3</text>
+      <text x="160" y="36" class="alert">11 broke</text>
+      <text x="240" y="36" class="ok">→ +39 reqs</text>
+      <text x="345" y="36" class="dim">deepest yield — residency &amp; lease primitives</text>
+
+      <text y="54"  class="warn">⚠</text>
+      <text x="22"  y="54" class="ink">session 4</text>
+      <text x="105" y="54" class="quiet">vs v7</text>
+      <text x="160" y="54" class="alert">13 broke</text>
+      <text x="240" y="54" class="ok">→ +13 reqs</text>
+      <text x="345" y="54" class="dim">audit hub extracted · modularity 0.58 → 0.94</text>
+
+      <text y="72"  class="warn">⚠</text>
+      <text x="22"  y="72" class="ink">session 5</text>
+      <text x="105" y="72" class="quiet">vs v8</text>
+      <text x="160" y="72" class="alert">13 broke</text>
+      <text x="240" y="72" class="ok">→ +21 reqs</text>
+      <text x="345" y="72" class="dim">CAS · 2-phase · drain-fence-broadcast-and-ack</text>
+    </g>
+
+    <!-- ============================================== -->
+    <!-- Hubs -->
+    <text x="40" y="436" class="quiet">⎿</text>
+    <text x="58" y="436" class="ink" font-weight="600">Top hubs by wiring</text>
+    <text x="222" y="436" class="quiet">where the system concentrates — load-bearing by design or by accident</text>
+
+    <g transform="translate(58,458)">
+      <text y="0"   class="ink">fanout</text>
+      <text x="147" y="0" class="accent">11</text>
+      <text x="170" y="0" class="dim">event-distribution spine · reads pools, writes fanout_bus</text>
+
+      <text y="18"  class="ctrl">region_coordinator</text>
+      <text x="147" y="18" class="accent">9</text>
+      <text x="170" y="18" class="dim">global control plane · 10 internal subsystems</text>
+
+      <text y="36"  class="ink">gateway</text>
+      <text x="147" y="36" class="accent">9</text>
+      <text x="170" y="36" class="dim">public RPC + websocket entry point</text>
+
+      <text y="54"  class="ink">chain_router</text>
+      <text x="147" y="54" class="accent">7</text>
+      <text x="170" y="54" class="dim">canonicalization · fork management across 4 pools</text>
+
+      <text y="72"  class="store">compliance_audit</text>
+      <text x="147" y="72" class="accent">7</text>
+      <text x="170" y="72" class="dim">pure sink · 7 writers · 0 readers (append-only)</text>
+
+      <text y="90"  class="store">tenant_store</text>
+      <text x="147" y="90" class="accent">6</text>
+      <text x="170" y="90" class="dim">residency-partitioned source of truth</text>
+    </g>
+
+    <!-- ============================================== -->
+    <!-- Imagination quality / findings -->
+    <text x="40" y="588" class="quiet">⎿</text>
+    <text x="58" y="588" class="ink" font-weight="600">Imagination quality</text>
+    <text x="220" y="588" class="quiet">1,754 findings  ·  6 alert-level (0.34%)  ·  crisp triage signal</text>
+
+    <g transform="translate(58,610)">
+      <text y="0"   class="dim">compound failures</text>
+      <text x="180" y="0"  class="accent">1,725</text>
+      <text x="240" y="0"  class="quiet">pre-loaded ammunition for session 6</text>
+
+      <text y="18"  class="dim">wide-blast scenarios</text>
+      <text x="180" y="18" class="accent">12</text>
+      <text x="240" y="18" class="quiet">one failure hits &gt;6 components</text>
+
+      <text y="36"  class="dim">hidden couplings</text>
+      <text x="180" y="36" class="accent">11</text>
+      <text x="240" y="36" class="quiet">fail together without a direct wire</text>
+
+      <text y="54"  class="dim">pressure magnets</text>
+      <text x="180" y="54" class="warn">2</text>
+      <text x="240" y="54" class="quiet">region_coordinator: 32 hits vs typical 25</text>
+    </g>
+
+    <!-- ============================================== -->
+    <!-- Hotspots / refactor targets -->
+    <text x="40" y="700" class="quiet">⎿</text>
+    <text x="58" y="700" class="ink" font-weight="600">Refactor candidates</text>
+    <text x="220" y="700" class="quiet">earned the right to:  /archi:plan  ·  drill region_coordinator  ·  stress s6</text>
+
+    <g transform="translate(58,722)">
+      <text y="0"   class="alert">▸</text>
+      <text x="20"  y="0"  class="ctrl">split region_coordinator</text>
+      <text x="220" y="0"  class="dim">10,129-char def · 32 stressors land here · own session</text>
+
+      <text y="18"  class="warn">▸</text>
+      <text x="20"  y="18" class="ink">wire</text>
+      <text x="60"  y="18" class="store">edge ↔ metrics_store</text>
+      <text x="220" y="18" class="dim">hidden coupling · same 4 residency scenarios break both</text>
+    </g>
+
+    <!-- Caret line -->
+    <text x="40" y="772" class="accent">&gt;</text>
+    <rect x="56" y="761" width="8" height="14" class="accent" opacity="0.85"/>
+  </g>
+</svg>

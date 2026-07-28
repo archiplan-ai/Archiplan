@@ -1,0 +1,154 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 664" width="820" height="664" role="img" aria-label="Claude Code session: /archi:stress hardening multi-region distributed consistency">
+  <defs>
+    <linearGradient id="winBg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0d1016"/>
+      <stop offset="1" stop-color="#08090d"/>
+    </linearGradient>
+    <linearGradient id="titleBar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#15181f"/>
+      <stop offset="1" stop-color="#0e1116"/>
+    </linearGradient>
+    <filter id="winShadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="14"/>
+      <feOffset dx="0" dy="10"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.55"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <style>
+      .mono { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .ink     { fill: #ecece8; }
+      .dim     { fill: #a7a9a4; }
+      .quiet   { fill: #6b6e69; }
+      .accent  { fill: #d9ff3a; }
+      .ok      { fill: #7fe39a; }
+      .warn    { fill: #ffc46b; }
+      .alert   { fill: #ff7a7a; }
+      .ctrl    { fill: #e6a8ff; }
+      .store   { fill: #8ab4ff; }
+      .muted   { fill: #5b5e58; }
+    </style>
+  </defs>
+
+  <!-- Window -->
+  <g filter="url(#winShadow)">
+    <rect x="20" y="16" width="780" height="632" rx="14" fill="url(#winBg)" stroke="rgba(236,236,232,0.14)"/>
+    <!-- Title bar -->
+    <path d="M20 30 a14 14 0 0 1 14 -14 h752 a14 14 0 0 1 14 14 v22 h-780 z" fill="url(#titleBar)"/>
+    <line x1="20" y1="52" x2="800" y2="52" stroke="rgba(236,236,232,0.08)"/>
+    <!-- Traffic lights -->
+    <circle cx="40"  cy="34" r="6" fill="#ff5f57"/>
+    <circle cx="60"  cy="34" r="6" fill="#febc2e"/>
+    <circle cx="80"  cy="34" r="6" fill="#28c840"/>
+    <!-- Title text -->
+    <text x="410" y="38" text-anchor="middle" class="mono quiet" font-size="11">claude  —  ~/dev/blockchain-event-gateway</text>
+    <!-- Status pill -->
+    <g transform="translate(656,24)">
+      <rect width="138" height="21" rx="10" fill="rgba(255,122,122,0.10)" stroke="rgba(255,122,122,0.30)"/>
+      <circle cx="11" cy="10" r="3" class="alert"/>
+      <text x="20" y="14" class="mono alert" font-size="10">archiplan · stress</text>
+    </g>
+  </g>
+
+  <!-- Content -->a
+  <g class="mono" font-size="12.5">
+    <!-- Prompt -->
+    <text x="40"  y="84" class="accent">&gt;</text>
+    <text x="58"  y="84" class="accent">/archi-stress</text>
+    <text x="166" y="84" class="ink">v1 architecture</text>
+
+    <!-- Divider -->
+    <line x1="40" y1="106" x2="780" y2="106" stroke="rgba(236,236,232,0.06)"/>
+
+    <!-- Response header -->
+    <text x="40" y="130" class="ok">●</text>
+    <text x="58" y="130" class="ink" font-weight="600">Stress session 1 complete</text>
+    <text x="260" y="130" class="quiet">·  7 stressors  ·  7/7 broke  ·  12 requirements derived &amp; satisfied</text>
+
+    <!-- Sub-summary -->
+    <text x="58" y="150" class="alert">regime CRITICAL</text>
+    <text x="190" y="150" class="dim">·  +1 node (region_coordinator)  ·  8 nodes redefined</text>
+
+    <!-- Stressors that broke -->
+    <text x="40" y="184" class="quiet">⎿</text>
+    <text x="58" y="184" class="ink" font-weight="600">Stressors that broke v1</text>
+    <text x="240" y="184" class="quiet">each one a free attack on the prior spec — fixes baked into v2</text>
+
+    <g transform="translate(58,208)">
+      <!-- 1 -->
+      <text y="0"   class="warn">⚠</text>
+      <text x="22"  y="0"  class="ink">cross-region-quota-race</text>
+      <text x="225" y="0"  class="dim">tenant fans to 2 regions, overshoots ceiling pre-convergence</text>
+      <text x="22"  y="16" class="ok">→</text>
+      <text x="40"  y="16" class="ok">R-global-quota-aggregation · R-throttle-flag-fast-path</text>
+
+      <!-- 2 -->
+      <text y="40"  class="warn">⚠</text>
+      <text x="22"  y="40" class="ink">tenant-store-split-brain</text>
+      <text x="220" y="40" class="dim">partition accepts conflicting add vs revoke writes</text>
+      <text x="22"  y="56" class="ok">→</text>
+      <text x="40"  y="56" class="ok">R-tenant-store-conflict-resolution · R-revocation-tombstone</text>
+
+      <!-- 3 -->
+      <text y="80"  class="warn">⚠</text>
+      <text x="22"  y="80" class="ink">cursor-cross-region</text>
+      <text x="220" y="80" class="dim">region-local cursor lost on failover — silent event gap</text>
+      <text x="22"  y="96" class="ok">→</text>
+      <text x="40"  y="96" class="ok">R-portable-cursor  (chain-coordinate cursors, any region replays)</text>
+
+      <!-- 4 -->
+      <text y="120" class="warn">⚠</text>
+      <text x="22"  y="120" class="ink">reorg-diverge-x-region</text>
+      <text x="220" y="120" class="dim">regions observe reorgs out of phase</text>
+      <text x="22"  y="136" class="ok">→</text>
+      <text x="40"  y="136" class="ok">R-cross-region-canonical-tip · R-cross-region-rollback-coherent</text>
+
+      <!-- 5 -->
+      <text y="160" class="warn">⚠</text>
+      <text x="22"  y="160" class="ink">clock-skew</text>
+      <text x="220" y="160" class="dim">NTP drift breaks rate-limit windows, ordering, finality timestamps</text>
+      <text x="22"  y="176" class="ok">→</text>
+      <text x="40"  y="176" class="ok">R-chain-derived-ordering · R-bounded-clock-skew</text>
+
+      <!-- 6 -->
+      <text y="200" class="warn">⚠</text>
+      <text x="22"  y="200" class="ink">data-residency</text>
+      <text x="220" y="200" class="dim">EU tenants pinned to jurisdiction; anycast routes EU via US</text>
+      <text x="22"  y="216" class="ok">→</text>
+      <text x="40"  y="216" class="ok">R-residency-policy · R-residency-aware-routing</text>
+
+      <!-- 7 -->
+      <text y="240" class="warn">⚠</text>
+      <text x="22"  y="240" class="ink">anycast-flap</text>
+      <text x="220" y="240" class="dim">BGP move ⇒ mass reconnect; auth_cache miss spike, correlated load</text>
+      <text x="22"  y="256" class="ok">→</text>
+      <text x="40"  y="256" class="ok">R-reconnect-storm-control  (session-handoff hints + bulk hydration)</text>
+
+    </g>
+
+    <!-- Net structural change -->
+    <text x="40" y="504" class="quiet">⎿</text>
+    <text x="58" y="504" class="ink" font-weight="600">Net structural change v1 → v2</text>
+    <text x="290" y="504" class="quiet">1 node added · 8 redefined  ·  regime stayed CRITICAL</text>
+
+    <g transform="translate(58,526)">
+      <text y="0"   class="ok">+</text>
+      <text x="20"  y="0"  class="ctrl">region_coordinator</text>
+      <text x="200" y="0"  class="dim">global control plane  ·  HLC · leases · residency · quorum tips</text>
+
+      <text y="24"  class="warn">↻</text>
+      <text x="20"  y="24" class="ink">redefined</text>
+      <text x="200" y="24" class="dim">tenant_store · auth_cache · usage_meter · fanout · chain_router</text>
+      <text x="200" y="40" class="dim">edge · gateway · metrics_store</text>
+    </g>
+
+    <!-- Next move -->
+    <text x="40" y="608" class="accent">▸</text>
+    <text x="58" y="608" class="ink">next move:</text>
+    <text x="142" y="608" class="accent">/archi-stress</text>
+    <text x="250" y="608" class="ink">v2 → v3  byzantine &amp; data-loss frontier</text>
+
+    <!-- Caret line -->
+    <text x="40" y="634" class="accent">&gt;</text>
+    <rect x="56" y="623" width="8" height="14" class="accent" opacity="0.85"/>
+  </g>
+</svg>

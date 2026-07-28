@@ -1,0 +1,143 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 628" width="820" height="628" role="img" aria-label="Claude Code session: /arch audit on an existing project, identifying failure nodes">
+  <defs>
+    <linearGradient id="winBg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0d1016"/>
+      <stop offset="1" stop-color="#08090d"/>
+    </linearGradient>
+    <linearGradient id="titleBar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#15181f"/>
+      <stop offset="1" stop-color="#0e1116"/>
+    </linearGradient>
+    <filter id="winShadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="14"/>
+      <feOffset dx="0" dy="10"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.55"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <style>
+      .mono { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .ink     { fill: #ecece8; }
+      .dim     { fill: #a7a9a4; }
+      .quiet   { fill: #6b6e69; }
+      .accent  { fill: #d9ff3a; }
+      .ok      { fill: #7fe39a; }
+      .warn    { fill: #ffc46b; }
+      .alert   { fill: #ff7a7a; }
+      .ctrl    { fill: #e6a8ff; }
+      .store   { fill: #8ab4ff; }
+      .muted   { fill: #5b5e58; }
+    </style>
+  </defs>
+
+  <!-- Window -->
+  <g filter="url(#winShadow)">
+    <rect x="20" y="16" width="780" height="596" rx="14" fill="url(#winBg)" stroke="rgba(236,236,232,0.14)"/>
+    <!-- Title bar -->
+    <path d="M20 30 a14 14 0 0 1 14 -14 h752 a14 14 0 0 1 14 14 v22 h-780 z" fill="url(#titleBar)"/>
+    <line x1="20" y1="52" x2="800" y2="52" stroke="rgba(236,236,232,0.08)"/>
+    <!-- Traffic lights -->
+    <circle cx="40"  cy="34" r="6" fill="#ff5f57"/>
+    <circle cx="60"  cy="34" r="6" fill="#febc2e"/>
+    <circle cx="80"  cy="34" r="6" fill="#28c840"/>
+    <!-- Title text -->
+    <text x="410" y="38" text-anchor="middle" class="mono quiet" font-size="11">claude  —  ~/dev/dex-protocol</text>
+    <!-- Status pill -->
+    <g transform="translate(658,24)">
+      <rect width="135" height="21" rx="10" fill="rgba(255,196,107,0.10)" stroke="rgba(255,196,107,0.30)"/>
+      <circle cx="11" cy="10" r="3" class="warn"/>
+      <text x="20" y="14" class="mono warn" font-size="10">archiplan · audit</text>
+    </g>
+  </g>
+
+  <!-- Content -->
+  <g class="mono" font-size="12.5">
+    <!-- Prompt -->
+    <text x="40"  y="84" class="accent">&gt;</text>
+    <text x="58"  y="84" class="accent">/arch</text>
+    <text x="110" y="84" class="ink">this project and identify failure nodes.</text>
+
+    <!-- Divider -->
+    <line x1="40" y1="106" x2="780" y2="106" stroke="rgba(236,236,232,0.06)"/>
+
+    <!-- Response header -->
+    <text x="40" y="130" class="ok">●</text>
+    <text x="58" y="130" class="ink" font-weight="600">Audit complete</text>
+    <text x="170" y="130" class="quiet">·  21 services found  ·  structure looks clean overall</text>
+
+    <!-- Sub-summary -->
+    <text x="58" y="150" class="warn">4 failure scenarios end broken</text>
+    <text x="290" y="150" class="dim">·  8 requirements unmet  ·  5 services on every break</text>
+
+    <!-- Hotspots -->
+    <text x="40" y="184" class="quiet">⎿</text>
+    <text x="58" y="184" class="ink" font-weight="600">Failure hotspots</text>
+    <text x="200" y="184" class="quiet">5 services hit every break: shadow-backend · verifier · terminal · witness</text>
+
+    <g transform="translate(58,208)">
+      <text y="0"   class="alert">⚠</text>
+      <text x="22"  y="0"  class="alert" font-weight="600">shadow-backend</text>
+      <text x="200" y="0"  class="dim">one process: matcher + custody + tx-submit + events  ·  breaks 7/8</text>
+
+      <text y="24"  class="warn">⚠</text>
+      <text x="22"  y="24" class="ink">shadow-verifier</text>
+      <text x="200" y="24" class="dim">signs every settlement, but spec barely models its failures</text>
+
+      <text y="48"  class="warn">⚠</text>
+      <text x="22"  y="48" class="ink">backend crash mid-settlement</text>
+      <text x="250" y="48" class="dim">assumes 5 dbs commit atomically — but nothing enforces it</text>
+
+      <text y="72"  class="warn">⚠</text>
+      <text x="22"  y="72" class="store">5 dbs fail together</text>
+      <text x="200" y="72" class="dim">cache · chain-sync · fiscal-pools · onchain-tracker · withdrawals</text>
+
+      <text y="96"  class="warn">⚠</text>
+      <text x="22"  y="96" class="ink">kafka → market-index</text>
+      <text x="200" y="96" class="dim">if kafka goes down, market-index goes with it  ·  no fallback</text>
+    </g>
+
+    <!-- Mitigation plan -->
+    <text x="40" y="344" class="quiet">⎿</text>
+    <text x="58" y="344" class="ink" font-weight="600">Mitigation plan</text>
+    <text x="200" y="344" class="quiet">2 fixes  ·  4 stress scenarios queued  ·  2 decomposition targets</text>
+
+    <g transform="translate(58,366)">
+      <!-- Fixes (merged list) -->
+      <text y="0"   class="warn">▸</text>
+      <text x="22"  y="0"  class="ink" font-weight="600">apply v1 plan</text>
+      <text x="200" y="0"  class="dim">event outbox · write quorum · circuit breaker · atomic admission</text>
+      <text x="200" y="18" class="ok">→ all 8 unmet requirements satisfied</text>
+
+      <text y="40"  class="warn">▸</text>
+      <text x="22"  y="40" class="ink" font-weight="600">name the commit</text>
+      <text x="200" y="40" class="dim">spell out the single transaction across the 5 dbs</text>
+      <text x="200" y="58" class="ok">→ removes 10 false-positive alerts</text>
+
+      <!-- Stress queue -->
+      <text y="92"  class="muted">▸</text>
+      <text x="22"  y="92" class="ok">queue</text>
+      <text x="74"  y="92" class="ink">+4 stress tests</text>
+      <text x="200" y="92" class="dim">single-db crash · validator drift · chain reorg · byzantine signer</text>
+
+      <!-- Zoom 1 -->
+      <text y="122" class="muted">▸</text>
+      <text x="22"  y="122" class="ctrl">split</text>
+      <text x="74"  y="122" class="alert">shadow-backend</text>
+      <text x="200" y="122" class="dim">break into matcher · custody · tx-submit · events · chain-sync</text>
+
+      <!-- Zoom 2 -->
+      <text y="144" class="muted">▸</text>
+      <text x="22"  y="144" class="ctrl">detail</text>
+      <text x="74"  y="144" class="ink">shadow-verifier</text>
+      <text x="200" y="144" class="dim">own keys · replay guard · health checks  ·  treat it as real</text>
+    </g>
+
+    <!-- Next move -->
+    <text x="40" y="564" class="accent">▸</text>
+    <text x="58" y="564" class="ink">next move:</text>
+    <text x="142" y="564" class="accent">/archi address atomic update across 5 dbs</text>
+
+    <!-- Caret line -->
+    <text x="40" y="596" class="accent">&gt;</text>
+    <rect x="56" y="585" width="8" height="14" class="accent" opacity="0.85"/>
+  </g>
+</svg>

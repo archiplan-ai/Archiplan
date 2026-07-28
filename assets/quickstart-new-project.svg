@@ -1,0 +1,144 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 760" width="820" height="760" role="img" aria-label="Claude Code session: /arch designing the blockchain-event-gateway">
+  <defs>
+    <linearGradient id="winBg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0d1016"/>
+      <stop offset="1" stop-color="#08090d"/>
+    </linearGradient>
+    <linearGradient id="titleBar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#15181f"/>
+      <stop offset="1" stop-color="#0e1116"/>
+    </linearGradient>
+    <filter id="winShadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="14"/>
+      <feOffset dx="0" dy="10"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.55"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <style>
+      .mono { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .ink     { fill: #ecece8; }
+      .dim     { fill: #a7a9a4; }
+      .quiet   { fill: #6b6e69; }
+      .accent  { fill: #d9ff3a; }
+      .ok      { fill: #7fe39a; }
+      .warn    { fill: #ffc46b; }
+      .chain   { fill: #ffb347; }
+      .store   { fill: #8ab4ff; }
+      .ctrl    { fill: #e6a8ff; }
+      .muted   { fill: #5b5e58; }
+    </style>
+  </defs>
+
+  <!-- Window -->
+  <g filter="url(#winShadow)">
+    <rect x="20" y="16" width="780" height="728" rx="14" fill="url(#winBg)" stroke="rgba(236,236,232,0.14)"/>
+    <!-- Title bar -->
+    <path d="M20 30 a14 14 0 0 1 14 -14 h752 a14 14 0 0 1 14 14 v22 h-780 z" fill="url(#titleBar)"/>
+    <line x1="20" y1="52" x2="800" y2="52" stroke="rgba(236,236,232,0.08)"/>
+    <!-- Traffic lights -->
+    <circle cx="40"  cy="34" r="6" fill="#ff5f57"/>
+    <circle cx="60"  cy="34" r="6" fill="#febc2e"/>
+    <circle cx="80"  cy="34" r="6" fill="#28c840"/>
+    <!-- Title text -->
+    <text x="410" y="38" text-anchor="middle" class="mono quiet" font-size="11">claude  —  ~/dev/blockchain-event-gateway</text>
+    <!-- Status pill -->
+    <g transform="translate(680,24)">
+      <rect width="114" height="21" rx="10" fill="rgba(217,255,58,0.08)" stroke="rgba(217,255,58,0.25)"/>
+      <circle cx="11" cy="10" r="3" class="accent"/>
+      <text x="20" y="14" class="mono accent" font-size="10">archiplan · on</text>
+    </g>
+  </g>
+
+  <!-- Content -->
+  <g class="mono" font-size="12.5">
+    <!-- Prompt -->
+    <text x="40"  y="84"  class="accent">&gt;</text>
+    <text x="58"  y="84"  class="accent">/archi</text>
+    <text x="110"  y="84"  class="ink">design a multi-region API service that gives developers access to</text>
+    <text x="110"  y="102" class="ink">Ethereum and Bitcoin on-chain data — current and historical — with</text>
+    <text x="110"  y="120" class="ink">reorg-safe semantics, per-key rate limits, residency-pinned tenant</text>
+    <text x="110"  y="138" class="ink">data, and crypto-shred compliance audit.</text>
+
+    <!-- Divider -->
+    <line x1="40" y1="160" x2="780" y2="160" stroke="rgba(236,236,232,0.06)"/>
+
+    <!-- Claude response header -->
+    <text x="40" y="184" class="ok">●</text>
+    <text x="58" y="184" class="ink" font-weight="600">Architecture hardened</text>
+    <text x="230" y="184" class="quiet">·  spec v1  ·  plan gateway-v1  ·  17 nodes · 39 edges</text>
+
+    <!-- One-line summary -->
+    <text x="58" y="204" class="dim">edge → gateway → {chain_router, usage_meter} → chain pools  ·  region_coordinator</text>
+
+    <!-- Components -->
+    <text x="40" y="236" class="quiet">⎿</text>
+    <text x="58" y="236" class="ink" font-weight="600">Top-level nodes</text>
+    <text x="190" y="236" class="quiet">4 tiers  ·  edge · data plane · control plane · stores</text>
+
+    <g transform="translate(58,256)">
+      <text y="0"   class="ink">edge</text>            <text x="170" y="0"   class="dim">TLS · WAF · residency-aware anycast · edge-attestation</text>
+      <text y="18"  class="ink">gateway</text>         <text x="170" y="18"  class="dim">auth · per-key rate-limit · request dispatch</text>
+      <text y="36"  class="ink">chain_router</text>    <text x="170" y="36"  class="dim">per-(chain,fork) routing · drain · canonicalize</text>
+      <text y="54"  class="ink">faout</text>          <text x="170" y="54"  class="dim">WS multiplex · cursors · address index</text>
+      <text y="72"  class="ctrl">region_coordinator</text> <text x="170" y="72"  class="dim">HLC · leases · residency · roster · health quorum</text>
+      <text y="90"  class="chain">chain pools</text>   <text x="170" y="90"  class="dim">eth_archive · sepolia_archive · btc_archive · ada_archive</text>
+      <text y="108" class="store">stores</text>        <text x="170" y="108" class="dim">tenant · auth_cache · metrics · fanout_bus · address_idx · audit</text>
+    </g>
+
+    <!-- Insights -->
+    <text x="40" y="396" class="quiet">⎿</text>
+    <text x="58" y="396" class="ink" font-weight="600">Architecture insights</text>
+    <g transform="translate(228,396)">
+      <text x="0"  y="0" class="ok">health: balanced</text>
+      <text x="118" y="0" class="quiet">·  72% safely changeable  ·  all requirements satisfied</text>
+    </g>
+
+    <g transform="translate(58,420)">
+      <text y="0"   class="warn">⚠</text>
+      <text x="20"  y="0"  class="ctrl">region_coordinator</text>
+      <text x="170" y="0"  class="dim">hotspot  ·  ~32 stressors  ·  10 internal subsystems</text>
+      <text x="170" y="16" class="quiet">prime decomposition target</text>
+
+      <text y="40"  class="warn">⚠</text>
+      <text x="20"  y="40" class="ink">edge ↔ metrics_store</text>
+      <text x="185" y="40" class="dim">hidden coupling  ·  break under same 4 residency stressors, no link</text>
+
+      <text y="64"  class="warn">⚠</text>
+      <text x="20"  y="64" class="ink">s3-replica-rotation-storm</text>
+      <text x="225" y="64" class="dim">wide-blast  ·  9 components across pools / control / stores</text>
+
+      <text y="88"  class="ok">●</text>
+      <text x="20"  y="88" class="store">compliance_audit</text>
+      <text x="155" y="88" class="dim">7 connections  ·  audit hub by design (acceptable)</text>
+    </g>
+
+    <!-- User prompt: /archi:plan -->
+    <text x="40" y="540" class="accent">&gt;</text>
+    <text x="58" y="540" class="accent">/archi-plan</text>
+
+    <!-- Divider -->
+    <line x1="40" y1="562" x2="780" y2="562" stroke="rgba(236,236,232,0.06)"/>
+
+    <!-- Tasks -->
+    <text x="40" y="586" class="quiet">⎿</text>
+    <text x="58" y="586" class="ink" font-weight="600">Implementation plan</text>
+    <text x="220" y="586" class="quiet">71 tasks  ·  10 dependency waves  ·  0 done</text>
+
+    <g transform="translate(58,606)">
+      <text y="0"   class="muted">▸</text> <text x="20" y="0"   class="accent">wave 1</text> <text x="98"  y="0"   class="dim">30 leaf tasks  ·  archives, lanes, registries, stores</text>
+      <text y="18"  class="muted">▸</text> <text x="20" y="18"  class="accent">wave 2</text> <text x="98"  y="18"  class="dim">15 tasks  ·  hlc_service · quorum_core · chain_writer · fork_detection</text>
+      <text y="36"  class="muted">▸</text> <text x="20" y="36"  class="accent">wave 3</text> <text x="98"  y="36"  class="dim">12 tasks  ·  lifecycle_gate · tip_quorum · lease_issuer · chain_router</text>
+      <text y="54"  class="muted">▸</text> <text x="20" y="54"  class="accent">wave 4–8</text> <text x="98" y="54" class="dim">11 tasks  ·  tenant_store, region_coordinator, gateway integration</text>
+      <text y="72"  class="muted">▸</text> <text x="20" y="72"  class="accent">wave 9–10</text> <text x="98" y="72" class="dim">2 tasks  ·  edge surface · client SDK</text>
+    </g>
+
+    <text x="40" y="706" class="accent">▸</text>
+    <text x="58" y="706" class="ink">next move:</text>
+    <text x="142" y="706" class="accent">/archi-implement</text>
+    <text x="274" y="706" class="ink">start</text>
+
+    <!-- Caret line -->
+    <text x="40" y="730" class="accent">&gt;</text>
+    <rect x="56" y="719" width="8" height="14" class="accent" opacity="0.85"/>
+  </g>
+</svg>
