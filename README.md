@@ -2,10 +2,15 @@
 
 **Turn your coding agent into a system architect**
 
-Connect Archiplan to your agent and the code it writes gets a real
-architecture behind it — stress-tested and traceable before anything ships.
+![Claude Code session: archi designing a system from scratch](quickstart-new-project.svg)
 
-![](archiplan.svg)
+- **Pre-mortem on every design** — traffic spikes, outages, hostile users and
+  regulators hit the spec before any code ships; whatever breaks becomes a requirement
+- **Never lose context** — every requirement remembers its origin; *"why did we split
+  this from that?"* is an artifact, not a lost Slack thread
+- **Fine-tune your architecture** — god-services and microservices-for-their-own-sake
+  get flagged before *"we should refactor"* turns into *"we have to rewrite"*
+- **Code with receipts** — spec and code stay linked; the build fails when they drift
 
 ## 01 — Install
 
