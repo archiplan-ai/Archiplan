@@ -105,15 +105,12 @@ the task files; every slot inside the records is filled by editing the
 files, and `plan verify` (Step 5) is the worklist that holds them
 together.
 
-**Batch the minting.** `archi batch -` executes commands from stdin —
-one per line, `#` comments and blank lines skipped, fail-fast with the
-offending line named. Mint the whole skeleton set in one call:
+Mint the skeletons with the two verbs — the folder once, a file per
+task:
 
 ```
-archi batch - <<'EOF'
-plan use tiny-store
-plan task add Store --desc "persist rows"
-EOF
+archi plan use <name>
+archi plan task add <node> [--desc <text>]
 ```
 
 Mints converge: `task add` on a node whose file is still the untouched
