@@ -2,7 +2,8 @@
 
 AI cares little about architecture, but writes code faster than we read it.
 
-![Claude Code session: archi designing a system from scratch](quickstart-new-project.svg)
+Connect Archiplan to your agent and the code it writes gets a real
+architecture behind it — stress-tested and traceable before anything ships.
 
 ![](assets/quickstart-new-project.svg)
 
