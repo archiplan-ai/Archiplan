@@ -102,8 +102,12 @@ fn the_round_lifecycle_is_verbs_with_derived_placement() {
         st,
         "---\naffects: [Gate, Service]\noutcome: pending\n---\n\n# Burst load\n\n## Attractor\n\n## Resolution\n"
     );
+    // a re-mint with different affects is a different record — loud
     let e = refuse(&root, &["stress", "add", "Burst load", "--affects", "Gate"]);
-    assert!(e.contains("taken"), "{e}");
+    assert!(e.contains("moved past its skeleton"), "{e}");
+    // the identical re-mint converges
+    let out = ok(&root, &["stress", "add", "Burst load", "--affects", "Gate,Service"]);
+    assert!(out.contains("already minted"), "{out}");
 
     // the empty text slots are the un-skippable worklist: check errors
     let (success, _out, err) = run(&root, &["check"]);
@@ -171,10 +175,10 @@ fn requirements_mint_explicitly_and_removals_preflight() {
         "---\nkind: functional\norigin: intent\nsatisfied-by: []\ndeferred:\n---\n\n\
          # Gate throttles\n\n## System Context\n\n## Satisfy\n"
     );
-    let e = refuse(&root, &[
+    let out = ok(&root, &[
         "req", "add", "Gate throttles", "--intent", "hardening", "--kind", "functional", "--origin", "intent",
     ]);
-    assert!(e.contains("taken"), "{e}");
+    assert!(out.contains("already minted"), "{out}");
 
     // a stressor-derived requirement validates its origin against a real slug
     ok(&root, &["stress", "open", "Round one"]);
@@ -263,4 +267,82 @@ fn a_whole_round_materializes_from_one_batch_and_the_guard_covers_every_line() {
     let (success, _o, e) = run(&primary, &["stress", "add", "Rogue", "--affects", "Gate"]);
     assert!(!success);
     assert!(e.contains("unbound") || e.contains("seat"), "{e}");
+}
+
+#[test]
+fn a_replayed_batch_converges() {
+    let root = temp_project();
+    ok(&root, &["version", "save", "-m", "seed"]);
+
+    fn batch(root: &Path, lines: &str) -> (bool, String, String) {
+        let out = Command::new(env!("CARGO_BIN_EXE_archi"))
+            .args(["batch", "-", "--project", root.to_str().unwrap()])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .and_then(|mut c| {
+                use std::io::Write;
+                c.stdin.take().unwrap().write_all(lines.as_bytes())?;
+                c.wait_with_output()
+            })
+            .expect("batch runs");
+        (
+            out.status.success(),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
+    }
+
+    // The round's batch dies on line 3 — a bad affects entry.
+    let (success, _o, e) = batch(
+        &root,
+        "stress open \"Round one\"\n\
+         stress add \"Burst load\" --affects Gate\n\
+         stress add \"Cold cache\" --affects Ghost\n\
+         stress add \"Slow drain\" --affects Ledger\n",
+    );
+    assert!(!success);
+    assert!(e.contains("Ghost"), "{e}");
+    assert!(root.join("archi/stress/round-one/burst-load.md").is_file());
+    assert!(!root.join("archi/stress/round-one/slow-drain.md").exists(), "fail-fast held");
+
+    // Replaying the whole batch, fixed, converges: applied lines answer
+    // with continuations and exit zero, the tail lands.
+    let (success, out, e) = batch(
+        &root,
+        "stress open \"Round one\"\n\
+         stress add \"Burst load\" --affects Gate\n\
+         stress add \"Cold cache\" --affects Ledger\n\
+         stress add \"Slow drain\" --affects Ledger\n",
+    );
+    assert!(success, "the replay must converge:\n{e}");
+    assert!(out.contains("already open — this is it"), "{out}");
+    assert!(out.contains("already minted"), "{out}");
+    assert!(root.join("archi/stress/round-one/cold-cache.md").is_file());
+    assert!(root.join("archi/stress/round-one/slow-drain.md").is_file());
+
+    // A skeleton that moved past itself is not re-mintable.
+    let filled = root.join("archi/stress/round-one/burst-load.md");
+    let text = fs::read_to_string(&filled).unwrap().replace(
+        "# Burst load\n",
+        "# Burst load\n\nOrganic peaks arrive 100x.\n",
+    );
+    fs::write(&filled, text).unwrap();
+    let e = refuse(&root, &["stress", "add", "Burst load", "--affects", "Gate"]);
+    assert!(e.contains("moved past its skeleton"), "{e}");
+
+    // req add converges the same way.
+    ok(&root, &[
+        "req", "add", "Gate throttles", "--intent", "hardening", "--kind", "functional", "--origin", "intent",
+    ]);
+    let out = ok(&root, &[
+        "req", "add", "Gate throttles", "--intent", "hardening", "--kind", "functional", "--origin", "intent",
+    ]);
+    assert!(out.contains("already minted"), "{out}");
+    // ...but different parameters are a different record: loud.
+    let e = refuse(&root, &[
+        "req", "add", "Gate throttles", "--intent", "hardening", "--kind", "non-functional", "--origin", "intent",
+    ]);
+    assert!(e.contains("moved past its skeleton") || e.contains("not re-mintable"), "{e}");
 }

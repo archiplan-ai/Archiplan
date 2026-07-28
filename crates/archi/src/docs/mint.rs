@@ -82,21 +82,36 @@ pub fn req_add(
         }
         Err(e) => return Err(e),
     }
-    if let Some(r) = tree.requirements.iter().find(|r| r.slug == slug) {
-        return Err(format!("slug `{slug}` is taken — {}", r.file));
-    }
     if tree.intents.iter().any(|i| i.slug == slug) {
         return Err(format!("`{slug}` names an intent charter — pick another title"));
     }
     let path = requirements_dir(root).join(intent).join(format!("{slug}.md"));
-    if path.exists() {
-        return Err(format!("{} already exists", rel(root, &path)));
-    }
     let deferred = deferred.map(|d| format!(" {d}")).unwrap_or_default();
     let text = format!(
         "---\nkind: {kind}\norigin: {origin}\nsatisfied-by: []\ndeferred:{deferred}\n---\n\n\
          # {title}\n\n## System Context\n\n## Satisfy\n"
     );
+    // A replayed batch converges: the identical skeleton is already minted —
+    // say so and succeed; a file that moved past its skeleton stays loud
+    // (refusals-name-the-continuation).
+    if let Ok(standing) = fs::read_to_string(&path) {
+        return if standing == text {
+            println!(
+                "already minted — {} stands; fill the summary, System Context and Satisfy",
+                rel(root, &path)
+            );
+            Ok(path)
+        } else {
+            Err(format!(
+                "{} stands and has moved past its skeleton — it is not re-mintable; \
+                 continue editing it",
+                rel(root, &path)
+            ))
+        };
+    }
+    if let Some(r) = tree.requirements.iter().find(|r| r.slug == slug) {
+        return Err(format!("slug `{slug}` is taken — {}", r.file));
+    }
     fs::write(&path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
     Ok(path)
 }
@@ -141,6 +156,15 @@ pub fn stress_open(root: &Path, model: &Model, title: &str) -> Result<PathBuf, S
     let slug = slug_of(title)?;
     let tree = super::discover_tree(root);
     if let Some(open) = tree.sessions.iter().find(|s| s.open()) {
+        // The re-run of the round's own open converges — this is the round
+        // (refusals-name-the-continuation); a different round stays a wall.
+        if open.slug == slug {
+            println!(
+                "round `{slug}` is already open — this is it: continue with \
+                 `archi stress add <title> --affects <terms>`"
+            );
+            return Ok(root.join(&open.file));
+        }
         return Err(format!(
             "round `{}` is already open — close it (`archi version save`) or fold it before \
              opening another",
@@ -210,17 +234,31 @@ pub fn stress_add(root: &Path, title: &str, affects: &[String]) -> Result<PathBu
             bad.join(", ")
         ));
     }
-    if let Some(st) = tree.stressors.iter().find(|st| st.slug == slug) {
-        return Err(format!("slug `{slug}` is taken — {}", st.file));
-    }
     let path = stress_dir(root).join(&open.slug).join(format!("{slug}.md"));
-    if path.exists() {
-        return Err(format!("{} already exists", rel(root, &path)));
-    }
     let text = format!(
         "---\naffects: [{}]\noutcome: pending\n---\n\n# {title}\n\n## Attractor\n\n## Resolution\n",
         affects.join(", ")
     );
+    // The replayed line converges on the identical skeleton; an edited or
+    // foreign file stays loud (refusals-name-the-continuation).
+    if let Ok(standing) = fs::read_to_string(&path) {
+        return if standing == text {
+            println!(
+                "already minted — {} stands; write the pressure, Attractor, and the verdict",
+                rel(root, &path)
+            );
+            Ok(path)
+        } else {
+            Err(format!(
+                "{} stands and has moved past its skeleton — it is not re-mintable; \
+                 continue editing it",
+                rel(root, &path)
+            ))
+        };
+    }
+    if let Some(st) = tree.stressors.iter().find(|st| st.slug == slug) {
+        return Err(format!("slug `{slug}` is taken — {}", st.file));
+    }
     fs::write(&path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
     Ok(path)
 }
