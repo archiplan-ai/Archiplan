@@ -138,15 +138,15 @@ A tiny hardened store: rows persist encrypted, served over HTTP.
 ## Stack
 
 - Rust — user choice
-- SQLCipher — decision `encrypt-at-rest`
-- cargo-nextest — the user's test runner
+- <engine> — decision `<slug>`
+- <test framework> — the user's answer
 
 ## Architecture
 
 - `Store` — persists and encrypts the rows
 - `API` — the read/write surface
-- `Store` realizes SQLCipher
-- `API` realizes Rust (axum)
+- `Store` realizes <engine>
+- `API` realizes Rust
 ```
 
 A stack bullet is the technology, ` — `, and its provenance — where the
@@ -204,13 +204,13 @@ The HTTP surface over the store: one handler per verb.
 
 ## Stack
 
-- axum 0.8: one router, state = the Store handle
+- <the specific library / API / pattern / path>
 
 ## Verifications
 
 ### rows-served
 
-- test — POST then GET round-trips a row (axum-test)
+- test — POST then GET round-trips a row, in the user's test runner
 ```
 
 - `## Spec` — one backticked canonical ref per bullet. The seed is
