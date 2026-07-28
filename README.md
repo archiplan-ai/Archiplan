@@ -2,25 +2,15 @@
 
 **Turn your coding agent into a system architect**
 
-The architecture is source code — modeled, compiled, stress-tested:
+![Claude Code session: archi designing a system from scratch](quickstart-new-project.svg)
 
-```
-def conn login := * ->LoginForm, <-Token *   // the form goes out, the token comes back
-
-// The service guarding the credential boundary.
-def node AuthService:
-  port handle_login   // receives the submitted credential pair
-
-def node UI:          // the human-facing client
-  port login
-
-UI.login login AuthService.handle_login
-```
-
-Rename `Token` and the build breaks at everything that names it — connections,
-requirements, code links. The spec cannot rot silently.
-
-![](archiplan.svg)
+- **Pre-mortem on every design** — traffic spikes, outages, hostile users and
+  regulators hit the spec before any code ships; whatever breaks becomes a requirement
+- **Never lose context** — every requirement remembers its origin; *"why did we split
+  this from that?"* is an artifact, not a lost Slack thread
+- **Fine-tune your architecture** — god-services and microservices-for-their-own-sake
+  get flagged before *"we should refactor"* turns into *"we have to rewrite"*
+- **Code with receipts** — spec and code stay linked; the build fails when they drift
 
 ## 01 — Install
 
