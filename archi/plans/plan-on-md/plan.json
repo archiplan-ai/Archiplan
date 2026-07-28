@@ -4,7 +4,7 @@
   "version_hash": "sha256:c146873e1060c8bc9f53d7b66b6875feeb90878e2d39c7efbb9eef7a63a8bb0e",
   "created": "2026-07-28T17:10:32Z",
   "state": "started",
-  "closed_waves": 1,
+  "closed_waves": 2,
   "problem": "The plan becomes a folder of markdown records with lifecycle in state.json: same reads, mint/rm/lifecycle verbs, prose edited in place, legacy plan.json readable forever",
   "technology_stack": [
     {

@@ -16,9 +16,10 @@ description: Generate an implementation plan from a hardened archi spec — an e
 # Generate Implementation Plan
 
 You are generating an implementation plan from a **hardened** archi spec —
-stress rounds survived, the version saved. The plan is authored entirely
-through `archi plan` subcommands; the file behind them stays text and
-merges like text, but your pen is the CLI. You stop when
+stress rounds survived, the version saved. The plan is a folder of
+markdown records under `archi/plans/<name>/`, authored like the rest of
+the spec: verbs mint and retire the files, prose and curation are edited
+in them, and `archi plan verify` is the worklist. You stop when
 `archi plan verify` is clean and the user has seen the plan.
 
 Ask every question to the user through the editor's poll tool
@@ -63,8 +64,12 @@ archi plan use <name>
 ```
 
 It refuses on an unsaved model — back to `/archi`, `version save` first.
-A fresh name pins the seat's current spec version and joins the seat's
-binding; everything below authors this plan.
+A fresh name mints the record folder — charter `<name>.md`,
+`scenarios.md`, `state.json` — pinned to the seat's current spec version
+and joined to the seat's binding; everything below authors this plan. A
+plan in the old json form still reads and runs its lifecycle, but
+authoring refuses: legacy plan.json is read-only — plans author as
+record folders now.
 
 ## Step 2 — Gather the full picture
 
@@ -80,10 +85,10 @@ version, the decisions that priced the trade-offs — before cutting tasks.
 
 ## Step 3 — Determine task ordering
 
-The dependency DAG is authored through `archi plan task input add …
---from <producer>` — every `--from` records both "what flows in" and a
-dependency edge; the waves derive from it, and
-`plan verify` errors on unknown producers and cycles. Analyze the graph:
+The dependency DAG lives in the task files' `## Inputs` sections — every
+`- from t<N> — <note>` line records both "what flows in" and a
+dependency edge; the waves derive from it, and `plan verify` errors on
+unknown producers and cycles. Analyze the graph:
 
 1. **Leaf nodes first** — components with no dependencies.
 2. **Data stores before services** — schema/storage before logic.
@@ -93,35 +98,63 @@ dependency edge; the waves derive from it, and
 
 ## Step 4 — Author the plan
 
-**Batch the authoring.** `archi batch -` executes commands from stdin —
-one per line, `#` comments and blank lines skipped, `\n` inside double
-quotes carries a multiline value, fail-fast with the offending line
-named. Author the whole envelope, tasks and curation in one call instead
-of a verb per turn:
+The folder is the plan: the charter `<name>.md` (envelope), one
+`t<N>-<node-slug>.md` per task, `scenarios.md`, and `state.json` —
+lifecycle only, moved by verbs, never edited. Two verbs mint and retire
+the task files; every slot inside the records is filled by editing the
+files, and `plan verify` (Step 5) is the worklist that holds them
+together.
+
+**Batch the minting.** `archi batch -` executes commands from stdin —
+one per line, `#` comments and blank lines skipped, fail-fast with the
+offending line named. Mint the whole skeleton set in one call:
 
 ```
 archi batch - <<'EOF'
-plan problem "a tiny hardened store"
-plan tech add Rust --provenance "user choice"
-plan task add Store --desc "persist rows"
-plan task req add t1 store-encrypted
-plan task verification add t1 store-encrypted "test — rows encrypted at rest"
+plan use tiny-store
+plan task add Types --desc "the shared Row schema"
+plan task add Store --desc "persist rows encrypted"
+plan task add API --desc "the read/write surface"
 EOF
 ```
 
-### Envelope — the plan-level frame
+Mints converge: `task add` on a node whose file is still the untouched
+skeleton reports "already minted"; a file you have edited refuses —
+"moved past its skeleton" — the verb never overwrites authored content.
+A mis-cut task retires with `plan task rm <id>` — draft only (past
+draft it names `plan reset`), and a task other tasks input refuses with
+its dependents: "feeds t3 — cut those inputs first".
 
-Author once, before any task:
+### Envelope — the charter file
 
+`archi/plans/<name>/<name>.md`: the problem prose sits under the title,
+before the first section; then two bullet sections —
+
+```markdown
+# tiny-store
+
+A tiny hardened store: rows persist encrypted, served over HTTP.
+
+## Stack
+
+- Rust — user choice
+- SQLCipher — decision `encrypt-at-rest`
+- cargo-nextest — the user's test runner
+
+## Architecture
+
+- `Store` — persists and encrypts the rows
+- `API` — the read/write surface
+- `Store` realizes SQLCipher
+- `API` realizes Rust (axum)
 ```
-archi plan problem "<what this plan delivers, in product terms>"
-archi plan tech add "<technology>" --provenance "<where the choice came from: a user answer, a spec decision, a stressor's outcome>"
-archi plan architecture-summary add <node> "<one-line role>"    # one per top-level node
-archi plan stack-mapping add <node> "<which concrete tech realizes it>"
-```
 
-Cover **every top-level node** with both a summary and a mapping
-entry — `plan verify` cross-checks the two both ways.
+A stack bullet is the technology, ` — `, and its provenance — where the
+choice came from: a user answer, a spec decision, a stressor's outcome.
+Architecture bullets open with the backticked node and take two shapes:
+`— <role>` (the one-line summary) and `realizes <tech>` (the stack
+mapping). Cover **every top-level node** with both — `plan verify`
+cross-checks the two both ways.
 
 Derive stack concerns from the node types (runtime for `Service`, engine
 for `Storage`, …) plus the always-ask cross-cutting layer: **the test
@@ -139,70 +172,95 @@ right), record it in the stack with its provenance, and name which
 scenarios depend on it. The goal is a working product at the end, not
 code that never ran.
 
-### Tasks — one per node
+### Tasks — one file per node
 
-```
-archi plan task add <node> [--desc <text>]
+`plan task add <node>` mints `t<N>-<node-slug>.md`, its `## Spec` seeded
+from the pinned model — the node plus its incoming edges, in canonical
+form. Everything else is authored by editing the file:
+
+```markdown
+---
+node: API
+owns: [rows-served]
+---
+
+# t3 — API
+
+The HTTP surface over the store: one handler per verb.
+
+## Spec
+
+- `API`
+- `UI.send request(Row) API.write`
+
+## Inputs
+
+- from t1 — the Row schema and the storage trait
+- from t2 — the Store constructor the router holds
+
+## Outputs
+
+- src/api.rs
+
+## Stack
+
+- axum 0.8: one router, state = the Store handle
+
+## Verifications
+
+### rows-served
+
+- test — POST then GET round-trips a row (axum-test)
 ```
 
-The auto-seed is conservative: the node plus its incoming edges, in
-canonical form. Outgoing edges the task realizes, siblings it logically
-participates with, cross-scope edges it crosses — add them explicitly;
-each new ref widens the task's requirement-candidate set:
-
-```
-archi plan task spec-ref add <task_id> <node_or_canonical_edge>
-```
-
-Then fill in what the spec cannot provide:
-
-```
-archi plan task desc <task_id> '<markdown body>'
-archi plan task stack-detail add <task_id> "<specific library / API / pattern / path>"
-archi plan task input add <task_id> "<concrete artifact that flows in>" --from <producer_task_id>
-archi plan task output add <task_id> <relative/path>
-```
-
-The **input note** names the concrete artifact crossing the boundary
-(schema, interface, DTO, generated client, migration…) — weak notes
-("data from X") break the contract: if you can't name what flows, the
-dependency probably shouldn't exist. Outputs are the files the task will
-write — capture attributes deltas through them.
+- `## Spec` — one backticked canonical ref per bullet. The seed is
+  conservative: outgoing edges the task realizes, siblings it logically
+  participates with, cross-scope edges it crosses — add their bullets;
+  each new ref widens the task's requirement-candidate set.
+- `## Inputs` — `- from t<N> — <note>`; the note names the concrete
+  artifact crossing the boundary (schema, interface, DTO, generated
+  client, migration…) — weak notes ("data from X") break the contract:
+  if you can't name what flows, the dependency probably shouldn't exist.
+- `## Outputs` — the files the task will write, as relative paths —
+  capture attributes deltas through them.
+- `## Stack` — task-level specifics: the library, API, pattern or path.
+- `## Verifications` — one `### <slug>` subhead per owned requirement,
+  proof bullets under it (below).
 
 ### Curate requirements
 
 The derived matched set is the candidate list — always fresh, never
-retyped. List the candidates, then own the ones the task answers for:
+retyped; the reads stay verbs:
 
 ```
-archi plan task req suggest <task_id>          # slot, slug, owned|candidate, via which refs
-archi plan task req add <task_id> <slug|slot>  # only a matched candidate is accepted
-archi plan task req remove <task_id> <slug>    # takes its verifications with it
-archi plan task req-list <task_id>             # the owned set with proof counts
+archi plan task req suggest <task_id>   # slot, slug, owned|candidate, via which refs
+archi plan task req-list <task_id>      # the owned set with proof counts
 ```
 
-**Curate, don't rubber-stamp**: one element can carry several
-requirements and several tasks can touch one element; owning everything
-everywhere duplicates work and over-gates verification. A task with
-candidates owns at least one — `plan verify` flags the opposite; a task
-whose elements carry no requirements may legitimately own none. A missing
-candidate wants a spec_ref (`task spec-ref add`), never a hand-typed slug.
+Own by editing `owns: [...]` in the task's frontmatter — only matched
+candidates belong there; `plan verify` errors on an owned slug the
+reverse lookup does not match (drop it, or restore the spec ref that
+carried it). **Curate, don't rubber-stamp**: one element can carry
+several requirements and several tasks can touch one element; owning
+everything everywhere duplicates work and over-gates verification. A
+task with candidates owns at least one — `plan verify` flags the
+opposite; a task whose elements carry no requirements may legitimately
+own none. A missing candidate wants a spec ref (a new `## Spec` bullet),
+never a hand-typed slug in `owns`. Un-owning a slug takes its proofs
+with it: delete the `### <slug>` section too — a verification under an
+unowned slug is structural, own it first.
 
 ### Verifications
 
-For every owned requirement, author at least one verification — a
-concrete, observable check describing how the implementer will prove the
-claim: a failing test, a type signature, a runtime contract, a migration
-assertion — whatever the requirement's prose prescribes:
-
-```
-archi plan task verification add <task_id> <slug|slot> "<observable check>"
-```
-
-**Do not paraphrase the requirement — name the check**, in the frameworks
-the user chose (that is why the envelope asked). A requirement covering
-several distinct concerns takes one verification per concern — same slot,
-several `verification add` calls.
+For every owned requirement, author under its `### <slug>` at least one
+proof bullet — a concrete, observable check describing how the
+implementer will prove the claim: a failing test, a type signature, a
+runtime contract, a migration assertion — whatever the requirement's
+prose prescribes. **Do not paraphrase the requirement — name the
+check**, in the frameworks the user chose (that is why the envelope
+asked). A requirement covering several distinct concerns takes one
+bullet per concern, all under the same `### <slug>`. An owned slug with
+no proof is a `plan verify` error.
 
 ### Task granularity
 
@@ -215,14 +273,19 @@ several `verification add` calls.
 
 ### Scenarios — end-to-end user-story coverage
 
-A user story crosses many elements; pinning it to one would lie about its
-scope, so scenarios live on the plan envelope as free text:
+A user story crosses many elements; pinning it to one would lie about
+its scope, so scenarios live on the plan envelope — `scenarios.md`, a
+heading and one bullet per flow (`archi plan scenarios list` reads them
+back):
 
+```markdown
+# Scenarios
+
+- A user writes a row over HTTP and reads it back decrypted — needs the compose db service.
 ```
-archi plan scenarios add "<one user-visible flow>"
-archi plan scenarios list
-archi plan scenarios remove <index>            # 1-based, from `list`
-```
+
+One flow is one bullet on one line — the record bullets (here and in the
+task files) do not wrap.
 
 Walk the architecture as a user and enumerate every distinct user-visible
 flow the product promises, one sentence each. They are not linked to
@@ -264,6 +327,8 @@ archi plan task show <task_id>     # any brief the user wants to inspect
 - **Scenarios are envelope user stories carrying their infrastructure.**
 - **Ask, never assume.** Every stack and infrastructure choice goes
   through the poll tool.
-- **CLI is the only author.** Every mutation goes through `archi plan …`;
-  every read through `plan show` / `task show` / `req suggest` /
-  `req-list`. Do not hand-write plan.json or poke at lifecycle state.
+- **Verbs cut, files carry.** Creation, removal and lifecycle go through
+  `archi plan` verbs (`plan use`, `task add|rm`, `start`/`next`/`close`);
+  prose and curation are edits to the record files; `plan verify` is the
+  worklist that holds them together. `state.json` is lifecycle — never
+  hand-edit it.

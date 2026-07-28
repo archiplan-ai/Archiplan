@@ -18,9 +18,11 @@ Ground rules, always:
   prose is edited in the files, but **skeletons come from verbs**:
   `archi req add|rm` and `archi stress open|add|rm` mint and retire the
   records with every machine field explicit, leaving the text slots for
-  you. The plan is text too, but its author is
-  the CLI: every plan mutation goes through `archi plan` verbs, never a
-  hand edit. Lifecycle moves only through verbs. Run `archi check` after
+  you. The plan is a folder of records like the rest of the spec:
+  creation, removal and lifecycle are verbs (`plan use`,
+  `plan task add|rm`, `start`/`next`/`close`), prose and curation are
+  edited in the files, and `plan verify` is the worklist.
+  Lifecycle moves only through verbs. Run `archi check` after
   every editing round — errors block, findings are the worklist.
 - Search, don't grep. `archi search <phrase>` is ranked retrieval over
   every archi object — model elements with their identity prose, intents,
