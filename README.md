@@ -1,6 +1,6 @@
 # Archiplan
 
-**Turn your coding agent into a system architect**
+AI cares little about architecture, but writes code faster than we read it.
 
 Connect Archiplan to your agent and the code it writes gets a real
 architecture behind it — stress-tested and traceable before anything ships.
