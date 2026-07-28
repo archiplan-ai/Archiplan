@@ -204,7 +204,7 @@ fn validate_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn load_plan(root: &Path, name: &str) -> Result<Plan, String> {
+pub(crate) fn load_plan(root: &Path, name: &str) -> Result<Plan, String> {
     let path = plan_path(root, name);
     let text =
         fs::read_to_string(&path).map_err(|e| format!("cannot read `{}`: {e}", path.display()))?;

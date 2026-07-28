@@ -8,6 +8,7 @@ version = "0.1.10"
 dependencies = [
  "ascii-dag",
  "diffy",
+ "libc",
  "modeling-lang",
  "serde",
  "serde_json",

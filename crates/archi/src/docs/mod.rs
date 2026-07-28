@@ -15,6 +15,7 @@
 //! `satisfied-by` and decision links validate against the live model.
 
 pub(crate) mod md;
+pub mod mint;
 pub(crate) mod schema;
 
 use std::collections::{BTreeMap, BTreeSet};

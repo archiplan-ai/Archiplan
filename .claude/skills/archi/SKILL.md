@@ -15,7 +15,10 @@ Ground rules, always:
 
 - Everything is text. Model = `.arch` sources under `archi/src/`,
   requirements, stressors and decisions = markdown under `archi/` —
-  mutate them by editing files. The plan is text too, but its author is
+  prose is edited in the files, but **skeletons come from verbs**:
+  `archi req add|rm` and `archi stress open|add|rm` mint and retire the
+  records with every machine field explicit, leaving the text slots for
+  you. The plan is text too, but its author is
   the CLI: every plan mutation goes through `archi plan` verbs, never a
   hand edit. Lifecycle moves only through verbs. Run `archi check` after
   every editing round — errors block, findings are the worklist.
@@ -135,14 +138,22 @@ published version; the default unit rides one seat and lands once.
    does belong here: what is this project willing to be bad at? Seed the
    answers as decisions under `archi/decisions/` with `prefer`/`over` —
    the revealed priority profile's first entries.
-3. **Derive requirements** — one file per claim in the intent folder,
-   filename the slugged name: frontmatter (`kind: functional` |
-   `non-functional`, `origin: intent`, `satisfied-by: []`, `deferred:`),
-   summary-first prose, then the reserved sections `System Context` and
-   `Satisfy`. Every field and section present in every file — empty is an
-   explicit state, absence an error; any other heading opens a
-   subrequirement. Leave them open — `unsatisfied_requirement` findings
-   are the worklist, not errors.
+3. **Derive requirements** — one claim, one file, minted by the verb:
+
+   ```
+   archi req add "<title>" --intent <folder> --kind functional|non-functional --origin intent
+   ```
+
+   Every parameter is explicit — a missing one is a refusal, an unknown
+   intent lists the folders; `--deferred <reason>` is the only optional
+   flag (its absence *is* the state). The mint writes the exact schema
+   shape — frontmatter, `System Context`, `Satisfy` — with the text
+   slots empty, and `check` holds them (a requirement needs its summary)
+   until you write the prose: summary first, then context and Satisfy as
+   elements land. `archi req rm <slug>` retires one — it refuses while a
+   plan owns the slug. Any other heading in the file opens a
+   subrequirement. Leave requirements open — `unsatisfied_requirement`
+   findings are the worklist, not errors.
 4. **Draft the model** — read the ontology first: `archi query --top`.
    The unclassified nodes are the preset's types, each carrying its
    definition; classify every term against them (`Service type_of
@@ -175,20 +186,26 @@ published version; the default unit rides one seat and lands once.
    saved — the NKP scoring line, `archi nkp --hotspots`, and the previous
    round's `under_stressed` findings; hotspots and unpressed terms take
    the first stressors.
-   Open the session, `archi/stress/<session>/<session>.md`: frontmatter
-   `version:` (the pinned id) and `closed:` (empty — the closing save
-   stamps it), then a name and one charter paragraph, what this round
-   presses and why now. At most one session is open at a time.
+   Open the session with the verb — `archi stress open "<title>"` — it
+   pins the version just saved (a moved model refuses toward `version
+   save`), derives the folder from the slug, and refuses while another
+   round is open. Then write the charter paragraph in the minted file:
+   what this round presses and why now.
 
    *For each stressor — identify, attractor, verdict:*
 
    a. **Identify.** Think hyperliminally — pick a stakeholder, failure
       mode, scale concern, or regulatory or operational constraint the
       happy path ignores; the valuable stressors cross a boundary the
-      architecture treats as separate. `affects` is required and must
-      resolve to epistatic nodes. Stressor description is a markdown body
-      — same rule as requirements (imperative first line, then any
-      structure a reader needs). One stressor = one pressure = one file.
+      architecture treats as separate. Mint the stressor into the open
+      round — `archi stress add "<title>" --affects <A,B,...>` — the
+      affects resolve against the round's pinned version at the write,
+      every miss named in one message. Then write the description in the
+      minted file: imperative first line, then any structure a reader
+      needs. One stressor = one pressure = one file; a whole round's
+      skeletons land in one `archi batch -` call. A mis-mint retires
+      with `archi stress rm <slug>` (an open round only; derived
+      requirements hold it).
    b. **Attractor.** What configuration does the system get pushed
       toward? A markdown body.
    c. **Verdict.** Three outcomes — `surviving`, `breaking`, `accepted` —

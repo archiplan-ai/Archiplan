@@ -671,7 +671,7 @@ fn list(
     }
 }
 
-fn parse_origin(s: &str) -> Result<Origin, String> {
+pub(crate) fn parse_origin(s: &str) -> Result<Origin, String> {
     const FORMS: &str = "origin is `intent`, `parent`, `stressor(slug, …)` or `fusion(slug, …)`";
     let slugs = |inner: &str, form: &str| -> Result<Vec<String>, String> {
         let v: Vec<String> = inner

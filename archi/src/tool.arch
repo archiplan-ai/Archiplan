@@ -16,6 +16,8 @@ def node Cli:
   port incidence   // incidence analysis verb
   port version     // save, anchor, remint, list, show, diff (archived or live), current
   port session     // fold: two concurrent rounds into one deliberate record
+  port req         // add, rm: requirement skeletons minted and retired by verb
+  port stress      // open, add, rm: the round's records minted and retired by verb
   port link        // add, ls, verify, confirm, rm, repin, capture, audit
   port repo        // ls, map: the member registry and its local mappings
   port plan        // use, task add, verify, start, next, close, reset
@@ -36,6 +38,15 @@ def node DocsCompiler:
   port pin_model    // reconstructs archived versions for pinned checks
   port compile_pin  // compiles a reconstructed render through the compiler
   port serve_pin    // hands pinned models to incidence, links and plans
+
+// crates/archi/src/docs/mint.rs — skeletons come from verbs: schema shape
+// out, text slots empty, placement derived from the tree's invariants.
+def node DocMint:
+  port mint      // req add, stress open, stress add: the exact schema shape, slots empty
+  port remove    // req rm, stress rm: the blast radius pre-flighted, sealed history refused
+  port read_tree // the best-effort doc tree: intents, slugs, the open round
+  port pin       // the open round's version, reconstructed to resolve affects
+  port emit      // skeleton files into the tree
 
 def node Search:
   port find      // phrase in, ranked cards out: one scan per query, no second store
@@ -131,6 +142,7 @@ Function type_of Members
 Service type_of Cli
 Function type_of DocsCompiler
 Function type_of Search
+Function type_of DocMint
 Function type_of Scaffold
 Service type_of Links
 Service type_of Planner
@@ -163,6 +175,15 @@ Members.read_decls recall(MemberDecl) SourceTree.serve in trace_flow
 Links.locate recall(MemberSet) Members.resolve in trace_flow
 Links.locate_scan recall(MemberSet) Members.resolve in trace_flow
 Archive.locate recall(MemberSet) Members.resolve in harden_flow
+
+// doc skeletons: minted and retired by verb, validated against the tree and the pin
+Cli.drive consult(->Command, <-Report) DocMint.mint in harden_flow
+Cli.drive consult(->Command, <-Report) DocMint.remove in harden_flow
+DocMint.read_tree recall(RequirementDoc) SourceTree.serve in harden_flow
+DocMint.read_tree recall(StressDoc) SourceTree.serve in harden_flow
+DocMint.pin recall(CanonicalRender) Archive.serve in harden_flow
+DocMint.emit persist(RequirementDoc) SourceTree.store in harden_flow
+DocMint.emit persist(StressDoc) SourceTree.store in harden_flow
 
 // search: one scan over the docs and the model it was handed, ranked cards out
 Cli.drive consult(->ModelGraph, <-SearchReport) Search.find in read_flow

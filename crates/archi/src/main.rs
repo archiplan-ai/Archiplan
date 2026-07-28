@@ -93,6 +93,11 @@ const USAGE: &str = "usage:
   archi version current [--project <dir>]
   archi session fold <slug> -m <note> [--keep theirs] [--project <dir>]
   archi session fold <loser> --into <winner> -m <note> [--project <dir>]
+  archi req add <title> --intent <folder> --kind functional|non-functional --origin 'intent|stressor(<slug>)' [--deferred <reason>] [--project <dir>]
+  archi req rm <slug> [--project <dir>]
+  archi stress open <title> [--project <dir>]
+  archi stress add <title> --affects <A,B,...> [--project <dir>]
+  archi stress rm <slug> [--project <dir>]
   archi link add <spec[@ver]> <file[#symbol]> --kind literal|indirect [--project <dir>]
   archi link ls [--spec <ref>] [--evidence] [--json] [--project <dir>]
   archi link verify [--spec <ref>] [--since [<member>=]<rev>] [--repo <member>] [--json] [--project <dir>]
@@ -167,6 +172,10 @@ struct Args {
     into: Option<String>,
     keep: Option<String>,
     task: Option<String>,
+    intent: Option<String>,
+    origin: Option<String>,
+    deferred: Option<String>,
+    affects: Option<String>,
     repo: Option<String>,
     desc: Option<String>,
     at: Option<String>,
@@ -234,6 +243,10 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         into: None,
         keep: None,
         task: None,
+        intent: None,
+        origin: None,
+        deferred: None,
+        affects: None,
         repo: None,
         desc: None,
         at: None,
@@ -305,6 +318,10 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--since" => args.since = Some(value(&mut it, "--since")?),
             "--evidence" => args.evidence = true,
             "--yes" => args.yes = true,
+            "--intent" => args.intent = Some(value(&mut it, "--intent")?),
+            "--origin" => args.origin = Some(value(&mut it, "--origin")?),
+            "--deferred" => args.deferred = Some(value(&mut it, "--deferred")?),
+            "--affects" => args.affects = Some(value(&mut it, "--affects")?),
             "--prune" => args.prune = true,
             "--details" => args.details = true,
             "--max-nodes" => args.max_nodes = Some(int(value(&mut it, "--max-nodes")?, "--max-nodes")?),
@@ -327,7 +344,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--desc" => args.desc = Some(value(&mut it, "--desc")?),
             // `link` reads the singular `--kind literal|indirect`; the
             // incidence filter keeps the repeatable list.
-            "--kind" if args.verb == "link" => {
+            "--kind" if args.verb == "link" || args.verb == "req" => {
                 args.kind_flag = Some(value(&mut it, "--kind")?)
             }
             "--kind" => args.kind.push(value(&mut it, "--kind")?),
@@ -354,6 +371,8 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
                     | "plan"
                     | "read"
                     | "session"
+                    | "req"
+                    | "stress"
                     | "search"
                     | "init"
                     | "repo"
@@ -2263,6 +2282,131 @@ fn run_init(args: &Args) -> ExitCode {
     }
 }
 
+
+/// `archi req add|rm` — requirement skeletons come from a verb: every
+/// machine field an explicit parameter, the text slots left for the
+/// author, removal pre-flighted against owning plans.
+fn run_req(args: &Args) -> ExitCode {
+    let fail = |e: String| -> ExitCode {
+        eprintln!("archi: {e}");
+        ExitCode::from(1)
+    };
+    let root = match locate_project(args) {
+        Ok(r) => r,
+        Err(e) => return usage_err(&e),
+    };
+    match (
+        args.positional.first().map(String::as_str),
+        args.positional.get(1..).unwrap_or_default(),
+    ) {
+        (Some("add"), [title]) => {
+            let (Some(intent), Some(kind), Some(origin)) =
+                (args.intent.as_deref(), args.kind_flag.as_deref(), args.origin.as_deref())
+            else {
+                return usage_err(
+                    "`req add` decides everything explicitly: archi req add <title> \
+                     --intent <folder> --kind functional|non-functional \
+                     --origin 'intent|stressor(<slug>)' [--deferred <reason>]",
+                );
+            };
+            match docs::mint::req_add(&root, title, intent, kind, origin, args.deferred.as_deref())
+            {
+                Ok(path) => {
+                    println!(
+                        "minted {} — fill the summary, System Context and Satisfy; \
+                         `archi check` holds the empty slots",
+                        path.strip_prefix(&root).unwrap_or(&path).display()
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("rm"), [slug]) => match docs::mint::req_rm(&root, slug) {
+            Ok(path) => {
+                println!("removed {}", path.strip_prefix(&root).unwrap_or(&path).display());
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e),
+        },
+        _ => usage_err(
+            "usage: archi req add <title> --intent <folder> --kind functional|non-functional \
+             --origin 'intent|stressor(<slug>)' [--deferred <reason>] | rm <slug>",
+        ),
+    }
+}
+
+/// `archi stress open|add|rm` — the round's records come from verbs: the
+/// charter pins the saved version, stressors land in the open round with
+/// affects resolved against its pinned version, removal never touches
+/// sealed history.
+fn run_stress(args: &Args) -> ExitCode {
+    let fail = |e: String| -> ExitCode {
+        eprintln!("archi: {e}");
+        ExitCode::from(1)
+    };
+    let root = match locate_project(args) {
+        Ok(r) => r,
+        Err(e) => return usage_err(&e),
+    };
+    match (
+        args.positional.first().map(String::as_str),
+        args.positional.get(1..).unwrap_or_default(),
+    ) {
+        (Some("open"), [title]) => {
+            let ws = match compile_or_report(&root, false) {
+                Ok(c) => c.workspace,
+                Err(code) => return code,
+            };
+            match docs::mint::stress_open(&root, ws.model(), title) {
+                Ok(path) => {
+                    println!(
+                        "opened round {} — write the charter paragraph; \
+                         `archi stress add <title> --affects <terms>` mints its stressors",
+                        path.strip_prefix(&root).unwrap_or(&path).display()
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("add"), [title]) => {
+            let Some(affects) = args.affects.as_deref() else {
+                return usage_err(
+                    "`stress add` names where the pressure lands: archi stress add <title> \
+                     --affects <A,B,...>",
+                );
+            };
+            let affects: Vec<String> = affects
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            match docs::mint::stress_add(&root, title, &affects) {
+                Ok(path) => {
+                    println!(
+                        "minted {} — write the pressure, Attractor, and the verdict when \
+                         the round decides",
+                        path.strip_prefix(&root).unwrap_or(&path).display()
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("rm"), [slug]) => match docs::mint::stress_rm(&root, slug) {
+            Ok(path) => {
+                println!("removed {}", path.strip_prefix(&root).unwrap_or(&path).display());
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e),
+        },
+        _ => usage_err(
+            "usage: archi stress open <title> | add <title> --affects <A,B,...> | rm <slug>",
+        ),
+    }
+}
+
 /// `archi sync-skills` — sync an initialized tree's briefing to this binary's
 /// copies. Locates an existing project (never creates one) and overwrites any
 /// divergent skill or CLAUDE.md block with the binary's copy, unconditionally;
@@ -2740,6 +2884,8 @@ fn guarded_route(args: &Args) -> Option<PlanHint<'_>> {
         // The audit reads — until `--prune` lets it retire journal entries.
         "link" if sub(0) == Some("audit") && args.prune => Some(PlanHint::None),
         "repo" if sub(0) == Some("map") => Some(PlanHint::None),
+        "req" if matches!(sub(0), Some("add" | "rm")) => Some(PlanHint::None),
+        "stress" if matches!(sub(0), Some("open" | "add" | "rm")) => Some(PlanHint::None),
         "plan" => match sub(0) {
             Some("use") => Some(args.positional.get(1).map_or(PlanHint::None, |n| PlanHint::Named(n))),
             Some(
@@ -2759,6 +2905,12 @@ fn guarded_route(args: &Args) -> Option<PlanHint<'_>> {
 }
 
 fn main() -> ExitCode {
+    // A verb piped into `head` dies of SIGPIPE like any unix tool — never
+    // of a rust panic on a closed stdout.
+    #[cfg(unix)]
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
     let argv: Vec<String> = std::env::args().skip(1).collect();
     // The standalone meta flags answer before any parsing or project
     // location — help is the asked-for output (stdout, exit 0), not the
@@ -2816,6 +2968,8 @@ fn main() -> ExitCode {
         "incidence" => run_incidence(&args),
         "version" => run_version(&args),
         "session" => run_session(&args),
+        "req" => run_req(&args),
+        "stress" => run_stress(&args),
         "link" => run_link(&args),
         "repo" => run_repo(&args),
         "worktree" => run_worktree(&args),
