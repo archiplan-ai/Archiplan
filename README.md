@@ -2,8 +2,23 @@
 
 **Turn your coding agent into a system architect**
 
-Connect Archiplan to your agent and the code it writes gets a real
-architecture behind it — stress-tested and traceable before anything ships.
+The architecture is source code — modeled, compiled, stress-tested:
+
+```
+def conn login := * ->LoginForm, <-Token *   // the form goes out, the token comes back
+
+// The service guarding the credential boundary.
+def node AuthService:
+  port handle_login   // receives the submitted credential pair
+
+def node UI:          // the human-facing client
+  port login
+
+UI.login login AuthService.handle_login
+```
+
+Rename `Token` and the build breaks at everything that names it — connections,
+requirements, code links. The spec cannot rot silently.
 
 ![](archiplan.svg)
 
