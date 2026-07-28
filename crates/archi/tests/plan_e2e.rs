@@ -91,6 +91,19 @@ fn fails(root: &Path, args: &[&str]) -> (String, String) {
     (stdout, stderr)
 }
 
+/// A verb cut from the surface is an unknown subverb: the plan usage
+/// error, exit 2 — no tombstones.
+fn usage_error(root: &Path, args: &[&str]) {
+    let out = Command::new(env!("CARGO_BIN_EXE_archi"))
+        .args(args)
+        .args(["--project", root.to_str().unwrap()])
+        .output()
+        .expect("archi runs");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "archi {args:?}:\n{err}");
+    assert!(err.contains("`plan` takes:"), "{args:?}: {err}");
+}
+
 /// Run the binary with text piped to stdin; return (success, stdout, stderr).
 fn run_stdin(root: &Path, args: &[&str], stdin: &str) -> (bool, String, String) {
     use std::io::Write;
@@ -151,16 +164,16 @@ fn the_record_folder_authors_by_editing_files() {
     assert_eq!(state_json(&root, "mvp")["state"], "draft");
     assert!(!dir.join("plan.json").exists());
 
-    // The old authoring verbs are dead on a record plan: content is the
-    // files, edited in place.
+    // The old authoring verbs are gone from the surface: a dead verb
+    // falls through to usage, exit 2 — content is the files, edited in
+    // place.
     for dead in [
         vec!["plan", "problem", "a tiny hardened store"],
         vec!["plan", "tech", "add", "Rust"],
         vec!["plan", "task", "desc", "t1", "persist rows"],
         vec!["plan", "scenarios", "add", "a user stores a row"],
     ] {
-        let (_, err) = fails(&root, &dead);
-        assert!(err.contains("its files — edit them"), "{dead:?}: {err}");
+        usage_error(&root, &dead);
     }
 
     // Tasks mint as seeded skeleton files; a byte-equal re-mint
@@ -244,6 +257,16 @@ fn the_record_folder_authors_by_editing_files() {
     let (_, err) = fails(&root, &["plan", "task", "add", "Store"]);
     assert!(err.contains("moved past its skeleton"), "{err}");
 
+    // `task rm` unmints a leaf — the file is gone; a producer some task
+    // inputs is held in place, the dependents named.
+    ok(&root, &["plan", "task", "add", "Gate"]);
+    assert!(dir.join("t3-gate.md").exists());
+    let out = ok(&root, &["plan", "task", "rm", "t3"]);
+    assert!(out.contains("removed"), "{out}");
+    assert!(!dir.join("t3-gate.md").exists());
+    let (_, err) = fails(&root, &["plan", "task", "rm", "t1"]);
+    assert!(err.contains("feeds t2"), "{err}");
+
     // The read surfaces serve the files verbatim.
     let show = ok(&root, &["plan", "show"]);
     assert!(show.contains("problem: a tiny hardened store"), "{show}");
@@ -268,6 +291,9 @@ fn the_record_folder_authors_by_editing_files() {
     assert_eq!(state_json(&root, "mvp")["state"], "started");
     let (_, err) = fails(&root, &["plan", "task", "add", "Gate"]);
     assert!(err.contains("tasks are cut in draft"), "{err}");
+    let (_, err) = fails(&root, &["plan", "task", "rm", "t2"]);
+    assert!(err.contains("past draft"), "{err}");
+    assert!(err.contains("plan reset"), "{err}");
 
     fs::remove_dir_all(&root).unwrap();
 }
@@ -279,18 +305,18 @@ fn batch_runs_the_mint_verbs_and_stops_at_the_first_failure() {
 
     // One invocation mints the plan and its tasks: comments and blank
     // lines are skipped, CRLF tolerated, `--project` is forwarded to
-    // every line. The dead authoring verb stops the batch exactly there.
+    // every line. The failing mint stops the batch exactly there.
     let script = "# the record plan in one call\r\n\
                   plan use mvp\n\
                   plan task add Store\n\
                   \n\
                   plan task add Auth\n\
-                  plan problem \"a tiny hardened store\"\n\
+                  plan task add Nope\n\
                   plan task add Gate\n";
     let (success, out, err) = run_stdin(&root, &["batch"], script);
     assert!(!success, "{out}");
     assert!(err.contains("batch stopped at line 6"), "{err}");
-    assert!(err.contains("its files — edit them"), "{err}");
+    assert!(err.contains("E_MODEL_REF"), "{err}");
     assert!(out.contains("[3] plan task add Auth"), "the lines before it ran: {out}");
 
     // Everything before the stop is applied; nothing after existed.
@@ -495,10 +521,10 @@ fn a_legacy_plan_json_reads_forever_and_its_lifecycle_verbs_advance_it() {
     assert!(ok(&root, &["plan", "status"]).contains("plan `mvp` @ v0001 (draft)"));
     assert!(ok(&root, &["plan", "show"]).contains("problem: kept as it was"));
 
-    // The form only shrinks: authoring and mint verbs refuse.
-    let (_, err) = fails(&root, &["plan", "problem", "no more"]);
-    assert!(err.contains("legacy plan.json is read-only"), "{err}");
+    // The form only shrinks: the mint verbs refuse.
     let (_, err) = fails(&root, &["plan", "task", "add", "Auth"]);
+    assert!(err.contains("legacy plan.json is read-only"), "{err}");
+    let (_, err) = fails(&root, &["plan", "task", "rm", "t1"]);
     assert!(err.contains("read-only"), "{err}");
 
     // Lifecycle still moves the old form: start, next to done, reset —
