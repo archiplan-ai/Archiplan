@@ -100,10 +100,10 @@ unknown producers and cycles. Analyze the graph:
 
 The folder is the plan: the charter `<name>.md` (envelope), one
 `t<N>-<node-slug>.md` per task, `scenarios.md`, and `state.json` —
-lifecycle only, moved by verbs, never edited. Two verbs mint and retire
-the task files; every slot inside the records is filled by editing the
-files, and `plan verify` (Step 5) is the worklist that holds them
-together.
+lifecycle only, moved by verbs, never edited. `plan use` mints the
+folder, `plan task add` mints a task file, `plan task rm` retires one;
+every slot inside the records is filled by editing the files, and
+`plan verify` (Step 5) is the worklist that holds them together.
 
 Mint the skeletons with the two verbs — the folder once, a file per
 task:
@@ -276,7 +276,7 @@ back):
 ```
 
 One flow is one bullet on one line — the record bullets (here and in the
-task files) do not wrap.
+task files) do not wrap. Removing a scenario is deleting its bullet.
 
 Walk the architecture as a user and enumerate every distinct user-visible
 flow the product promises, one sentence each. They are not linked to
