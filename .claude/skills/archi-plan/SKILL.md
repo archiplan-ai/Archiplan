@@ -112,9 +112,7 @@ offending line named. Mint the whole skeleton set in one call:
 ```
 archi batch - <<'EOF'
 plan use tiny-store
-plan task add Types --desc "the shared Row schema"
-plan task add Store --desc "persist rows encrypted"
-plan task add API --desc "the read/write surface"
+plan task add Store --desc "persist rows"
 EOF
 ```
 
@@ -133,20 +131,17 @@ before the first section; then two bullet sections —
 ```markdown
 # tiny-store
 
-A tiny hardened store: rows persist encrypted, served over HTTP.
+a tiny hardened store
 
 ## Stack
 
 - Rust — user choice
-- <engine> — decision `<slug>`
-- <test framework> — the user's answer
+- <technology> — <where the choice came from: a user answer, a spec decision, a stressor's outcome>
 
 ## Architecture
 
-- `Store` — persists and encrypts the rows
-- `API` — the read/write surface
-- `Store` realizes <engine>
-- `API` realizes Rust
+- `<node>` — <one-line role>
+- `<node>` realizes <which concrete tech realizes it>
 ```
 
 A stack bullet is the technology, ` — `, and its provenance — where the
@@ -180,37 +175,36 @@ form. Everything else is authored by editing the file:
 
 ```markdown
 ---
-node: API
-owns: [rows-served]
+node: Store
+owns: [store-encrypted]
 ---
 
-# t3 — API
+# t1 — Store
 
-The HTTP surface over the store: one handler per verb.
+persist rows
 
 ## Spec
 
-- `API`
-- `UI.send request(Row) API.write`
+- `Store`
+- `<node_or_canonical_edge>`
 
 ## Inputs
 
-- from t1 — the Row schema and the storage trait
-- from t2 — the Store constructor the router holds
+- from <producer_task_id> — <concrete artifact that flows in>
 
 ## Outputs
 
-- src/api.rs
+- <relative/path>
 
 ## Stack
 
-- <the specific library / API / pattern / path>
+- <specific library / API / pattern / path>
 
 ## Verifications
 
-### rows-served
+### store-encrypted
 
-- test — POST then GET round-trips a row, in the user's test runner
+- test — rows encrypted at rest
 ```
 
 - `## Spec` — one backticked canonical ref per bullet. The seed is
@@ -281,7 +275,7 @@ back):
 ```markdown
 # Scenarios
 
-- A user writes a row over HTTP and reads it back decrypted — needs the compose db service.
+- <one user-visible flow>
 ```
 
 One flow is one bullet on one line — the record bullets (here and in the
