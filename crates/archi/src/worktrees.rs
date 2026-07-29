@@ -661,6 +661,21 @@ fn plan_cascade(
                 ));
                 continue;
             }
+            // A reachable baseline behind the branch proceeds — continuing
+            // an older pinned version is legitimate — but says how far, so
+            // fresh work anchors first instead of inheriting a foreign
+            // delta window. Only this auto arm speaks: an explicit `--base`
+            // and the attach path are the caller's own choice.
+            if let Some(n) = git_out(&repo_top, &["rev-list", "--count", &format!("{sha}..{refname}")])
+                && n.parse::<u64>().unwrap_or(0) > 0
+            {
+                println!(
+                    "note: member {name}: baseline {} is {n} commit(s) behind `{b}` — \
+                     continuing an older pinned version; fresh work anchors first \
+                     (`archi version anchor --repo {name}`)",
+                    &sha[..sha.len().min(7)]
+                );
+            }
             b
         };
         let target = default_worktree_dir(&repo_top, slug);
@@ -766,11 +781,15 @@ pub fn merge(
         ));
     }
     let branch = binding.branch.clone();
+    // The project's offset below the git top — the seat keeps it, so the
+    // seat's project root is the worktree plus the same offset.
+    let rel = root.strip_prefix(&top).unwrap_or(Path::new(""));
+    let seat_project =
+        if rel.as_os_str().is_empty() { wt_path.clone() } else { wt_path.join(rel) };
     // A seat lands only after its plan closes: work mid-wave never merges.
     // Spec-only seats (no plan) land freely.
     if let Some(plan_name) = &binding.plan {
-        let rel = root.strip_prefix(&top).unwrap_or(Path::new(""));
-        if let Ok(plans) = crate::plans::all_plans(&wt_path.join(rel)) {
+        if let Ok(plans) = crate::plans::all_plans(&seat_project) {
             if let Some(p) = plans.iter().find(|p| &p.name == plan_name) {
                 if p.state != crate::plans::PlanState::Completed {
                     return Err(format!(
@@ -796,6 +815,47 @@ pub fn merge(
                      `archi worktree merge {handle} --to <branch>`"
                 ));
             }
+        }
+    }
+
+    // The landed archive is what every future unit inherits, so the gate
+    // runs on both paths — the local merge and `--to` alike: while any
+    // member's worktree tip is not the baseline the seat's latest version
+    // records, refuse before anything pushes or merges, every stale member
+    // batched into the one message with its repair
+    // (archi/requirements/worktree-parallelism/a-landing-carries-fresh-baselines.md).
+    if !binding.members.is_empty() {
+        let baselines: BTreeMap<String, String> = crate::versions::Archive::open(&seat_project)?
+            .and_then(|a| {
+                a.entries().last().map(|e| {
+                    e.commits.iter().map(|(k, b)| (k.clone(), b.sha.clone())).collect()
+                })
+            })
+            .unwrap_or_default();
+        fn short(s: &str) -> &str {
+            &s[..s.len().min(7)]
+        }
+        let stale: Vec<String> = binding
+            .members
+            .iter()
+            .filter_map(|(name, m)| {
+                // an unreadable member worktree is the push loop's refusal
+                // to make, not a staleness verdict
+                let tip = git_out(&m.path, &["rev-parse", "HEAD"])?;
+                let recorded = baselines.get(name.as_str());
+                (recorded.map(String::as_str) != Some(tip.as_str())).then(|| {
+                    format!(
+                        "member {name}: worktree tip {} is past the recorded baseline {} — \
+                         `archi version anchor --repo {name} --project {}`, then re-run the merge",
+                        short(&tip),
+                        recorded.map_or("none", |s| short(s)),
+                        seat_project.display()
+                    )
+                })
+            })
+            .collect();
+        if !stale.is_empty() {
+            return Err(stale.join("\n"));
         }
     }
 
@@ -876,8 +936,7 @@ pub fn merge(
     // dangling entry pointing at nothing.
     let mut retired = false;
     if !matches!(spec, RepoOutcome::Conflict { .. }) && members_clear {
-        let rel = root.strip_prefix(&top).unwrap_or(Path::new(""));
-        scrub_seat(&wt_path.join(rel));
+        scrub_seat(&seat_project);
         worktree_remove(&top, &wt_path, false).map_err(|e| {
             format!("{e}\nthe worktree keeps its binding; commit or clean it, then re-run")
         })?;

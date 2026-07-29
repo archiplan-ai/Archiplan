@@ -72,6 +72,14 @@ fn ok(root: &Path, args: &[&str]) -> String {
     stdout
 }
 
+fn head(dir: &Path) -> String {
+    let out = Command::new("git")
+        .args(["-C", dir.to_str().unwrap(), "rev-parse", "HEAD"])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
 /// Run a save on `main` the disciplined way: a bootstrap seat maps the
 /// members, saves, commits, and merges back — mutations never run unbound,
 /// and the retire leaves the registry empty.
@@ -397,13 +405,24 @@ fn the_cascade_mints_member_worktrees_and_the_seat_overlay() {
     assert!(ls.contains("member backend:"), "{ls}");
     assert!(ls.contains("(base main) — ok"), "{ls}");
 
-    // Close: member work goes by push, spec by local merge, all retired.
+    // Close, the contract's way: the spec saves mid-unit while member code
+    // is in flight (the save names the omission), the member commits, the
+    // seat anchors the fresh tip — then member work goes by push, spec by
+    // local merge, all retired.
     fs::write(bwt.join("src/lib.rs"), "pub fn serve() { /* new */ }\n").unwrap();
-    git(&bwt, &["add", "-A"]);
-    git(&bwt, &["commit", "-qm", "member work"]);
-    fs::write(wt.join("notes.md"), "spec work\n").unwrap();
+    fs::write(
+        wt.join("archi/src/model.arch"),
+        format!("{MODEL}def node Audit:\n  port log\n"),
+    )
+    .unwrap();
+    ok(&wt, &["version", "save", "-m", "unit spec work"]);
     git(&wt, &["add", "-A"]);
     git(&wt, &["commit", "-qm", "spec work"]);
+    git(&bwt, &["add", "-A"]);
+    git(&bwt, &["commit", "-qm", "member work"]);
+    ok(&wt, &["version", "anchor", "--repo", "backend"]);
+    git(&wt, &["add", "-A"]);
+    git(&wt, &["commit", "-qm", "baseline anchored"]);
     let out = ok(&spec, &["worktree", "merge", "feat"]);
     assert!(out.contains("member backend: pushed"), "{out}");
     assert!(out.contains("merged archi/feat"), "{out}");
@@ -416,6 +435,125 @@ fn the_cascade_mints_member_worktrees_and_the_seat_overlay() {
         .unwrap();
     let heads = String::from_utf8_lossy(&heads.stdout).into_owned();
     assert!(heads.contains("archi/feat"), "the member branch reached the remote: {heads}");
+}
+
+#[test]
+fn an_unanchored_member_refuses_the_landing_until_the_seat_anchors() {
+    let (ws, spec, backend) = cascade_repo("anchor-gate");
+    let bare = ws.join("origin.git");
+    git(&ws, &["init", "-q", "--bare", bare.to_str().unwrap()]);
+    git(&backend, &["remote", "add", "origin", bare.to_str().unwrap()]);
+    ok(&spec, &["worktree", "mint", "feat", "--repos", "backend"]);
+    let wt = spec.parent().unwrap().join("spec-worktrees/feat");
+    let bwt = backend.parent().unwrap().join("backend-worktrees/feat");
+
+    // The unit's shape: member code in flight while the spec saves — the
+    // fresh version records no backend baseline — then the member commits.
+    fs::write(bwt.join("src/lib.rs"), "pub fn serve() { /* grown */ }\n").unwrap();
+    fs::write(
+        wt.join("archi/src/model.arch"),
+        format!("{MODEL}def node Audit:\n  port log\n"),
+    )
+    .unwrap();
+    ok(&wt, &["version", "save", "-m", "unit spec work"]);
+    git(&wt, &["add", "-A"]);
+    git(&wt, &["commit", "-qm", "spec work"]);
+    git(&bwt, &["add", "-A"]);
+    git(&bwt, &["commit", "-qm", "member work"]);
+    let tip = head(&bwt);
+
+    // The landing refuses before anything pushes or merges, naming the
+    // member and the repair.
+    let (success, _out, err) = run(&spec, &["worktree", "merge", "feat"]);
+    assert!(!success, "un-anchored member work never lands");
+    assert!(
+        err.contains(&format!("member backend: worktree tip {}", &tip[..7])),
+        "{err}"
+    );
+    assert!(err.contains("is past the recorded baseline none"), "{err}");
+    assert!(err.contains("archi version anchor --repo backend --project"), "{err}");
+    assert!(err.contains(wt.to_str().unwrap()), "the recipe names the seat: {err}");
+    assert!(err.contains("then re-run the merge"), "{err}");
+    assert!(bwt.is_dir(), "nothing pushed, nothing retired");
+
+    // The repair: the seat is bound so anchor passes the guard, and the
+    // member resolves through the seat overlay to the member worktree.
+    let out = ok(&wt, &["version", "anchor", "--repo", "backend"]);
+    assert!(out.contains(&format!("baseline backend at {tip}")), "{out}");
+    git(&wt, &["add", "-A"]);
+    git(&wt, &["commit", "-qm", "baseline anchored"]);
+    let out = ok(&spec, &["worktree", "merge", "feat"]);
+    assert!(out.contains("member backend: pushed"), "{out}");
+    assert!(out.contains("retired"), "{out}");
+    assert!(!bwt.exists(), "anchored, landed, retired");
+}
+
+#[test]
+fn the_to_landing_runs_the_same_baseline_gate() {
+    let (ws, spec, backend) = cascade_repo("to-gate");
+    let bare = ws.join("origin.git");
+    git(&ws, &["init", "-q", "--bare", bare.to_str().unwrap()]);
+    git(&backend, &["remote", "add", "origin", bare.to_str().unwrap()]);
+    let recorded = head(&backend);
+    ok(&spec, &["worktree", "mint", "feat", "--repos", "backend"]);
+    let wt = spec.parent().unwrap().join("spec-worktrees/feat");
+    let bwt = backend.parent().unwrap().join("backend-worktrees/feat");
+    fs::write(bwt.join("note.txt"), "work\n").unwrap();
+    git(&bwt, &["add", "-A"]);
+    git(&bwt, &["commit", "-qm", "member work"]);
+    let tip = head(&bwt);
+
+    // `--to` protects the same archive: the gate refuses before the
+    // sideways landing touches anything.
+    let (success, _out, err) = run(&spec, &["worktree", "merge", "feat", "--to", "feat/x"]);
+    assert!(!success, "a stale baseline never lands sideways either");
+    assert!(err.contains(&format!("worktree tip {}", &tip[..7])), "{err}");
+    assert!(
+        err.contains(&format!("is past the recorded baseline {}", &recorded[..7])),
+        "{err}"
+    );
+    assert!(err.contains("archi version anchor --repo backend"), "{err}");
+    let verify = Command::new("git")
+        .args(["-C", spec.to_str().unwrap(), "rev-parse", "--verify", "refs/heads/feat/x"])
+        .output()
+        .unwrap();
+    assert!(!verify.status.success(), "the refusal precedes the landing branch");
+    assert!(bwt.is_dir(), "the member stays");
+
+    // The same recipe repairs a recorded-but-stale mark: the moved clean
+    // member re-anchors the latest version, saying where the mark stood.
+    let out = ok(&wt, &["version", "anchor", "--repo", "backend"]);
+    assert!(
+        out.contains(&format!("re-anchored v0001: baseline backend at {tip}")),
+        "{out}"
+    );
+    assert!(out.contains(&format!("(was {}; anchor-born", &recorded[..7])), "{out}");
+    git(&wt, &["add", "-A"]);
+    git(&wt, &["commit", "-qm", "baseline re-anchored"]);
+    let out = ok(&spec, &["worktree", "merge", "feat", "--to", "feat/x"]);
+    assert!(out.contains("member backend: pushed"), "{out}");
+    assert!(out.contains("landed archi/feat on new branch feat/x"), "{out}");
+    assert!(out.contains("retired"), "{out}");
+    assert!(!bwt.exists(), "re-anchored, landed sideways, retired");
+}
+
+#[test]
+fn a_stale_but_reachable_auto_base_notes_how_far_behind() {
+    let (_ws, spec, backend) = cascade_repo("behind");
+    let baseline = head(&backend);
+    // the member's branch advances past the recorded baseline — still an
+    // ancestor: continuing the older pinned version is legitimate
+    git(&backend, &["commit", "-qm", "ahead", "--allow-empty"]);
+
+    let out = ok(&spec, &["worktree", "mint", "feat", "--repos", "backend"]);
+    assert!(
+        out.contains(&format!("note: member backend: baseline {}", &baseline[..7])),
+        "{out}"
+    );
+    assert!(out.contains("is 1 commit(s) behind `main`"), "{out}");
+    assert!(out.contains("archi version anchor --repo backend"), "{out}");
+    // the mint proceeded — the note informs, never refuses
+    assert!(backend.parent().unwrap().join("backend-worktrees/feat").is_dir());
 }
 
 #[test]
@@ -471,6 +609,7 @@ fn a_baseline_off_the_branch_refuses_with_the_base_escape() {
     let out = ok(&spec, &["worktree", "mint", "feat", "--repos", "backend", "--base", "backend=main"]);
     assert!(out.contains("member backend:"), "{out}");
     assert!(out.contains("(base main)"), "{out}");
+    assert!(!out.contains("behind"), "an explicit --base stays silent: {out}");
 }
 
 #[test]
@@ -515,10 +654,25 @@ fn a_partial_cascade_rolls_back_whole() {
 fn a_refused_push_keeps_the_member_until_repaired() {
     let (ws, spec, backend) = cascade_repo("push-refused");
     ok(&spec, &["worktree", "mint", "feat", "--repos", "backend"]);
+    let wt = spec.parent().unwrap().join("spec-worktrees/feat");
     let bwt = backend.parent().unwrap().join("backend-worktrees/feat");
+    // member work lands the contract's way — save mid-flight, commit,
+    // anchor in the seat — so the landing gate passes and the push itself
+    // is what refuses below
     fs::write(bwt.join("note.txt"), "work\n").unwrap();
+    fs::write(
+        wt.join("archi/src/model.arch"),
+        format!("{MODEL}def node Extra:\n  port x\n"),
+    )
+    .unwrap();
+    ok(&wt, &["version", "save", "-m", "unit"]);
+    git(&wt, &["add", "-A"]);
+    git(&wt, &["commit", "-qm", "unit"]);
     git(&bwt, &["add", "-A"]);
     git(&bwt, &["commit", "-qm", "work"]);
+    ok(&wt, &["version", "anchor", "--repo", "backend"]);
+    git(&wt, &["add", "-A"]);
+    git(&wt, &["commit", "-qm", "baseline anchored"]);
 
     // no remote: the push refuses, the member stays bound, nothing retires
     let (success, out, _err) = run(&spec, &["worktree", "merge", "feat"]);

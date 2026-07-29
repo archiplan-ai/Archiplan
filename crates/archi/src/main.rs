@@ -806,6 +806,15 @@ fn run_version(args: &Args) -> ExitCode {
                     }
                     ExitCode::SUCCESS
                 }
+                Ok(versions::Anchored::Reanchored { id, commit, was }) => {
+                    let member = args.repo.as_deref().expect("only --repo re-anchors");
+                    println!(
+                        "re-anchored {id}: baseline {member} at {commit} (was {}; anchor-born — \
+                         the span since the save is unaudited)",
+                        &was[..was.len().min(7)]
+                    );
+                    ExitCode::SUCCESS
+                }
                 Ok(versions::Anchored::Already { id, commit }) => {
                     match args.repo.as_deref() {
                         Some(member) => {
