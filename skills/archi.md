@@ -278,6 +278,14 @@ published version; the default unit rides one seat and lands once.
    is never accepted silently. One decision may sign several accepted
    stressors.
 
+   **Scope in a multi-repo model.** When the user's ask named a specific
+   repository and a stressor's answer reaches into other members, never
+   widen silently: put one question through the poll tool, two options —
+   **extend the work to those repos**, or **stay on the user's rails**.
+   Declined scope is still recorded — a derived requirement with
+   `--deferred <reason>` — never a quiet model edit or seat extension
+   for a repo the user did not name.
+
    A decision is one file under `archi/decisions/` (flat, filename = the
    slugged name), the sole carrier of axes:
 
