@@ -341,7 +341,10 @@ published version; the default unit rides one seat and lands once.
    incomplete.
 
    Repeat 4–6 until a round survives — that version is the hardened
-   spec.
+   spec. After that final `version save`, put one question to the user
+   through the poll tool, two options: **commit the spec work now** on
+   the seat's branch — or **leave the tree as it is**. Never commit
+   unasked.
 7. **Plan** — the `archi-plan` skill: the envelope with a user-polled
    stack and its infrastructure, tasks per node, requirement ownership,
    named verifications, scenarios. `plan use` refuses on an unsaved
