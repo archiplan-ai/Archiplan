@@ -4,10 +4,11 @@ version = 4
 
 [[package]]
 name = "archi"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "ascii-dag",
  "diffy",
+ "libc",
  "modeling-lang",
  "serde",
  "serde_json",

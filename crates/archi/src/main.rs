@@ -27,8 +27,8 @@
 //! archi link repin <id> [--to <file[#symbol]>]
 //! archi link capture --task <TASK> [--json]
 //! archi link audit [--scope <path>] [--since <rev>] [--prune] [--json]
-//! archi plan use <name> | repin | show [--json] | verify [--json]
-//! archi plan task add <node> [--desc <text>]
+//! archi plan use <name> | repin | show [<name>] [--json] | verify [--json]
+//! archi plan task add <node> [--desc <text>] | rm <id>
 //! archi plan start | next | current-wave | close | reset
 //! archi read  [<request.json> | -] [--at <id>]
 //! archi query [--scope <path>]... [--type <path>]... [--kind <k>]... [--view <v>]...
@@ -93,6 +93,11 @@ const USAGE: &str = "usage:
   archi version current [--project <dir>]
   archi session fold <slug> -m <note> [--keep theirs] [--project <dir>]
   archi session fold <loser> --into <winner> -m <note> [--project <dir>]
+  archi req add <title> --intent <folder> --kind functional|non-functional --origin 'intent|stressor(<slug>)' [--deferred <reason>] [--project <dir>]
+  archi req rm <slug> [--project <dir>]
+  archi stress open <title> [--project <dir>]
+  archi stress add <title> --affects <A,B,...> [--project <dir>]
+  archi stress rm <slug> [--project <dir>]
   archi link add <spec[@ver]> <file[#symbol]> --kind literal|indirect [--project <dir>]
   archi link ls [--spec <ref>] [--evidence] [--json] [--project <dir>]
   archi link verify [--spec <ref>] [--since [<member>=]<rev>] [--repo <member>] [--json] [--project <dir>]
@@ -108,15 +113,10 @@ const USAGE: &str = "usage:
   archi worktree ls [--plan <slug>] [--spec <effort>] [--json] [--project <dir>]
   archi worktree drop <slug|path> [--project <dir>]
   archi worktree merge <slug|path> [--to [<member>=]<branch>]... [--project <dir>]
-  archi plan use <name> | repin | show [--json] | verify [--json] | list | status [--project <dir>]
-  archi plan problem <text> | tech add <tech> [--provenance <why>] [--project <dir>]
-  archi plan architecture-summary add <node> <role> | stack-mapping add <node> <tech> [--project <dir>]
-  archi plan scenarios add <text> | list | remove <index> [--project <dir>]
-  archi plan task add <node> [--desc <text>] | desc <id> <text> | show <id> [--project <dir>]
-  archi plan task stack-detail add <id> <text> | spec-ref add <id> <ref> [--project <dir>]
-  archi plan task input add <id> <note> --from <producer> | output add <id> <path> [--project <dir>]
-  archi plan task req suggest <id> | add <id> <req|slot> | remove <id> <req> | req-list <id> [--project <dir>]
-  archi plan task verification add <id> <req|slot> <text> | remove <id> <req|slot> [<n>] [--project <dir>]
+  archi plan use <name> | repin | show [<name>] [--json] | verify [--json] | list | status [--project <dir>]
+  archi plan task add <node> [--desc <text>] | rm <id> | show <id> [--project <dir>]
+  archi plan task req suggest <id> | req-list <id> [--project <dir>]
+  archi plan scenarios list [--project <dir>]
   archi plan start | next | current-wave | close | reset [--project <dir>]
   archi read [<request.json> | -] [--at <id>] [--project <dir>]
   archi query [--scope <path>]... [--type <path>]... [--kind <k>]... [--view <v>]...
@@ -167,6 +167,10 @@ struct Args {
     into: Option<String>,
     keep: Option<String>,
     task: Option<String>,
+    intent: Option<String>,
+    origin: Option<String>,
+    deferred: Option<String>,
+    affects: Option<String>,
     repo: Option<String>,
     desc: Option<String>,
     at: Option<String>,
@@ -185,8 +189,6 @@ struct Args {
     base: Vec<String>,
     to_many: Vec<String>,
     plan_flag: Option<String>,
-    provenance: Option<String>,
-    from_task: Option<String>,
     positional: Vec<String>,
 }
 
@@ -234,6 +236,10 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         into: None,
         keep: None,
         task: None,
+        intent: None,
+        origin: None,
+        deferred: None,
+        affects: None,
         repo: None,
         desc: None,
         at: None,
@@ -252,8 +258,6 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         base: Vec::new(),
         to_many: Vec::new(),
         plan_flag: None,
-        provenance: None,
-        from_task: None,
         positional: Vec::new(),
     };
     let mut it = argv.iter().peekable();
@@ -305,6 +309,10 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--since" => args.since = Some(value(&mut it, "--since")?),
             "--evidence" => args.evidence = true,
             "--yes" => args.yes = true,
+            "--intent" => args.intent = Some(value(&mut it, "--intent")?),
+            "--origin" => args.origin = Some(value(&mut it, "--origin")?),
+            "--deferred" => args.deferred = Some(value(&mut it, "--deferred")?),
+            "--affects" => args.affects = Some(value(&mut it, "--affects")?),
             "--prune" => args.prune = true,
             "--details" => args.details = true,
             "--max-nodes" => args.max_nodes = Some(int(value(&mut it, "--max-nodes")?, "--max-nodes")?),
@@ -318,8 +326,6 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--repos" => args.repos = Some(value(&mut it, "--repos")?),
             "--base" => args.base.push(value(&mut it, "--base")?),
             "--plan" => args.plan_flag = Some(value(&mut it, "--plan")?),
-            "--provenance" => args.provenance = Some(value(&mut it, "--provenance")?),
-            "--from" => args.from_task = Some(value(&mut it, "--from")?),
             "--into" => args.into = Some(value(&mut it, "--into")?),
             "--keep" => args.keep = Some(value(&mut it, "--keep")?),
             "--task" => args.task = Some(value(&mut it, "--task")?),
@@ -327,7 +333,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--desc" => args.desc = Some(value(&mut it, "--desc")?),
             // `link` reads the singular `--kind literal|indirect`; the
             // incidence filter keeps the repeatable list.
-            "--kind" if args.verb == "link" => {
+            "--kind" if args.verb == "link" || args.verb == "req" => {
                 args.kind_flag = Some(value(&mut it, "--kind")?)
             }
             "--kind" => args.kind.push(value(&mut it, "--kind")?),
@@ -354,6 +360,8 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
                     | "plan"
                     | "read"
                     | "session"
+                    | "req"
+                    | "stress"
                     | "search"
                     | "init"
                     | "repo"
@@ -796,6 +804,15 @@ fn run_version(args: &Args) -> ExitCode {
                         ),
                         None => println!("anchored {id} at commit {commit}"),
                     }
+                    ExitCode::SUCCESS
+                }
+                Ok(versions::Anchored::Reanchored { id, commit, was }) => {
+                    let member = args.repo.as_deref().expect("only --repo re-anchors");
+                    println!(
+                        "re-anchored {id}: baseline {member} at {commit} (was {}; anchor-born — \
+                         the span since the save is unaudited)",
+                        &was[..was.len().min(7)]
+                    );
                     ExitCode::SUCCESS
                 }
                 Ok(versions::Anchored::Already { id, commit }) => {
@@ -1803,54 +1820,13 @@ fn run_plan(args: &Args) -> ExitCode {
                 Err(e) => fail(e),
             }
         }
-        (Some("task"), [desc, id, text]) if desc == "desc" => {
-            match plans::task_desc(&root, id, text) {
-                Ok(()) => {
-                    println!("{id} described");
-                    ExitCode::SUCCESS
-                }
-                Err(e) => fail(e),
+        (Some("task"), [rm, id]) if rm == "rm" => match plans::task_rm(&root, id) {
+            Ok(path) => {
+                println!("removed {}", path.strip_prefix(&root).unwrap_or(&path).display());
+                ExitCode::SUCCESS
             }
-        }
-        (Some("task"), [sd, add, id, text]) if sd == "stack-detail" && add == "add" => {
-            match plans::task_stack_detail_add(&root, id, text) {
-                Ok(()) => {
-                    println!("{id} stack + {text}");
-                    ExitCode::SUCCESS
-                }
-                Err(e) => fail(e),
-            }
-        }
-        (Some("task"), [input, add, id, note]) if input == "input" && add == "add" => {
-            let Some(from) = args.from_task.as_deref() else {
-                return usage_err("`task input add` names its producer: --from <task_id>");
-            };
-            match plans::task_input_add(&root, id, from, note) {
-                Ok(()) => {
-                    println!("{id} ← {from}: {note}");
-                    ExitCode::SUCCESS
-                }
-                Err(e) => fail(e),
-            }
-        }
-        (Some("task"), [output, add, id, path]) if output == "output" && add == "add" => {
-            match plans::task_output_add(&root, id, path) {
-                Ok(()) => {
-                    println!("{id} output + {path}");
-                    ExitCode::SUCCESS
-                }
-                Err(e) => fail(e),
-            }
-        }
-        (Some("task"), [sr, add, id, r]) if sr == "spec-ref" && add == "add" => {
-            match plans::task_spec_ref_add(&root, id, r) {
-                Ok(()) => {
-                    println!("{id} spec_ref + {r}");
-                    ExitCode::SUCCESS
-                }
-                Err(e) => fail(e),
-            }
-        }
+            Err(e) => fail(e),
+        },
         (Some("task"), [req, suggest, id]) if req == "req" && suggest == "suggest" => {
             let ws = match live_model() {
                 Ok(ws) => ws,
@@ -1876,28 +1852,6 @@ fn run_plan(args: &Args) -> ExitCode {
                     if !any {
                         println!("no candidates — the task's elements carry no requirements");
                     }
-                    ExitCode::SUCCESS
-                }
-                Err(e) => fail(e),
-            }
-        }
-        (Some("task"), [req, add, id, handle]) if req == "req" && add == "add" => {
-            let ws = match live_model() {
-                Ok(ws) => ws,
-                Err(code) => return code,
-            };
-            match plans::own_add(&root, ws.model(), id, handle) {
-                Ok(slug) => {
-                    println!("{id} owns {slug}");
-                    ExitCode::SUCCESS
-                }
-                Err(e) => fail(e),
-            }
-        }
-        (Some("task"), [req, remove, id, handle]) if req == "req" && remove == "remove" => {
-            match plans::own_remove(&root, id, handle) {
-                Ok(slug) => {
-                    println!("{id} disowned {slug} (its verifications went with it)");
                     ExitCode::SUCCESS
                 }
                 Err(e) => fail(e),
@@ -1929,43 +1883,6 @@ fn run_plan(args: &Args) -> ExitCode {
                             if proofs == 1 { "" } else { "s" }
                         );
                     }
-                    ExitCode::SUCCESS
-                }
-                Err(e) => fail(e),
-            }
-        }
-        (Some("task"), [verification, add, id, handle, text])
-            if verification == "verification" && add == "add" =>
-        {
-            let ws = match live_model() {
-                Ok(ws) => ws,
-                Err(code) => return code,
-            };
-            match plans::verification_add(&root, ws.model(), id, handle, text) {
-                Ok(slug) => {
-                    println!("{id} {slug} verify + {text}");
-                    ExitCode::SUCCESS
-                }
-                Err(e) => fail(e),
-            }
-        }
-        (Some("task"), [verification, remove, id, handle, rest @ ..])
-            if verification == "verification" && remove == "remove" && rest.len() <= 1 =>
-        {
-            let index = match rest.first() {
-                None => None,
-                Some(n) => match n.parse::<usize>() {
-                    Ok(i) => Some(i),
-                    Err(_) => return usage_err("`verification remove` takes a 1-based index"),
-                },
-            };
-            let ws = match live_model() {
-                Ok(ws) => ws,
-                Err(code) => return code,
-            };
-            match plans::verification_remove(&root, ws.model(), id, handle, index) {
-                Ok(slug) => {
-                    println!("{id} {slug} verification removed");
                     ExitCode::SUCCESS
                 }
                 Err(e) => fail(e),
@@ -2011,12 +1928,16 @@ fn run_plan(args: &Args) -> ExitCode {
                 Err(e) => fail(e),
             }
         }
-        (Some("show"), []) => {
+        (Some("show"), tail @ ([] | [_])) => {
             let ws = match live_model() {
                 Ok(ws) => ws,
                 Err(code) => return code,
             };
-            match plans::show(&root, ws.model()) {
+            let shown = match tail.first() {
+                Some(name) => plans::show_named(&root, ws.model(), name),
+                None => plans::show(&root, ws.model()),
+            };
+            match shown {
                 Ok((plan, report)) => {
                     if args.json {
                         println!(
@@ -2120,50 +2041,6 @@ fn run_plan(args: &Args) -> ExitCode {
                 Err(e) => fail(e),
             }
         }
-        (Some("problem"), [text]) => match plans::set_problem(&root, text) {
-            Ok(()) => {
-                println!("problem set");
-                ExitCode::SUCCESS
-            }
-            Err(e) => fail(e),
-        },
-        (Some("tech"), [add, tech]) if add == "add" => {
-            let prov = args.provenance.clone().unwrap_or_default();
-            match plans::tech_add(&root, tech, &prov) {
-                Ok(()) => {
-                    println!("stack + {tech}");
-                    ExitCode::SUCCESS
-                }
-                Err(e) => fail(e),
-            }
-        }
-        (Some("architecture-summary"), [add, node, role]) if add == "add" => {
-            match plans::summary_add(&root, node, role) {
-                Ok(()) => {
-                    println!("summary + {node}");
-                    ExitCode::SUCCESS
-                }
-                Err(e) => fail(e),
-            }
-        }
-        (Some("stack-mapping"), [add, node, tech]) if add == "add" => {
-            match plans::mapping_add(&root, node, tech) {
-                Ok(()) => {
-                    println!("mapping + {tech} realizes {node}");
-                    ExitCode::SUCCESS
-                }
-                Err(e) => fail(e),
-            }
-        }
-        (Some("scenarios"), [add, text]) if add == "add" => {
-            match plans::scenarios_add(&root, text) {
-                Ok(()) => {
-                    println!("scenario added");
-                    ExitCode::SUCCESS
-                }
-                Err(e) => fail(e),
-            }
-        }
         (Some("scenarios"), [list]) if list == "list" => match plans::load_active(&root) {
             Ok(p) => {
                 if p.scenarios.is_empty() {
@@ -2176,18 +2053,6 @@ fn run_plan(args: &Args) -> ExitCode {
             }
             Err(e) => fail(e),
         },
-        (Some("scenarios"), [remove, idx]) if remove == "remove" => {
-            let Ok(i) = idx.parse::<usize>() else {
-                return usage_err("`scenarios remove` takes the 1-based index from `list`");
-            };
-            match plans::scenarios_remove(&root, i) {
-                Ok(s) => {
-                    println!("removed: {s}");
-                    ExitCode::SUCCESS
-                }
-                Err(e) => fail(e),
-            }
-        }
         (Some("list"), []) => match plans::all_plans(&root) {
             Ok(all) => {
                 if all.is_empty() {
@@ -2229,10 +2094,8 @@ fn run_plan(args: &Args) -> ExitCode {
             Err(e) => fail(e),
         },
         _ => usage_err(
-            "`plan` takes: use <name> | repin | show | verify | list | status | problem | tech add | \
-             architecture-summary add | stack-mapping add | scenarios add|list|remove | \
-             task add|desc|show|stack-detail|spec-ref|input|output|req|req-list|verification | \
-             start | next | current-wave | close | reset",
+            "`plan` takes: use <name> | repin | show | verify | list | status | scenarios list | \
+             task add|rm|show|req suggest|req-list | start | next | current-wave | close | reset",
         ),
     }
 }
@@ -2260,6 +2123,131 @@ fn run_init(args: &Args) -> ExitCode {
             eprintln!("archi: {e}");
             ExitCode::from(1)
         }
+    }
+}
+
+
+/// `archi req add|rm` — requirement skeletons come from a verb: every
+/// machine field an explicit parameter, the text slots left for the
+/// author, removal pre-flighted against owning plans.
+fn run_req(args: &Args) -> ExitCode {
+    let fail = |e: String| -> ExitCode {
+        eprintln!("archi: {e}");
+        ExitCode::from(1)
+    };
+    let root = match locate_project(args) {
+        Ok(r) => r,
+        Err(e) => return usage_err(&e),
+    };
+    match (
+        args.positional.first().map(String::as_str),
+        args.positional.get(1..).unwrap_or_default(),
+    ) {
+        (Some("add"), [title]) => {
+            let (Some(intent), Some(kind), Some(origin)) =
+                (args.intent.as_deref(), args.kind_flag.as_deref(), args.origin.as_deref())
+            else {
+                return usage_err(
+                    "`req add` decides everything explicitly: archi req add <title> \
+                     --intent <folder> --kind functional|non-functional \
+                     --origin 'intent|stressor(<slug>)' [--deferred <reason>]",
+                );
+            };
+            match docs::mint::req_add(&root, title, intent, kind, origin, args.deferred.as_deref())
+            {
+                Ok(path) => {
+                    println!(
+                        "minted {} — fill the summary, System Context and Satisfy; \
+                         `archi check` holds the empty slots",
+                        path.strip_prefix(&root).unwrap_or(&path).display()
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("rm"), [slug]) => match docs::mint::req_rm(&root, slug) {
+            Ok(path) => {
+                println!("removed {}", path.strip_prefix(&root).unwrap_or(&path).display());
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e),
+        },
+        _ => usage_err(
+            "usage: archi req add <title> --intent <folder> --kind functional|non-functional \
+             --origin 'intent|stressor(<slug>)' [--deferred <reason>] | rm <slug>",
+        ),
+    }
+}
+
+/// `archi stress open|add|rm` — the round's records come from verbs: the
+/// charter pins the saved version, stressors land in the open round with
+/// affects resolved against its pinned version, removal never touches
+/// sealed history.
+fn run_stress(args: &Args) -> ExitCode {
+    let fail = |e: String| -> ExitCode {
+        eprintln!("archi: {e}");
+        ExitCode::from(1)
+    };
+    let root = match locate_project(args) {
+        Ok(r) => r,
+        Err(e) => return usage_err(&e),
+    };
+    match (
+        args.positional.first().map(String::as_str),
+        args.positional.get(1..).unwrap_or_default(),
+    ) {
+        (Some("open"), [title]) => {
+            let ws = match compile_or_report(&root, false) {
+                Ok(c) => c.workspace,
+                Err(code) => return code,
+            };
+            match docs::mint::stress_open(&root, ws.model(), title) {
+                Ok(path) => {
+                    println!(
+                        "opened round {} — write the charter paragraph; \
+                         `archi stress add <title> --affects <terms>` mints its stressors",
+                        path.strip_prefix(&root).unwrap_or(&path).display()
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("add"), [title]) => {
+            let Some(affects) = args.affects.as_deref() else {
+                return usage_err(
+                    "`stress add` names where the pressure lands: archi stress add <title> \
+                     --affects <A,B,...>",
+                );
+            };
+            let affects: Vec<String> = affects
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            match docs::mint::stress_add(&root, title, &affects) {
+                Ok(path) => {
+                    println!(
+                        "minted {} — write the pressure, Attractor, and the verdict when \
+                         the round decides",
+                        path.strip_prefix(&root).unwrap_or(&path).display()
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("rm"), [slug]) => match docs::mint::stress_rm(&root, slug) {
+            Ok(path) => {
+                println!("removed {}", path.strip_prefix(&root).unwrap_or(&path).display());
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e),
+        },
+        _ => usage_err(
+            "usage: archi stress open <title> | add <title> --affects <A,B,...> | rm <slug>",
+        ),
     }
 }
 
@@ -2740,18 +2728,14 @@ fn guarded_route(args: &Args) -> Option<PlanHint<'_>> {
         // The audit reads — until `--prune` lets it retire journal entries.
         "link" if sub(0) == Some("audit") && args.prune => Some(PlanHint::None),
         "repo" if sub(0) == Some("map") => Some(PlanHint::None),
+        "req" if matches!(sub(0), Some("add" | "rm")) => Some(PlanHint::None),
+        "stress" if matches!(sub(0), Some("open" | "add" | "rm")) => Some(PlanHint::None),
         "plan" => match sub(0) {
             Some("use") => Some(args.positional.get(1).map_or(PlanHint::None, |n| PlanHint::Named(n))),
-            Some(
-                "repin" | "start" | "next" | "close" | "reset" | "problem" | "tech"
-                | "architecture-summary" | "stack-mapping",
-            ) => Some(PlanHint::Active),
-            Some("scenarios") if sub(1) != Some("list") => Some(PlanHint::Active),
-            Some("task") => match sub(1) {
-                Some("show") | Some("req-list") => None,
-                Some("req") if sub(2) == Some("suggest") => None,
-                _ => Some(PlanHint::Active),
-            },
+            Some("repin" | "start" | "next" | "close" | "reset") => Some(PlanHint::Active),
+            // Of `task`, only the mints mutate; content edits are file
+            // edits, outside any verb. Everything else under plan reads.
+            Some("task") if matches!(sub(1), Some("add" | "rm")) => Some(PlanHint::Active),
             _ => None,
         },
         _ => None,
@@ -2759,6 +2743,12 @@ fn guarded_route(args: &Args) -> Option<PlanHint<'_>> {
 }
 
 fn main() -> ExitCode {
+    // A verb piped into `head` dies of SIGPIPE like any unix tool — never
+    // of a rust panic on a closed stdout.
+    #[cfg(unix)]
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
     let argv: Vec<String> = std::env::args().skip(1).collect();
     // The standalone meta flags answer before any parsing or project
     // location — help is the asked-for output (stdout, exit 0), not the
@@ -2816,6 +2806,8 @@ fn main() -> ExitCode {
         "incidence" => run_incidence(&args),
         "version" => run_version(&args),
         "session" => run_session(&args),
+        "req" => run_req(&args),
+        "stress" => run_stress(&args),
         "link" => run_link(&args),
         "repo" => run_repo(&args),
         "worktree" => run_worktree(&args),

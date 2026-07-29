@@ -160,13 +160,24 @@ pub enum Anchored {
         /// The commit recorded as its provenance.
         commit: String,
     },
-    /// The version already carries commit provenance; provenance is a
-    /// birth fact and anchoring never rewrites it.
+    /// The mark already answers: home provenance is a birth fact and never
+    /// rewrites; a member baseline stands when the checkout's tip is the
+    /// recorded one, or when the version is older history.
     Already {
         /// The version.
         id: String,
         /// Its recorded provenance.
         commit: String,
+    },
+    /// The latest version's member baseline moved to the member's clean
+    /// tip — the explicit verb re-marks the latest version only, anchor-born.
+    Reanchored {
+        /// The re-anchored version.
+        id: String,
+        /// The freshly recorded commit.
+        commit: String,
+        /// The sha the mark carried before.
+        was: String,
     },
 }
 
@@ -592,8 +603,11 @@ pub fn anchor(root: &Path, model: &Model) -> Result<Anchored, String> {
 /// at — the member-side counterpart of [`anchor`], for members dirty or
 /// unreachable at save time. The guarantee is the clean-tree half alone —
 /// the strength code provenance ever had — and the baseline is marked
-/// anchor-born so the audit words its window honestly. A recorded baseline
-/// is a birth fact: re-anchoring reports it, never rewrites.
+/// anchor-born so the audit words its window honestly. Marks on older
+/// versions are history and never move; the latest version's mark follows
+/// the member — a clean checkout standing on a different tip re-records
+/// it, anchor-born, so a landing never inherits a stale window
+/// (`archi/requirements/worktree-parallelism/a-landing-carries-fresh-baselines`).
 pub fn anchor_member(root: &Path, model: &Model, member: &str) -> Result<Anchored, String> {
     let mut archive = Archive::open(root)?
         .filter(|a| !a.entries.is_empty())
@@ -618,17 +632,38 @@ pub fn anchor_member(root: &Path, model: &Model, member: &str) -> Result<Anchore
             "`{member}` is unreachable here: `archi repo map {member} <dir>` first"
         ));
     };
+    let is_latest = pos + 1 == archive.entries.len();
     let entry = &mut archive.entries[pos];
     let id = entry.id.clone();
-    if let Some(existing) = entry.commits.get(member) {
-        return Ok(Anchored::Already {
-            id,
-            commit: existing.sha.clone(),
-        });
+    let existing = entry.commits.get(member).map(|b| b.sha.clone());
+    if let Some(prev) = &existing {
+        // a mark on an older version is history and never moves; the
+        // latest version's mark is judged against the checkout below
+        if !is_latest {
+            return Ok(Anchored::Already { id, commit: prev.clone() });
+        }
     }
-    let ctx = crate::members::GitContext::of(mroot).ok_or_else(|| {
-        format!("`{member}` is not inside a git work tree: nothing to anchor to")
-    })?;
+    let Some(ctx) = crate::members::GitContext::of(mroot) else {
+        return match existing {
+            // no readable tip to compare against — the mark stands
+            Some(prev) => Ok(Anchored::Already { id, commit: prev }),
+            None => Err(format!(
+                "`{member}` is not inside a git work tree: nothing to anchor to"
+            )),
+        };
+    };
+    if let Some(prev) = &existing {
+        match ctx.head() {
+            // the checkout stands where the mark says — today's answer
+            Some(head) if head == *prev => {
+                return Ok(Anchored::Already { id, commit: prev.clone() });
+            }
+            // no tip to compare — the mark stands
+            None => return Ok(Anchored::Already { id, commit: prev.clone() }),
+            // a moved tip: the clean gate and the re-record below
+            Some(_) => {}
+        }
+    }
     match ctx.clean() {
         Some(true) => {}
         Some(false) => {
@@ -650,7 +685,10 @@ pub fn anchor_member(root: &Path, model: &Model, member: &str) -> Result<Anchore
         },
     );
     archive.write_manifest()?;
-    Ok(Anchored::Recorded { id, commit: sha })
+    Ok(match existing {
+        Some(was) => Anchored::Reanchored { id, commit: sha, was },
+        None => Anchored::Recorded { id, commit: sha },
+    })
 }
 
 fn id_of(index: usize) -> String {
@@ -1003,7 +1041,7 @@ mod tests {
     }
 
     #[test]
-    fn anchor_member_records_post_hoc_and_never_rewrites() {
+    fn anchor_member_records_post_hoc_and_the_same_tip_stands() {
         let root = temp_project(&v1());
         let backend = member_repo(&root, "backend", true);
         declare_members(&root, "[[repo]]\nname = \"backend\"\npath = \"backend\"\n");
@@ -1027,15 +1065,82 @@ mod tests {
             Anchored::Recorded { id, commit } => {
                 assert_eq!((id.as_str(), commit), ("v0001", sha.clone()))
             }
-            Anchored::Already { .. } => panic!("first member anchor must record"),
+            other => panic!("first member anchor must record: {other:?}"),
         }
         let archive = Archive::open(&root).unwrap().unwrap();
         let b = &archive.entries()[0].commits["backend"];
         assert_eq!((b.sha.as_str(), b.born), (sha.as_str(), Born::Anchor));
-        // A birth fact: re-anchoring reports, never rewrites.
+        // The checkout stands where the mark says: nothing to re-record.
         assert!(matches!(
             anchor_member(&root, ws.model(), "backend").unwrap(),
             Anchored::Already { .. }
+        ));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_moved_member_re_anchors_the_latest_version_only() {
+        let root = temp_project(&v1());
+        let backend = member_repo(&root, "backend", false);
+        declare_members(&root, "[[repo]]\nname = \"backend\"\npath = \"backend\"\n");
+        let ws = compiled_model(&root);
+        save(&root, ws.model(), "first").unwrap();
+        let b0 = head(&backend);
+        write_model(&root, &v2());
+        let ws2 = compiled_model(&root);
+        save(&root, ws2.model(), "second").unwrap();
+
+        // A dirty tree at the recorded tip keeps today's answer: HEAD is
+        // where the mark says, nothing to re-record.
+        fs::write(backend.join("more.rs"), "fn more() {}\n").unwrap();
+        assert!(matches!(
+            anchor_member(&root, ws2.model(), "backend").unwrap(),
+            Anchored::Already { id, commit } if id == "v0002" && commit == b0
+        ));
+        // A moved AND dirty member refuses: the re-record carries the same
+        // clean-tree guarantee as any anchor.
+        git(&backend, &["add", "-A"]);
+        git(&backend, &["commit", "-q", "-m", "moved"]);
+        let b1 = head(&backend);
+        fs::write(backend.join("wip.rs"), "fn wip() {}\n").unwrap();
+        assert!(
+            anchor_member(&root, ws2.model(), "backend")
+                .unwrap_err()
+                .contains("dirty")
+        );
+        fs::remove_file(backend.join("wip.rs")).unwrap();
+
+        // A clean checkout on a different tip re-records the latest mark,
+        // anchor-born; the report carries where the mark stood.
+        match anchor_member(&root, ws2.model(), "backend").unwrap() {
+            Anchored::Reanchored { id, commit, was } => {
+                assert_eq!(
+                    (id.as_str(), commit.as_str(), was.as_str()),
+                    ("v0002", b1.as_str(), b0.as_str())
+                );
+            }
+            other => panic!("a moved clean member re-records: {other:?}"),
+        }
+        let archive = Archive::open(&root).unwrap().unwrap();
+        let moved = &archive.entries()[1].commits["backend"];
+        assert_eq!((moved.sha.as_str(), moved.born), (b1.as_str(), Born::Anchor));
+        // Older history stays untouched, save-born as recorded.
+        let old = &archive.entries()[0].commits["backend"];
+        assert_eq!((old.sha.as_str(), old.born), (b0.as_str(), Born::Save));
+        // Baselines live in the manifest alone: the seal survives the move.
+        assert_eq!(archive.verify(), Vec::<String>::new());
+        // The same tip keeps today's Already answer.
+        assert!(matches!(
+            anchor_member(&root, ws2.model(), "backend").unwrap(),
+            Anchored::Already { id, commit } if id == "v0002" && commit == b1
+        ));
+        // A live model matching an older version: its mark is history — the
+        // verb reports it and never moves it.
+        write_model(&root, &v1());
+        let ws1 = compiled_model(&root);
+        assert!(matches!(
+            anchor_member(&root, ws1.model(), "backend").unwrap(),
+            Anchored::Already { id, commit } if id == "v0001" && commit == b0
         ));
         fs::remove_dir_all(&root).unwrap();
     }
@@ -1098,7 +1203,7 @@ mod tests {
             Anchored::Recorded { id, commit } => {
                 assert_eq!((id.as_str(), commit), ("v0001", first.clone()))
             }
-            Anchored::Already { .. } => panic!("first anchor must record"),
+            other => panic!("first anchor must record: {other:?}"),
         }
         let archive = Archive::open(&root).unwrap().unwrap();
         assert_eq!(archive.entries()[0].commit.as_deref(), Some(first.as_str()));

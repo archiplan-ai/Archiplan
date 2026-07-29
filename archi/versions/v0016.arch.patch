@@ -1,0 +1,33 @@
+--- original
++++ modified
+@@ -137,7 +137,8 @@
+ def node Nkp:
+   port scan // the landscape read: regime, hotspots, corridors
+ def node NkpReport // the NKP landscape read: regime, hotspots, corridors
+-def node PlanFile // plan.json — authored fields edited, lifecycle via verbs
++def node PlanFile // the plan folder's records: charter, task files, scenarios — minted by verbs, prose edited in place
++def node PlanState // state.json beside the records — the plan's lifecycle alone: state, closed waves, the pinned version and its hash
+ def node Planner:
+   port advance // start, next: waves, gates, scenario latches
+   port author // use, task add: pins a version, seeds spec_refs
+@@ -246,6 +247,7 @@
+ Data type_of ModelGraph
+ Data type_of NkpReport
+ Data type_of PlanFile
++Data type_of PlanState
+ Data type_of Report
+ Data type_of RequirementDoc
+ Data type_of Resolution
+@@ -373,10 +375,12 @@
+ Members.read_decls recall(<-MemberDecl) SourceTree.serve in trace_flow
+ Planner.coverage recall(<-LinkEvent) Links.serve_links in trace_flow
+ Planner.load_plan recall(<-PlanFile) SourceTree.serve in trace_flow
++Planner.load_plan recall(<-PlanState) SourceTree.serve in trace_flow
+ Planner.pin_model recall(<-ModelGraph) DocsCompiler.serve_pin in trace_flow
+ Planner.run_capture consult(->ItemHashIndex, <-LinkEvent) Links.capture in trace_flow
+ Planner.store_plan persist(ItemHashIndex) SourceTree.store in trace_flow
+ Planner.store_plan persist(PlanFile) SourceTree.store in trace_flow
++Planner.store_plan persist(PlanState) SourceTree.store in trace_flow
+ Scaffold.emit persist(AgentBrief) SourceTree.store in compile_flow
+ Scaffold.emit persist(ArchSource) SourceTree.store in compile_flow
+ Scaffold.read_tree recall(<-AgentBrief) SourceTree.serve in compile_flow

@@ -10,12 +10,16 @@
 //! (unique project-wide, `E_SLUG`); the `slot` is a per-task ordinal for
 //! short addresses, derived with the rest.
 //!
-//! The editing surface splits like the rest of the system: authored fields
-//! — envelope prose, descriptions, `inputs`, `outputs`, extra `spec_refs`,
-//! `verifications`, scenarios — are edited in `plan.json` directly, exactly
-//! as requirements are edited in their markdown; lifecycle state and
-//! derived content move only through verbs, and every verb re-validates the
-//! file on load, so a hand edit cannot drift silently.
+//! The editing surface splits like the rest of the system: authored
+//! content — envelope prose, descriptions, `inputs`, `outputs`, extra
+//! `spec_refs`, `owns`, `verifications`, scenarios — lives in the record
+//! folder's markdown files ([`records`]) and is edited there directly,
+//! exactly as requirements are edited in their markdown; lifecycle state
+//! moves only through verbs, into `state.json`, and every verb
+//! re-validates the files on load, so a hand edit cannot drift silently.
+//! A legacy `plan.json` stays readable forever — read-only: its lifecycle
+//! verbs work, its authoring surface refuses
+//! (`archi/requirements/planning/a-plan-is-a-folder-of-records.md`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -28,6 +32,8 @@ use serde::{Deserialize, Serialize};
 use crate::docs;
 use crate::links;
 use crate::versions;
+
+mod records;
 
 // ---- the plan model ---------------------------------------------------------
 
@@ -204,8 +210,20 @@ fn validate_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn load_plan(root: &Path, name: &str) -> Result<Plan, String> {
+/// Both storage forms load into the one [`Plan`]: the record folder is
+/// the format, `plan.json` is legacy read-only — carrying both at once
+/// is a conflict the author resolves, never a merge.
+pub(crate) fn load_plan(root: &Path, name: &str) -> Result<Plan, String> {
     let path = plan_path(root, name);
+    if records::is_record(root, name) {
+        if path.exists() {
+            return Err(format!(
+                "plan `{name}` carries both plan.json and the record folder — keep one: \
+                 the folder is the format, plan.json is legacy read-only"
+            ));
+        }
+        return records::load(root, name);
+    }
     let text =
         fs::read_to_string(&path).map_err(|e| format!("cannot read `{}`: {e}", path.display()))?;
     let plan: Plan = serde_json::from_str(&text)
@@ -220,13 +238,31 @@ fn load_plan(root: &Path, name: &str) -> Result<Plan, String> {
     Ok(plan)
 }
 
+/// The legacy full write. A record plan refuses it — its content is its
+/// files; [`save_state`] is the lifecycle-only path both forms share.
 fn store_plan(root: &Path, plan: &Plan) -> Result<(), String> {
+    if records::is_record(root, &plan.name) {
+        return Err(
+            "a record plan's content is its files — edit them; verbs move lifecycle alone".into(),
+        );
+    }
     let dir = plan_dir(root, &plan.name);
     fs::create_dir_all(&dir).map_err(|e| format!("cannot create `{}`: {e}", dir.display()))?;
     let path = plan_path(root, &plan.name);
     let mut text = serde_json::to_string_pretty(plan).map_err(|e| format!("plan serializes: {e}"))?;
     text.push('\n');
     fs::write(&path, text).map_err(|e| format!("cannot write `{}`: {e}", path.display()))
+}
+
+/// Persist lifecycle alone — state, waves, latches, the pin. A record
+/// plan writes `state.json`; a legacy plan rewrites plan.json whole, as
+/// it always did (its content fields ride along unchanged).
+fn save_state(root: &Path, plan: &Plan) -> Result<(), String> {
+    if records::is_record(root, &plan.name) {
+        records::write_state(root, plan)
+    } else {
+        store_plan(root, plan)
+    }
 }
 
 fn write_marker(root: &Path, name: &str) -> Result<(), String> {
@@ -312,34 +348,21 @@ pub enum Used {
     Switched(Plan),
 }
 
-/// `archi plan use <name>`: switch to a named plan, creating an empty
-/// skeleton pinned to the current spec version on first use.
+/// `archi plan use <name>`: switch to a named plan, minting an empty
+/// record folder pinned to the current spec version on first use —
+/// charter and scenarios skeletons for the author, `state.json` for the
+/// verbs. Switching reaches both forms; re-`use` of an existing plan is
+/// a switch, as always.
 pub fn use_plan(root: &Path, model: &Model, name: &str) -> Result<Used, String> {
     validate_name(name)?;
-    if plan_path(root, name).exists() {
+    if plan_path(root, name).exists() || records::is_record(root, name) {
         let plan = load_plan(root, name)?;
         write_marker(root, name)?;
         return Ok(Used::Switched(plan));
     }
     let version = pinnable_version(root, model)?;
     let version_hash = pin_hash(root, &version);
-    let plan = Plan {
-        name: name.to_string(),
-        version,
-        version_hash,
-        created: now(),
-        state: PlanState::Draft,
-        closed_waves: 0,
-        problem: String::new(),
-        technology_stack: Vec::new(),
-        architecture_summary: Vec::new(),
-        stack_mapping: Vec::new(),
-        scenarios: Vec::new(),
-        scenarios_displayed: false,
-        scenarios_closed: false,
-        tasks: Vec::new(),
-    };
-    store_plan(root, &plan)?;
+    let plan = records::mint(root, name, version, version_hash, now())?;
     write_marker(root, name)?;
     Ok(Used::Created(plan))
 }
@@ -355,7 +378,7 @@ pub fn repin(root: &Path, model: &Model) -> Result<(Plan, String), String> {
     }
     let from = std::mem::replace(&mut plan.version, to);
     plan.version_hash = pin_hash(root, &plan.version);
-    store_plan(root, &plan)?;
+    save_state(root, &plan)?;
     Ok((plan, from))
 }
 
@@ -406,10 +429,21 @@ pub(crate) fn check(root: &Path) -> Result<Vec<PlanFinding>, String> {
     Ok(out)
 }
 
-/// `archi plan task add <node>`: mint a task pinned to a node of the
-/// pinned version, spec_refs seeded as the node plus its incoming edges.
+/// The refusal every content-writing verb meets on a legacy plan: the
+/// old json form is history — readable forever, never grown.
+const LEGACY_READ_ONLY: &str =
+    "legacy plan.json is read-only — plans author as record folders now";
+
+/// `archi plan task add <node>`: mint a task file pinned to a node of
+/// the pinned version, spec_refs seeded as the node plus its incoming
+/// edges — the skeleton whose slots the author fills. Re-minting a node
+/// whose file still is its skeleton converges; a file that moved past it
+/// is the author's and refuses.
 pub fn task_add(root: &Path, node: &str, description: Option<&str>) -> Result<Task, String> {
-    let mut plan = load_active(root)?;
+    let plan = load_active(root)?;
+    if !records::is_record(root, &plan.name) {
+        return Err(LEGACY_READ_ONLY.into());
+    }
     if plan.state != PlanState::Draft {
         return Err(format!(
             "the plan is {}: tasks are cut in draft — `plan reset` restructures",
@@ -424,11 +458,8 @@ pub fn task_add(root: &Path, node: &str, description: Option<&str>) -> Result<Ta
             plan.version
         ));
     }
-    if let Some(t) = plan.tasks.iter().find(|t| t.node == node) {
-        return Err(format!("`{}` already pins `{node}` — one task per node", t.id));
-    }
-    let task = Task {
-        id: next_task_id(&plan.tasks),
+    let skeleton = |id: String| Task {
+        id,
         node: node.to_string(),
         description: description.unwrap_or_default().to_string(),
         spec_refs: seed_spec_refs(model, node),
@@ -438,12 +469,64 @@ pub fn task_add(root: &Path, node: &str, description: Option<&str>) -> Result<Ta
         outputs: Vec::new(),
         verifications: BTreeMap::new(),
     };
-    plan.tasks.push(task.clone());
-    store_plan(root, &plan)?;
+    if let Some(t) = plan.tasks.iter().find(|t| t.node == node) {
+        // The node is already cut. Byte-equal to what this mint would
+        // write means nothing happened yet — converge; anything else is
+        // authored content this verb must not touch.
+        let path = records::task_path(root, &plan.name, &t.id)
+            .ok_or_else(|| format!("no file carries `{}`", t.id))?;
+        let on_disk = fs::read_to_string(&path)
+            .map_err(|e| format!("cannot read `{}`: {e}", path.display()))?;
+        let task = skeleton(t.id.clone());
+        let shown = path.strip_prefix(root).unwrap_or(&path).display();
+        if on_disk == records::render_task(&task) {
+            println!("already minted — {shown} stands; fill its slots");
+            return Ok(task);
+        }
+        return Err(format!("`{shown}` moved past its skeleton — not re-mintable"));
+    }
+    let task = skeleton(next_task_id(&plan.tasks));
+    records::write_task(root, &plan.name, &task)?;
     Ok(task)
 }
 
-/// Dense past every id ever seen — a hand-deleted task must not free its id.
+/// `archi plan task rm <id>`: unmint a task file — draft-only, and
+/// refused while any other task inputs it. Ids stay stable: the gap is
+/// fine, the next `task add` mints past the highest ever seen.
+pub fn task_rm(root: &Path, id: &str) -> Result<PathBuf, String> {
+    let plan = load_active(root)?;
+    if !records::is_record(root, &plan.name) {
+        return Err(LEGACY_READ_ONLY.into());
+    }
+    if plan.state != PlanState::Draft {
+        return Err(format!(
+            "the plan is {}: past draft — `plan reset` first",
+            plan.state.describe()
+        ));
+    }
+    if !plan.tasks.iter().any(|t| t.id == id) {
+        return Err(format!("no task `{id}` — `archi plan show` lists them"));
+    }
+    let dependents: Vec<&str> = plan
+        .tasks
+        .iter()
+        .filter(|t| t.inputs.contains_key(id))
+        .map(|t| t.id.as_str())
+        .collect();
+    if !dependents.is_empty() {
+        return Err(format!(
+            "`{id}` feeds {} — cut those inputs first",
+            dependents.join(", ")
+        ));
+    }
+    let path = records::task_path(root, &plan.name, id)
+        .ok_or_else(|| format!("no file carries `{id}`"))?;
+    fs::remove_file(&path).map_err(|e| format!("cannot remove `{}`: {e}", path.display()))?;
+    Ok(path)
+}
+
+/// One past the highest id present: a removed middle task leaves its
+/// gap, so ids never shift under the plan's feet.
 fn next_task_id(tasks: &[Task]) -> String {
     let max = tasks
         .iter()
@@ -655,295 +738,6 @@ fn layer(tasks: &[Task]) -> Result<Vec<Vec<String>>, String> {
     Ok(waves)
 }
 
-// ---- verbs: authoring --------------------------------------------------------
-//
-// The full free-fractal authoring surface, re-homed onto text: every verb
-// is a validated read-modify-write of plan.json — the file stays the truth,
-// the verb spares the author the schema.
-
-/// Authoring is a draft-stage act — a started plan restructures through
-/// `plan reset`, a completed one is history.
-fn authoring_plan(root: &Path) -> Result<Plan, String> {
-    let plan = load_active(root)?;
-    if plan.state != PlanState::Draft {
-        return Err(format!(
-            "the plan is {}: authoring happens in draft — `plan reset` restructures",
-            plan.state.describe()
-        ));
-    }
-    Ok(plan)
-}
-
-pub fn set_problem(root: &Path, text: &str) -> Result<(), String> {
-    let mut plan = authoring_plan(root)?;
-    plan.problem = text.to_string();
-    store_plan(root, &plan)
-}
-
-pub fn tech_add(root: &Path, tech: &str, provenance: &str) -> Result<(), String> {
-    let mut plan = authoring_plan(root)?;
-    if plan.technology_stack.iter().any(|t| t.tech == tech) {
-        return Err(format!("`{tech}` is already in the stack"));
-    }
-    plan.technology_stack.push(TechChoice {
-        tech: tech.to_string(),
-        provenance: provenance.to_string(),
-    });
-    store_plan(root, &plan)
-}
-
-pub fn summary_add(root: &Path, node: &str, role: &str) -> Result<(), String> {
-    let mut plan = authoring_plan(root)?;
-    if plan.architecture_summary.iter().any(|s| s.node == node) {
-        return Err(format!("`{node}` already carries a summary line"));
-    }
-    plan.architecture_summary.push(SummaryLine {
-        node: node.to_string(),
-        role: role.to_string(),
-    });
-    store_plan(root, &plan)
-}
-
-pub fn mapping_add(root: &Path, node: &str, tech: &str) -> Result<(), String> {
-    let mut plan = authoring_plan(root)?;
-    if plan.stack_mapping.iter().any(|m| m.node == node && m.tech == tech) {
-        return Err(format!("`{tech}` already realizes `{node}`"));
-    }
-    plan.stack_mapping.push(StackMapping {
-        tech: tech.to_string(),
-        node: node.to_string(),
-    });
-    store_plan(root, &plan)
-}
-
-pub fn scenarios_add(root: &Path, text: &str) -> Result<(), String> {
-    let mut plan = authoring_plan(root)?;
-    plan.scenarios.push(text.to_string());
-    store_plan(root, &plan)
-}
-
-/// 1-based, as `scenarios list` numbers them.
-pub fn scenarios_remove(root: &Path, index: usize) -> Result<String, String> {
-    let mut plan = authoring_plan(root)?;
-    if index == 0 || index > plan.scenarios.len() {
-        return Err(format!(
-            "no scenario {index} — `archi plan scenarios list` numbers {} of them",
-            plan.scenarios.len()
-        ));
-    }
-    let removed = plan.scenarios.remove(index - 1);
-    store_plan(root, &plan)?;
-    Ok(removed)
-}
-
-fn task_entry<'a>(plan: &'a mut Plan, id: &str) -> Result<&'a mut Task, String> {
-    plan.tasks
-        .iter_mut()
-        .find(|t| t.id == id)
-        .ok_or_else(|| format!("no task `{id}` — `archi plan show` lists them"))
-}
-
-pub fn task_desc(root: &Path, id: &str, text: &str) -> Result<(), String> {
-    let mut plan = authoring_plan(root)?;
-    task_entry(&mut plan, id)?.description = text.to_string();
-    store_plan(root, &plan)
-}
-
-pub fn task_stack_detail_add(root: &Path, id: &str, text: &str) -> Result<(), String> {
-    let mut plan = authoring_plan(root)?;
-    let t = task_entry(&mut plan, id)?;
-    if t.stack_details.is_empty() {
-        t.stack_details = text.to_string();
-    } else {
-        t.stack_details.push('\n');
-        t.stack_details.push_str(text);
-    }
-    store_plan(root, &plan)
-}
-
-pub fn task_input_add(root: &Path, id: &str, from: &str, note: &str) -> Result<(), String> {
-    let mut plan = authoring_plan(root)?;
-    if id == from {
-        return Err(format!("`{id}` cannot input itself"));
-    }
-    if !plan.tasks.iter().any(|t| t.id == from) {
-        return Err(format!("no producer `{from}` — `archi plan show` lists the tasks"));
-    }
-    task_entry(&mut plan, id)?
-        .inputs
-        .insert(from.to_string(), note.to_string());
-    store_plan(root, &plan)
-}
-
-pub fn task_output_add(root: &Path, id: &str, path: &str) -> Result<(), String> {
-    let mut plan = authoring_plan(root)?;
-    let t = task_entry(&mut plan, id)?;
-    if t.outputs.iter().any(|o| o == path) {
-        return Err(format!("`{path}` is already an output of {id}"));
-    }
-    t.outputs.push(path.to_string());
-    store_plan(root, &plan)
-}
-
-pub fn task_spec_ref_add(root: &Path, id: &str, r: &str) -> Result<(), String> {
-    let mut plan = authoring_plan(root)?;
-    if r.contains('@') {
-        return Err(format!(
-            "`{r}` carries a version — spec_refs are version-free; the plan's pin applies"
-        ));
-    }
-    let canonical = links::normalize_ref(r);
-    if r != canonical {
-        return Err(format!("`{r}` is not canonical — write `{canonical}`"));
-    }
-    let ws = compile_pinned(root, &plan.version)?;
-    let spec = links::SpecRef { path: canonical.clone(), version: None };
-    if !links::resolves_in(ws.model(), &spec) {
-        return Err(format!(
-            "`{r}` names no element of {} (E_MODEL_REF)",
-            plan.version
-        ));
-    }
-    let t = task_entry(&mut plan, id)?;
-    if t.spec_refs.iter().any(|s| s == &canonical) {
-        return Err(format!("`{r}` is already a spec_ref of {id}"));
-    }
-    t.spec_refs.push(canonical);
-    store_plan(root, &plan)?;
-    Ok(())
-}
-
-/// Resolve a requirement handle — a slug, or a per-task slot (`r1`) — against
-/// the task's matched set.
-fn resolve_req<'a>(matched: &'a [MatchedReq], handle: &str) -> Option<&'a MatchedReq> {
-    matched.iter().find(|m| m.req == handle || m.slot == handle)
-}
-
-pub fn own_add(root: &Path, live: &Model, id: &str, handle: &str) -> Result<String, String> {
-    let mut plan = authoring_plan(root)?;
-    let report = verify_plan(root, live, &plan)?;
-    let matched = report.derived.matched.get(id).map(Vec::as_slice).unwrap_or_default();
-    let Some(m) = resolve_req(matched, handle) else {
-        return Err(format!(
-            "`{handle}` is not among {id}'s matched requirements — \
-             `archi plan task req suggest {id}` lists the candidates; a missing candidate \
-             wants a spec_ref (`archi plan task spec-ref add`)"
-        ));
-    };
-    let slug = m.req.clone();
-    let t = task_entry(&mut plan, id)?;
-    if t.owns.contains(&slug) {
-        return Err(format!("{id} already owns `{slug}`"));
-    }
-    t.owns.push(slug.clone());
-    store_plan(root, &plan)?;
-    Ok(slug)
-}
-
-pub fn own_remove(root: &Path, id: &str, handle: &str) -> Result<String, String> {
-    let mut plan = authoring_plan(root)?;
-    let t = task_entry(&mut plan, id)?;
-    let Some(pos) = t.owns.iter().position(|s| s == handle) else {
-        return Err(format!("{id} does not own `{handle}` — `archi plan task req-list {id}`"));
-    };
-    let slug = t.owns.remove(pos);
-    t.verifications.remove(&slug);
-    store_plan(root, &plan)?;
-    Ok(slug)
-}
-
-pub fn verification_add(
-    root: &Path,
-    live: &Model,
-    id: &str,
-    handle: &str,
-    text: &str,
-) -> Result<String, String> {
-    let mut plan = authoring_plan(root)?;
-    let report = verify_plan(root, live, &plan)?;
-    let matched = report.derived.matched.get(id).map(Vec::as_slice).unwrap_or_default();
-    let slug = resolve_req(matched, handle)
-        .map(|m| m.req.clone())
-        .unwrap_or_else(|| handle.to_string());
-    let t = task_entry(&mut plan, id)?;
-    if !t.owns.contains(&slug) {
-        return Err(format!(
-            "{id} does not own `{slug}` — own it first: `archi plan task req add {id} {slug}`"
-        ));
-    }
-    t.verifications.entry(slug.clone()).or_default().push(text.to_string());
-    store_plan(root, &plan)?;
-    Ok(slug)
-}
-
-pub fn verification_remove(
-    root: &Path,
-    live: &Model,
-    id: &str,
-    handle: &str,
-    index: Option<usize>,
-) -> Result<String, String> {
-    let mut plan = authoring_plan(root)?;
-    let report = verify_plan(root, live, &plan)?;
-    let matched = report.derived.matched.get(id).map(Vec::as_slice).unwrap_or_default();
-    let slug = resolve_req(matched, handle)
-        .map(|m| m.req.clone())
-        .unwrap_or_else(|| handle.to_string());
-    let t = task_entry(&mut plan, id)?;
-    let Some(list) = t.verifications.get_mut(&slug) else {
-        return Err(format!("{id} has no verifications for `{slug}`"));
-    };
-    match index {
-        Some(i) => {
-            if i == 0 || i > list.len() {
-                return Err(format!("no verification {i} — {slug} carries {}", list.len()));
-            }
-            list.remove(i - 1);
-            if list.is_empty() {
-                t.verifications.remove(&slug);
-            }
-        }
-        None => {
-            t.verifications.remove(&slug);
-        }
-    }
-    store_plan(root, &plan)?;
-    Ok(slug)
-}
-
-/// The standalone brief `archi plan task show` renders: everything a
-/// sub-agent needs, no implicit context.
-pub fn render_task_show(plan: &Plan, report: &PlanReport, id: &str) -> Result<String, String> {
-    let Some(t) = plan.tasks.iter().find(|t| t.id == id) else {
-        return Err(format!("no task `{id}` — `archi plan show` lists them"));
-    };
-    let mut out = format!("{} {} — {}\n", t.id, t.node, t.description);
-    out.push_str(&format!("pinned: {}\n", plan.version));
-    out.push_str(&format!("spec_refs: {}\n", t.spec_refs.join(", ")));
-    if !t.stack_details.is_empty() {
-        out.push_str(&format!("stack: {}\n", t.stack_details.replace('\n', "; ")));
-    }
-    for (from, note) in &t.inputs {
-        out.push_str(&format!("input ← {from}: {note}\n"));
-    }
-    for o in &t.outputs {
-        out.push_str(&format!("output: {o}\n"));
-    }
-    for m in report.derived.matched.get(id).into_iter().flatten() {
-        let owned = if m.owned { "owned" } else { "unowned" };
-        out.push_str(&format!(
-            "{} {} ({owned}, via {})\n",
-            m.slot,
-            m.req,
-            m.matched_refs.join(", ")
-        ));
-        for v in t.verifications.get(&m.req).into_iter().flatten() {
-            out.push_str(&format!("  verify: {v}\n"));
-        }
-    }
-    Ok(out)
-}
-
 // ---- verify ------------------------------------------------------------------
 
 /// The outcome of `archi plan verify`: structural errors gate the
@@ -977,6 +771,23 @@ pub fn verify(root: &Path, model: &Model) -> Result<PlanReport, String> {
 /// read surface.
 pub fn show(root: &Path, model: &Model) -> Result<(Plan, PlanReport), String> {
     let plan = load_active(root)?;
+    let report = verify_plan(root, model, &plan)?;
+    Ok((plan, report))
+}
+
+/// `archi plan show <name>`: the same view for a named plan — a pure read
+/// that never consults or rewrites `.current`, so any checkout, seated or
+/// not, reads any stored plan. An unknown name lists what exists.
+pub fn show_named(root: &Path, model: &Model, name: &str) -> Result<(Plan, PlanReport), String> {
+    if !plan_path(root, name).exists() && !records::is_record(root, name) {
+        let names: Vec<String> = all_plans(root)?.into_iter().map(|p| p.name).collect();
+        return Err(if names.is_empty() {
+            format!("no plan `{name}` — none exist; `archi plan use <name>` creates one")
+        } else {
+            format!("no plan `{name}` — plans: {}", names.join(", "))
+        });
+    }
+    let plan = load_plan(root, name)?;
     let report = verify_plan(root, model, &plan)?;
     Ok((plan, report))
 }
@@ -1286,7 +1097,7 @@ pub fn start(root: &Path, model: &Model) -> Result<(Plan, Vec<String>), String> 
     links::capture::write_index(root, &plan.name, 1)?;
     plan.state = PlanState::Started;
     plan.closed_waves = 0;
-    store_plan(root, &plan)?;
+    save_state(root, &plan)?;
     Ok((plan, report.derived.waves[0].clone()))
 }
 
@@ -1343,7 +1154,7 @@ pub fn next(root: &Path, model: &Model) -> Result<NextOutcome, String> {
         if plan.scenarios_displayed && !plan.scenarios_closed {
             plan.scenarios_closed = true;
             plan.state = PlanState::Completed;
-            store_plan(root, &plan)?;
+            save_state(root, &plan)?;
             return Ok(NextOutcome {
                 capture: None,
                 step: Step::Done,
@@ -1387,7 +1198,7 @@ pub fn next(root: &Path, model: &Model) -> Result<NextOutcome, String> {
         plan.scenarios_displayed = true;
         Step::Scenarios(plan.scenarios.clone())
     };
-    store_plan(root, &plan)?;
+    save_state(root, &plan)?;
     Ok(NextOutcome {
         capture: Some(capture),
         step,
@@ -1426,7 +1237,7 @@ pub fn close(root: &Path) -> Result<Plan, String> {
         return Err(format!("plan `{}` is already completed", plan.name));
     }
     plan.state = PlanState::Completed;
-    store_plan(root, &plan)?;
+    save_state(root, &plan)?;
     Ok(plan)
 }
 
@@ -1443,7 +1254,7 @@ pub fn reset(root: &Path) -> Result<Plan, String> {
         fs::remove_dir_all(&waves_dir)
             .map_err(|e| format!("cannot remove `{}`: {e}", waves_dir.display()))?;
     }
-    store_plan(root, &plan)?;
+    save_state(root, &plan)?;
     Ok(plan)
 }
 
@@ -1542,6 +1353,39 @@ pub fn render_show(plan: &Plan, report: &PlanReport) -> String {
         out.push_str(&format!("note: {n}\n"));
     }
     out
+}
+
+/// The standalone brief `archi plan task show` renders: everything a
+/// sub-agent needs, no implicit context.
+pub fn render_task_show(plan: &Plan, report: &PlanReport, id: &str) -> Result<String, String> {
+    let Some(t) = plan.tasks.iter().find(|t| t.id == id) else {
+        return Err(format!("no task `{id}` — `archi plan show` lists them"));
+    };
+    let mut out = format!("{} {} — {}\n", t.id, t.node, t.description);
+    out.push_str(&format!("pinned: {}\n", plan.version));
+    out.push_str(&format!("spec_refs: {}\n", t.spec_refs.join(", ")));
+    if !t.stack_details.is_empty() {
+        out.push_str(&format!("stack: {}\n", t.stack_details.replace('\n', "; ")));
+    }
+    for (from, note) in &t.inputs {
+        out.push_str(&format!("input ← {from}: {note}\n"));
+    }
+    for o in &t.outputs {
+        out.push_str(&format!("output: {o}\n"));
+    }
+    for m in report.derived.matched.get(id).into_iter().flatten() {
+        let owned = if m.owned { "owned" } else { "unowned" };
+        out.push_str(&format!(
+            "{} {} ({owned}, via {})\n",
+            m.slot,
+            m.req,
+            m.matched_refs.join(", ")
+        ));
+        for v in t.verifications.get(&m.req).into_iter().flatten() {
+            out.push_str(&format!("  verify: {v}\n"));
+        }
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -1644,9 +1488,25 @@ mod tests {
         load_active(root).unwrap()
     }
 
+    /// The record form's "full save": author by rewriting the files —
+    /// exactly what a human does between mints. Lifecycle is not
+    /// touched; state.json stays the verbs' alone.
+    fn store_authored(root: &Path, plan: &Plan) {
+        let dir = plan_dir(root, &plan.name);
+        fs::write(
+            dir.join(format!("{}.md", plan.name)),
+            records::render_charter(plan),
+        )
+        .unwrap();
+        fs::write(dir.join("scenarios.md"), records::render_scenarios(&plan.scenarios)).unwrap();
+        for t in &plan.tasks {
+            fs::write(dir.join(records::task_file_name(t)), records::render_task(t)).unwrap();
+        }
+    }
+
     /// Author the curation whole: descriptions, own every matched
     /// requirement, one verification per owned — the old own-everything
-    /// behavior, spelled out.
+    /// behavior, spelled out into the task files.
     fn curate_all(root: &Path, model: &Model) {
         let mut plan = active(root);
         let report = verify_plan(root, model, &plan).unwrap();
@@ -1662,7 +1522,7 @@ mod tests {
                     .or_insert_with(|| vec![format!("test — proves {}", m.req)]);
             }
         }
-        store_plan(root, &plan).unwrap();
+        store_authored(root, &plan);
     }
 
     #[test]
@@ -1680,6 +1540,20 @@ mod tests {
             Used::Created(p) if p.version == v1 && p.state == PlanState::Draft
         ));
         assert_eq!(active_name(&root).unwrap().as_deref(), Some("mvp"));
+
+        // The mint is the record folder: charter and scenarios skeletons
+        // plus state.json — no plan.json is ever born again.
+        let dir = plan_dir(&root, "mvp");
+        assert!(dir.join("mvp.md").exists());
+        assert!(dir.join("scenarios.md").exists());
+        assert!(dir.join("state.json").exists());
+        assert!(!dir.join("plan.json").exists());
+
+        // Both forms at once refuse loudly, naming the choice.
+        fs::write(dir.join("plan.json"), "{}").unwrap();
+        let err = load_plan(&root, "mvp").unwrap_err();
+        assert!(err.contains("both plan.json and the record folder"), "{err}");
+        fs::remove_file(dir.join("plan.json")).unwrap();
 
         // A dirty model refuses to mint a new plan, but switching to an
         // existing one is free.
@@ -1742,11 +1616,62 @@ mod tests {
             ]
         );
 
-        // One task per node; nodes resolve at the pinned version.
+        // The mint is a file; a byte-equal re-mint converges, a request
+        // that would write different bytes refuses — the file is the
+        // author's the moment it differs from the skeleton.
+        assert!(plan_dir(&root, "mvp").join("t2-auth.md").exists());
+        let again = task_add(&root, "Auth", None).unwrap();
+        assert_eq!(again.id, "t2", "byte-equal re-mint converges");
         let err = task_add(&root, "Store", None).unwrap_err();
-        assert!(err.contains("one task per node"), "{err}");
+        assert!(err.contains("moved past its skeleton"), "{err}");
+
+        // An edited file refuses the re-mint even with the same request.
+        let file = plan_dir(&root, "mvp").join("t2-auth.md");
+        let text = fs::read_to_string(&file)
+            .unwrap()
+            .replace("# t2 — Auth", "# t2 — Auth\n\nnow described");
+        fs::write(&file, text).unwrap();
+        let err = task_add(&root, "Auth", None).unwrap_err();
+        assert!(err.contains("moved past its skeleton"), "{err}");
+
+        // Nodes resolve at the pinned version.
         let err = task_add(&root, "Nope", None).unwrap_err();
         assert!(err.contains("E_MODEL_REF"), "{err}");
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn task_rm_unmints_draft_files_and_guards_dependents() {
+        let root = temp_project();
+        let ws = compiled(&root);
+        save_version(&root);
+        use_plan(&root, ws.model(), "mvp").unwrap();
+        task_add(&root, "Store", None).unwrap();
+        task_add(&root, "Auth", None).unwrap();
+
+        // t2 inputs t1: the producer is held in place, the error lists
+        // who depends on it.
+        let mut plan = active(&root);
+        plan.tasks[1].inputs.insert("t1".into(), "the store api".into());
+        store_authored(&root, &plan);
+        let err = task_rm(&root, "t1").unwrap_err();
+        assert!(err.contains("feeds t2"), "{err}");
+        let err = task_rm(&root, "t9").unwrap_err();
+        assert!(err.contains("no task `t9`"), "{err}");
+
+        // The consumer removes — file gone, plan smaller, and the next
+        // mint counts past the highest id present.
+        let gone = task_rm(&root, "t2").unwrap();
+        assert!(!gone.exists());
+        assert_eq!(active(&root).tasks.len(), 1);
+        assert_eq!(task_add(&root, "Auth", None).unwrap().id, "t2");
+
+        // Past draft the structure is frozen.
+        close(&root).unwrap();
+        let err = task_rm(&root, "t1").unwrap_err();
+        assert!(err.contains("past draft"), "{err}");
+        assert!(err.contains("plan reset"), "{err}");
 
         fs::remove_dir_all(&root).unwrap();
     }
@@ -1826,13 +1751,14 @@ mod tests {
         task_add(&root, "Store", None).unwrap();
         task_add(&root, "Auth", None).unwrap();
 
-        // Author the plan: outputs, an input edge t1 → t2, a scenario.
+        // Author the plan by rewriting its files: outputs, an input edge
+        // t1 → t2, a scenario.
         let mut plan = active(&root);
         plan.scenarios.push("a user logs in end to end".into());
         plan.tasks[0].outputs.push("code/store.rs".into());
         plan.tasks[1].outputs.push("code/auth.rs".into());
         plan.tasks[1].inputs.insert("t1".into(), "the store api".into());
-        store_plan(&root, &plan).unwrap();
+        store_authored(&root, &plan);
 
         // The start gate: unowned matches and empty descriptions refuse —
         // curation is authored before the plan runs.
@@ -1935,7 +1861,7 @@ mod tests {
         assert!(!plan_dir(&root, "mvp").join("waves").exists());
         let mut plan = active(&root);
         plan.scenarios.clear();
-        store_plan(&root, &plan).unwrap();
+        store_authored(&root, &plan);
         start(&root, ws.model()).unwrap();
         let outcome = next(&root, ws.model()).unwrap();
         assert!(matches!(outcome.step, Step::Wave { closed: 1, .. }));
@@ -1958,7 +1884,7 @@ mod tests {
 
         let mut plan = active(&root);
         plan.tasks[0].outputs.push("code/auth.rs".into());
-        store_plan(&root, &plan).unwrap();
+        store_authored(&root, &plan);
         curate_all(&root, ws.model());
         start(&root, ws.model()).unwrap();
 
@@ -2017,7 +1943,7 @@ mod tests {
         plan.tasks[0]
             .verifications
             .insert("store-encrypted".into(), vec!["test — encrypted at rest".into()]);
-        store_plan(&root, &plan).unwrap();
+        store_authored(&root, &plan);
         let report = verify(&root, ws.model()).unwrap();
         assert_eq!(report.errors, Vec::<String>::new(), "{:?}", report.errors);
         let flags: Vec<(String, bool)> = report.derived.matched["t1"]
@@ -2046,7 +1972,7 @@ mod tests {
             role: "keeps the rows".into(),
         });
         plan.stack_mapping.push(StackMapping { tech: "sqlite".into(), node: "Auth".into() });
-        store_plan(&root, &plan).unwrap();
+        store_authored(&root, &plan);
         let report = verify(&root, ws.model()).unwrap();
         let all = report.errors.join("\n");
         assert!(all.contains("summary node `Store` has no stack mapping"), "{all}");
@@ -2054,23 +1980,27 @@ mod tests {
         let mut plan = active(&root);
         plan.architecture_summary.clear();
         plan.stack_mapping.clear();
-        store_plan(&root, &plan).unwrap();
+        store_authored(&root, &plan);
 
-        // A verification for an unowned match is a stale key; owning a
-        // requirement the lookup never matched is a lie — both refuse.
+        // Owning a requirement the lookup never matched is a lie —
+        // verify refuses it as an error, since owns is hand-edited.
         let mut plan = active(&root);
-        plan.tasks[0]
-            .verifications
-            .insert("service-hardening".into(), vec!["test — hardened".into()]);
         plan.tasks[0].owns.push("ghost-req".into());
-        store_plan(&root, &plan).unwrap();
+        store_authored(&root, &plan);
         let report = verify(&root, ws.model()).unwrap();
         let all = report.errors.join("\n");
-        assert!(
-            all.contains("`service-hardening`, which the task does not own"),
-            "{all}"
-        );
         assert!(all.contains("owns `ghost-req`"), "{all}");
+
+        // A verification under an unowned slug never loads at all — the
+        // record form catches the stale key before verify runs.
+        let file = plan_dir(&root, "mvp").join("t1-store.md");
+        let text = fs::read_to_string(&file).unwrap()
+            + "\n### service-hardening\n\n- test — hardened\n";
+        fs::write(&file, text).unwrap();
+        let err = verify(&root, ws.model()).err().unwrap();
+        assert!(err.contains("`### service-hardening`"), "{err}");
+        assert!(err.contains("own it first"), "{err}");
+        assert!(err.contains("t1-store.md"), "{err}");
 
         fs::remove_dir_all(&root).unwrap();
     }
@@ -2129,24 +2059,20 @@ mod tests {
         task_add(&root, "Store", None).unwrap();
         task_add(&root, "Auth", None).unwrap();
 
-        // Hand-edit the plan: an input cycle, an unknown input, a stale
-        // verification key, a dangling spec_ref, a versioned ref.
+        // Hand-edit the task files: an input cycle, an unknown input, a
+        // dangling spec_ref, a versioned ref — all load, verify refuses.
         let mut plan = active(&root);
         plan.tasks[0].inputs.insert("t2".into(), "the auth api".into());
         plan.tasks[1].inputs.insert("t1".into(), "the store".into());
         plan.tasks[1].inputs.insert("t9".into(), "a ghost".into());
-        plan.tasks[0]
-            .verifications
-            .insert("no-such-req".into(), vec!["test — never matches".into()]);
         plan.tasks[0].spec_refs.push("Phantom".into());
         plan.tasks[1].spec_refs.push("Auth@v0001".into());
-        store_plan(&root, &plan).unwrap();
+        store_authored(&root, &plan);
 
         let report = verify(&root, ws.model()).unwrap();
         let all = report.errors.join("\n");
         assert!(all.contains("form a cycle"), "{all}");
         assert!(all.contains("`t9` names no task"), "{all}");
-        assert!(all.contains("no-such-req"), "{all}");
         assert!(all.contains("`Phantom` names no element"), "{all}");
         assert!(all.contains("carries a version"), "{all}");
         assert!(report.derived.waves.is_empty(), "a cycle has no layering");
@@ -2154,11 +2080,10 @@ mod tests {
         // Untangle, then drift the live model: verify notes, not errors.
         let mut plan = active(&root);
         plan.tasks[0].inputs.clear();
-        plan.tasks[0].verifications.clear();
         plan.tasks[0].spec_refs.retain(|r| r != "Phantom");
         plan.tasks[1].inputs.remove("t9");
         plan.tasks[1].spec_refs.retain(|r| !r.contains('@'));
-        store_plan(&root, &plan).unwrap();
+        store_authored(&root, &plan);
         curate_all(&root, ws.model());
         fs::write(
             root.join("archi/src/model.arch"),
@@ -2175,6 +2100,97 @@ mod tests {
             report.derived.waves,
             vec![vec!["t1".to_string()], vec!["t2".to_string()]]
         );
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_legacy_plan_json_reads_read_only_and_its_lifecycle_moves() {
+        let root = temp_project();
+        let ws = compiled(&root);
+        let v1 = save_version(&root);
+        put_requirements(&root);
+        put(
+            &root,
+            "code/store.rs",
+            "pub struct Store;\nimpl Store {\n    pub fn put(&mut self) {}\n}\n",
+        );
+
+        // Hand-construct the old form — no verb mints it anymore.
+        let legacy = Plan {
+            name: "old".into(),
+            version: v1,
+            version_hash: None,
+            created: "2026-01-01T00:00:00Z".into(),
+            state: PlanState::Draft,
+            closed_waves: 0,
+            problem: "kept as it was".into(),
+            technology_stack: Vec::new(),
+            architecture_summary: Vec::new(),
+            stack_mapping: Vec::new(),
+            scenarios: Vec::new(),
+            scenarios_displayed: false,
+            scenarios_closed: false,
+            tasks: vec![Task {
+                id: "t1".into(),
+                node: "Store".into(),
+                description: "persist rows".into(),
+                spec_refs: vec!["Store".into(), "Auth.creds wire Store.inn".into()],
+                owns: vec!["service-hardening".into(), "store-encrypted".into()],
+                stack_details: String::new(),
+                inputs: BTreeMap::new(),
+                outputs: vec!["code/store.rs".into()],
+                verifications: [
+                    ("service-hardening".to_string(), vec!["test — hardened".to_string()]),
+                    ("store-encrypted".to_string(), vec!["test — sealed".to_string()]),
+                ]
+                .into(),
+            }],
+        };
+        store_plan(&root, &legacy).unwrap();
+        assert!(matches!(
+            use_plan(&root, ws.model(), "old").unwrap(),
+            Used::Switched(p) if p.problem == "kept as it was"
+        ));
+
+        // The form only shrinks: the mint verbs refuse.
+        let err = task_add(&root, "Auth", None).unwrap_err();
+        assert!(err.contains("read-only"), "{err}");
+        let err = task_rm(&root, "t1").unwrap_err();
+        assert!(err.contains("read-only"), "{err}");
+
+        // A stale verification key is a verify error here — the record
+        // form refuses it at load, the legacy form at verify.
+        let mut bad = legacy.clone();
+        bad.tasks[0]
+            .verifications
+            .insert("no-such-req".into(), vec!["test — never matches".into()]);
+        store_plan(&root, &bad).unwrap();
+        let report = verify(&root, ws.model()).unwrap();
+        assert!(
+            report.errors.join("\n").contains("`no-such-req`, which the task does not own"),
+            "{:?}",
+            report.errors
+        );
+        store_plan(&root, &legacy).unwrap();
+
+        // Lifecycle still moves the old form: start, next to done, reset.
+        let (started, wave1) = start(&root, ws.model()).unwrap();
+        assert_eq!(started.state, PlanState::Started);
+        assert_eq!(wave1, vec!["t1".to_string()]);
+        let outcome = next(&root, ws.model()).unwrap();
+        assert!(matches!(outcome.step, Step::Done));
+        assert_eq!(active(&root).state, PlanState::Completed);
+        reset(&root).unwrap();
+        assert_eq!(active(&root).state, PlanState::Draft);
+
+        // Everything stayed json: no record files appeared, the content
+        // rode along untouched.
+        let dir = plan_dir(&root, "old");
+        assert!(dir.join("plan.json").exists());
+        assert!(!dir.join("old.md").exists());
+        assert!(!dir.join("state.json").exists());
+        assert_eq!(active(&root).problem, "kept as it was");
 
         fs::remove_dir_all(&root).unwrap();
     }

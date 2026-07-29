@@ -1,0 +1,65 @@
+{
+  "name": "doc-verbs-hardening",
+  "version": "v0015",
+  "version_hash": "sha256:4498451716d711863b0eb79353fcf25b213a39c4556423a35c0dd4ec591f5ad6",
+  "created": "2026-07-28T16:25:12Z",
+  "state": "completed",
+  "closed_waves": 1,
+  "problem": "Refusals on re-minted records name the continuation, so a half-applied round batch converges on re-run",
+  "technology_stack": [
+    {
+      "tech": "Rust",
+      "provenance": "the repository's standing stack"
+    },
+    {
+      "tech": "cargo test",
+      "provenance": "the repository's standing test harness"
+    }
+  ],
+  "architecture_summary": [
+    {
+      "node": "DocMint",
+      "role": "mints and retires doc skeletons; owns the refusal wording"
+    }
+  ],
+  "stack_mapping": [
+    {
+      "tech": "crates/archi/src/docs/mint.rs",
+      "node": "DocMint"
+    }
+  ],
+  "scenarios": [
+    "An agent's round batch dies mid-way; re-running the identical batch converges — applied lines answer with continuations, the tail lands. Runs on cargo test (a_replayed_batch_converges)."
+  ],
+  "scenarios_displayed": true,
+  "scenarios_closed": true,
+  "tasks": [
+    {
+      "id": "t1",
+      "node": "DocMint",
+      "description": "Re-minting the identical record converges instead of refusing: `stress open` of the already-open round (same slug) exits 0 naming it as this round; `req add` and `stress add` whose target file byte-equals the skeleton they would write exit 0 — already minted, fill the slots. Anything else stays loud: a foreign open round, a taken slug elsewhere, a standing file that moved past its skeleton all refuse with the continuation named.",
+      "spec_refs": [
+        "DocMint",
+        "Function type_of DocMint",
+        "Cli.drive consult(->Command, <-Report) DocMint.mint",
+        "Cli.drive consult(->Command, <-Report) DocMint.remove"
+      ],
+      "owns": [
+        "refusals-name-the-continuation"
+      ],
+      "stack_details": "same-record detection: open-round slug equality; existing-path equality before the slug-taken refusal\nidempotence test = byte-equality with the would-be skeleton; edited files are not re-mintable",
+      "inputs": {},
+      "outputs": [
+        "crates/archi/src/docs/mint.rs",
+        "crates/archi/tests/mint_e2e.rs"
+      ],
+      "verifications": {
+        "refusals-name-the-continuation": [
+          "cargo test a_replayed_batch_converges — a mid-batch death replayed in full converges: applied lines answer continuations, the tail lands",
+          "cargo test a_replayed_batch_converges — `stress open` of the open round names it as this round and points at `stress add`",
+          "cargo test a_replayed_batch_converges — re-minting a standing skeleton answers that the file stands and its slots await prose"
+        ]
+      }
+    }
+  ]
+}

@@ -13,7 +13,8 @@ def node Findings        // advisory observations — surfaced, never blocking
 def node CanonicalRender // canonical(project): the render that versions hash and archive
 def node RequirementDoc  // intent + requirement markdown under archi/requirements/
 def node StressDoc       // session + stressor markdown under archi/stress/
-def node PlanFile        // plan.json — authored fields edited, lifecycle via verbs
+def node PlanFile        // the plan folder's records: charter, task files, scenarios — minted by verbs, prose edited in place
+def node PlanState       // state.json beside the records — the plan's lifecycle alone: state, closed waves, the pinned version and its hash
 def node LinkEvent       // one append-only journal event: add, confirm, repin, retire…
 def node CodeItem        // a source item of the code tree, addressed by symbol
 def node SymbolHashes    // one item's interface + body hash over canonical tokens
@@ -43,6 +44,7 @@ Data type_of CanonicalRender
 Data type_of RequirementDoc
 Data type_of StressDoc
 Data type_of PlanFile
+Data type_of PlanState
 Data type_of LinkEvent
 Data type_of CodeItem
 Data type_of SymbolHashes

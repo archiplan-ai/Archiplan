@@ -137,20 +137,20 @@ mod tests {
     #[test]
     fn splits_words_and_both_quote_kinds() {
         assert_eq!(
-            split_line("plan task desc t1 'persist the rows'").unwrap(),
-            vec!["plan", "task", "desc", "t1", "persist the rows"]
+            split_line("plan task add Store --desc 'persist the rows'").unwrap(),
+            vec!["plan", "task", "add", "Store", "--desc", "persist the rows"]
         );
         assert_eq!(
-            split_line("plan problem \"a tiny store\"").unwrap(),
-            vec!["plan", "problem", "a tiny store"]
+            split_line("stress open \"a tiny store\"").unwrap(),
+            vec!["stress", "open", "a tiny store"]
         );
     }
 
     #[test]
     fn double_quotes_carry_escapes_single_stay_literal() {
         assert_eq!(
-            split_line(r#"task desc t1 "line one\nline two — a \"quote\"""#).unwrap(),
-            vec!["task", "desc", "t1", "line one\nline two — a \"quote\""]
+            split_line(r#"task add Store --desc "line one\nline two — a \"quote\"""#).unwrap(),
+            vec!["task", "add", "Store", "--desc", "line one\nline two — a \"quote\""]
         );
         assert_eq!(
             split_line(r"x 'no \n escape'").unwrap(),

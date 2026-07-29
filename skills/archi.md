@@ -15,9 +15,14 @@ Ground rules, always:
 
 - Everything is text. Model = `.arch` sources under `archi/src/`,
   requirements, stressors and decisions = markdown under `archi/` —
-  mutate them by editing files. The plan is text too, but its author is
-  the CLI: every plan mutation goes through `archi plan` verbs, never a
-  hand edit. Lifecycle moves only through verbs. Run `archi check` after
+  prose is edited in the files, but **skeletons come from verbs**:
+  `archi req add|rm` and `archi stress open|add|rm` mint and retire the
+  records with every machine field explicit, leaving the text slots for
+  you. The plan is a folder of records like the rest of the spec:
+  creation, removal and lifecycle are verbs (`plan use`,
+  `plan task add|rm`, `start`/`next`/`close`), prose and curation are
+  edited in the files, and `plan verify` is the worklist.
+  Lifecycle moves only through verbs. Run `archi check` after
   every editing round — errors block, findings are the worklist.
 - Search, don't grep. `archi search <phrase>` is ranked retrieval over
   every archi object — model elements with their identity prose, intents,
@@ -58,8 +63,9 @@ channel:
 2. Delegates write content files only: stressor files, requirement files,
    separate `.arch` modules. Lifecycle verbs — `version save`, session
    open/close, every `plan` and `link` verb — belong to the orchestrator
-   alone. Single-slot surfaces (the session charter, `plan.json`, edits to
-   one shared module) take one writer: the orchestrator.
+   alone. Single-slot surfaces (the session charter, a plan's record
+   folder — its `state.json` lifecycle is never hand-edited — edits
+   to one shared module) take one writer: the orchestrator.
 3. **The materialization gate**: after every fan-out, before anything
    else, the orchestrator verifies on disk — `archi check`, then count the
    artifacts against what the fan-out claims (`archi search
@@ -135,14 +141,22 @@ published version; the default unit rides one seat and lands once.
    does belong here: what is this project willing to be bad at? Seed the
    answers as decisions under `archi/decisions/` with `prefer`/`over` —
    the revealed priority profile's first entries.
-3. **Derive requirements** — one file per claim in the intent folder,
-   filename the slugged name: frontmatter (`kind: functional` |
-   `non-functional`, `origin: intent`, `satisfied-by: []`, `deferred:`),
-   summary-first prose, then the reserved sections `System Context` and
-   `Satisfy`. Every field and section present in every file — empty is an
-   explicit state, absence an error; any other heading opens a
-   subrequirement. Leave them open — `unsatisfied_requirement` findings
-   are the worklist, not errors.
+3. **Derive requirements** — one claim, one file, minted by the verb:
+
+   ```
+   archi req add "<title>" --intent <folder> --kind functional|non-functional --origin intent
+   ```
+
+   Every parameter is explicit — a missing one is a refusal, an unknown
+   intent lists the folders; `--deferred <reason>` is the only optional
+   flag (its absence *is* the state). The mint writes the exact schema
+   shape — frontmatter, `System Context`, `Satisfy` — with the text
+   slots empty, and `check` holds them (a requirement needs its summary)
+   until you write the prose: summary first, then context and Satisfy as
+   elements land. `archi req rm <slug>` retires one — it refuses while a
+   plan owns the slug. Any other heading in the file opens a
+   subrequirement. Leave requirements open — `unsatisfied_requirement`
+   findings are the worklist, not errors.
 4. **Draft the model** — read the ontology first: `archi query --top`.
    The unclassified nodes are the preset's types, each carrying its
    definition; classify every term against them (`Service type_of
@@ -175,20 +189,26 @@ published version; the default unit rides one seat and lands once.
    saved — the NKP scoring line, `archi nkp --hotspots`, and the previous
    round's `under_stressed` findings; hotspots and unpressed terms take
    the first stressors.
-   Open the session, `archi/stress/<session>/<session>.md`: frontmatter
-   `version:` (the pinned id) and `closed:` (empty — the closing save
-   stamps it), then a name and one charter paragraph, what this round
-   presses and why now. At most one session is open at a time.
+   Open the session with the verb — `archi stress open "<title>"` — it
+   pins the version just saved (a moved model refuses toward `version
+   save`), derives the folder from the slug, and refuses while another
+   round is open. Then write the charter paragraph in the minted file:
+   what this round presses and why now.
 
    *For each stressor — identify, attractor, verdict:*
 
    a. **Identify.** Think hyperliminally — pick a stakeholder, failure
       mode, scale concern, or regulatory or operational constraint the
       happy path ignores; the valuable stressors cross a boundary the
-      architecture treats as separate. `affects` is required and must
-      resolve to epistatic nodes. Stressor description is a markdown body
-      — same rule as requirements (imperative first line, then any
-      structure a reader needs). One stressor = one pressure = one file.
+      architecture treats as separate. Mint the stressor into the open
+      round — `archi stress add "<title>" --affects <A,B,...>` — the
+      affects resolve against the round's pinned version at the write,
+      every miss named in one message. Then write the description in the
+      minted file: imperative first line, then any structure a reader
+      needs. One stressor = one pressure = one file; a whole round's
+      skeletons land in one `archi batch -` call. A mis-mint retires
+      with `archi stress rm <slug>` (an open round only; derived
+      requirements hold it).
    b. **Attractor.** What configuration does the system get pushed
       toward? A markdown body.
    c. **Verdict.** Three outcomes — `surviving`, `breaking`, `accepted` —
@@ -258,6 +278,14 @@ published version; the default unit rides one seat and lands once.
    is never accepted silently. One decision may sign several accepted
    stressors.
 
+   **Scope in a multi-repo model.** When the user's ask named a specific
+   repository and a stressor's answer reaches into other members, never
+   widen silently: put one question through the poll tool, two options —
+   **extend the work to those repos**, or **stay on the user's rails**.
+   Declined scope is still recorded — a derived requirement with
+   `--deferred <reason>` — never a quiet model edit or seat extension
+   for a repo the user did not name.
+
    A decision is one file under `archi/decisions/` (flat, filename = the
    slugged name), the sole carrier of axes:
 
@@ -321,7 +349,10 @@ published version; the default unit rides one seat and lands once.
    incomplete.
 
    Repeat 4–6 until a round survives — that version is the hardened
-   spec.
+   spec. After that final `version save`, put one question to the user
+   through the poll tool, two options: **commit the spec work now** on
+   the seat's branch — or **leave the tree as it is**. Never commit
+   unasked.
 7. **Plan** — the `archi-plan` skill: the envelope with a user-polled
    stack and its infrastructure, tasks per node, requirement ownership,
    named verifications, scenarios. `plan use` refuses on an unsaved
@@ -469,6 +500,9 @@ anchor-born.
   `archi.toml` — capture and the audit share it, links into excluded
   files still verify.
 - `plan use` refuses → the model has unsaved changes; `version save` first.
+- `worktree merge` refuses a stale member baseline (worktree tip past
+  the recorded mark) → `archi version anchor --repo <member>` in the
+  seat, then re-run the merge.
 - post-merge `check` says the manifest holds conflict markers → two branches minted the same
   version id; keep the first-landed entry and its patch file, then
   `archi version remint -m <note> --session <slug>` re-mints the later round onto the merged
