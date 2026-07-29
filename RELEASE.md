@@ -13,6 +13,61 @@ downloadable and that is the migration model.
 
 ## Releases
 
+### 0.1.12
+
+Self-update. Two project-less verbs run outside every guard:
+`archi check-update` asks the release feed for the latest version and answers
+in one line — up to date, a newer number named toward `archi update`, or an
+older one worded as the feed's rollback (the feed is the truth in both
+directions, so one `update` always converges); `archi update` downloads the
+platform tarball into a scratch dir and replaces the running binary with a
+single atomic rename onto the resolved `current_exe`. Symlinks keep — the
+target file changes, never the link; a torn download or bad unpack leaves the
+standing binary byte-identical; the report names the replaced path, and a path
+inside a cargo `target/` dir is called out as a replaced build artifact. All
+network rides system `curl` and unpacking rides system `tar` — the same
+plumbing doctrine as git, zero new dependencies. Windows refuses toward the
+PowerShell installer.
+
+The old fractal client is walled off for good: its server keeps `/version`
+answering the old world's own final number, so fractal-era binaries report
+"up to date" and are never nudged onto the new tool.
+
+### 0.1.11
+
+Plans become folders of records. `archi/plans/<name>/` holds the charter
+(`<name>.md`), one `t<N>-<node-slug>.md` per task, `scenarios.md` and a
+verbs-only `state.json`; creation, removal and lifecycle stay verbs
+(`plan use`, `plan task add|rm`, `start`/`next`/`close`/`reset`), prose and
+curation are edits to the files, and `plan verify` is the worklist holding
+them together. Waves still derive from the Inputs graph — never stored. A
+legacy `plan.json` reads and runs its lifecycle but refuses authoring;
+`plan show <name>` renders any plan by name without activating it. The
+0.1.10 authoring-verb surface (problem/tech/summary/mapping/scenarios/task
+field verbs) retires with the format.
+
+Doc skeletons come from verbs. `archi req add|rm` and
+`archi stress open|add|rm` mint and retire requirement and stressor records
+with every machine field explicit — no defaults, unknown intents list the
+folders, empty text slots are held by `check` as the un-skippable worklist.
+Re-mints converge: an untouched skeleton reports "already minted", an edited
+file refuses rather than overwrite, and removals pre-flight their blast
+radius (a plan-owned requirement, a requirement-holding stressor).
+
+The landing gets a baseline gate. `archi worktree merge` pre-flights every
+cascaded member — worktree tip against the pinned version's recorded
+baseline — and refuses stale or missing marks in one batched message with
+the repair spelled out; `archi version anchor --repo <member>` now records a
+missing baseline and re-records a moved one on the latest version
+(anchor-born, older versions never move), and the mint's auto-base notes how
+far behind a reachable baseline sits. `check` and `build` gain the verdict
+gate: a dirty governed spec in an unbound checkout refuses to bless itself.
+A seat extension resolves members from the seat, not the primary. The
+briefings follow: implement anchors the seat at DONE, finish-worktree names
+the stale-baseline repair, the plan skill teaches the record flow, the
+hardened save closes on a commit poll, and a stress round widening past the
+repository the user named must ask first.
+
 ### 0.1.10
 
 Parallel work gets seats. A machine-local registry in the git common dir binds
