@@ -63,8 +63,9 @@ channel:
 2. Delegates write content files only: stressor files, requirement files,
    separate `.arch` modules. Lifecycle verbs — `version save`, session
    open/close, every `plan` and `link` verb — belong to the orchestrator
-   alone. Single-slot surfaces (the session charter, `plan.json`, edits to
-   one shared module) take one writer: the orchestrator.
+   alone. Single-slot surfaces (the session charter, a plan's record
+   folder — its `state.json` lifecycle is never hand-edited — edits
+   to one shared module) take one writer: the orchestrator.
 3. **The materialization gate**: after every fan-out, before anything
    else, the orchestrator verifies on disk — `archi check`, then count the
    artifacts against what the fan-out claims (`archi search
@@ -488,6 +489,9 @@ anchor-born.
   `archi.toml` — capture and the audit share it, links into excluded
   files still verify.
 - `plan use` refuses → the model has unsaved changes; `version save` first.
+- `worktree merge` refuses a stale member baseline (worktree tip past
+  the recorded mark) → `archi version anchor --repo <member>` in the
+  seat, then re-run the merge.
 - post-merge `check` says the manifest holds conflict markers → two branches minted the same
   version id; keep the first-landed entry and its patch file, then
   `archi version remint -m <note> --session <slug>` re-mints the later round onto the merged

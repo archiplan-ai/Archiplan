@@ -52,6 +52,10 @@ Ground rules, always:
 4. **On refusal, repair and re-run** — the verb is idempotent:
    - *open plan* → close it (step 1);
    - *protected receiving branch* → `--to <branch>`, push, PR;
+   - *stale member baseline* → the merge names each member whose
+     worktree tip is past the recorded baseline;
+     `archi version anchor --repo <member>` in the seat, then re-run
+     the merge;
    - *member push refused* (no remote, no rights) → repair the remote and
      re-run; the member stays bound until its push lands;
    - *merge conflict* → the join is the `archi-merge` skill's ceremony;

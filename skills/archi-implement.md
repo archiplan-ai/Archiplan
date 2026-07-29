@@ -161,9 +161,14 @@ forbidden. Then:
 archi plan next
 ```
 
-It prints `DONE`. Then offer the user, through the poll tool, to close
-the seat now — the `archi-finish-worktree` skill: land the unit, push
-member branches, retire the worktree — or leave the seat standing.
+It prints `DONE`. After the final commit, anchor the seat:
+`archi version anchor` for the home repo, then
+`archi version anchor --repo <member>` for every cascaded member the
+seat carries — the landing gate refuses a stale mark, and anchoring at
+DONE is what keeps the merge clean. Then offer the user, through the
+poll tool, to close the seat now — the `archi-finish-worktree` skill:
+land the unit, push member branches, retire the worktree — or leave
+the seat standing.
 
 ## Sub-agents
 
@@ -200,9 +205,10 @@ sub-agents cannot prompt for permission on their own.
   the orchestrator never writes task code inline.
 - **Stop on plan errors.** Surface the CLI message verbatim and route the
   user back to `/archi` as the message dictates.
-- **CLI is the only author.** Never hand-edit plan.json — `state`,
-  `closed_waves`, latches, the version archive or the link journal least
-  of all; authored plan fields were `/archi-plan`'s business, through its
+- **CLI is the only author.** The plan is a record folder — never
+  hand-edit its `state.json` lifecycle (`state`, `closed_waves`,
+  latches), the version archive or the link journal least of all;
+  authored plan fields were `/archi-plan`'s business, through its
   verbs, not this skill's.
 - **Code lands only in seats.** The plan's worktree and its member
   worktrees — never a primary checkout.
