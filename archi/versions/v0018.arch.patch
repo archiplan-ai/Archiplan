@@ -1,0 +1,10 @@
+--- original
++++ modified
+@@ -313,6 +313,7 @@
+ Agent.drive invoke(->Command, <-Report) Cli.session in harden_flow
+ Agent.drive invoke(->Command, <-Report) Cli.status in seat_flow
+ Agent.drive invoke(->Command, <-Report) Cli.stress in harden_flow
++Agent.drive invoke(->Command, <-Report) Cli.update in read_flow
+ Agent.drive invoke(->Command, <-Report) Cli.version in harden_flow
+ Agent.drive invoke(->Command, <-Report) Cli.worktree in seat_flow
+ Archive.canonicalize render(->ModelGraph, <-CanonicalRender) Renderer.emit_source in harden_flow
