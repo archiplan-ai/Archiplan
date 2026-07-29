@@ -2,6 +2,7 @@
 name = "modeling-lang"
 version = "0.2.0"
 edition = "2024"
+license = "MIT"
 description = "Archiplan modeling language: a free graph of nodes, ports and distinguished edges, edited through atomic batches of idempotent JSON statements, and queried back as replayable statements."
 
 [dependencies]

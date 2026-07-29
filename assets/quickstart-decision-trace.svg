@@ -1,0 +1,156 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 704" role="img" aria-label="Claude Code session: archi explains a decision chain across multiple stress sessions">
+  <defs>
+    <linearGradient id="winBg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0d1016"/>
+      <stop offset="1" stop-color="#08090d"/>
+    </linearGradient>
+    <linearGradient id="titleBar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#15181f"/>
+      <stop offset="1" stop-color="#0e1116"/>
+    </linearGradient>
+    <filter id="winShadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="14"/>
+      <feOffset dx="0" dy="10"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.55"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <style>
+      .mono { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .ink     { fill: #ecece8; }
+      .dim     { fill: #a7a9a4; }
+      .quiet   { fill: #6b6e69; }
+      .accent  { fill: #d9ff3a; }
+      .ok      { fill: #7fe39a; }
+      .warn    { fill: #ffc46b; }
+      .alert   { fill: #ff7a7a; }
+      .ctrl    { fill: #e6a8ff; }
+      .store   { fill: #8ab4ff; }
+      .muted   { fill: #5b5e58; }
+    </style>
+  </defs>
+
+  <!-- Window -->
+  <g filter="url(#winShadow)">
+    <rect x="20" y="16" width="780" height="672" rx="14" fill="url(#winBg)" stroke="rgba(236,236,232,0.14)"/>
+    <!-- Title bar -->
+    <path d="M20 30 a14 14 0 0 1 14 -14 h752 a14 14 0 0 1 14 14 v22 h-780 z" fill="url(#titleBar)"/>
+    <line x1="20" y1="52" x2="800" y2="52" stroke="rgba(236,236,232,0.08)"/>
+    <!-- Traffic lights -->
+    <circle cx="40"  cy="34" r="6" fill="#ff5f57"/>
+    <circle cx="60"  cy="34" r="6" fill="#febc2e"/>
+    <circle cx="80"  cy="34" r="6" fill="#28c840"/>
+    <!-- Title text -->
+    <text x="410" y="38" text-anchor="middle" class="mono quiet" font-size="11">claude  —  ~/dev/blockchain-event-gateway</text>
+    <!-- Status pill -->
+    <g transform="translate(628,24)">
+      <rect width="165" height="21" rx="10" fill="rgba(230,168,255,0.10)" stroke="rgba(230,168,255,0.30)"/>
+      <circle cx="11" cy="10" r="3" class="ctrl"/>
+      <text x="20" y="14" class="mono ctrl" font-size="10">archi · decision-trace</text>
+    </g>
+  </g>
+
+  <!-- Content -->
+  <g class="mono" font-size="12.5">
+    <!-- Prompt -->
+    <text x="40"  y="84" class="accent">&gt;</text>
+    <text x="58"  y="84" class="accent">/archi-explain</text>
+    <text x="176"  y="84" class="ink">why we introduced global tenant_store replication</text>
+
+    <!-- Tool call indicator -->
+    <text x="40" y="106" class="quiet">⏺</text>
+    <text x="58" y="106" class="dim">Ran 3 spec queries</text>
+    <text x="208" y="106" class="quiet">archi query subgraph --layer epistatic · archi reqs · archi stress --history</text>
+
+    <!-- Divider -->
+    <line x1="40" y1="124" x2="780" y2="124" stroke="rgba(236,236,232,0.06)"/>
+
+    <!-- Response header -->
+    <text x="40" y="148" class="ok">●</text>
+    <text x="58" y="148" class="ink" font-weight="600">Decision chain reconstructed</text>
+    <text x="288" y="148" class="quiet">·  4 sessions traversed  ·  origin found  ·  reversed in v10</text>
+
+    <!-- Sub-summary -->
+    <text x="58" y="168" class="dim">short answer:</text>
+    <text x="148" y="168" class="ink">session 1 forced it, sessions 2 + 5 walked it back — v10 is residency-partitioned</text>
+
+    <!-- ============================================== -->
+    <!-- Block 1: origin -->
+    <text x="40" y="200" class="quiet">⎿</text>
+    <text x="58" y="200" class="ink" font-weight="600">origin · session 1</text>
+    <text x="208" y="200" class="quiet">stressor that introduced the "global replication" idea</text>
+
+    <g transform="translate(58,224)">
+      <text y="0"   class="alert">⚠</text>
+      <text x="22"  y="0"  class="ink">S-region-outage</text>
+      <text x="225" y="0"  class="dim">regional outage takes the entire service down  ·  BREAKING</text>
+      <text x="22"  y="18" class="ok">→</text>
+      <text x="40"  y="18" class="ok">R-multi-region  ·  R-tenant-store-replication</text>
+      <text x="22"  y="38" class="quiet">note</text>
+      <text x="60"  y="38" class="dim">"global replication" was a side effect, not design intent —</text>
+      <text x="60"  y="54" class="dim">gateways live in every region and must authenticate locally;</text>
+      <text x="60"  y="70" class="dim">a single-region tenant_store ⇒ cross-region RTT + SPOF on every auth.</text>
+    </g>
+
+    <!-- ============================================== -->
+    <!-- Block 2: walked back -->
+    <text x="40" y="334" class="quiet">⎿</text>
+    <text x="58" y="334" class="ink" font-weight="600">walked back · session 2</text>
+    <text x="248" y="334" class="quiet">three later stressors attacked the new "global" property</text>
+
+    <g transform="translate(58,358)">
+      <text y="0"   class="warn">⚠</text>
+      <text x="22"  y="0"  class="ink">S-tenant-store-split-brain</text>
+      <text x="228" y="0"  class="dim">cross-region writes during partition corrupt auth state</text>
+      <text x="22"  y="16" class="ok">→</text>
+      <text x="40"  y="16" class="ok">single-writer per key  ·  revocations globally tombstoned</text>
+
+      <text y="40"  class="warn">⚠</text>
+      <text x="22"  y="40" class="ink">S-cross-region-quota-race</text>
+      <text x="228" y="40" class="dim">eventual consistency lets tenants double-spend quota</text>
+      <text x="22"  y="56" class="ok">→</text>
+      <text x="40"  y="56" class="ok">quota lifted off replication  ·  aggregated in region_coordinator</text>
+
+      <text y="80"  class="warn">⚠</text>
+      <text x="22"  y="80" class="ink">S-data-residency</text>
+      <text x="228" y="80" class="dim">EU tenant data surfaces in US replicas  ·  compliance break</text>
+      <text x="22"  y="96" class="ok">→</text>
+      <text x="40"  y="96" class="ok">R-residency-policy  ·  tenant_store residency-partitioned, not global</text>
+    </g>
+
+    <!-- ============================================== -->
+    <!-- Block 3: hardened -->
+    <text x="40" y="490" class="quiet">⎿</text>
+    <text x="58" y="490" class="ink" font-weight="600">hardened · session 5</text>
+    <text x="224" y="490" class="quiet">concurrency requirements replaced "replicate everywhere"</text>
+
+    <g transform="translate(58,514)">
+      <text y="0"   class="ctrl">+</text>
+      <text x="20"  y="0"  class="ink">r-s5-lease-cas-uniform</text>
+      <text x="225" y="0"  class="dim">per-tenant single-writer leases  ·  HLC TTL  ·  uniform CAS</text>
+
+      <text y="18"  class="ctrl">+</text>
+      <text x="20"  y="18" class="ink">r-s5-residency-2pc</text>
+      <text x="225" y="18" class="dim">2-phase commit for residency policy_version transitions</text>
+    </g>
+
+    <!-- ============================================== -->
+    <!-- Block 4: what v10 says -->
+    <text x="40" y="572" class="quiet">⎿</text>
+    <text x="58" y="572" class="ink" font-weight="600">what the v10 spec actually says</text>
+    <text x="305" y="572" class="quiet">"globally replicated" appears nowhere in the definition</text>
+
+    <g transform="translate(58,596)">
+      <text y="0"   class="store">tenant_store</text>
+      <text x="115" y="0"  class="dim">· residency-partitioned</text>
+      <text x="275" y="0"  class="quiet">each region holds only partitions its policy admits</text>
+      <text x="115" y="18" class="dim">· single-writer per tenant</text>
+      <text x="275" y="18" class="quiet">lease tokens  ·  CAS-on-(record_version, lease_id)</text>
+      <text x="115" y="36" class="dim">· tombstoned</text>
+      <text x="275" y="36" class="quiet">revocations  ·  plan changes  ·  preservation  ·  erasure</text>
+    </g>
+
+    <!-- Caret line -->
+    <text x="40" y="676" class="accent">&gt;</text>
+    <rect x="56" y="665" width="8" height="14" class="accent" opacity="0.85"/>
+  </g>
+</svg>

@@ -13,6 +13,62 @@ downloadable and that is the migration model.
 
 ## Releases
 
+### 0.1.10
+
+Parallel work gets seats. A machine-local registry in the git common dir binds
+each worktree to one unit of work — spec, then plan, then code — and `archi
+status` plus `archi worktree mint|ls|drop|merge` drive that lifecycle: mint
+cascades to member repositories on baseline-proven branches and writes the seat
+overlay, merge lands the unit whole (members by push and PR only, closed plans
+only), retires the worktree and clears its binding. Version pins carry content
+hashes, so a remint can never silently reinterpret one.
+
+The guard is unconditional and lives at the router: the binding, not the
+branch, licenses a mutation. An unbound checkout — the primary included —
+refuses every mutating verb and names the seats it could continue instead; a
+gitless tree refuses loudly, since isolation, branches and merge need a
+repository. `check` and `build` pass a verdict gate of their own: uncommitted
+edits under a governed spec in an unbound checkout refuse rather than bless
+themselves, while a bound seat, a clean tree (CI, the receiving checkout) and a
+tree mid-merge all pass — the join triage needs `check` exactly while `archi/`
+is conflicted. `protected` keeps one meaning: branches that never receive a
+local merge. This is the upgrade-visible change — a 0.1.9 habit of mutating in
+the primary checkout must now seat the work first (`archi plan use <name>`, or
+`archi worktree mint <slug>` for spec work without a plan).
+
+Plan authoring returns to the CLI. Every authoring mutation is a verb again —
+`plan problem`, `tech add`, `architecture-summary add`, `stack-mapping add`,
+`scenarios add|list|remove`, task `desc`/`show`/`stack-detail`/`spec-ref`/
+`input --from`/`output`, `task req suggest|add|remove|req-list`, `task
+verification add|remove`, `plan list|status` — each a validated
+read-modify-write of `plan.json`, so the file stays the truth and the CLI is
+its only author. `archi batch` re-invokes the binary per stdin line: no second
+dispatch surface, every future verb batchable by construction, fail-fast with
+the offending line named.
+
+Requirement ownership is curated, not inferred. The derived matched set stays
+the ever-fresh candidate list and each task selects a strict subset into
+`owns`; verification duty follows ownership, so one requirement no longer
+demands proofs from every task that touched its element. `plan verify` is the
+whole worklist again — unowned candidates, `owns` outside the match, missing or
+orphaned verifications, empty descriptions, the summary/stack-mapping
+cross-check — and the reverse lookup now folds a port to its owning node's
+surface and canonical edge text to both endpoints, so port-pinned requirements
+stop vanishing from the planner. Satisfied requirements no task of the plan
+reaches surface as notes: scope by decision, never by silence.
+
+The briefing splits three ways. `/archi-plan` and `/archi-implement` are skills
+of their own, `/archi-finish-worktree` closes a seat, and every skill opens by
+policing its own freshness — run `archi sync-skills` first, an `updated` report
+means re-read the file before acting. The `CLAUDE.md` block regains its two
+directives. `archi init` writes `protected = ["main"]` into new manifests and
+scaffolds `.gitignore`, so the discipline is on from birth; a declared
+discipline without git refuses, create-or-cancel.
+
+Distribution moves to GitHub: the repository is public under MIT, and
+`install.sh` / `install.ps1` resolve the latest release, verify the published
+`.sha256` and install from the release assets.
+
 ### 0.1.9
 
 `archi viz` learns to draw the flow of data. A payload riding a connection's
@@ -160,12 +216,14 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/archiplan-ai/Archiplan/main/release/install.ps1 | iex
 ```
 
-The installer resolves the latest release, verifies the checksum, and installs
-to `~/.local/bin`. Pin a version with `ARCHI_VERSION=x.y.z`; point at a
-different asset host with `ARCHI_BASE_URL`.
+The installer resolves the newest tag from `/releases/latest` (falling back to
+the GitHub API when a network eats the redirect), downloads the platform
+tarball and its `.sha256` from that release's assets, verifies the checksum,
+and installs to `~/.local/bin`. Pin a version with `ARCHI_VERSION=x.y.z`;
+install from a fork or mirror with `ARCHI_REPO=owner/repo`.
 
-While the repository is private, anonymous downloads 404. Authenticated users
-install with:
+The repository is public, so release assets download anonymously. The manual
+path, for anyone who would rather not pipe a script into a shell:
 
 ```sh
 gh release download v$V -R archiplan-ai/Archiplan -p "archi-$V-macos-arm64.tar.gz"
