@@ -76,8 +76,8 @@ use serde_json::{Value, json};
 const USAGE: &str = "usage:
   archi init  [<dir>]
   archi sync-skills [--project <dir>]
-  archi check-update   # this binary against the release server's latest
-  archi update         # swap this binary for the server's latest
+  archi check-update   # this binary against the release feed's latest
+  archi update         # swap this binary for the feed's latest
   archi check [--project <dir>] [--json]
   archi build [--project <dir>] [--emit-batch <file|->]
   archi nkp   [--project <dir>] [--regime | --hotspots | --corridors] [--top | --scope <path>]

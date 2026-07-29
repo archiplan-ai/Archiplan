@@ -1,13 +1,14 @@
 //! End to end through a COPY of the real binary: the self-updater —
-//! `check-update` reads the server's word on latest, `update` swaps the
-//! binary atomically in either direction, and every refusal leaves the
-//! standing binary untouched.
+//! `check-update` reads the feed's word on latest, `update` verifies the
+//! checksum and swaps the binary atomically in either direction, and
+//! every refusal leaves the standing binary untouched.
 //!
-//! The release server is a `file://` fixture: a dir holding `version`
-//! (the JSON envelope) and `download/archi-<v>-<plat>.tar.gz`, reached
-//! through `ARCHI_BASE_URL` — curl serves file URLs like any other.
-//! CRITICAL: every test copies the built binary into its own scratch and
-//! runs the copy — the real build artifact is never the swap target.
+//! The release feed is a `file://` fixture in the `ARCHI_BASE_URL` shape:
+//! a dir holding `latest` (a plain text file naming `v<V>`) and
+//! `download/v<V>/archi-<V>-<plat>.tar.gz` beside its `.sha256` — curl
+//! serves file URLs like any other. CRITICAL: every test copies the built
+//! binary into its own scratch and runs the copy — the real build
+//! artifact is never the swap target.
 
 #![cfg(unix)]
 
@@ -45,24 +46,43 @@ fn plat() -> &'static str {
     }
 }
 
-/// Stand up a fixture release server in `dir` and return its base URL:
-/// `version` answers `latest`, `download/` holds a tarball unpacking to
-/// `archi-<latest>-<plat>/archi` — a script that prints `archi <latest>`,
-/// so a swapped binary names its new number when run.
+/// The SHA-256 of a file, first-found-wins like the updater itself:
+/// `shasum -a 256`, then `sha256sum`.
+fn sha256_hex(path: &Path) -> String {
+    let tools: [(&str, &[&str]); 2] = [("shasum", &["-a", "256"]), ("sha256sum", &[])];
+    for (tool, args) in tools {
+        if let Ok(out) = Command::new(tool).args(args).arg(path).output()
+            && out.status.success()
+        {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            return stdout.split_whitespace().next().expect("a hash field").to_string();
+        }
+    }
+    panic!("neither shasum nor sha256sum on PATH — the update e2e cannot hash its fixture")
+}
+
+/// Where the fixture feed keeps the assets of version `latest`.
+fn asset_dir(server: &Path, latest: &str) -> PathBuf {
+    server.join("download").join(format!("v{latest}"))
+}
+
+/// Stand up a fixture release feed in `dir` and return its base URL:
+/// `latest` is a plain text file naming `v<latest>`; `download/v<latest>/`
+/// holds a tarball unpacking to `archi-<latest>-<plat>/archi` — a script
+/// that prints `archi <latest>`, so a swapped binary names its new number
+/// when run — beside its `.sha256`.
 fn fixture(dir: &Path, latest: &str) -> String {
-    fs::create_dir_all(dir.join("download")).unwrap();
-    fs::write(
-        dir.join("version"),
-        format!(r#"{{"server":"archiplan-test","latest":"{latest}"}}"#),
-    )
-    .unwrap();
+    fs::create_dir_all(dir).unwrap();
+    fs::write(dir.join("latest"), format!("v{latest}\n")).unwrap();
     let name = format!("archi-{latest}-{}", plat());
     let stage = dir.join("stage");
     fs::create_dir_all(stage.join(&name)).unwrap();
     let payload = stage.join(&name).join("archi");
     fs::write(&payload, format!("#!/bin/sh\necho \"archi {latest}\"\n")).unwrap();
     fs::set_permissions(&payload, fs::Permissions::from_mode(0o755)).unwrap();
-    let tarball = dir.join("download").join(format!("{name}.tar.gz"));
+    let assets = asset_dir(dir, latest);
+    fs::create_dir_all(&assets).unwrap();
+    let tarball = assets.join(format!("{name}.tar.gz"));
     let out = Command::new("tar")
         .arg("-czf")
         .arg(&tarball)
@@ -72,6 +92,11 @@ fn fixture(dir: &Path, latest: &str) -> String {
         .output()
         .unwrap();
     assert!(out.status.success(), "tar -czf: {}", String::from_utf8_lossy(&out.stderr));
+    fs::write(
+        assets.join(format!("{name}.tar.gz.sha256")),
+        format!("{}  {name}.tar.gz\n", sha256_hex(&tarball)),
+    )
+    .unwrap();
     format!("file://{}", dir.display())
 }
 
@@ -151,7 +176,7 @@ fn older_version_words_a_rollback_and_update_follows_it() {
     assert_eq!(code, 0, "{out}{err}");
     assert_eq!(
         out.trim(),
-        format!("archi {CURRENT} — the server offers 0.0.1 (a rollback): `archi update` follows it")
+        format!("archi {CURRENT} — the feed offers 0.0.1 (a rollback): `archi update` follows it")
     );
 
     let (code, out, err) = run(&bin, &base, &["update"]);
@@ -182,15 +207,56 @@ fn a_poisoned_tarball_leaves_the_binary_byte_identical() {
     let ws = scratch("poison");
     let server = ws.join("server");
     let base = fixture(&server, "9.9.9");
-    let tarball = server.join("download").join(format!("archi-9.9.9-{}.tar.gz", plat()));
+    // Poison the bytes after the honest checksum is minted — the hash
+    // gate, not tar, must catch it.
+    let tarball = asset_dir(&server, "9.9.9").join(format!("archi-9.9.9-{}.tar.gz", plat()));
     fs::write(&tarball, b"these bytes are no tarball").unwrap();
     let bin = copy_bin(&ws);
     let before = fs::read(&bin).unwrap();
 
     let (code, out, err) = run(&bin, &base, &["update"]);
     assert_eq!(code, 1, "a poisoned tarball must refuse\n{out}{err}");
-    assert!(err.contains("unpack"), "the refusal names the unpack: {err}");
+    assert!(err.contains("checksum mismatch"), "the refusal names the checksum: {err}");
+    assert!(!err.contains("unpack"), "the hash gate fires before tar: {err}");
     assert_eq!(fs::read(&bin).unwrap(), before, "the binary must stay byte-identical");
+}
+
+#[test]
+fn a_lying_checksum_refuses_naming_both_hashes() {
+    let ws = scratch("lying");
+    let server = ws.join("server");
+    let base = fixture(&server, "9.9.9");
+    let name = format!("archi-9.9.9-{}", plat());
+    let assets = asset_dir(&server, "9.9.9");
+    let honest = sha256_hex(&assets.join(format!("{name}.tar.gz")));
+    let lie = "f".repeat(64);
+    fs::write(assets.join(format!("{name}.tar.gz.sha256")), format!("{lie}  {name}.tar.gz\n"))
+        .unwrap();
+    let bin = copy_bin(&ws);
+    let before = fs::read(&bin).unwrap();
+
+    let (code, out, err) = run(&bin, &base, &["update"]);
+    assert_eq!(code, 1, "a lying checksum must refuse\n{out}{err}");
+    assert!(err.contains("checksum mismatch"), "the refusal names the mismatch: {err}");
+    assert!(err.contains(&lie), "the refusal names the expected hash: {err}");
+    assert!(err.contains(&honest), "the refusal names the actual hash: {err}");
+    assert_eq!(fs::read(&bin).unwrap(), before, "the binary must stay byte-identical");
+}
+
+#[test]
+fn a_missing_checksum_refuses_as_unverifiable() {
+    let ws = scratch("nosum");
+    let server = ws.join("server");
+    let base = fixture(&server, "9.9.9");
+    let name = format!("archi-9.9.9-{}", plat());
+    fs::remove_file(asset_dir(&server, "9.9.9").join(format!("{name}.tar.gz.sha256"))).unwrap();
+    let bin = copy_bin(&ws);
+    let before = fs::read(&bin).unwrap();
+
+    let (code, out, err) = run(&bin, &base, &["update"]);
+    assert_eq!(code, 1, "a missing checksum must refuse\n{out}{err}");
+    assert!(err.contains("unverifiable is not installable"), "the refusal words the spirit: {err}");
+    assert_eq!(fs::read(&bin).unwrap(), before, "the binary must stay untouched");
 }
 
 #[test]

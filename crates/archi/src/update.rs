@@ -1,49 +1,132 @@
-//! Self-update: `archi check-update` asks the release server where this
-//! binary stands; `archi update` swaps the binary for the server's latest.
+//! Self-update: `archi check-update` asks the release feed where this
+//! binary stands; `archi update` swaps the binary for the feed's latest.
 //!
-//! The server contract is the installer's (`release/install.sh`): `GET
-//! <BASE>/version` answers `{"server":"…","latest":"x.y.z"}`, and `GET
-//! <BASE>/download/archi-<version>-<platform>.tar.gz` serves a tarball
-//! unpacking to `archi-<version>-<platform>/archi`. BASE defaults to
-//! `https://api.archiplan.ai`; `ARCHI_BASE_URL` points anywhere else —
-//! tests ride `file://` fixtures, which curl serves like any other URL.
+//! The feed is GitHub releases of `archiplan-ai/Archiplan` (`ARCHI_REPO`
+//! names a fork or mirror), resolved the installer's way
+//! (`release/install.sh`): the `/releases/latest` redirect names the
+//! newest tag and is not rate-limited; the API's `tag_name` is the
+//! fallback for networks that swallow the redirect. Assets live at
+//! `/releases/download/v<V>/archi-<V>-<platform>.tar.gz`, each beside its
+//! `.sha256`, and the checksum must verify before anything unpacks —
+//! unverifiable is not installable. `ARCHI_BASE_URL` replaces the whole
+//! feed for tests and mirrors: `GET <base>/latest` is a plain text file
+//! carrying `v<V>` or `<V>`, `<base>/download/v<V>/` the assets — the
+//! e2e suite rides `file://` fixtures, which curl serves like any other
+//! URL.
 //!
 //! Transport is system plumbing, the same doctrine as git in
-//! `worktrees.rs`: `curl -fsSL` fetches, `tar -xzf` unpacks, and refusals
-//! carry the tool's own stderr verbatim plus the continuation. The swap
-//! itself is one `rename` onto the resolved running binary — atomic, so
-//! the new binary lands whole or not at all: every earlier failure (torn
-//! download, bad unpack, refused rename) leaves the standing binary
-//! untouched. Symlinks resolve to their target first — the link stays a
-//! link; the file behind it is what changes. The server is the truth of
-//! latest in either direction: a lower number is a rollback, and `update`
-//! follows it.
+//! `worktrees.rs`: `curl -fsSL` fetches, `shasum`/`sha256sum` hashes,
+//! `tar -xzf` unpacks, and refusals carry the tool's own stderr verbatim
+//! plus the continuation. The swap itself is one `rename` onto the
+//! resolved running binary — atomic, so the new binary lands whole or not
+//! at all: every earlier failure (torn download, bad checksum, bad
+//! unpack, refused rename) leaves the standing binary untouched. Symlinks
+//! resolve to their target first — the link stays a link; the file behind
+//! it is what changes. The feed is the truth of latest in either
+//! direction: a lower number is a rollback, and `update` follows it.
 
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-/// The release server every request rides unless `ARCHI_BASE_URL` says
+/// The GitHub repo whose releases are the feed unless `ARCHI_REPO` says
 /// otherwise.
-const DEFAULT_BASE: &str = "https://api.archiplan.ai";
+const DEFAULT_REPO: &str = "archiplan-ai/Archiplan";
 
 /// This binary's own version — the baseline every comparison starts from.
 const CURRENT: &str = env!("CARGO_PKG_VERSION");
 
-/// The continuation every server-side refusal names.
-const CONTINUATION: &str = "check the network, or point ARCHI_BASE_URL at a release server";
+/// The continuation every feed-side refusal names.
+const CONTINUATION: &str = "check the network, or point ARCHI_BASE_URL at a release feed";
 
-/// The base URL, `ARCHI_BASE_URL` over the default, trailing slash trimmed.
-fn base() -> String {
-    match std::env::var("ARCHI_BASE_URL") {
-        Ok(v) if !v.trim().is_empty() => v.trim().trim_end_matches('/').to_string(),
-        _ => DEFAULT_BASE.to_string(),
+/// Where releases come from: GitHub unless `ARCHI_BASE_URL` replaces the
+/// whole feed with a plain-file mirror.
+enum Feed {
+    /// GitHub releases of `owner/repo` — the default lane, `ARCHI_REPO`
+    /// naming a fork or mirror.
+    GitHub(String),
+    /// An `ARCHI_BASE_URL` mirror, trailing slash trimmed: `GET
+    /// <base>/latest` is a plain text file carrying `v<V>` or `<V>`,
+    /// `<base>/download/v<V>/<file>` the assets.
+    Base(String),
+}
+
+impl Feed {
+    fn resolve() -> Feed {
+        if let Ok(v) = std::env::var("ARCHI_BASE_URL") {
+            let v = v.trim();
+            if !v.is_empty() {
+                return Feed::Base(v.trim_end_matches('/').to_string());
+            }
+        }
+        match std::env::var("ARCHI_REPO") {
+            Ok(r) if !r.trim().is_empty() => Feed::GitHub(r.trim().to_string()),
+            _ => Feed::GitHub(DEFAULT_REPO.to_string()),
+        }
     }
+
+    /// The feed's word on latest, leading `v` stripped and validated as a
+    /// triple. Every refusal names the cause and the continuation.
+    fn latest(&self) -> Result<(String, (u64, u64, u64)), String> {
+        let v = match self {
+            Feed::GitHub(repo) => github_latest(repo)?,
+            Feed::Base(base) => {
+                let url = format!("{base}/latest");
+                let body = curl(&url, &[])
+                    .map_err(|e| format!("the release feed gave no latest — {e}; {CONTINUATION}"))?;
+                let raw = String::from_utf8_lossy(&body);
+                let raw = raw.trim();
+                raw.strip_prefix('v').unwrap_or(raw).to_string()
+            }
+        };
+        let t =
+            triple(&v).map_err(|e| format!("the feed's latest is malformed: {e}; {CONTINUATION}"))?;
+        Ok((v, t))
+    }
+
+    /// The URL an asset of release `v<version>` downloads from.
+    fn download_url(&self, version: &str, file: &str) -> String {
+        match self {
+            Feed::GitHub(repo) => {
+                format!("https://github.com/{repo}/releases/download/v{version}/{file}")
+            }
+            Feed::Base(base) => format!("{base}/download/v{version}/{file}"),
+        }
+    }
+}
+
+/// The newest release of `repo` on GitHub, leading `v` stripped — the
+/// installer's own two-step: the `/releases/latest` redirect names the
+/// tag without rate limits; the API is the fallback for networks that
+/// swallow the redirect.
+fn github_latest(repo: &str) -> Result<String, String> {
+    if let Ok(out) = curl(
+        &format!("https://github.com/{repo}/releases/latest"),
+        &["-I", "-o", "/dev/null", "-w", "%{url_effective}"],
+    ) {
+        let effective = String::from_utf8_lossy(&out);
+        if let Some((_, tag)) = effective.trim().rsplit_once("/releases/tag/v")
+            && !tag.is_empty()
+        {
+            return Ok(tag.to_string());
+        }
+    }
+    let url = format!("https://api.github.com/repos/{repo}/releases/latest");
+    let body = curl(&url, &[]).map_err(|e| {
+        format!("the release feed at github.com/{repo} named no latest — {e}; {CONTINUATION}")
+    })?;
+    let v: serde_json::Value = serde_json::from_slice(&body)
+        .map_err(|e| format!("the answer at {url} is not the release JSON ({e}); {CONTINUATION}"))?;
+    let Some(tag) = v.get("tag_name").and_then(|t| t.as_str()) else {
+        return Err(format!("the answer at {url} carries no `tag_name`; {CONTINUATION}"));
+    };
+    let tag = tag.trim();
+    Ok(tag.strip_prefix('v').unwrap_or(tag).to_string())
 }
 
 /// The release platform this binary was built for — the compiled-in mirror
 /// of `release/install.sh`'s uname map. `Err` is the refusal for platforms
-/// the release server does not build: Windows rides its own installer,
+/// the release feed does not carry: Windows rides its own installer,
 /// anything else names itself.
 fn platform() -> Result<&'static str, String> {
     if cfg!(target_os = "linux") && cfg!(target_arch = "x86_64") {
@@ -57,7 +140,7 @@ fn platform() -> Result<&'static str, String> {
     }
     if cfg!(target_os = "windows") {
         return Err(
-            "self-update on Windows rides the installer: `irm https://api.archiplan.ai/install.ps1 | iex`"
+            "self-update on Windows rides the installer: `irm https://archiplan.ai/install.ps1 | iex`"
                 .into(),
         );
     }
@@ -99,26 +182,10 @@ fn triple(v: &str) -> Result<(u64, u64, u64), String> {
     }
 }
 
-/// Ask the server its latest: `GET <base>/version`, the `latest` field of
-/// the JSON envelope, validated as a triple. Every refusal names the cause
-/// and the continuation.
-fn latest(base: &str) -> Result<(String, (u64, u64, u64)), String> {
-    let url = format!("{base}/version");
-    let body = curl(&url, &[])
-        .map_err(|e| format!("the release server gave no version — {e}; {CONTINUATION}"))?;
-    let v: serde_json::Value = serde_json::from_slice(&body)
-        .map_err(|e| format!("the answer at {url} is not the version JSON ({e}); {CONTINUATION}"))?;
-    let Some(latest) = v.get("latest").and_then(|l| l.as_str()) else {
-        return Err(format!("the answer at {url} carries no `latest` version; {CONTINUATION}"));
-    };
-    let t = triple(latest).map_err(|e| format!("the server's latest is malformed: {e}; {CONTINUATION}"))?;
-    Ok((latest.to_string(), t))
-}
-
 /// `archi check-update` — one line naming where this binary stands against
-/// the server's latest. Never touches the binary.
+/// the feed's latest. Never touches the binary.
 pub fn check() -> Result<String, String> {
-    let (latest_s, latest_t) = latest(&base())?;
+    let (latest_s, latest_t) = Feed::resolve().latest()?;
     let current_t = triple(CURRENT).map_err(|e| format!("this binary's own version is broken: {e}"))?;
     Ok(match latest_t.cmp(&current_t) {
         std::cmp::Ordering::Equal => format!("archi {CURRENT} — up to date"),
@@ -126,7 +193,7 @@ pub fn check() -> Result<String, String> {
             format!("archi {CURRENT} — newer {latest_s} available: `archi update`")
         }
         std::cmp::Ordering::Less => format!(
-            "archi {CURRENT} — the server offers {latest_s} (a rollback): `archi update` follows it"
+            "archi {CURRENT} — the feed offers {latest_s} (a rollback): `archi update` follows it"
         ),
     })
 }
@@ -169,6 +236,34 @@ fn mark_executable(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// The SHA-256 of a file through system plumbing, first-found-wins like
+/// the installer: `shasum -a 256` (macOS ships it), then `sha256sum`
+/// (coreutils) — the first hex field of whichever answers.
+fn sha256(path: &Path) -> Result<String, String> {
+    let tools: [(&str, &[&str]); 2] = [("shasum", &["-a", "256"]), ("sha256sum", &[])];
+    for (tool, args) in tools {
+        let out = match Command::new(tool).args(args).arg(path).output() {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(format!("{tool}: {e} — the standing binary is untouched")),
+            Ok(out) => out,
+        };
+        if !out.status.success() {
+            return Err(format!(
+                "{tool} refused the tarball: {} — the standing binary is untouched",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ));
+        }
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        return match stdout.split_whitespace().next() {
+            Some(h) => Ok(h.to_string()),
+            None => Err(format!("{tool} answered no hash — the standing binary is untouched")),
+        };
+    }
+    Err("cannot verify the download: neither `shasum` nor `sha256sum` is on PATH — \
+         install coreutils (sha256sum) or perl (shasum) — the standing binary is untouched"
+        .into())
+}
+
 /// The atom: rename the staged binary onto the resolved target — on one
 /// filesystem, a single `rename`. Across filesystems (EXDEV, raw os error
 /// 18) the stage first copies into the target's own directory, so the
@@ -201,27 +296,49 @@ fn swap(staged: &Path, target: &Path) -> Result<(), String> {
     }
 }
 
-/// `archi update` — the same check first, then download, unpack, verify,
-/// and swap. The report names the resolved target the new binary landed
-/// on; a `target` path component means a cargo build artifact was
+/// `archi update` — the same check first, then download, checksum-verify,
+/// unpack, and swap. The report names the resolved target the new binary
+/// landed on; a `target` path component means a cargo build artifact was
 /// replaced, and the report says so.
 pub fn apply() -> Result<String, String> {
     let plat = platform()?;
-    let base = base();
-    let (latest_s, latest_t) = latest(&base)?;
+    let feed = Feed::resolve();
+    let (latest_s, latest_t) = feed.latest()?;
     let current_t = triple(CURRENT).map_err(|e| format!("this binary's own version is broken: {e}"))?;
     if latest_t == current_t {
         return Ok(format!("already up to date ({CURRENT})"));
     }
 
-    // Download and unpack in a scratch dir — nothing standing is touched
-    // until the final rename.
+    // Download, verify and unpack in a scratch dir — nothing standing is
+    // touched until the final rename.
     let scratch = Scratch::new()?;
     let name = format!("archi-{latest_s}-{plat}");
-    let tarball = scratch.0.join(format!("{name}.tar.gz"));
-    let url = format!("{base}/download/{name}.tar.gz");
+    let file = format!("{name}.tar.gz");
+    let tarball = scratch.0.join(&file);
+    let url = feed.download_url(&latest_s, &file);
     curl(&url, &["-o", &tarball.to_string_lossy()])
         .map_err(|e| format!("the download failed — {e}; the standing binary is untouched ({CONTINUATION})"))?;
+
+    // The checksum gates the unpack: beside every tarball sits its
+    // `.sha256`, and unverifiable is not installable.
+    let sum_url = feed.download_url(&latest_s, &format!("{file}.sha256"));
+    let sum_body = curl(&sum_url, &[]).map_err(|e| {
+        format!("no checksum for {file} — {e}; unverifiable is not installable — the standing binary is untouched")
+    })?;
+    let sum_text = String::from_utf8_lossy(&sum_body);
+    let expected = sum_text
+        .split_whitespace()
+        .next()
+        .filter(|f| f.chars().all(|c| c.is_ascii_hexdigit()))
+        .ok_or_else(|| {
+            format!("the checksum at {sum_url} carries no hash — unverifiable is not installable — the standing binary is untouched")
+        })?;
+    let actual = sha256(&tarball)?;
+    if !actual.eq_ignore_ascii_case(expected) {
+        return Err(format!(
+            "checksum mismatch for {file} — expected {expected}, got {actual} — the standing binary is untouched"
+        ));
+    }
     let tar = Command::new("tar")
         .arg("-xzf")
         .arg(&tarball)
