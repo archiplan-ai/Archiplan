@@ -1,0 +1,26 @@
+--- original
++++ modified
+@@ -34,7 +34,7 @@
+   port session // fold: two concurrent rounds into one deliberate record
+   port status // where am I: checkout, binding, version state, open work
+   port stress // open, add, rm: the round's records minted and retired by verb
+-  port update // check-update, update: the binary against the server's latest
++  port update // check-update, update: the binary against the release feed's latest
+   port version // save, anchor, remint, list, show, diff (archived or live), current
+   port worktree // mint, ls, drop, merge: the seat lifecycle
+ def node CodeItem // a source item of the code tree, addressed by symbol
+@@ -210,10 +210,10 @@
+ def node Tokens // lexer output
+ def node Tradeoffs: // The operator's up-front priorities — what to favor, what to spend — set explicitly or derived by an auto mode, weighting the scoring read and stress-round prioritization.
+   port weigh // operator priorities in, the weighting the scoring read consumes
+-def node Updater: // crates/archi/src/update.rs — the binary against the server's latest: curl and tar through Command, the swap an atomic rename over current_exe.
+-  port check // GET /version against the compiled-in number: up to date, or the newer one named
+-  port fetch // the platform tarball of latest into a scratch dir, unpacked and verified whole
+-  port swap // the running binary replaced by rename; equal versions converge, torn fetches change nothing
++def node Updater: // crates/archi/src/update.rs — the binary against the release feed's latest: curl and tar through Command, the swap an atomic rename over current_exe.
++  port check // the feed's latest tag against the compiled-in number: up to date, or the drift named by direction
++  port fetch // the platform tarball of latest from the release assets, checksum-verified in a scratch dir
++  port swap // the running binary replaced by rename; equal versions converge, torn or tampered fetches change nothing
+ def view compile_flow // source to model: the compiler pipeline and the engine
+ def view harden_flow // versions, docs, stress and incidence: the harden loop
+ def view read_flow // agents interrogating the model: queries, envelope, nkp

@@ -27,7 +27,7 @@ def node Cli:
   port init        // manifest + source dir + starter + briefing, create-only — the verb before a project exists
   port worktree    // mint, ls, drop, merge: the seat lifecycle
   port status      // where am I: checkout, binding, version state, open work
-  port update      // check-update, update: the binary against the server's latest
+  port update      // check-update, update: the binary against the release feed's latest
   port compile_src // drives the compiler
   port exec        // replays the lowered batch on the engine
   port ask         // read statements to the engine's envelope
@@ -58,12 +58,12 @@ def node Scaffold:
   port emit      // the missing artifacts, in an order that keeps every intermediate tree honest: manifest last
   port read_tree // what the target already holds — manifest, modules, briefing — read before any write
 
-// crates/archi/src/update.rs — the binary against the server's latest:
+// crates/archi/src/update.rs — the binary against the release feed's latest:
 // curl and tar through Command, the swap an atomic rename over current_exe.
 def node Updater:
-  port check // GET /version against the compiled-in number: up to date, or the newer one named
-  port fetch // the platform tarball of latest into a scratch dir, unpacked and verified whole
-  port swap  // the running binary replaced by rename; equal versions converge, torn fetches change nothing
+  port check // the feed's latest tag against the compiled-in number: up to date, or the drift named by direction
+  port fetch // the platform tarball of latest from the release assets, checksum-verified in a scratch dir
+  port swap  // the running binary replaced by rename; equal versions converge, torn or tampered fetches change nothing
 
 // The member registry: declared repositories resolved to local roots, home implicit.
 def node Members:
