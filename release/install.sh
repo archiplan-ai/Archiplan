@@ -6,7 +6,7 @@ set -eu
 # platform and installs the binary to ~/.local/bin. Pin a version with ARCHI_VERSION=x.y.z; point
 # at another host with ARCHI_BASE_URL.
 
-BASE="${ARCHI_BASE_URL:-https://api.archiplan.ai}"
+BASE="${ARCHI_BASE_URL:-https://api.archiplan.ai/archi}"
 VERSION="${ARCHI_VERSION:-__INJECT_AT_DEPLOY__}"
 
 os=$(uname -s); arch=$(uname -m)

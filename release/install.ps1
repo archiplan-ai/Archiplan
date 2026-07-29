@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 # the archi tarball for Windows x64 and installs archi.exe to %USERPROFILE%\.local\bin.
 # Pin a version with $env:ARCHI_VERSION; point at another host with $env:ARCHI_BASE_URL.
 
-$Base = if ($env:ARCHI_BASE_URL) { $env:ARCHI_BASE_URL } else { 'https://api.archiplan.ai' }
+$Base = if ($env:ARCHI_BASE_URL) { $env:ARCHI_BASE_URL } else { 'https://api.archiplan.ai/archi' }
 $Version = if ($env:ARCHI_VERSION) { $env:ARCHI_VERSION } else { '__INJECT_AT_DEPLOY__' }
 
 $arch = $env:PROCESSOR_ARCHITECTURE

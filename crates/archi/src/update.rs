@@ -5,7 +5,8 @@
 //! <BASE>/version` answers `{"server":"…","latest":"x.y.z"}`, and `GET
 //! <BASE>/download/archi-<version>-<platform>.tar.gz` serves a tarball
 //! unpacking to `archi-<version>-<platform>/archi`. BASE defaults to
-//! `https://api.archiplan.ai`; `ARCHI_BASE_URL` points anywhere else —
+//! `https://api.archiplan.ai/archi` — the new tool's own lane, apart from
+//! the old fractal client's `/version`; `ARCHI_BASE_URL` points anywhere else —
 //! tests ride `file://` fixtures, which curl serves like any other URL.
 //!
 //! Transport is system plumbing, the same doctrine as git in
@@ -25,7 +26,7 @@ use std::process::Command;
 
 /// The release server every request rides unless `ARCHI_BASE_URL` says
 /// otherwise.
-const DEFAULT_BASE: &str = "https://api.archiplan.ai";
+const DEFAULT_BASE: &str = "https://api.archiplan.ai/archi";
 
 /// This binary's own version — the baseline every comparison starts from.
 const CURRENT: &str = env!("CARGO_PKG_VERSION");
@@ -57,7 +58,7 @@ fn platform() -> Result<&'static str, String> {
     }
     if cfg!(target_os = "windows") {
         return Err(
-            "self-update on Windows rides the installer: `irm https://api.archiplan.ai/install.ps1 | iex`"
+            "self-update on Windows rides the installer: `irm https://archiplan.ai/install.ps1 | iex`"
                 .into(),
         );
     }
