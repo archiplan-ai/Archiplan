@@ -15,18 +15,24 @@ downloadable and that is the migration model.
 
 ### 0.1.12
 
-Self-update. Two project-less verbs run outside every guard:
-`archi check-update` asks the release feed for the latest version and answers
-in one line — up to date, a newer number named toward `archi update`, or an
-older one worded as the feed's rollback (the feed is the truth in both
-directions, so one `update` always converges); `archi update` downloads the
-platform tarball into a scratch dir and replaces the running binary with a
-single atomic rename onto the resolved `current_exe`. Symlinks keep — the
-target file changes, never the link; a torn download or bad unpack leaves the
-standing binary byte-identical; the report names the replaced path, and a path
-inside a cargo `target/` dir is called out as a replaced build artifact. All
-network rides system `curl` and unpacking rides system `tar` — the same
-plumbing doctrine as git, zero new dependencies. Windows refuses toward the
+Self-update. Two project-less verbs run outside every guard, against the
+same truth the installers ship with — the repository's GitHub releases:
+`archi check-update` resolves the newest tag exactly as `install.sh` does
+(the `releases/latest` redirect, the API as fallback, `ARCHI_REPO` for
+forks) and answers in one line — up to date, a newer number named toward
+`archi update`, or an older one worded as the feed's rollback (the feed is
+the truth in both directions, so one `update` always converges);
+`archi update` downloads the platform tarball and its published `.sha256`
+from the release assets, proves the checksum through system hashing
+(`shasum`/`sha256sum`) before anything unpacks — torn, tampered or
+unverifiable assets refuse with the standing binary byte-identical — and
+replaces the running binary with a single atomic rename onto the resolved
+`current_exe`. Symlinks keep: the target file changes, never the link; the
+report names the replaced path, and a path inside a cargo `target/` dir is
+called out as a replaced build artifact. All network rides system `curl`
+and unpacking rides system `tar` — the plumbing doctrine of the git layer,
+zero new dependencies; `ARCHI_BASE_URL` swaps the whole feed for mirrors
+and keeps the e2e suite on `file://` fixtures. Windows refuses toward the
 PowerShell installer.
 
 The old fractal client is walled off for good: its server keeps `/version`
