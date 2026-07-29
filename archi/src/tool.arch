@@ -27,6 +27,7 @@ def node Cli:
   port init        // manifest + source dir + starter + briefing, create-only — the verb before a project exists
   port worktree    // mint, ls, drop, merge: the seat lifecycle
   port status      // where am I: checkout, binding, version state, open work
+  port update      // check-update, update: the binary against the server's latest
   port compile_src // drives the compiler
   port exec        // replays the lowered batch on the engine
   port ask         // read statements to the engine's envelope
@@ -56,6 +57,13 @@ def node Scaffold:
   port stand_up  // one target directory in, the created/kept report out
   port emit      // the missing artifacts, in an order that keeps every intermediate tree honest: manifest last
   port read_tree // what the target already holds — manifest, modules, briefing — read before any write
+
+// crates/archi/src/update.rs — the binary against the server's latest:
+// curl and tar through Command, the swap an atomic rename over current_exe.
+def node Updater:
+  port check // GET /version against the compiled-in number: up to date, or the newer one named
+  port fetch // the platform tarball of latest into a scratch dir, unpacked and verified whole
+  port swap  // the running binary replaced by rename; equal versions converge, torn fetches change nothing
 
 // The member registry: declared repositories resolved to local roots, home implicit.
 def node Members:
@@ -144,6 +152,7 @@ Function type_of DocsCompiler
 Function type_of Search
 Function type_of DocMint
 Function type_of Scaffold
+Function type_of Updater
 Service type_of Links
 Service type_of Planner
 Service type_of Sessions
@@ -196,6 +205,11 @@ Scaffold.read_tree recall(ArchSource) SourceTree.serve in compile_flow
 Scaffold.read_tree recall(AgentBrief) SourceTree.serve in compile_flow
 Scaffold.emit persist(ArchSource) SourceTree.store in compile_flow
 Scaffold.emit persist(AgentBrief) SourceTree.store in compile_flow
+
+// self-update: the one flow that leaves the machine — curl out, rename home
+Cli.drive consult(->Command, <-Report) Updater.check in read_flow
+Cli.drive consult(->Command, <-Report) Updater.fetch in compile_flow
+Cli.drive consult(->Command, <-Report) Updater.swap in compile_flow
 
 // docs cross-check: markdown in, pinned models on demand
 DocsCompiler.load_docs recall(RequirementDoc) SourceTree.serve in harden_flow

@@ -33,6 +33,7 @@ Agent.drive invoke Cli.repo in trace_flow
 Agent.drive invoke Cli.worktree in seat_flow
 Agent.drive invoke Cli.status in seat_flow
 Agent.drive invoke Cli.plan in trace_flow
+Agent.drive invoke Cli.update in read_flow
 
 Agent.author persist(ArchSource) SourceTree.store in compile_flow
 Agent.author persist(RequirementDoc) SourceTree.store in harden_flow

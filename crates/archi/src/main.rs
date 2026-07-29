@@ -57,6 +57,7 @@ mod scaffold;
 mod search;
 mod sessions;
 mod tradeoffs;
+mod update;
 mod versions;
 mod visualizer;
 mod worktrees;
@@ -75,6 +76,8 @@ use serde_json::{Value, json};
 const USAGE: &str = "usage:
   archi init  [<dir>]
   archi sync-skills [--project <dir>]
+  archi check-update   # this binary against the release server's latest
+  archi update         # swap this binary for the server's latest
   archi check [--project <dir>] [--json]
   archi build [--project <dir>] [--emit-batch <file|->]
   archi nkp   [--project <dir>] [--regime | --hotspots | --corridors] [--top | --scope <path>]
@@ -369,6 +372,8 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
                     | "viz"
                     | "worktree"
                     | "batch"
+                    | "check-update"
+                    | "update"
             ) =>
             {
                 args.positional.push(other.to_string())
@@ -2126,6 +2131,26 @@ fn run_init(args: &Args) -> ExitCode {
     }
 }
 
+/// `archi check-update | update` — the self-updater (`update.rs`): like
+/// `init`, it runs without a project — the subject is this binary, not a
+/// spec — so no project is located and no seat guard applies.
+fn run_self_update(args: &Args) -> ExitCode {
+    if args.project.is_some() || !args.positional.is_empty() {
+        return usage_err(&format!("`{}` takes no arguments", args.verb));
+    }
+    let outcome = if args.verb == "update" { update::apply() } else { update::check() };
+    match outcome {
+        Ok(report) => {
+            println!("{report}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("archi: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
 
 /// `archi req add|rm` — requirement skeletons come from a verb: every
 /// machine field an explicit parameter, the text slots left for the
@@ -2799,6 +2824,7 @@ fn main() -> ExitCode {
     }
     match args.verb.as_str() {
         "init" => run_init(&args),
+        "check-update" | "update" => run_self_update(&args),
         "sync-skills" => run_sync_skills(&args),
         "check" => run_check(&args),
         "build" => run_build(&args),

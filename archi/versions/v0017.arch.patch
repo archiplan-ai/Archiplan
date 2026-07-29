@@ -1,0 +1,39 @@
+--- original
++++ modified
+@@ -34,6 +34,7 @@
+   port session // fold: two concurrent rounds into one deliberate record
+   port status // where am I: checkout, binding, version state, open work
+   port stress // open, add, rm: the round's records minted and retired by verb
++  port update // check-update, update: the binary against the server's latest
+   port version // save, anchor, remint, list, show, diff (archived or live), current
+   port worktree // mint, ls, drop, merge: the seat lifecycle
+ def node CodeItem // a source item of the code tree, addressed by symbol
+@@ -209,6 +210,10 @@
+ def node Tokens // lexer output
+ def node Tradeoffs: // The operator's up-front priorities — what to favor, what to spend — set explicitly or derived by an auto mode, weighting the scoring read and stress-round prioritization.
+   port weigh // operator priorities in, the weighting the scoring read consumes
++def node Updater: // crates/archi/src/update.rs — the binary against the server's latest: curl and tar through Command, the swap an atomic rename over current_exe.
++  port check // GET /version against the compiled-in number: up to date, or the newer one named
++  port fetch // the platform tarball of latest into a scratch dir, unpacked and verified whole
++  port swap // the running binary replaced by rename; equal versions converge, torn fetches change nothing
+ def view compile_flow // source to model: the compiler pipeline and the engine
+ def view harden_flow // versions, docs, stress and incidence: the harden loop
+ def view read_flow // agents interrogating the model: queries, envelope, nkp
+@@ -278,6 +283,7 @@
+ Function type_of Scaffold
+ Function type_of Search
+ Function type_of Tradeoffs
++Function type_of Updater
+ Service type_of Agent
+ Service type_of Cli
+ Service type_of Links
+@@ -330,6 +336,9 @@
+ Cli.drive consult(->Command, <-Report) Seats.verdict in seat_flow
+ Cli.drive consult(->Command, <-Report) Sessions.fold in harden_flow
+ Cli.drive consult(->Command, <-Report) Tradeoffs.weigh in read_flow
++Cli.drive consult(->Command, <-Report) Updater.check in read_flow
++Cli.drive consult(->Command, <-Report) Updater.fetch in compile_flow
++Cli.drive consult(->Command, <-Report) Updater.swap in compile_flow
+ Cli.drive consult(->Findings, <-Report) Addressing.stamp in read_flow
+ Cli.drive consult(->ModelGraph, <-Diagnostics) DocsCompiler.compile_docs in harden_flow
+ Cli.drive consult(->ModelGraph, <-Findings) Query.audit in read_flow
