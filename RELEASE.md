@@ -13,6 +13,30 @@ downloadable and that is the migration model.
 
 ## Releases
 
+### 0.1.13
+
+A seventh skill joins the briefing: `ste-writing`. It writes prose in
+ASD-STE100 Simplified Technical English — documentation, READMEs,
+pull-request text, error messages, release notes, and comments. It does not
+touch code, identifiers, or command syntax. The rules are mechanical and
+lintable: one name for one thing, the short common word, active voice, one
+instruction per sentence. No semicolons, no contractions, no marketing
+adjectives. Two modes carry it. Strict mode applies every rule and both
+length caps to procedures, runbooks, and error text. STE-flavored mode keeps
+the sentence, paragraph, and active-voice discipline for general prose, and
+relaxes the dictionary so the text still reads naturally. Six self-lint
+checks run before the text returns.
+
+The `CLAUDE.md` block gains a third standing directive: write architecture
+prose in Simplified Technical English. This entry is the first one written
+under that rule.
+
+Skill-only, like 0.1.7 and 0.1.8. The binary's embedded briefing changes, so
+`archi init` and `archi sync-skills` write the newer copy. No verb, format or
+finding moves. A 0.1.12 tree brought current with `archi sync-skills` reports
+`.claude/skills/ste-writing/SKILL.md` as `created` and `CLAUDE.md` as
+`updated`. Every other file stays byte-identical.
+
 ### 0.1.12
 
 Self-update. Two project-less verbs run outside every guard, against the

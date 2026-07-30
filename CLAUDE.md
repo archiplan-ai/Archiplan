@@ -28,4 +28,5 @@ or `closed:` stamps.
 
 No silent assumptions: state what you assume, surface the tradeoffs.
 Minimal design that solves the problem — no speculative features.
+For any prose text you're writing about architecture, use ASD-STE100 Simplified Technical English.
 <!-- archi:end -->

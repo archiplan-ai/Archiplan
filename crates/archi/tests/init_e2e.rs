@@ -76,7 +76,7 @@ fn a_fresh_init_stands_up_a_building_project() {
     // The report: every artifact created, the manifest on the last created
     // line, the verdict naming the project.
     let created: Vec<&str> = out.lines().filter(|l| l.starts_with("created")).collect();
-    assert_eq!(created.len(), 10, "{out}");
+    assert_eq!(created.len(), 11, "{out}");
     assert!(created.last().unwrap().contains("archi.toml"), "{out}");
     assert!(out.contains("initialized `proj`"), "{out}");
 
