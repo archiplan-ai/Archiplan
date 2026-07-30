@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use modeling_lang::source::{find_project_root, manifest_src};
 
 /// The briefing, embedded at build time: skill name → SKILL.md text.
-const SKILLS: [(&str, &str); 6] = [
+const SKILLS: [(&str, &str); 7] = [
     ("archi", include_str!("../../../skills/archi.md")),
     ("archi-plan", include_str!("../../../skills/archi-plan.md")),
     ("archi-implement", include_str!("../../../skills/archi-implement.md")),
@@ -29,6 +29,7 @@ const SKILLS: [(&str, &str); 6] = [
         "archi-migrate-fractal",
         include_str!("../../../skills/archi-migrate-fractal.md"),
     ),
+    (("ste-writing"), include_str!("../../../skills/ste-writing.md")),
 ];
 
 const FENCE_OPEN: &str = "<!-- archi:begin -->";
@@ -465,6 +466,7 @@ fn claude_block(src: &str) -> String {
          \n\
          No silent assumptions: state what you assume, surface the tradeoffs.\n\
          Minimal design that solves the problem — no speculative features.\n\
+         For any prose text you're writing about architecture, use ASD-STE100 Simplified Technical English.\n\
          {FENCE_CLOSE}"
     )
 }
