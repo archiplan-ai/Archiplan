@@ -96,13 +96,21 @@ session, before any mutation:
    default: **create the repository** (`git init` + a seed commit, then
    reopen from step 1) — or **cancel the whole session**. There is no
    third path: never proceed bare, never mutate an ungoverned tree.
-2. **Look for the existing seat first**: `archi worktree ls` (narrow with
+2. **A bound seat under your feet continues.** When `status` shows this
+   checkout bound and the user asks for more work, put one question
+   through the poll tool, two options: **continue the unit here** — a
+   finished plan does not end the seat: a new round, a save and
+   `archi plan use <name>` join the same binding, and the landing later
+   carries it all at once — or **land the seat now**
+   (`archi worktree merge <slug>`, the archi-finish-worktree skill) and
+   mint a fresh one for the new work.
+3. **Look for the existing seat first**: `archi worktree ls` (narrow with
    `--spec <effort>` / `--plan <slug>`). Work on a spec continues in
    that spec's worktree — `cd` there; a plan made current there
    (`archi plan use <name>`) joins the same binding and pins the spec
    version of that branch. A seat that exists only as a pushed branch is
    re-attached with `archi worktree mint <slug>` (attach, not create).
-3. **Mint only work nothing carries**: `archi worktree mint <slug>
+4. **Mint only work nothing carries**: `archi worktree mint <slug>
    [--plan <name>]`. The CLI creates the branch (`archi/<slug>`), the
    sibling worktree and the registry entry, then prints the path — `cd`
    into it yourself; the CLI never changes your directory. A mutating verb
