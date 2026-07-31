@@ -531,8 +531,11 @@ impl fmt::Display for MemberFinding {
 /// declared member. Never errors and never crashes on an unreachable
 /// member — each probe degrades to its own finding or to silence — and a
 /// resolve fault (unparsable overlay, ghost row) stays silent here: every
-/// repo and link verb already raises it loudly.
-pub fn check(project_root: &Path) -> Vec<MemberFinding> {
+/// repo and link verb already raises it loudly. `seat_members` are the
+/// current checkout's own member worktrees (its registry binding): rows
+/// pointing there are the seat's working map, written by the mint — the
+/// linked-worktree probe never grades them as rot.
+pub fn check(project_root: &Path, seat_members: &[PathBuf]) -> Vec<MemberFinding> {
     let Ok(set) = MemberSet::resolve(project_root) else {
         return Vec::new();
     };
@@ -559,7 +562,13 @@ pub fn check(project_root: &Path) -> Vec<MemberFinding> {
             });
             continue;
         };
-        if let Some(wt) = linked_worktree(root) {
+        let seat_owned = {
+            let canonical = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+            seat_members.iter().any(|p| *p == canonical)
+        };
+        if !seat_owned
+            && let Some(wt) = linked_worktree(root)
+        {
             out.push(MemberFinding::LinkedWorktreeMapping {
                 member: m.name.clone(),
                 path: path.clone(),

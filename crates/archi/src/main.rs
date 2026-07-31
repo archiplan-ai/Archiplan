@@ -468,8 +468,19 @@ fn run_check(args: &Args) -> ExitCode {
     });
     // The member map is machine state and decays like one: four probes per
     // declared member, advisory like every finding — a memberless project
-    // prints nothing new (archi/requirements/multi-repo/).
-    let member_findings = members::check(&root);
+    // prints nothing new (archi/requirements/multi-repo/). A bound seat's
+    // own member worktrees are its working map, not rot: they ride the
+    // exemption.
+    let seat_members: Vec<std::path::PathBuf> = worktrees::toplevel(&root)
+        .and_then(|top| {
+            worktrees::Registry::load(&root).ok().flatten().map(|reg| {
+                reg.binding_of(&top)
+                    .map(|b| b.members.values().map(|m| m.path.clone()).collect())
+                    .unwrap_or_default()
+            })
+        })
+        .unwrap_or_default();
+    let member_findings = members::check(&root, &seat_members);
     let clean = archive_errors.is_empty() && doc.diagnostics.is_empty();
     // A check with no errors closes on the landscape read: the NKP scoring
     // and the refactoring directions it implies, over the default slice.

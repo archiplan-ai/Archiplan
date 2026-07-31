@@ -382,6 +382,25 @@ fn cascade_repo(tag: &str) -> (PathBuf, PathBuf, PathBuf) {
 }
 
 #[test]
+fn a_bound_seats_own_members_are_not_rot_to_check() {
+    let (ws, spec, backend) = cascade_repo("seatown");
+    let bare = ws.join("origin.git");
+    git(&ws, &["init", "-q", "--bare", bare.to_str().unwrap()]);
+    git(&backend, &["remote", "add", "origin", bare.to_str().unwrap()]);
+
+    ok(&spec, &["worktree", "mint", "own", "--repos", "backend"]);
+    let wt = spec.parent().unwrap().join("spec-worktrees/own");
+
+    // Inside the seat the overlay maps the member to its own worktree —
+    // written by the mint, the working map, not a stale row.
+    let out = ok(&wt, &["check"]);
+    assert!(
+        !out.contains("linked worktree"),
+        "the seat's own member worktree graded as rot:\n{out}"
+    );
+}
+
+#[test]
 fn the_cascade_mints_member_worktrees_and_the_seat_overlay() {
     let (ws, spec, backend) = cascade_repo("cascade");
     let bare = ws.join("origin.git");
