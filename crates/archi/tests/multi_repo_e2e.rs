@@ -292,6 +292,46 @@ fn a_memberless_project_is_todays_byte_for_byte() {
 }
 
 #[test]
+fn map_refuses_a_linked_worktree_and_names_the_main_checkout() {
+    let ws = scratch("wtgate");
+    let spec = ws.join("spec");
+    let backend = ws.join("backend");
+    spec_project(&spec, "[[repo]]\nname = \"backend\"\npath = \"../backend\"\n");
+    member_repo(&backend);
+    let spec = util::seat(&spec);
+
+    // The field incident's shape: a scratch worktree of the member offered
+    // as its mapping. The row would outlive the worktree and a later mint
+    // would base seats on the dead branch standing there.
+    let wt = ws.join("backend-scratch");
+    git(&backend, &["worktree", "add", "-q", wt.to_str().unwrap(), "-b", "feature/dead"]);
+    let (success, out, err) = run(&spec, &["repo", "map", "backend", wt.to_str().unwrap()]);
+    assert!(!success, "a linked worktree must not become a mapping:\n{out}\n{err}");
+    assert!(err.contains("archi: "), "{err}");
+    assert!(err.contains("linked worktree"), "{err}");
+    assert!(err.contains("`feature/dead`"), "the standing branch is named:\n{err}");
+    assert!(
+        err.contains(backend.to_str().unwrap()),
+        "the main checkout is the ready repair:\n{err}"
+    );
+    assert!(err.contains("archi repo map backend"), "{err}");
+    let overlay = spec.join("archi/repos.local.toml");
+    let row_written =
+        overlay.exists() && fs::read_to_string(&overlay).unwrap().contains("backend");
+    assert!(!row_written, "the refusal wrote no overlay row");
+
+    // The named repair — the main checkout — maps exactly as before.
+    let mapped = ok(&spec, &["repo", "map", "backend", backend.to_str().unwrap()]);
+    assert!(mapped.contains("mapped backend ->"), "{mapped}");
+    assert!(
+        fs::read_to_string(&overlay).unwrap().contains("backend"),
+        "the main-checkout row lands"
+    );
+    let ls = ok(&spec, &["repo", "ls"]);
+    assert!(!ls.contains("unreachable"), "{ls}");
+}
+
+#[test]
 fn a_dangling_baseline_degrades_alone() {
     let ws = scratch("dangling");
     let spec = ws.join("spec");

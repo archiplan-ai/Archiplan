@@ -72,6 +72,29 @@ pub fn common_dir(dir: &Path) -> Option<PathBuf> {
         .map(|s| canon(Path::new(&s)))
 }
 
+/// True when `dir` sits in a linked worktree — its git dir is not the
+/// repository's common dir. `false` on any git failure (absence stays a
+/// value; the arms that follow refuse on their own terms).
+fn is_linked_worktree(dir: &Path) -> bool {
+    let Some(out) =
+        git_out(dir, &["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"])
+    else {
+        return false;
+    };
+    let mut lines = out.lines();
+    match (lines.next(), lines.next()) {
+        (Some(git_dir), Some(common)) => canon(Path::new(git_dir)) != canon(Path::new(common)),
+        _ => false,
+    }
+}
+
+/// The repository's main checkout — the first worktree git lists,
+/// canonicalized. From a linked worktree this answers the primary, not the
+/// caller's own path.
+fn main_checkout(dir: &Path) -> Option<PathBuf> {
+    list_worktrees(dir).into_iter().next().map(|w| w.path)
+}
+
 /// The checked-out branch; `None` when detached (or no git).
 pub fn current_branch(dir: &Path) -> Option<String> {
     let b = git_out(dir, &["rev-parse", "--abbrev-ref", "HEAD"])?;
@@ -574,6 +597,29 @@ fn plan_cascade(
             ));
             continue;
         };
+        // The cascade anchors on the repository's MAIN checkout — placement,
+        // branch surgery, shared-repo dedup — never on the mapped path,
+        // which a stale overlay row can leave standing in a scratch
+        // worktree. For an ordinary mapping the two coincide.
+        let repo_top = main_checkout(&checkout).unwrap_or(repo_top);
+        // A member mapped onto a linked worktree is a stale overlay row:
+        // without an explicit `--base` the seat would branch from whatever
+        // dead branch stands there — foreign commits from birth. A named
+        // base skips the check (the branch is chosen; the checkout's
+        // identity stops mattering), and an already-bound member never
+        // reaches the cascade — a re-mint extension attaches, gate-free.
+        if !bases.contains_key(name) && is_linked_worktree(&checkout) {
+            let standing = git_out(&checkout, &["rev-parse", "--abbrev-ref", "HEAD"])
+                .unwrap_or_else(|| "HEAD".to_string());
+            refusals.push(format!(
+                "member {name}: the mapped checkout {} is a linked worktree standing on \
+                 `{standing}` — a stale overlay row. Re-map: `archi repo map {name} {}`, \
+                 or name the base outright: `--base {name}=<branch>`",
+                checkout.display(),
+                repo_top.display()
+            ));
+            continue;
+        }
         if let Some(t) = targets.iter_mut().find(|t| t.repo_top == repo_top) {
             if let Some(b) = bases.get(name) {
                 if *b != t.base {

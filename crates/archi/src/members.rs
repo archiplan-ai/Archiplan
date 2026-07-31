@@ -155,7 +155,9 @@ fn read_overlay(project_root: &Path) -> Result<BTreeMap<String, String>, String>
 }
 
 /// Map a member to a directory on this machine: writes the overlay row.
-/// The member must be declared — the overlay never invents identity.
+/// The member must be declared — the overlay never invents identity — and
+/// the directory must be the repo's MAIN checkout: a linked worktree is
+/// refused before anything is written.
 pub fn map_member(project_root: &Path, name: &str, dir: &str) -> Result<Member, String> {
     let decls = modeling_lang::source::manifest_repos(project_root)
         .map_err(|d| format!("{}: {}", d.code, d.message))?;
@@ -164,6 +166,9 @@ pub fn map_member(project_root: &Path, name: &str, dir: &str) -> Result<Member, 
             "`{name}` is not declared — add its [[repo]] row to archi.toml first; \
              the overlay maps identity, it never mints it"
         ));
+    }
+    if let Some(refusal) = linked_worktree_refusal(dir, &project_root.join(dir), name) {
+        return Err(refusal);
     }
     let mut overlay = read_overlay(project_root)?;
     overlay.insert(name.to_string(), dir.to_string());
@@ -180,6 +185,56 @@ pub fn map_member(project_root: &Path, name: &str, dir: &str) -> Result<Member, 
     fs::write(&path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
     let set = MemberSet::resolve(project_root)?;
     Ok(set.get(name).expect("just mapped").clone())
+}
+
+/// The write-time gate on `repo map`: a mapping must name the repo's main
+/// checkout. A linked worktree's row outlives the worktree — the checkout
+/// retires, the row stands, and a later `worktree mint` bases seats on
+/// whatever dead branch stood there. Detection is git's own frame: in a
+/// linked worktree the git-dir sits under `<common>/worktrees/<name>`, so
+/// git-dir and git-common-dir disagree; in a main checkout they coincide.
+/// A path that is no git checkout at all is not this gate's business —
+/// `None`, today's behavior untouched.
+fn linked_worktree_refusal(dir: &str, target: &Path, member: &str) -> Option<String> {
+    let git = |args: &[&str]| -> Option<String> {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(target)
+            .args(args)
+            .output()
+            .ok()?;
+        out.status
+            .success()
+            .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    };
+    // git-dir may come back relative to the queried directory; the common
+    // dir is asked absolute. Canonicalized, the two agree exactly when the
+    // checkout is the main one (symlinked tmp dirs included).
+    let canon = |s: &str| {
+        let p = PathBuf::from(s);
+        let p = if p.is_relative() { target.join(p) } else { p };
+        fs::canonicalize(&p).unwrap_or(p)
+    };
+    let git_dir = canon(&git(&["rev-parse", "--git-dir"])?);
+    let common = canon(&git(&["rev-parse", "--path-format=absolute", "--git-common-dir"])?);
+    if git_dir == common {
+        return None;
+    }
+    let branch =
+        git(&["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_else(|| "HEAD".to_string());
+    // The first `worktree` entry of the porcelain listing is the main
+    // checkout — the ready repair.
+    let main = git(&["worktree", "list", "--porcelain"])
+        .and_then(|list| {
+            list.lines()
+                .find_map(|l| l.strip_prefix("worktree ").map(str::to_string))
+        })
+        .unwrap_or_else(|| common.parent().unwrap_or(&common).display().to_string());
+    Some(format!(
+        "{dir} is a linked worktree of the repo, standing on `{branch}` — a mapping \
+         outlives the worktree and poisons future mints. The main checkout is {main}: \
+         `archi repo map {member} {main}`"
+    ))
 }
 
 pub(crate) fn toml_string(s: &str) -> String {
@@ -454,6 +509,28 @@ mod tests {
         assert_eq!(m.mapped_path.as_deref(), Some("co2"));
         let text = fs::read_to_string(root.join(OVERLAY)).unwrap();
         assert_eq!(text.matches("backend").count(), 1);
+    }
+
+    #[test]
+    fn map_member_refuses_a_linked_worktree_and_names_the_repair() {
+        let root = scratch();
+        write_manifest(&root, "[[repo]]\nname = \"backend\"\n");
+        let repo = scratch();
+        git_init(&repo);
+        fs::write(repo.join("f.txt"), "x").unwrap();
+        git(&repo, &["add", "-A"]);
+        git(&repo, &["commit", "-qm", "seed"]);
+        let wt = scratch().join("wt");
+        git(&repo, &["worktree", "add", "-q", wt.to_str().unwrap(), "-b", "feature/dead"]);
+        let e = map_member(&root, "backend", wt.to_str().unwrap()).unwrap_err();
+        assert!(e.contains("linked worktree"), "{e}");
+        assert!(e.contains("`feature/dead`"), "the standing branch is named: {e}");
+        assert!(e.contains(repo.to_str().unwrap()), "the main checkout is the repair: {e}");
+        assert!(e.contains("archi repo map backend"), "{e}");
+        assert!(!root.join(OVERLAY).exists(), "no row written on refusal");
+        // The named repair goes through as before.
+        let m = map_member(&root, "backend", repo.to_str().unwrap()).unwrap();
+        assert_eq!(m.root.as_deref(), Some(repo.as_path()));
     }
 
     #[test]
