@@ -13,6 +13,16 @@ downloadable and that is the migration model.
 
 ## Releases
 
+### 0.1.15
+
+The opening learns the standing seat. When `archi status` shows the
+checkout bound and the user asks for more work, the briefing puts one
+question: continue the unit in this seat — a finished plan does not end
+it, a new round and a new plan join the same binding and land together —
+or land the seat now and mint a fresh one. Skill-only, like 0.1.7, 0.1.8
+and 0.1.13: `archi sync-skills` reports the `archi` skill as `updated`;
+every other file stays byte-identical.
+
 ### 0.1.14
 
 The member map gets guard rails. `archi repo map` refuses a path that is a
