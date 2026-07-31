@@ -1,14 +1,14 @@
-//! Worktree seats: the machine-local binding of work to checkouts.
+//! Worktrees: the machine-local binding of work to checkouts.
 //!
 //! Parallel agent sessions each live in their own git worktree; which
 //! worktree carries which plan is a machine fact, not shared truth. The
 //! registry lives under the repository's common git dir — the one place
-//! every worktree shares, tracked by none — and moves only through verbs:
+//! every worktree shares, tracked by none — and moves only through commands:
 //! mint writes entries, merge clears them, `worktree ls`/`drop` read and
 //! repair (`archi/requirements/worktree-parallelism/`).
 //!
 //! Git queries are lenient (`Option`, absence is a value); git mutations are
-//! loud (`Result` carrying git's own stderr). No verb here ever changes the
+//! loud (`Result` carrying git's own stderr). No command here ever changes the
 //! caller's working directory — minting prints the path, entering it is the
 //! caller's move.
 
@@ -152,7 +152,7 @@ fn worktree_add(
     git_run(repo, &args).map(|_| ())
 }
 
-/// Keep archi's machine-local seat artifacts out of git without touching
+/// Keep archi's machine-local worktree artifacts out of git without touching
 /// any committed file: the repo-local exclude (`$GIT_COMMON_DIR/info/
 /// exclude`, shared by every worktree, never committed) gains the overlay
 /// and marker patterns, so an agent's `git add -A` cannot leak machine
@@ -176,7 +176,7 @@ fn ensure_excludes(top: &Path) {
     if !text.is_empty() && !text.ends_with('\n') {
         text.push('\n');
     }
-    text.push_str("# archi seat artifacts — machine-local, never committed\n");
+    text.push_str("# archi worktree artifacts — machine-local, never committed\n");
     for p in missing {
         text.push_str(p);
         text.push('\n');
@@ -184,10 +184,10 @@ fn ensure_excludes(top: &Path) {
     let _ = fs::write(&path, text);
 }
 
-/// Remove the seat artifacts archi itself wrote into a worktree — the
+/// Remove the worktree artifacts archi itself wrote into a worktree — the
 /// member overlay and the active-plan marker — so a retire's non-force
 /// `worktree remove` only ever refuses over the *user's* uncommitted work.
-pub fn scrub_seat(wt_project: &Path) {
+pub fn scrub_worktree(wt_project: &Path) {
     let _ = fs::remove_file(wt_project.join(crate::members::OVERLAY));
     let _ = fs::remove_file(wt_project.join("archi").join("plans").join(".current"));
 }
@@ -205,7 +205,7 @@ pub fn worktree_remove(repo: &Path, path: &Path, force: bool) -> Result<(), Stri
 // ---------------------------------------------------------------------------
 // The registry
 
-/// One member's cascaded seat within a binding.
+/// One member's cascaded worktree within a binding.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MemberBinding {
     /// The member worktree (or the shared worktree, for members sharing a
@@ -256,7 +256,7 @@ impl Registry {
     /// `root` is not inside a git repository. A missing file is the empty
     /// registry — it appears at the first write, no init step. Entries whose
     /// worktree git no longer lists are dropped (written back only when
-    /// something dropped); a member seat is dropped only when its own repo
+    /// something dropped); a member worktree is dropped only when its own repo
     /// confirms the worktree gone, an unreachable member repo keeps it.
     pub fn load(root: &Path) -> Result<Option<Registry>, String> {
         let Some(common) = common_dir(root) else {
@@ -283,7 +283,7 @@ impl Registry {
             b.members.retain(|_, m| {
                 let repo = if m.checkout.is_dir() { &m.checkout } else { &m.path };
                 let listed = list_worktrees(repo);
-                // an unreachable repo lists nothing — keep the seat
+                // an unreachable repo lists nothing — keep the worktree
                 let keep = listed.is_empty()
                     || listed.iter().any(|w| w.path == m.path);
                 healed |= !keep;
@@ -304,7 +304,7 @@ impl Registry {
         let file = RegistryFile { worktree: self.entries.clone() };
         let body = toml::to_string(&file).map_err(|e| format!("{}: {e}", self.path.display()))?;
         let text =
-            format!("# machine-local worktree bindings — operated by archi verbs, never merged\n{body}");
+            format!("# machine-local worktree bindings — operated by archi commands, never merged\n{body}");
         fs::write(&self.path, text).map_err(|e| format!("cannot write {}: {e}", self.path.display()))
     }
 
@@ -377,10 +377,10 @@ pub struct Minted {
     pub attached: bool,
     /// True when the caller already sits in the slug's worktree and the
     /// binding was merely extended.
-    pub seated: bool,
+    pub extended: bool,
 }
 
-/// Mint the seat for `slug`: the branch (created, or attached when it
+/// Mint the worktree for `slug`: the branch (created, or attached when it
 /// already exists), the worktree, the member cascade, the overlay, the
 /// registry entry — entry last, and a partial cascade rolls back whole, so
 /// no failure leaves a dangling binding. Re-minting from inside the slug's
@@ -401,24 +401,24 @@ pub fn mint(
     let mut reg = Registry::load(&root)?.expect("toplevel resolved, so common dir does");
     ensure_excludes(&top);
     // where the project sits inside the tree — a monorepo spec below the
-    // git root keeps that offset inside its seat too
+    // git root keeps that offset inside its worktree too
     let rel = root.strip_prefix(&top).unwrap_or(Path::new("")).to_path_buf();
     let worktrees = list_worktrees(&top);
-    let seated = worktrees
+    let extended = worktrees
         .iter()
         .find(|w| w.branch.as_deref() == Some(branch.as_str()))
         .map(|w| w.path.clone());
-    if let Some(seat) = &seated {
-        if *seat != top {
+    if let Some(wt) = &extended {
+        if *wt != top {
             return Err(format!(
                 "`{branch}` is already checked out at {} — continue there (cd {}); \
                  if that checkout is gone, run `git worktree prune` and retry",
-                seat.display(),
-                seat.display()
+                wt.display(),
+                wt.display()
             ));
         }
     }
-    let existing = match &seated {
+    let existing = match &extended {
         Some(_) => reg.binding_of(&top).cloned(),
         None => None,
     };
@@ -428,9 +428,9 @@ pub fn mint(
         .unwrap_or_default();
     // Members resolve against the invoked project root — the checkout that
     // carries the unit's manifest, overlay and archive: the primary on a
-    // first cascade, the seat itself on a mid-unit extension (declarations
-    // and anchors made in the seat land on the primary only at the final
-    // merge). Already-cascaded members are excluded above, so the seat's
+    // first cascade, the worktree itself on a mid-unit extension (declarations
+    // and anchors made in the worktree land on the primary only at the final
+    // merge). Already-cascaded members are excluded above, so the worktree's
     // overlay rows pointing at member worktrees never feed the cascade;
     // a fresh member unresolvable from here refuses toward `repo map` —
     // member locations are machine-local truth, the overlay carries them.
@@ -442,7 +442,7 @@ pub fn mint(
         plan_cascade(&root, slug, plan, &fresh_repos, bases)?
     };
 
-    // create: spec worktree (unless seated), then member worktrees — any
+    // create: spec worktree (unless it exists), then member worktrees — any
     // failure rolls the run's creations back
     let mut created: Vec<(PathBuf, PathBuf, bool)> = Vec::new();
     let rollback = |created: &[(PathBuf, PathBuf, bool)]| {
@@ -453,8 +453,8 @@ pub fn mint(
             }
         }
     };
-    let (wt_path, attached) = match &seated {
-        Some(seat) => (seat.clone(), true),
+    let (wt_path, attached) = match &extended {
+        Some(wt) => (wt.clone(), true),
         None => {
             let path = default_worktree_dir(&top, slug);
             if path.exists() {
@@ -492,7 +492,7 @@ pub fn mint(
             );
         }
     }
-    // the overlay the seat resolves members through — every cascaded member,
+    // the overlay the worktree resolves members through — every cascaded member,
     // old and new, points at its member worktree
     if !members.is_empty() {
         let rows: Vec<(String, PathBuf)> = members
@@ -512,7 +512,7 @@ pub fn mint(
     };
     reg.bind(&wt_path, binding);
     reg.save()?;
-    Ok(Minted { path: wt_path, branch, attached, seated: seated.is_some() })
+    Ok(Minted { path: wt_path, branch, attached, extended: extended.is_some() })
 }
 
 // ---------------------------------------------------------------------------
@@ -603,7 +603,7 @@ fn plan_cascade(
         // worktree. For an ordinary mapping the two coincide.
         let repo_top = main_checkout(&checkout).unwrap_or(repo_top);
         // A member mapped onto a linked worktree is a stale overlay row:
-        // without an explicit `--base` the seat would branch from whatever
+        // without an explicit `--base` the worktree would branch from whatever
         // dead branch stands there — foreign commits from birth. A named
         // base skips the check (the branch is chosen; the checkout's
         // identity stops mattering), and an already-bound member never
@@ -770,7 +770,7 @@ fn write_worktree_overlay(
 ) -> Result<(), String> {
     let path = wt_project.join(crate::members::OVERLAY);
     let mut text =
-        String::from("# member worktrees of this seat — written by archi worktree mint\n");
+        String::from("# member worktrees bound to this checkout — written by archi worktree mint\n");
     for (name, dir) in rows {
         text.push_str(&format!(
             "{name} = {}\n",
@@ -784,7 +784,7 @@ fn write_worktree_overlay(
 }
 
 // ---------------------------------------------------------------------------
-// Merge — the closing verb
+// Merge — the closing command
 
 /// One repository's outcome inside a merge.
 #[derive(Debug)]
@@ -841,19 +841,19 @@ pub fn merge(
         ));
     }
     let branch = binding.branch.clone();
-    // The project's offset below the git top — the seat keeps it, so the
-    // seat's project root is the worktree plus the same offset.
+    // The project's offset below the git top — the worktree keeps it, so its
+    // project root is the worktree plus the same offset.
     let rel = root.strip_prefix(&top).unwrap_or(Path::new(""));
-    let seat_project =
+    let wt_project =
         if rel.as_os_str().is_empty() { wt_path.clone() } else { wt_path.join(rel) };
-    // A seat lands only after its plan closes: work mid-wave never merges.
-    // Spec-only seats (no plan) land freely.
+    // A worktree lands only after its plan closes: work mid-wave never merges.
+    // A worktree with no plan lands freely.
     if let Some(plan_name) = &binding.plan {
-        if let Ok(plans) = crate::plans::all_plans(&seat_project) {
+        if let Ok(plans) = crate::plans::all_plans(&wt_project) {
             if let Some(p) = plans.iter().find(|p| &p.name == plan_name) {
                 if p.state != crate::plans::PlanState::Completed {
                     return Err(format!(
-                        "plan `{plan_name}` is {} — a seat lands only after its plan \
+                        "plan `{plan_name}` is {} — a worktree lands only after its plan \
                          closes: finish the waves (`archi plan next`) or `archi plan \
                          close`, then re-run the merge",
                         p.state.describe()
@@ -880,12 +880,12 @@ pub fn merge(
 
     // The landed archive is what every future unit inherits, so the gate
     // runs on both paths — the local merge and `--to` alike: while any
-    // member's worktree tip is not the baseline the seat's latest version
+    // member's worktree tip is not the baseline the worktree's latest version
     // records, refuse before anything pushes or merges, every stale member
     // batched into the one message with its repair
     // (archi/requirements/worktree-parallelism/a-landing-carries-fresh-baselines.md).
     if !binding.members.is_empty() {
-        let baselines: BTreeMap<String, String> = crate::versions::Archive::open(&seat_project)?
+        let baselines: BTreeMap<String, String> = crate::versions::Archive::open(&wt_project)?
             .and_then(|a| {
                 a.entries().last().map(|e| {
                     e.commits.iter().map(|(k, b)| (k.clone(), b.sha.clone())).collect()
@@ -909,7 +909,7 @@ pub fn merge(
                          `archi version anchor --repo {name} --project {}`, then re-run the merge",
                         short(&tip),
                         recorded.map_or("none", |s| short(s)),
-                        seat_project.display()
+                        wt_project.display()
                     )
                 })
             })
@@ -996,7 +996,7 @@ pub fn merge(
     // dangling entry pointing at nothing.
     let mut retired = false;
     if !matches!(spec, RepoOutcome::Conflict { .. }) && members_clear {
-        scrub_seat(&seat_project);
+        scrub_worktree(&wt_project);
         worktree_remove(&top, &wt_path, false).map_err(|e| {
             format!("{e}\nthe worktree keeps its binding; commit or clean it, then re-run")
         })?;
@@ -1015,19 +1015,19 @@ pub fn merge(
 // The guard
 
 /// The three-outcome gate every mutating route passes — wired once, at the
-/// router in `main`, never inside verb bodies: bound here — proceed; bound
-/// elsewhere — refuse naming the owner; unbound — refuse toward a seat.
+/// router in `main`, never inside command bodies: bound here — proceed; bound
+/// elsewhere — refuse naming the owner; unbound — refuse toward a worktree.
 /// The discipline is unconditional: the binding, not the branch, is the
 /// license to mutate — an unbound checkout (the primary included) never
-/// mutates, and gitless refuses loudly: the seat model (isolation,
+/// mutates, and gitless refuses loudly: the worktree model (isolation,
 /// branches, merge) needs a repository. `protected` in archi.toml keeps a
 /// single meaning — branches that never receive a local merge.
 pub fn guard_mutation(root: &Path, work: Option<&str>) -> Result<(), String> {
     let root = canon(root);
     let Some(top) = toplevel(&root) else {
         return Err(
-            "not a git repository — archi mutations run only inside a seated worktree, \
-             and the seat model (isolation, branches, merge) needs one. Ask the user: \
+            "not a git repository — archi mutations run only inside a bound worktree, \
+             and the worktree model (isolation, branches, merge) needs one. Ask the user: \
              create it (`git init` and a seed commit), or cancel the work — never \
              proceed bare."
                 .to_string(),
@@ -1038,7 +1038,7 @@ pub fn guard_mutation(root: &Path, work: Option<&str>) -> Result<(), String> {
         if let Some((owner, _)) = reg.owner_of_plan(slug) {
             if Path::new(owner) != top.as_path() {
                 return Err(format!(
-                    "plan `{slug}` is seated at {owner} — continue there (cd {owner}); \
+                    "plan `{slug}` is bound to {owner} — continue there (cd {owner}); \
                      if that checkout is gone, `archi worktree drop {slug}`"
                 ));
             }
@@ -1047,10 +1047,11 @@ pub fn guard_mutation(root: &Path, work: Option<&str>) -> Result<(), String> {
     if reg.binding_of(&top).is_some() {
         return Ok(());
     }
-    // One seat carries the whole unit — spec, plan, code. When seats exist,
+    // One worktree carries the whole unit — spec, plan, code. When some
+    // exist,
     // continuation belongs to one of them: list, never mint over them; the
     // CLI cannot know which spec a new plan serves, the caller can.
-    let seats: Vec<String> = reg
+    let standing: Vec<String> = reg
         .entries()
         .map(|(k, b)| {
             let mut parts = Vec::new();
@@ -1065,11 +1066,11 @@ pub fn guard_mutation(root: &Path, work: Option<&str>) -> Result<(), String> {
         })
         .collect();
     match work {
-        Some(slug) if seats.is_empty() => {
+        Some(slug) if standing.is_empty() => {
             let minted = mint(&root, slug, Some(slug), None, &[], &BTreeMap::new())?;
             Err(format!(
-                "this checkout is unbound — mutating verbs run only inside a seated \
-                 worktree; minted worktree {} on branch {}; cd {} and re-run this verb; \
+                "this checkout is unbound — mutating commands run only inside a bound \
+                 worktree; minted worktree {} on branch {}; cd {} and re-run this command; \
                  the CLI never changes your directory",
                 minted.path.display(),
                 minted.branch,
@@ -1077,31 +1078,31 @@ pub fn guard_mutation(root: &Path, work: Option<&str>) -> Result<(), String> {
             ))
         }
         Some(slug) => Err(format!(
-            "this checkout is unbound — mutating verbs run only inside a seated \
-             worktree; existing seats:\n{}\nif `{slug}` continues one of them, work \
+            "this checkout is unbound — mutating commands run only inside a bound \
+             worktree; existing worktrees:\n{}\nif `{slug}` continues one of them, work \
              there (cd its path); only new, unrelated work mints its own: \
              `archi worktree mint {slug}`",
-            seats.join("\n")
+            standing.join("\n")
         )),
-        None if seats.is_empty() => Err(
-            "this checkout is unbound — mutating verbs run only inside a seated \
+        None if standing.is_empty() => Err(
+            "this checkout is unbound — mutating commands run only inside a bound \
              worktree; name the work first: `archi plan use <name>` mints a plan \
-             worktree, `archi worktree mint <slug>` seats spec work without a plan"
+             worktree, `archi worktree mint <slug>` binds spec work without a plan"
                 .to_string(),
         ),
         None => Err(format!(
-            "this checkout is unbound — mutating verbs run only inside a seated \
-             worktree; existing seats:\n{}\ncontinue in one of them (cd its path), or \
-             seat new work: `archi worktree mint <slug>`",
-            seats.join("\n")
+            "this checkout is unbound — mutating commands run only inside a bound \
+             worktree; existing worktrees:\n{}\ncontinue in one of them (cd its path), or \
+             bind new work: `archi worktree mint <slug>`",
+            standing.join("\n")
         )),
     }
 }
 
 /// The verdict gate `check` and `build` pass at the router: reads answer
 /// anywhere, but a verdict on ungoverned work is a lie — an unbound
-/// checkout whose spec carries uncommitted edits refuses with the seat
-/// recipe instead of blessing them. A bound seat never trips it; a clean
+/// checkout whose spec carries uncommitted edits refuses with the worktree
+/// recipe instead of blessing them. A bound worktree never trips it; a clean
 /// tree passes (CI, the receiving checkout after a landing); a tree
 /// mid-merge is exempt — the join triage (`archi-merge`) needs `check`
 /// exactly while `archi/` is conflicted. Gitless stays free: branch
@@ -1132,9 +1133,9 @@ pub fn guard_verdict(root: &Path) -> Result<(), String> {
     let more = dirty.len().saturating_sub(8);
     let tail = if more > 0 { format!("\n  …and {more} more") } else { String::new() };
     Err(format!(
-        "the spec carries uncommitted edits outside a seated worktree:\n{}{tail}\n\
+        "the spec carries uncommitted edits outside a bound worktree:\n{}{tail}\n\
          a passing report here would bless ungoverned work — continue in an \
-         existing seat (`archi worktree ls`) or mint one (`archi worktree \
+         existing worktree (`archi worktree ls`) or mint one (`archi worktree \
          mint <slug>`), carry the edits there, and re-run",
         shown.join("\n")
     ))
@@ -1259,7 +1260,7 @@ mod tests {
     }
 
     #[test]
-    fn mint_attaches_to_an_existing_branch_and_refuses_a_seated_one() {
+    fn mint_attaches_to_an_existing_branch_and_refuses_a_checked_out_one() {
         let outer = scratch();
         let spec = repo(&outer, "spec");
         git(&spec, &["branch", "archi/auth"]);
@@ -1271,7 +1272,7 @@ mod tests {
         assert!(e.contains(&minted.path.to_string_lossy().into_owned()), "{e}");
         // ...but from inside its own worktree, mint extends instead
         let m2 = mint_plain(&minted.path, "auth", None, Some("auth-spec")).unwrap();
-        assert!(m2.seated);
+        assert!(m2.extended);
         let reg = Registry::load(&spec).unwrap().unwrap();
         let b = reg.binding_of(&minted.path).unwrap();
         assert_eq!(b.plan.as_deref(), Some("auth"));
@@ -1279,7 +1280,7 @@ mod tests {
     }
 
     #[test]
-    fn mint_without_a_plan_seats_an_effort() {
+    fn mint_without_a_plan_binds_an_effort() {
         let outer = scratch();
         let spec = repo(&outer, "spec");
         let minted = mint_plain(&spec, "storm", None, Some("storm")).unwrap();
@@ -1310,11 +1311,11 @@ mod tests {
         git(&spec, &["switch", "-qc", "feature"]);
         let e = guard_mutation(&spec, Some("x")).unwrap_err();
         assert!(e.contains("unbound"), "{e}");
-        assert!(e.contains("seated worktree"), "{e}");
+        assert!(e.contains("bound worktree"), "{e}");
     }
 
     #[test]
-    fn the_guard_mints_for_an_unbound_checkout_and_names_the_seat() {
+    fn the_guard_mints_for_an_unbound_checkout_and_names_the_worktree() {
         let outer = scratch();
         let spec = repo(&outer, "spec");
         manifest(&spec, "protected = [\"main\"]\n");
@@ -1332,24 +1333,24 @@ mod tests {
         assert!(guard_mutation(Path::new(owner), Some("auth")).is_ok());
         // any other checkout refuses with the owner's path
         let e = guard_mutation(&spec, Some("auth")).unwrap_err();
-        assert!(e.contains("seated at"), "{e}");
-        // unrelated new work with seats standing: candidates listed, no mint
+        assert!(e.contains("is bound to"), "{e}");
+        // unrelated new work with worktrees standing: candidates listed, no mint
         let e = guard_mutation(&spec, Some("billing")).unwrap_err();
-        assert!(e.contains("existing seats"), "{e}");
+        assert!(e.contains("existing worktrees"), "{e}");
         assert!(e.contains("plan auth"), "{e}");
         assert!(e.contains("worktree mint billing"), "{e}");
         assert!(
             !default_worktree_dir(&spec, "billing").exists(),
-            "continuation is the default — nothing minted over standing seats"
+            "continuation is the default — nothing minted over standing worktrees"
         );
-        // a verb with no work to name gets the same candidates
+        // a command with no work to name gets the same candidates
         let e = guard_mutation(&spec, None).unwrap_err();
-        assert!(e.contains("existing seats"), "{e}");
+        assert!(e.contains("existing worktrees"), "{e}");
         assert!(e.contains("worktree mint"), "{e}");
     }
 
     #[test]
-    fn a_seatless_registry_gets_both_recipes_for_nameless_work() {
+    fn an_empty_registry_gets_both_recipes_for_nameless_work() {
         let outer = scratch();
         let spec = repo(&outer, "spec");
         manifest(&spec, "protected = [\"main\"]\n");
@@ -1361,7 +1362,7 @@ mod tests {
     }
 
     #[test]
-    fn the_verdict_gate_refuses_only_a_dirty_spec_outside_a_seat() {
+    fn the_verdict_gate_refuses_only_a_dirty_spec_outside_a_worktree() {
         // gitless: free — the post-init smoke predates the repository
         let plain = scratch();
         manifest(&plain, "");
@@ -1379,7 +1380,7 @@ mod tests {
         // a non-spec edit does not trip it
         fs::write(spec.join("notes.md"), "scratch\n").unwrap();
         assert!(guard_verdict(&spec).is_ok());
-        // an uncommitted spec edit outside a seat refuses with the recipe
+        // an uncommitted spec edit outside a worktree refuses with the recipe
         fs::write(spec.join("archi/src/model.arch"), "def node A\ndef node B\n").unwrap();
         let e = guard_verdict(&spec).unwrap_err();
         assert!(e.contains("uncommitted"), "{e}");
@@ -1394,7 +1395,7 @@ mod tests {
         git(&spec, &["add", "-A"]);
         git(&spec, &["commit", "-qm", "grow"]);
         assert!(guard_verdict(&spec).is_ok());
-        // the same edit inside a bound seat never trips the gate
+        // the same edit inside a bound worktree never trips the gate
         let minted = mint_plain(&spec, "work", None, Some("work")).unwrap();
         fs::write(minted.path.join("archi/src/model.arch"), "def node C\n").unwrap();
         assert!(guard_verdict(&minted.path).is_ok());

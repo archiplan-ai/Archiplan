@@ -1,7 +1,7 @@
-//! End to end through the real binary: one verb stands a project up
+//! End to end through the real binary: one command stands a project up
 //! (`archi/requirements/cold-start/one-verb-stands-a-project-up`), a second
 //! run changes no bytes, the manifest routes the starter and aborts the
-//! broken run, the briefing lands verbatim, and the verbs around init keep
+//! broken run, the briefing lands verbatim, and the commands around init keep
 //! their contracts.
 
 mod util;
@@ -80,12 +80,12 @@ fn a_fresh_init_stands_up_a_building_project() {
     assert!(created.last().unwrap().contains("archi.toml"), "{out}");
     assert!(out.contains("initialized `proj`"), "{out}");
 
-    // Seat artifacts are ignored from birth — machine-local, never merged.
+    // Worktree artifacts are ignored from birth — machine-local, never merged.
     let ignore = fs::read_to_string(root.join("proj/.gitignore")).unwrap();
     assert!(ignore.contains("archi/*.local.toml"), "{ignore}");
     assert!(ignore.contains("archi/plans/.current"), "{ignore}");
 
-    // The seat discipline is declared from birth; deleting the line opts out.
+    // The one-worktree rule is declared from birth; deleting the line opts out.
     let manifest = fs::read_to_string(root.join("proj/archi.toml")).unwrap();
     assert!(manifest.contains("protected = [\"main\"]"), "{manifest}");
 
@@ -218,7 +218,7 @@ fn the_verbs_around_init_keep_their_contracts() {
     let root = temp_dir();
     ok_in(&root, &["init", "."]);
 
-    // Search runs on the fresh project — the dispatch gained a verb and
+    // Search runs on the fresh project — the dispatch gained a command and
     // lost none.
     let (code, _, _) = run_in(&root, &["search", "anything", "at", "all"]);
     assert_eq!(code, Some(0));
@@ -235,13 +235,13 @@ fn the_verbs_around_init_keep_their_contracts() {
     assert_eq!(code, Some(1), "no opt-out: {stderr}");
     assert!(stderr.contains("git init"), "{stderr}");
 
-    // Seated, the flow runs: a save, an init, a save — init minted nothing
+    // Bound, the flow runs: a save, an init, a save — init minted nothing
     // the second save could notice.
-    let seat = util::seat(&root);
-    ok_in(&seat, &["version", "save", "-m", "first"]);
-    let out = ok_in(&seat, &["init", "."]);
+    let wt = util::worktree(&root);
+    ok_in(&wt, &["version", "save", "-m", "first"]);
+    let out = ok_in(&wt, &["init", "."]);
     assert!(out.contains("already initialized"), "{out}");
-    let (_, stdout, stderr) = run_in(&seat, &["version", "save", "-m", "again"]);
+    let (_, stdout, stderr) = run_in(&wt, &["version", "save", "-m", "again"]);
     assert!(
         (stdout.clone() + &stderr).contains("unchanged since v0001"),
         "{stdout}\n{stderr}"

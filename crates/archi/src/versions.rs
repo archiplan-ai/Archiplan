@@ -170,7 +170,7 @@ pub enum Anchored {
         commit: String,
     },
     /// The latest version's member baseline moved to the member's clean
-    /// tip — the explicit verb re-marks the latest version only, anchor-born.
+    /// tip — the explicit command re-marks the latest version only, anchor-born.
     Reanchored {
         /// The re-anchored version.
         id: String,
@@ -215,7 +215,7 @@ impl Archive {
                      id. Keep the first-landed entry and its patch file (both sides' model and \
                      doc work is already merged), then re-mint the later round onto the lineage: \
                      `archi version remint -m <note> --session <slug>` — run it in the later \
-                     round's seat, re-attached with `archi worktree mint <slug>` if it was \
+                     round's worktree, re-attached with `archi worktree mint <slug>` if it was \
                      already retired \
                      (archi/requirements/self-hosting/parallel-editing-discipline.md)",
                     index.display()
@@ -1135,7 +1135,7 @@ mod tests {
             Anchored::Already { id, commit } if id == "v0002" && commit == b1
         ));
         // A live model matching an older version: its mark is history — the
-        // verb reports it and never moves it.
+        // command reports it and never moves it.
         write_model(&root, &v1());
         let ws1 = compiled_model(&root);
         assert!(matches!(

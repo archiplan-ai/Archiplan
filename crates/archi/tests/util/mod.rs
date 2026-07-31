@@ -1,8 +1,8 @@
-//! Shared fixture plumbing: the seat every e2e mutation runs from.
+//! Shared fixture plumbing: the worktree every e2e mutation runs from.
 //!
-//! The guard is unconditional — mutating verbs run only inside a seated
-//! worktree — so a fixture becomes: commit the scaffold, mint the seat
-//! through the binary itself, hand the seat path to the test. Reads still
+//! The guard is unconditional — mutating commands run only inside a bound
+//! worktree — so a fixture becomes: commit the scaffold, mint the worktree
+//! through the binary itself, hand its path to the test. Reads still
 //! answer anywhere; only tests that mutate need this.
 
 use std::path::{Path, PathBuf};
@@ -23,10 +23,10 @@ pub fn git(dir: &Path, args: &[&str]) {
     );
 }
 
-/// Turn a scaffolded directory into a committed repo and mint its seat;
-/// returns the seat worktree the test mutates from. The primary checkout
+/// Turn a scaffolded directory into a committed repo and mint its worktree;
+/// returns the worktree the test mutates from. The primary checkout
 /// stays on `main`, unbound and untouched.
-pub fn seat(fixture: &Path) -> PathBuf {
+pub fn worktree(fixture: &Path) -> PathBuf {
     git(fixture, &["init", "-q", "-b", "main"]);
     git(fixture, &["config", "user.email", "t@t"]);
     git(fixture, &["config", "user.name", "t"]);
@@ -34,7 +34,7 @@ pub fn seat(fixture: &Path) -> PathBuf {
     git(fixture, &["add", "-A"]);
     git(fixture, &["commit", "-qm", "seed"]);
     let out = Command::new(env!("CARGO_BIN_EXE_archi"))
-        .args(["worktree", "mint", "seat", "--project", fixture.to_str().unwrap()])
+        .args(["worktree", "mint", "wt", "--project", fixture.to_str().unwrap()])
         .output()
         .expect("archi runs");
     assert!(
@@ -44,10 +44,10 @@ pub fn seat(fixture: &Path) -> PathBuf {
         String::from_utf8_lossy(&out.stderr)
     );
     let name = fixture.file_name().unwrap().to_str().unwrap();
-    let seat = fixture
+    let wt = fixture
         .parent()
         .unwrap()
         .join(format!("{name}-worktrees"))
-        .join("seat");
-    std::fs::canonicalize(&seat).unwrap_or(seat)
+        .join("wt");
+    std::fs::canonicalize(&wt).unwrap_or(wt)
 }

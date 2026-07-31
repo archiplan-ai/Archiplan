@@ -32,7 +32,7 @@ fn temp_project() -> PathBuf {
     )
     .unwrap();
     fs::write(dir.join("archi/src/model.arch"), MODEL).unwrap();
-    util::seat(&dir)
+    util::worktree(&dir)
 }
 
 fn session_file(root: &Path, slug: &str) -> PathBuf {

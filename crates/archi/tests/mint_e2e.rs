@@ -1,4 +1,4 @@
-//! End to end through the real binary: doc skeletons come from verbs —
+//! End to end through the real binary: doc skeletons come from commands —
 //! `req add|rm`, `stress open|add|rm` — every machine field explicit or
 //! derived, text slots held empty by the schema's own diagnostics, removals
 //! pre-flighted (`archi/requirements/spec-docs/skeletons-come-from-a-verb.md`).
@@ -38,7 +38,7 @@ fn temp_project() -> PathBuf {
         "# Hardening\n\nThe area under pressure.\n",
     )
     .unwrap();
-    util::seat(&dir)
+    util::worktree(&dir)
 }
 
 fn run(root: &Path, args: &[&str]) -> (bool, String, String) {
@@ -263,15 +263,15 @@ fn a_whole_round_materializes_from_one_batch_and_the_guard_covers_every_line() {
         assert!(root.join(f).is_file(), "{f} did not materialize");
     }
 
-    // the mutation guard covers the new verbs — an unbound checkout refuses
+    // the mutation guard covers the new commands — an unbound checkout refuses
     let primary = {
-        // the fixture root's primary checkout is the seat's origin
+        // the fixture root's primary checkout is the worktree's origin
         let top = root.parent().unwrap().parent().unwrap();
         top.join(root.parent().unwrap().file_name().unwrap().to_str().unwrap().trim_end_matches("-worktrees"))
     };
     let (success, _o, e) = run(&primary, &["stress", "add", "Rogue", "--affects", "Gate"]);
     assert!(!success);
-    assert!(e.contains("unbound") || e.contains("seat"), "{e}");
+    assert!(e.contains("unbound") || e.contains("worktree"), "{e}");
 }
 
 #[test]

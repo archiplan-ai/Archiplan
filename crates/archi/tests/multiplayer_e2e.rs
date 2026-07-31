@@ -39,12 +39,12 @@ fn temp_project() -> PathBuf {
     dir
 }
 
-/// A committed fixture plus its seat worktree — mutating verbs answer only
-/// from the seat, so tests write and run there. Returns (fixture, seat).
-fn seated() -> (PathBuf, PathBuf) {
+/// A committed fixture plus its worktree — mutating commands answer only
+/// from the worktree, so tests write and run there. Returns (fixture, worktree).
+fn bound() -> (PathBuf, PathBuf) {
     let fixture = temp_project();
-    let seat = util::seat(&fixture);
-    (fixture, seat)
+    let wt = util::worktree(&fixture);
+    (fixture, wt)
 }
 
 fn cleanup(fixture: &Path) {
@@ -84,7 +84,7 @@ fn write_journal(root: &Path, text: &str) {
 
 #[test]
 fn parallel_adds_union_fold_in_either_order() {
-    let (fixture, root) = seated();
+    let (fixture, root) = bound();
 
     // Writer one mints on their branch.
     let (ok, out, err) = run(&root, &["link", "add", "Gate", "code/gate.rs#gate", "--kind", "indirect"]);
@@ -123,7 +123,7 @@ fn parallel_adds_union_fold_in_either_order() {
 
 #[test]
 fn retire_repin_union_folds_both_orders_and_surfaces_the_absorption() {
-    let (fixture, root) = seated();
+    let (fixture, root) = bound();
     let (ok, _, err) = run(&root, &["link", "add", "Gate", "code/gate.rs#gate", "--kind", "indirect"]);
     assert!(ok, "{err}");
     let base = read_journal(&root);
@@ -179,7 +179,7 @@ fn an_id_never_minted_still_refuses_the_fold() {
 
 #[test]
 fn the_union_merge_attribute_ships_beside_the_journal() {
-    let (fixture, root) = seated();
+    let (fixture, root) = bound();
     let (ok, _, err) = run(&root, &["link", "add", "Gate", "code/gate.rs#gate", "--kind", "indirect"]);
     assert!(ok, "{err}");
     let ga = fs::read_to_string(root.join("archi/links/.gitattributes")).unwrap();
@@ -202,9 +202,9 @@ fn git(root: &Path, args: &[&str]) -> bool {
 
 #[test]
 fn remint_rejoins_the_lineage_and_restamps_the_round() {
-    // Both players branch inside the seat worktree: the binding, not the
+    // Both players branch inside the worktree: the binding, not the
     // branch, licenses the mutation, and the git plumbing stays real.
-    let (fixture, root) = seated();
+    let (fixture, root) = bound();
     let (ok, _, err) = run(&root, &["version", "save", "-m", "base"]);
     assert!(ok, "{err}");
     assert!(git(&root, &["add", "-A"]) && git(&root, &["commit", "-qm", "base"]));
@@ -222,7 +222,7 @@ fn remint_rejoins_the_lineage_and_restamps_the_round() {
 
     // The loser runs a whole round from the same base: session, answer
     // (node Loser), save — also v0002, closed: stamped v0002.
-    assert!(git(&root, &["checkout", "-q", "archi/seat"]));
+    assert!(git(&root, &["checkout", "-q", "archi/wt"]));
     assert!(git(&root, &["checkout", "-qb", "loser"]));
     let sdir = root.join("archi/stress/loser-round");
     fs::create_dir_all(&sdir).unwrap();
@@ -284,7 +284,7 @@ fn remint_rejoins_the_lineage_and_restamps_the_round() {
 
 #[test]
 fn remint_refuses_unchanged_unknown_and_open() {
-    let (fixture, root) = seated();
+    let (fixture, root) = bound();
     let (ok, _, err) = run(&root, &["version", "save", "-m", "base"]);
     assert!(ok, "{err}");
 
@@ -317,7 +317,7 @@ fn remint_refuses_unchanged_unknown_and_open() {
 
 #[test]
 fn diff_live_shows_the_unsaved_delta() {
-    let (fixture, root) = seated();
+    let (fixture, root) = bound();
     let (ok, _, err) = run(&root, &["version", "save", "-m", "base"]);
     assert!(ok, "{err}");
     fs::write(root.join("archi/src/model.arch"), format!("{MODEL}def node Extra\n")).unwrap();
@@ -338,7 +338,7 @@ fn diff_live_shows_the_unsaved_delta() {
 
 #[test]
 fn conflict_markers_name_the_recipe_and_sessions_stay_quiet() {
-    let (fixture, root) = seated();
+    let (fixture, root) = bound();
     let (ok, _, err) = run(&root, &["version", "save", "-m", "base"]);
     assert!(ok, "{err}");
     let sdir = root.join("archi/stress/quiet-round");
@@ -368,7 +368,7 @@ fn conflict_markers_name_the_recipe_and_sessions_stay_quiet() {
 
 #[test]
 fn a_half_shipped_save_names_the_travel_rule() {
-    let (fixture, root) = seated();
+    let (fixture, root) = bound();
     let (ok, out, err) = run(&root, &["version", "save", "-m", "base"]);
     assert!(ok, "{err}");
     assert!(

@@ -21,105 +21,134 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/archiplan-ai/Archiplan/main/release/install.ps1 | iex
 ```
 
-The installer resolves the latest [GitHub release](https://github.com/archiplan-ai/Archiplan/releases)
-for your platform, verifies its checksum, and drops the binary into
-`~/.local/bin` — make sure it is on your `PATH`, then confirm with
-`archi --version`. Pin a version with `ARCHI_VERSION=x.y.z`.
+The installer finds the latest [GitHub release](https://github.com/archiplan-ai/Archiplan/releases)
+for your platform, verifies its checksum, and writes the binary into
+`~/.local/bin`. Make sure that directory is on your `PATH`, then confirm
+the install with `archi --version`. To pin a version, set
+`ARCHI_VERSION=x.y.z`.
 
-Prefer to do it by hand? Every release publishes a tarball per platform
-(`macos-arm64`, `linux-x64`, `linux-arm64`, `windows-x64`) with a `.sha256`
-beside it — download one, unpack it, and move `archi` onto your `PATH`.
+You can also install it by hand. Every release publishes one tarball per
+platform — `macos-arm64`, `linux-x64`, `linux-arm64`, `windows-x64` —
+with a `.sha256` file beside it. Download one, unpack it, and move
+`archi` onto your `PATH`.
 
 ## 02 — Getting started
 
-Everything after the install happens inside your agent — no commands to memorize.
+Everything after the install happens inside your agent. There are no
+commands to memorize.
 
 ### New project
 
-Open your agent in the project folder, run `/archi`, describe the system in one
-sentence. The agent takes it from there:
+Open your agent in the project folder, run `/archi`, and describe the
+system in one sentence. The agent does the rest:
 
-- intent → requirements → model → stress rounds → a hardened, versioned spec
-- every choice that matters comes back as a question with priced options
-- `/archi-plan` — the implementation plan; stack, tests and infrastructure polled from you
-- `/archi-implement` — waves of parallel sub-agents until done, scenarios run on a live stack
+- intent, then requirements, then the model, then stress rounds, then a
+  hardened and versioned spec
+- every choice that matters comes back to you as a question with priced
+  options
+- `/archi-plan` writes the implementation plan. It polls you for the
+  stack, the tests and the infrastructure.
+- `/archi-implement` runs waves of parallel sub-agents until the plan is
+  done, and runs the scenarios on a live stack
 
 ### Existing project
 
 Run `/archi` in the repo and name the change you want:
 
-- the model is recovered from the code — only the slice your change touches
-- requirements pin the behavior that must not break; links anchor the load-bearing code
-- from there the loop is the same: stress, version, `/archi-plan`, `/archi-implement`
+- the model is recovered from the code — only the slice your change
+  touches
+- requirements pin the behavior that must not break, and links anchor the
+  load-bearing code
+- from there the loop is the same: stress, version, `/archi-plan`,
+  `/archi-implement`
 
 ![](assets/quickstart-existing-project.svg)
 
 ### Multi-repo
 
-Spec in one repository, code in several. Tell the agent which repos participate:
+The spec lives in one repository and the code lives in several. Tell the
+agent which repos participate:
 
-- each member is seated beside its checkout — same branch, grown from its recorded baseline
-- an ambiguous base comes back as candidate branches, never a guess
-- members land by push and PR on their forges; the spec lands once, whole
+- each member gets a worktree beside its checkout, on the same branch,
+  started from its recorded baseline
+- an ambiguous base comes back as candidate branches. The agent never
+  guesses.
+- members land by push and PR on their forges. The spec lands once, and
+  whole.
 
-### The worktree seat
+### One worktree per unit of work
 
-- one unit — spec, then plan, then code — rides one worktree and lands once
-- parallel efforts are parallel seats; your main checkout is never mutated
-- the tools refuse work done outside the discipline — and say where to go
+- one unit — the spec, then the plan, then the code — stays in one
+  worktree and lands once
+- parallel efforts are parallel worktrees. Your main checkout is never
+  mutated.
+- the tools refuse work done outside this rule, and they say where to go
 
-## 03 — Every skill, by what you're doing
+## 03 — Every skill, by the job it does
 
-The install drops the workflow skills into your agent, all invoked with a slash
-command. Grouped by the job at hand.
+The install writes the workflow skills into your agent, and a slash
+command invokes each one. They are grouped by the job at hand.
 
 ### Design the architecture
 
-**`/archi`** — the main entry point. Guides a full architecture session with the
-archiplan methodology — from a one-line problem statement, through intent and
-requirements, to a hardened, versioned spec. Greenfield or brownfield. Tracks coupling
-live with the NKP scoring line, steering you toward the **CRITICAL** regime — the
-evolvable edge where changes propagate without cascading. Stress rounds live here too:
-each round discovers stressors — failure modes, scale concerns, hostile users,
-regulators — names the components each one presses, applies verdicts, and turns every
-break into a derived requirement or a deliberately signed trade-off. You loop until a
-round survives; that version is the hardened spec.
+**`/archi`** is the main entry point. It guides a full architecture
+session with the archiplan methodology: from a one-line problem
+statement, through intent and requirements, to a hardened and versioned
+spec. It works greenfield and brownfield. It tracks the coupling live
+with the NKP scoring line. It steers you toward the **CRITICAL** regime,
+where changes propagate without cascading.
 
-### Plan & build
+The stress rounds live here too. Each round finds stressors — failure
+modes, scale concerns, hostile users, regulators. It names the components
+that each stressor presses, applies the verdicts, and turns every break
+into a derived requirement or into a signed trade-off. You loop until a
+round survives. That version is the hardened spec.
 
-**`/archi-plan`** — turns a hardened spec into an implementation plan, authored
-entirely through the `archi plan` verbs: an envelope with a user-polled stack and its
-infrastructure, one task per node, requirement ownership curated from the spec's own
-reverse lookup, named verifications, end-to-end scenarios. Refuses on an unsaved model.
+### Plan and build
 
-**`/archi-implement`** — drives the build of a started plan wave by wave, every task in
-its own sub-agent, until `archi plan next` reports `DONE`. The plan stays the source of
-truth — task briefs come from `archi plan task show`; every wave commits inside the
-seat before the join, and code-link evidence is captured as each wave closes.
+**`/archi-plan`** turns a hardened spec into an implementation plan. It
+authors the plan entirely through the `archi plan` commands. The plan holds
+a charter, one task per node, curated requirement ownership, named
+verifications and end-to-end scenarios. The charter carries a user-polled
+stack and its infrastructure. The ownership is curated from the spec's
+own reverse lookup. The command refuses on an unsaved model.
 
-### Land & merge
+**`/archi-implement`** drives the build of a started plan, wave by wave,
+with every task in its own sub-agent, until `archi plan next` reports
+`DONE`. The plan stays the source of truth. The task briefs come from
+`archi plan task show`. Every wave commits inside the worktree before the
+merge, and code-link evidence is captured as each wave closes.
 
-**`/archi-finish-worktree`** — closes a seat: lands its spec/plan/code unit, pushes
-member branches for their PRs, retires the worktree and its registry binding in one
-move. A protected receiving branch lands sideways (`--to` + push + PR), never by local
-merge.
+### Land and merge
 
-**`/archi-merge`** — two branches that both mutated the spec: triage the join with
-`check`, resolve version-archive collisions with `remint`, read the journal's absorbed
-residue, fold concurrent stress rounds. The contract is the canonical render — git
-merging clean proves nothing until the composition compiles.
+**`/archi-finish-worktree`** closes a worktree. It lands the spec, plan
+and code unit in one move. It pushes the member branches for their PRs,
+and it retires the worktree and its registry binding. A protected
+receiving branch lands sideways, with `--to` plus a push and a PR, never
+by a local merge.
 
-## 04 - See it in action
+**`/archi-merge`** joins two branches that both mutated the spec. It
+triages the merge with `check`, resolves version-archive collisions with
+`remint`, reads the notes the journal absorbed, and folds concurrent
+stress rounds. The contract is the canonical render: a clean git merge
+proves nothing until the composition compiles.
 
-### Pre-mortem on every design
+## 04 — See it in action
 
-Archiplan throws traffic spikes, partial outages, hostile users, and regulators at the spec — before you ship code that pretended those don't exist. Anything that breaks becomes a new requirement.
+### Find the failures before you ship
+
+Archiplan throws traffic spikes, partial outages, hostile users and
+regulators at the spec, before you ship code that pretended none of them
+exist. Anything that breaks becomes a new requirement.
 
 ![](assets/quickstart-stress-session.svg)
 
-### Never lose context
+### Never lose the context
 
-Every requirement remembers its origin — the initial problem, a specific stressor, a stakeholder concern. Six months later, when someone asks why did we split this from that?, the answer is an artifact, not a lost Slack thread.
+Every requirement remembers its origin: the initial problem, a specific
+stressor, or a stakeholder concern. Six months later, when someone asks
+why you split this from that, the answer is an artifact and not a lost
+Slack thread.
 
 ![](assets/quickstart-decision-trace.svg)
 
@@ -129,23 +158,25 @@ Archiplan flags when your design is heading toward a god-service or microservice
 
 ![](assets/quickstart-fine-tune.svg)
 
-## 05 - How Archiplan integrates into software development life cycle
+## 05 — How Archiplan fits the software development life cycle
 
-Evolutionary approach to system design, then continous tracking of cause-and-effect:
+It gives you an evolutionary approach to system design, then continuous
+tracking of cause and effect:
 
 ![](assets/archiplan.svg)
 
 ---
 
-Archi is in beta. It's rough in places — that's the point. We're hardening it the way
-archi hardens a spec, and the fastest way to make it better is to hear what breaks for
-you. Try it on a real design and tell us where it bends.
+Archi is in beta. It is rough in places, and that is the point. We harden
+it the way archi hardens a spec. The fastest way to make it better is to
+hear what breaks for you. Try it on a real design, and tell us what
+breaks.
 
 Go deeper:
 
 - [skills/archi.md](skills/archi.md) — the full workflow, greenfield and brownfield, and the modeling language in brief
-- [docs/versioning.md](docs/versioning.md) — what a version is and why the archive is durable
-- [docs/multi-repo-workflow.md](docs/multi-repo-workflow.md) — the loop when code lives in repositories of its own
+- [docs/versioning.md](docs/versioning.md) — what a version is, and why the archive is durable
+- [docs/multi-repo-workflow.md](docs/multi-repo-workflow.md) — the loop when the code lives in repositories of its own
 
 Licensed under the [MIT License](LICENSE).
 

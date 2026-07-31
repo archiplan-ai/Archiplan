@@ -652,7 +652,7 @@ pub(crate) enum MemberRoot {
 }
 
 /// The member resolution every link operation reads through: home plus the
-/// declared members, resolved once per verb.
+/// declared members, resolved once per command.
 pub(crate) struct Roots {
     set: crate::members::MemberSet,
 }
@@ -680,7 +680,7 @@ impl Roots {
         }
     }
 
-    /// The root, or a loud error naming the recovery — for verbs that
+    /// The root, or a loud error naming the recovery — for commands that
     /// cannot proceed on absence (`link add`, `repin --to`).
     pub(crate) fn require(&self, repo: &Option<String>) -> Result<PathBuf, String> {
         match self.of(repo) {

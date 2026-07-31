@@ -3,11 +3,11 @@
 
 For any architecture-related work — modeling systems, components,
 relationships, requirements, specs, plans — use the `archi` CLI and its
-skills; never design ad hoc in chat. `archi --help` lists the verbs.
+skills; never design ad hoc in chat. `archi --help` lists the commands.
 
 This repository is modeled with archiplan: the spec is text under `archi/`,
 the model is `.arch` source under `archi/src/`, and lifecycle state moves only
-through `archi` verbs — never hand-edit `archi/versions/`, the link journal,
+through `archi` commands — never hand-edit `archi/versions/`, the link journal,
 or `closed:` stamps.
 
 - After any model or doc edit run `archi check`: errors block, findings are
@@ -21,9 +21,9 @@ or `closed:` stamps.
   a count of the files it claims to have written.
 - The spec workflow (model, stress, version) is the `archi` skill in
   `.claude/skills/archi/`; authoring a plan is `archi-plan`; executing
-  it in waves is `archi-implement`; closing a worktree seat is
+  it in waves is `archi-implement`; closing a worktree is
   `archi-finish-worktree`; merging parallel spec work is `archi-merge`,
-  and crossing a project off the old fractal client is
+  and importing a project from the old fractal client is
   `archi-migrate-fractal`.
 
 No silent assumptions: state what you assume, surface the tradeoffs.

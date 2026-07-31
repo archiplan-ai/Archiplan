@@ -41,7 +41,7 @@ fn temp_project(model: &str) -> PathBuf {
     )
     .unwrap();
     fs::write(dir.join("archi/src/model.arch"), model).unwrap();
-    util::seat(&dir)
+    util::worktree(&dir)
 }
 
 fn run(root: &Path, args: &[&str]) -> (bool, String, String) {

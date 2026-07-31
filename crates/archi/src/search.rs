@@ -12,7 +12,7 @@
 //! (matching-forgives-the-phrasing). Each corpus degrades alone: no model
 //! darkens only the element cards, an unparseable doc falls back to its
 //! raw text (a-dark-corpus-stays-partial). Every hit carries its kind's
-//! next hop as slugs and paths for the next verb (cards-carry-the-next-hop).
+//! next hop as slugs and paths for the next command (cards-carry-the-next-hop).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -71,7 +71,7 @@ impl Kind {
 
 /// A card's next-hop relations — the fields its kind already holds, kept
 /// through the output boundary. Everything is slugs and paths, ready for
-/// the next verb.
+/// the next command.
 #[derive(Default, Serialize)]
 pub struct Refs {
     /// Element: its identity prose.
@@ -574,7 +574,7 @@ fn corpus(root: &Path, model: Option<&Model>) -> Vec<Card> {
 pub struct Hit {
     /// The card's kind label.
     pub kind: &'static str,
-    /// The slug (docs) or model path (elements) — the address for the next verb.
+    /// The slug (docs) or model path (elements) — the address for the next command.
     pub slug: String,
     /// The score, rounded for a stable surface.
     pub score: f64,

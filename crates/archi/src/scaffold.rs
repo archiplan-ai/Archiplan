@@ -84,7 +84,7 @@ impl Outcome {
 /// Stand `target` up as an archiplan project. Reads before it writes,
 /// writes only what is missing, and orders the writes so every
 /// intermediate tree is honest: the manifest — the marker every other
-/// verb keys on — lands last.
+/// command keys on — lands last.
 pub fn init(target: &Path) -> Result<Outcome, String> {
     fs::create_dir_all(target)
         .map_err(|e| format!("cannot create {}: {e}", target.display()))?;
@@ -154,7 +154,7 @@ pub fn init(target: &Path) -> Result<Outcome, String> {
     };
     steps.push(step(act.0, &target, &claude, act.1));
 
-    // The gitignore: seat artifacts are machine-local and never merged —
+    // The gitignore: worktree artifacts are machine-local and never merged —
     // create it, append the missing lines once, or leave it as found.
     let gitignore = target.join(".gitignore");
     let wanted = ["archi/*.local.toml", "archi/plans/.current"];
@@ -184,7 +184,7 @@ pub fn init(target: &Path) -> Result<Outcome, String> {
     if manifest.is_file() {
         steps.push(step(Act::Ok, &target, &manifest, Some("present".into())));
     } else {
-        // the seat discipline is on from birth: mutation runs in worktrees,
+        // the one-worktree rule is on from birth: mutation runs in worktrees,
         // never in the primary checkout; deleting the line is the opt-out
         write_new(
             &manifest,
@@ -204,7 +204,7 @@ pub fn init(target: &Path) -> Result<Outcome, String> {
 }
 
 /// Sync an initialized tree's briefing to this binary's copies. Where `init`
-/// is create-only, `sync-skills` is the deliberate verb that reconciles a
+/// is create-only, `sync-skills` is the deliberate command that reconciles a
 /// project with a newer binary (`the-installed-skill-drifts`): a skill or
 /// CLAUDE.md block that already matches is `ok`, an absent one is `created`,
 /// and any divergent one is `updated` — overwritten with the binary's copy,
@@ -292,10 +292,10 @@ pub fn render(o: &Outcome) -> String {
         ));
     }
     for s in &o.steps {
-        let verb = act_verb(s.act);
+        let command = act_verb(s.act);
         match &s.detail {
-            Some(d) => out.push_str(&format!("{verb:<9}{} ({d})\n", s.path)),
-            None => out.push_str(&format!("{verb:<9}{}\n", s.path)),
+            Some(d) => out.push_str(&format!("{command:<9}{} ({d})\n", s.path)),
+            None => out.push_str(&format!("{command:<9}{}\n", s.path)),
         }
     }
     if o.fresh() {
@@ -316,10 +316,10 @@ pub fn render_sync(o: &Outcome) -> String {
         ));
     }
     for s in &o.steps {
-        let verb = act_verb(s.act);
+        let command = act_verb(s.act);
         match &s.detail {
-            Some(d) => out.push_str(&format!("{verb:<9}{} ({d})\n", s.path)),
-            None => out.push_str(&format!("{verb:<9}{}\n", s.path)),
+            Some(d) => out.push_str(&format!("{command:<9}{} ({d})\n", s.path)),
+            None => out.push_str(&format!("{command:<9}{}\n", s.path)),
         }
     }
     let wrote = o
@@ -441,11 +441,11 @@ fn claude_block(src: &str) -> String {
          \n\
          For any architecture-related work — modeling systems, components,\n\
          relationships, requirements, specs, plans — use the `archi` CLI and its\n\
-         skills; never design ad hoc in chat. `archi --help` lists the verbs.\n\
+         skills; never design ad hoc in chat. `archi --help` lists the commands.\n\
          \n\
          This repository is modeled with archiplan: the spec is text under `archi/`,\n\
          the model is `.arch` source under `{src}/`, and lifecycle state moves only\n\
-         through `archi` verbs — never hand-edit `archi/versions/`, the link journal,\n\
+         through `archi` commands — never hand-edit `archi/versions/`, the link journal,\n\
          or `closed:` stamps.\n\
          \n\
          - After any model or doc edit run `archi check`: errors block, findings are\n\
@@ -459,9 +459,9 @@ fn claude_block(src: &str) -> String {
          \x20 a count of the files it claims to have written.\n\
          - The spec workflow (model, stress, version) is the `archi` skill in\n\
          \x20 `.claude/skills/archi/`; authoring a plan is `archi-plan`; executing\n\
-         \x20 it in waves is `archi-implement`; closing a worktree seat is\n\
+         \x20 it in waves is `archi-implement`; closing a worktree is\n\
          \x20 `archi-finish-worktree`; merging parallel spec work is `archi-merge`,\n\
-         \x20 and crossing a project off the old fractal client is\n\
+         \x20 and importing a project from the old fractal client is\n\
          \x20 `archi-migrate-fractal`.\n\
          \n\
          No silent assumptions: state what you assume, surface the tradeoffs.\n\
