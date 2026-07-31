@@ -18,9 +18,12 @@
 //! comparison (`archi/requirements/multi-repo/git-speaks-from-its-own-root`).
 
 use std::collections::BTreeMap;
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+use serde::Serialize;
 
 /// The implicit home member's name. Renders as `home` in reports; the empty
 /// string keeps unqualified refs and pre-member journal events meaning home
@@ -196,17 +199,24 @@ pub fn map_member(project_root: &Path, name: &str, dir: &str) -> Result<Member, 
 /// A path that is no git checkout at all is not this gate's business —
 /// `None`, today's behavior untouched.
 fn linked_worktree_refusal(dir: &str, target: &Path, member: &str) -> Option<String> {
-    let git = |args: &[&str]| -> Option<String> {
-        let out = Command::new("git")
-            .arg("-C")
-            .arg(target)
-            .args(args)
-            .output()
-            .ok()?;
-        out.status
-            .success()
-            .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
-    };
+    let wt = linked_worktree(target)?;
+    let LinkedWorktree { branch, main } = wt;
+    Some(format!(
+        "{dir} is a linked worktree of the repo, standing on `{branch}` — a mapping \
+         outlives the worktree and poisons future mints. The main checkout is {main}: \
+         `archi repo map {member} {main}`"
+    ))
+}
+
+/// A linked worktree seen at `target`: the branch standing in it and the
+/// repository's main checkout. `None` for a main checkout — and for a path
+/// that is no git checkout at all, which is not this probe's business.
+struct LinkedWorktree {
+    branch: String,
+    main: String,
+}
+
+fn linked_worktree(target: &Path) -> Option<LinkedWorktree> {
     // git-dir may come back relative to the queried directory; the common
     // dir is asked absolute. Canonicalized, the two agree exactly when the
     // checkout is the main one (symlinked tmp dirs included).
@@ -215,26 +225,31 @@ fn linked_worktree_refusal(dir: &str, target: &Path, member: &str) -> Option<Str
         let p = if p.is_relative() { target.join(p) } else { p };
         fs::canonicalize(&p).unwrap_or(p)
     };
-    let git_dir = canon(&git(&["rev-parse", "--git-dir"])?);
-    let common = canon(&git(&["rev-parse", "--path-format=absolute", "--git-common-dir"])?);
+    let git_dir = canon(&git_out(target, &["rev-parse", "--git-dir"])?);
+    let common = canon(&git_out(target, &["rev-parse", "--path-format=absolute", "--git-common-dir"])?);
     if git_dir == common {
         return None;
     }
-    let branch =
-        git(&["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_else(|| "HEAD".to_string());
+    let branch = git_out(target, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .unwrap_or_else(|| "HEAD".to_string());
     // The first `worktree` entry of the porcelain listing is the main
     // checkout — the ready repair.
-    let main = git(&["worktree", "list", "--porcelain"])
+    let main = git_out(target, &["worktree", "list", "--porcelain"])
         .and_then(|list| {
             list.lines()
                 .find_map(|l| l.strip_prefix("worktree ").map(str::to_string))
         })
         .unwrap_or_else(|| common.parent().unwrap_or(&common).display().to_string());
-    Some(format!(
-        "{dir} is a linked worktree of the repo, standing on `{branch}` — a mapping \
-         outlives the worktree and poisons future mints. The main checkout is {main}: \
-         `archi repo map {member} {main}`"
-    ))
+    Some(LinkedWorktree { branch, main })
+}
+
+/// One git consultation: trimmed stdout on success, `None` on any failure —
+/// the degrade every probe rides.
+fn git_out(dir: &Path, args: &[&str]) -> Option<String> {
+    let out = Command::new("git").arg("-C").arg(dir).args(args).output().ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
 pub(crate) fn toml_string(s: &str) -> String {
@@ -360,16 +375,24 @@ pub fn survey(set: &MemberSet) -> Vec<MemberStatus> {
                 root: m.root.clone(),
                 clean: git.as_ref().and_then(GitContext::clean),
                 head: git.as_ref().and_then(GitContext::head),
-                baseline: baselines.get(&m.name).cloned(),
+                baseline: baselines
+                    .get(&m.name)
+                    .map(|b| format!("{} ({})", b.sha, b.born)),
             }
         })
         .collect()
 }
 
+/// A member's baseline as the latest version entry records it.
+struct RecordedBaseline {
+    sha: String,
+    born: String,
+}
+
 /// The latest version entry's provenance, per member: home's `commit` field
 /// and the `commits` table, read leniently — the archive stays versions.rs's
 /// to write.
-fn latest_baselines(project_root: &Path) -> BTreeMap<String, String> {
+fn latest_baselines(project_root: &Path) -> BTreeMap<String, RecordedBaseline> {
     let mut out = BTreeMap::new();
     let path = project_root.join("archi").join("versions").join("index.toml");
     let Ok(text) = fs::read_to_string(&path) else {
@@ -386,26 +409,221 @@ fn latest_baselines(project_root: &Path) -> BTreeMap<String, String> {
         return out;
     };
     if let Some(c) = last.get("commit").and_then(|v| v.as_str()) {
-        out.insert(HOME.to_string(), format!("{c} (save)"));
+        out.insert(
+            HOME.to_string(),
+            RecordedBaseline { sha: c.to_string(), born: "save".to_string() },
+        );
     }
     if let Some(commits) = last.get("commits").and_then(|v| v.as_table()) {
         for (name, entry) in commits {
-            let rendered = match entry {
-                toml::Value::String(sha) => Some(format!("{sha} (save)")),
-                toml::Value::Table(t) => t.get("sha").and_then(|v| v.as_str()).map(|sha| {
-                    match t.get("born").and_then(|v| v.as_str()) {
-                        Some(born) => format!("{sha} ({born})"),
-                        None => format!("{sha} (save)"),
-                    }
+            let recorded = match entry {
+                toml::Value::String(sha) => Some(RecordedBaseline {
+                    sha: sha.clone(),
+                    born: "save".to_string(),
                 }),
+                toml::Value::Table(t) => {
+                    t.get("sha").and_then(|v| v.as_str()).map(|sha| RecordedBaseline {
+                        sha: sha.to_string(),
+                        born: t
+                            .get("born")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("save")
+                            .to_string(),
+                    })
+                }
                 _ => None,
             };
-            if let Some(r) = rendered {
+            if let Some(r) = recorded {
                 out.insert(name.clone(), r);
             }
         }
     }
     out
+}
+
+// ---------------------------------------------------------------------------
+// Check — the member map's decay, advisory
+
+/// An advisory member-map finding: `archi check`'s read of how this
+/// machine's map has decayed under a spec that declares members. Never an
+/// error — exit codes stand — and a memberless project yields nothing.
+/// Kinds are append-only, like every finding family.
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MemberFinding {
+    /// The stated path is a missing directory or no git checkout.
+    UnresolvedPath {
+        member: String,
+        /// The path as its source states it.
+        path: String,
+        /// Where the row came from: `archi.toml \`path\`` or the overlay.
+        source: String,
+    },
+    /// The mapped checkout is a linked worktree, not the main checkout.
+    LinkedWorktreeMapping {
+        member: String,
+        path: String,
+        source: String,
+        /// The branch standing in the worktree.
+        branch: String,
+        /// The main checkout — the ready repair.
+        main: String,
+    },
+    /// origin's url and the manifest's declared url name different repos.
+    WrongClone {
+        member: String,
+        /// The manifest's url, verbatim.
+        declared: String,
+        /// origin's url, verbatim.
+        origin: String,
+    },
+    /// The latest version's recorded baseline sits on no branch.
+    StrandedBaseline {
+        member: String,
+        sha7: String,
+    },
+}
+
+impl MemberFinding {
+    /// The member the line concerns — its id on the check report.
+    pub fn member(&self) -> &str {
+        match self {
+            MemberFinding::UnresolvedPath { member, .. }
+            | MemberFinding::LinkedWorktreeMapping { member, .. }
+            | MemberFinding::WrongClone { member, .. }
+            | MemberFinding::StrandedBaseline { member, .. } => member,
+        }
+    }
+}
+
+impl fmt::Display for MemberFinding {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MemberFinding::UnresolvedPath { member, path, source } => write!(
+                f,
+                "unresolved member path: `{member}` — `{path}` ({source}) is no git \
+                 checkout on this machine — `archi repo map {member} <dir>`"
+            ),
+            MemberFinding::LinkedWorktreeMapping { member, path, source, branch, main } => {
+                write!(
+                    f,
+                    "member mapped to a linked worktree: `{member}` — `{path}` ({source}) \
+                     stands on `{branch}`; map the main checkout — \
+                     `archi repo map {member} {main}`"
+                )
+            }
+            MemberFinding::WrongClone { member, declared, origin } => write!(
+                f,
+                "wrong clone: `{member}` — a different clone stands at the mapped path: \
+                 origin is {origin}, archi.toml declares {declared} — \
+                 `archi repo map {member} <dir>`"
+            ),
+            MemberFinding::StrandedBaseline { member, sha7 } => write!(
+                f,
+                "stranded baseline: `{member}` — {sha7}: the baseline sits on no branch \
+                 — a squashed landing; `archi version anchor --repo {member}` re-records it"
+            ),
+        }
+    }
+}
+
+/// `archi check`'s advisory survey of the member map: four decay probes per
+/// declared member. Never errors and never crashes on an unreachable
+/// member — each probe degrades to its own finding or to silence — and a
+/// resolve fault (unparsable overlay, ghost row) stays silent here: every
+/// repo and link verb already raises it loudly.
+pub fn check(project_root: &Path) -> Vec<MemberFinding> {
+    let Ok(set) = MemberSet::resolve(project_root) else {
+        return Vec::new();
+    };
+    let baselines = latest_baselines(project_root);
+    let mut out = Vec::new();
+    for m in set.declared() {
+        // A member with no stated path anywhere was never mapped on this
+        // machine: absence, not drift
+        // (`archi/requirements/multi-repo/absence-is-not-drift`).
+        let Some(path) = m.stated_path().map(str::to_string) else {
+            continue;
+        };
+        let source = if m.mapped_path.is_some() {
+            OVERLAY.to_string()
+        } else {
+            "archi.toml `path`".to_string()
+        };
+        let root = m.root.as_deref().filter(|r| GitContext::of(r).is_some());
+        let Some(root) = root else {
+            out.push(MemberFinding::UnresolvedPath {
+                member: m.name.clone(),
+                path,
+                source,
+            });
+            continue;
+        };
+        if let Some(wt) = linked_worktree(root) {
+            out.push(MemberFinding::LinkedWorktreeMapping {
+                member: m.name.clone(),
+                path: path.clone(),
+                source: source.clone(),
+                branch: wt.branch,
+                main: wt.main,
+            });
+        }
+        // Url drift — skipped entirely when either side is absent: a
+        // declaration without a url, or a checkout without an origin, is
+        // absence, not drift.
+        let declared = m.url.as_deref().map(str::trim).filter(|u| !u.is_empty());
+        let origin =
+            git_out(root, &["remote", "get-url", "origin"]).filter(|u| !u.is_empty());
+        if let (Some(declared), Some(origin)) = (declared, origin)
+            && normalized_url(declared) != normalized_url(&origin)
+        {
+            out.push(MemberFinding::WrongClone {
+                member: m.name.clone(),
+                declared: declared.to_string(),
+                origin,
+            });
+        }
+        // The recorded baseline must sit on some branch; a missing object
+        // strands the same way. No recorded baseline, no probe.
+        if let Some(b) = baselines.get(&m.name)
+            && let Ok(o) = Command::new("git")
+                .arg("-C")
+                .arg(root)
+                .args(["branch", "--contains", &b.sha])
+                .output()
+        {
+            let holders = String::from_utf8_lossy(&o.stdout);
+            if !o.status.success() || holders.trim().is_empty() {
+                out.push(MemberFinding::StrandedBaseline {
+                    member: m.name.clone(),
+                    sha7: b.sha[..b.sha.len().min(7)].to_string(),
+                });
+            }
+        }
+    }
+    out
+}
+
+/// Normalize a git url for identity comparison: protocol and `user@` off,
+/// `.git` tail and trailing slashes off, scp-style `host:path` folded to
+/// `host/path` so the ssh and https forms of one repo agree, the host
+/// case-folded. Callers never hand this an empty side — absence is not
+/// drift, the probe skips.
+fn normalized_url(url: &str) -> String {
+    let u = url.trim().trim_end_matches('/');
+    let u = u.strip_suffix(".git").unwrap_or(u);
+    let u = u.trim_end_matches('/');
+    let u = u.split_once("://").map_or(u, |(_, rest)| rest);
+    let u = match (u.find('@'), u.find('/')) {
+        (Some(at), Some(slash)) if at < slash => &u[at + 1..],
+        (Some(at), None) => &u[at + 1..],
+        _ => u,
+    };
+    let u = u.replacen(':', "/", 1);
+    match u.split_once('/') {
+        Some((host, rest)) => format!("{}/{}", host.to_ascii_lowercase(), rest),
+        None => u.to_ascii_lowercase(),
+    }
 }
 
 #[cfg(test)]
@@ -582,6 +800,26 @@ mod tests {
         assert_eq!(ctx.clean(), Some(true), "a dirty sibling never dirties this member");
         fs::write(member.join("new.txt"), "dirt inside").unwrap();
         assert_eq!(ctx.clean(), Some(false));
+    }
+
+    #[test]
+    fn url_normalization_folds_the_forms_of_one_repo_together() {
+        for (a, b) in [
+            ("https://github.com/acme/backend.git", "git@github.com:acme/backend"),
+            ("https://GitHub.com/acme/backend.git/", "ssh://git@github.com/acme/backend"),
+            ("git@github.com:acme/backend.git", "https://github.com/acme/backend/"),
+        ] {
+            assert_eq!(normalized_url(a), normalized_url(b), "{a} vs {b}");
+        }
+        // The path stays case-sensitive; a different repo stays different.
+        assert_ne!(
+            normalized_url("https://github.com/acme/backend"),
+            normalized_url("https://github.com/acme/Backend"),
+        );
+        assert_ne!(
+            normalized_url("git@github.com:acme/backend"),
+            normalized_url("git@github.com:acme/other"),
+        );
     }
 
     #[test]

@@ -55,6 +55,21 @@ fn git(dir: &Path, args: &[&str]) {
     );
 }
 
+fn git_out(dir: &Path, args: &[&str]) -> String {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
 fn member_repo(dir: &Path) {
     fs::create_dir_all(dir.join("src")).unwrap();
     fs::write(dir.join("src/lib.rs"), SERVE_RS).unwrap();
@@ -329,6 +344,174 @@ fn map_refuses_a_linked_worktree_and_names_the_main_checkout() {
     );
     let ls = ok(&spec, &["repo", "ls"]);
     assert!(!ls.contains("unreachable"), "{ls}");
+}
+
+#[test]
+fn check_reports_an_unresolved_member_path_from_either_source() {
+    let ws = scratch("chk-path");
+    let spec = ws.join("spec");
+    let backend = ws.join("backend");
+    spec_project(
+        &spec,
+        "[[repo]]\nname = \"backend\"\npath = \"../backend\"\n\
+         [[repo]]\nname = \"frontend\"\npath = \"../frontend\"\n",
+    );
+    member_repo(&backend);
+    let spec = seat_mapped(&spec, &[("backend", &backend)]);
+
+    // backend's mapped checkout leaves; frontend's manifest convention
+    // resolves nowhere from the seat. Both decay modes are advisory: the
+    // check still exits 0.
+    fs::remove_dir_all(&backend).unwrap();
+    let (success, out, err) = run(&spec, &["check"]);
+    assert!(success, "member findings never fail the check:\n{out}\n{err}");
+    assert!(out.contains("unresolved member path: `backend`"), "{out}");
+    assert!(
+        out.contains("archi/repos.local.toml"),
+        "the overlay is named as backend's source:\n{out}"
+    );
+    assert!(out.contains("archi repo map backend"), "{out}");
+    assert!(out.contains("unresolved member path: `frontend`"), "{out}");
+    assert!(
+        out.contains("archi.toml `path`"),
+        "the manifest is named as frontend's source:\n{out}"
+    );
+    assert!(out.contains("archi repo map frontend"), "{out}");
+}
+
+#[test]
+fn check_reports_a_linked_worktree_standing_in_the_map() {
+    let ws = scratch("chk-wt");
+    let spec = ws.join("spec");
+    let backend = ws.join("backend");
+    spec_project(&spec, "[[repo]]\nname = \"backend\"\npath = \"../backend\"\n");
+    member_repo(&backend);
+    let spec = seat_mapped(&spec, &[("backend", &backend)]);
+
+    // The map decays under the write-time gate: a scratch worktree comes to
+    // stand where the row points (the row predates the worktree).
+    let wt = ws.join("backend-scratch");
+    git(&backend, &["worktree", "add", "-q", wt.to_str().unwrap(), "-b", "feature/dead"]);
+    fs::write(
+        spec.join("archi/repos.local.toml"),
+        format!("backend = {:?}\n", wt.to_str().unwrap()),
+    )
+    .unwrap();
+    let (success, out, err) = run(&spec, &["check"]);
+    assert!(success, "{out}\n{err}");
+    assert!(out.contains("linked worktree: `backend`"), "{out}");
+    assert!(out.contains("`feature/dead`"), "the standing branch is named:\n{out}");
+    assert!(
+        out.contains("archi/repos.local.toml"),
+        "the overlay is named as the source:\n{out}"
+    );
+    assert!(
+        out.contains(&format!("archi repo map backend {}", backend.display())),
+        "the main checkout is the ready repair:\n{out}"
+    );
+}
+
+#[test]
+fn check_reports_a_wrong_clone_and_lets_absent_urls_be() {
+    let ws = scratch("chk-url");
+    let spec = ws.join("spec");
+    let backend = ws.join("backend");
+    let frontend = ws.join("frontend");
+    spec_project(
+        &spec,
+        "[[repo]]\nname = \"backend\"\npath = \"../backend\"\n\
+         url = \"https://github.com/acme/backend.git\"\n\
+         [[repo]]\nname = \"frontend\"\npath = \"../frontend\"\n\
+         url = \"https://github.com/acme/frontend.git\"\n",
+    );
+    member_repo(&backend);
+    member_repo(&frontend);
+    git(&backend, &["remote", "add", "origin", "git@github.com:acme/other.git"]);
+    // frontend declares a url but its checkout has no origin remote —
+    // absence is not drift, that probe stays silent.
+    let spec = seat_mapped(&spec, &[("backend", &backend), ("frontend", &frontend)]);
+
+    let (success, out, err) = run(&spec, &["check"]);
+    assert!(success, "{out}\n{err}");
+    assert!(out.contains("wrong clone: `backend`"), "{out}");
+    assert!(
+        out.contains("a different clone stands at the mapped path"),
+        "{out}"
+    );
+    assert!(
+        out.contains("https://github.com/acme/backend.git"),
+        "the declared url arrives verbatim:\n{out}"
+    );
+    assert!(
+        out.contains("git@github.com:acme/other.git"),
+        "origin's url arrives verbatim:\n{out}"
+    );
+    assert!(out.contains("archi.toml declares"), "the source is named:\n{out}");
+    assert_eq!(
+        out.matches("wrong clone").count(),
+        1,
+        "frontend's originless checkout is not drift:\n{out}"
+    );
+}
+
+#[test]
+fn check_reports_a_squash_stranded_baseline() {
+    let ws = scratch("chk-base");
+    let spec = ws.join("spec");
+    let backend = ws.join("backend");
+    spec_project(&spec, "[[repo]]\nname = \"backend\"\npath = \"../backend\"\n");
+    member_repo(&backend);
+    let spec = seat_mapped(&spec, &[("backend", &backend)]);
+    let saved = ok(&spec, &["version", "save", "-m", "first"]);
+    assert!(saved.contains("baseline backend:"), "{saved}");
+    let index = fs::read_to_string(spec.join("archi/versions/index.toml")).unwrap();
+    let sha7 = index.split("sha = \"").nth(1).unwrap()[..7].to_string();
+
+    // History rewrites out from under the record: a new root replaces the
+    // branch and the old one retires — the recorded sha may still exist as
+    // an object, but `branch --contains` answers empty, the squashed-landing
+    // shape.
+    let old = git_out(&backend, &["rev-parse", "--abbrev-ref", "HEAD"]);
+    git(&backend, &["checkout", "-q", "--orphan", "fresh"]);
+    git(&backend, &["commit", "-qm", "squashed root"]);
+    git(&backend, &["branch", "-D", &old]);
+
+    let (success, out, err) = run(&spec, &["check"]);
+    assert!(success, "{out}\n{err}");
+    assert!(out.contains("stranded baseline: `backend`"), "{out}");
+    assert!(
+        out.contains("the baseline sits on no branch — a squashed landing"),
+        "{out}"
+    );
+    assert!(out.contains(&sha7), "the recorded sha7 is named:\n{out}");
+    assert!(out.contains("archi version anchor --repo backend"), "{out}");
+}
+
+#[test]
+fn a_healthy_member_map_adds_nothing_to_check() {
+    let ws = scratch("chk-healthy");
+    let spec = ws.join("spec");
+    let backend = ws.join("backend");
+    spec_project(
+        &spec,
+        "[[repo]]\nname = \"backend\"\npath = \"../backend\"\n\
+         url = \"https://GitHub.com/acme/backend.git\"\n",
+    );
+    member_repo(&backend);
+    // origin is the ssh form of the declared https url: normalization meets
+    // in the middle, no drift.
+    git(&backend, &["remote", "add", "origin", "ssh://git@github.com/acme/backend/"]);
+    let spec = seat_mapped(&spec, &[("backend", &backend)]);
+    // A recorded baseline standing on its branch — the healthy shape of the
+    // fourth probe too.
+    let saved = ok(&spec, &["version", "save", "-m", "first"]);
+    assert!(saved.contains("baseline backend:"), "{saved}");
+
+    let out = ok(&spec, &["check"]);
+    assert!(
+        out.contains("no findings"),
+        "a healthy map adds nothing to the report:\n{out}"
+    );
 }
 
 #[test]
