@@ -382,6 +382,25 @@ fn cascade_repo(tag: &str) -> (PathBuf, PathBuf, PathBuf) {
 }
 
 #[test]
+fn a_bound_seats_own_members_are_not_rot_to_check() {
+    let (ws, spec, backend) = cascade_repo("seatown");
+    let bare = ws.join("origin.git");
+    git(&ws, &["init", "-q", "--bare", bare.to_str().unwrap()]);
+    git(&backend, &["remote", "add", "origin", bare.to_str().unwrap()]);
+
+    ok(&spec, &["worktree", "mint", "own", "--repos", "backend"]);
+    let wt = spec.parent().unwrap().join("spec-worktrees/own");
+
+    // Inside the seat the overlay maps the member to its own worktree —
+    // written by the mint, the working map, not a stale row.
+    let out = ok(&wt, &["check"]);
+    assert!(
+        !out.contains("linked worktree"),
+        "the seat's own member worktree graded as rot:\n{out}"
+    );
+}
+
+#[test]
 fn the_cascade_mints_member_worktrees_and_the_seat_overlay() {
     let (ws, spec, backend) = cascade_repo("cascade");
     let bare = ws.join("origin.git");
@@ -584,6 +603,140 @@ fn a_seat_extension_resolves_members_from_the_seat() {
     assert!(ls.contains("— ok"), "{ls}");
 }
 
+/// A member's overlay row, written directly: plain toml the mint resolves
+/// members through — the shape `archi repo map` leaves behind.
+fn map_overlay(spec: &Path, name: &str, dir: &Path) {
+    fs::write(
+        spec.join("archi/repos.local.toml"),
+        format!(
+            "# machine-local member checkouts — gitignored, never merged\n{name} = \"{}\"\n",
+            dir.display()
+        ),
+    )
+    .unwrap();
+}
+
+fn has_branch(dir: &Path, name: &str) -> bool {
+    Command::new("git")
+        .args([
+            "-C",
+            dir.to_str().unwrap(),
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{name}"),
+        ])
+        .output()
+        .unwrap()
+        .status
+        .success()
+}
+
+#[test]
+fn a_member_mapped_onto_a_linked_worktree_refuses_the_mint() {
+    let (ws, spec, backend) = cascade_repo("linked-gate");
+    // the field incident's shape: a leftover scratch worktree of the member
+    // repo stands on a dead feature branch, and a stale overlay row maps
+    // the member there
+    let scratch = ws.join("backend-scratch");
+    git(&backend, &["worktree", "add", "-q", "-b", "dead/feature", scratch.to_str().unwrap()]);
+    map_overlay(&spec, "backend", &scratch);
+
+    let (success, _out, err) = run(&spec, &["worktree", "mint", "feat", "--repos", "backend"]);
+    assert!(!success, "a stale overlay row never seeds a seat");
+    assert!(err.contains("member backend: the mapped checkout"), "{err}");
+    assert!(err.contains(scratch.to_str().unwrap()), "{err}");
+    assert!(err.contains("is a linked worktree standing on `dead/feature`"), "{err}");
+    assert!(err.contains("a stale overlay row"), "{err}");
+    assert!(
+        err.contains(&format!("archi repo map backend {}", backend.display())),
+        "the repair names the main checkout: {err}"
+    );
+    assert!(err.contains("--base backend="), "{err}");
+    // the full-rollback contract: no seat, no branches, no registry row
+    assert!(!spec.parent().unwrap().join("spec-worktrees/feat").exists(), "no seat");
+    assert!(!has_branch(&spec, "archi/feat"), "no spec branch");
+    assert!(!has_branch(&backend, "archi/feat"), "no member branch");
+    let ls = ok(&spec, &["worktree", "ls"]);
+    assert!(!ls.contains("feat"), "no registry row survived: {ls}");
+}
+
+#[test]
+fn an_explicit_base_skips_the_gate_and_placement_anchors_on_the_main_checkout() {
+    let (ws, spec, backend) = cascade_repo("linked-base");
+    let scratch = ws.join("backend-scratch");
+    git(&backend, &["worktree", "add", "-q", "-b", "dead/feature", scratch.to_str().unwrap()]);
+    map_overlay(&spec, "backend", &scratch);
+
+    // the base is named outright: the mapped checkout's identity stops
+    // mattering, and the mint proceeds
+    let out = ok(&spec, &["worktree", "mint", "feat", "--repos", "backend", "--base", "backend=main"]);
+    assert!(out.contains("member backend:"), "{out}");
+    assert!(out.contains("(base main)"), "{out}");
+    assert!(!out.contains("linked worktree"), "an explicit --base skips the gate: {out}");
+    // placement anchors on the MAIN checkout's sibling folder, never on a
+    // sibling of the mapped scratch path
+    let bwt = ws.join("backend-worktrees/feat");
+    assert!(bwt.is_dir(), "the member worktree sits beside the main checkout");
+    assert!(
+        !ws.join("backend-scratch-worktrees").exists(),
+        "nothing lands beside the scratch path"
+    );
+    // the seat overlay points the member at the anchored worktree
+    let wt = spec.parent().unwrap().join("spec-worktrees/feat");
+    let overlay = fs::read_to_string(wt.join("archi/repos.local.toml")).unwrap();
+    assert!(overlay.contains("backend-worktrees"), "{overlay}");
+    // `main` carries the recorded baseline: the audited line holds, no note
+    assert!(!out.contains("off the audited line"), "{out}");
+}
+
+#[test]
+fn an_explicit_base_off_the_recorded_baseline_notes_the_departure() {
+    let (_ws, spec, backend) = cascade_repo("off-line");
+    let baseline = head(&backend);
+    // a branch with no shared history: it cannot contain the recorded baseline
+    git(&backend, &["switch", "-q", "--orphan", "stray"]);
+    git(&backend, &["commit", "-qm", "unrelated", "--allow-empty"]);
+    git(&backend, &["switch", "-q", "main"]);
+
+    // the escape lane never refuses — the mint proceeds, but the departure
+    // from the audited line is said out loud, once
+    let out = ok(&spec, &["worktree", "mint", "feat", "--repos", "backend", "--base", "backend=stray"]);
+    assert!(
+        out.contains(&format!(
+            "note: member backend: the named base `stray` does not contain the recorded \
+             baseline {} — continuing off the audited line",
+            &baseline[..7]
+        )),
+        "{out}"
+    );
+    assert!(out.contains("member backend:"), "{out}");
+    assert!(out.contains("(base stray)"), "{out}");
+    assert!(backend.parent().unwrap().join("backend-worktrees/feat").is_dir(), "the mint proceeded");
+}
+
+#[test]
+fn a_re_mint_extension_attaches_without_the_gate() {
+    let (_ws, spec, backend) = cascade_repo("linked-remint");
+    ok(&spec, &["worktree", "mint", "feat", "--repos", "backend"]);
+    let wt = spec.parent().unwrap().join("spec-worktrees/feat");
+    let bwt = backend.parent().unwrap().join("backend-worktrees/feat");
+    assert!(bwt.is_dir());
+
+    // the seat's own overlay maps the member at its member worktree — a
+    // linked checkout by construction; the re-mint attaches in silence,
+    // the gate never fires on an already-bound member
+    let (success, out, err) = run(&wt, &["worktree", "mint", "feat", "--repos", "backend"]);
+    assert!(success, "a re-mint extension attaches: {err}");
+    assert!(out.contains("seated:"), "{out}");
+    assert!(!out.contains("linked worktree"), "no gate output: {out}");
+    assert!(!err.contains("linked worktree"), "no gate output: {err}");
+    assert!(out.contains("member backend:"), "the binding still carries the member: {out}");
+    let ls = ok(&wt, &["worktree", "ls"]);
+    assert!(ls.contains("member backend:"), "{ls}");
+    assert!(ls.contains("— ok"), "{ls}");
+}
+
 #[test]
 fn a_baseline_off_the_branch_refuses_with_the_base_escape() {
     let (_ws, spec, backend) = cascade_repo("off-branch");
@@ -599,6 +752,7 @@ fn a_baseline_off_the_branch_refuses_with_the_base_escape() {
     git(&spec, &["add", "-A"]);
     git(&spec, &["commit", "-qm", "model grows"]);
     seat_save(&spec, "boot2", &[("backend", &backend)], "v2 with side baseline");
+    let baseline = head(&backend);
     git(&backend, &["switch", "-q", "main"]);
 
     let (success, _out, err) = run(&spec, &["worktree", "mint", "feat", "--repos", "backend"]);
@@ -609,7 +763,17 @@ fn a_baseline_off_the_branch_refuses_with_the_base_escape() {
     let out = ok(&spec, &["worktree", "mint", "feat", "--repos", "backend", "--base", "backend=main"]);
     assert!(out.contains("member backend:"), "{out}");
     assert!(out.contains("(base main)"), "{out}");
-    assert!(!out.contains("behind"), "an explicit --base stays silent: {out}");
+    // the behind-by-N gauge belongs to the auto arm alone — the escape lane
+    // instead names its departure: `main` does not carry the side baseline
+    assert!(!out.contains("behind"), "the auto arm's gauge stays out of the escape lane: {out}");
+    assert!(
+        out.contains(&format!(
+            "note: member backend: the named base `main` does not contain the recorded \
+             baseline {} — continuing off the audited line",
+            &baseline[..7]
+        )),
+        "{out}"
+    );
 }
 
 #[test]
@@ -631,6 +795,11 @@ fn a_missing_baseline_names_both_repairs() {
     assert!(!success);
     assert!(err.contains("version anchor --repo backend"), "{err}");
     assert!(err.contains("--base backend="), "{err}");
+    // the named escape works, and with nothing recorded there is no audited
+    // line to depart — the mint stays silent
+    let out = ok(&spec, &["worktree", "mint", "feat", "--repos", "backend", "--base", "backend=main"]);
+    assert!(out.contains("member backend:"), "{out}");
+    assert!(!out.contains("off the audited line"), "{out}");
 }
 
 #[test]

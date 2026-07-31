@@ -466,6 +466,21 @@ fn run_check(args: &Args) -> ExitCode {
         eprintln!("archi: warning: {e}");
         Vec::new()
     });
+    // The member map is machine state and decays like one: four probes per
+    // declared member, advisory like every finding — a memberless project
+    // prints nothing new (archi/requirements/multi-repo/). A bound seat's
+    // own member worktrees are its working map, not rot: they ride the
+    // exemption.
+    let seat_members: Vec<std::path::PathBuf> = worktrees::toplevel(&root)
+        .and_then(|top| {
+            worktrees::Registry::load(&root).ok().flatten().map(|reg| {
+                reg.binding_of(&top)
+                    .map(|b| b.members.values().map(|m| m.path.clone()).collect())
+                    .unwrap_or_default()
+            })
+        })
+        .unwrap_or_default();
+    let member_findings = members::check(&root, &seat_members);
     let clean = archive_errors.is_empty() && doc.diagnostics.is_empty();
     // A check with no errors closes on the landscape read: the NKP scoring
     // and the refactoring directions it implies, over the default slice.
@@ -507,6 +522,11 @@ fn run_check(args: &Args) -> ExitCode {
             addressing::of_plan_finding(f).stamp(&mut v);
             v
         }));
+        all.extend(member_findings.iter().map(|f| {
+            let mut v = serde_json::to_value(f).expect("serializes");
+            addressing::Address { id: f.member().to_string(), kind: "repo" }.stamp(&mut v);
+            v
+        }));
         let mut envelope = json!({ "status": "ok", "findings": all });
         if !archive_errors.is_empty() {
             envelope["status"] = json!("error");
@@ -535,7 +555,11 @@ fn run_check(args: &Args) -> ExitCode {
             serde_json::to_string_pretty(&envelope).expect("serializes")
         );
     } else {
-        if findings.is_empty() && doc.findings.is_empty() && plan_findings.is_empty() {
+        if findings.is_empty()
+            && doc.findings.is_empty()
+            && plan_findings.is_empty()
+            && member_findings.is_empty()
+        {
             println!("no findings");
         } else {
             for f in &findings {
@@ -546,6 +570,9 @@ fn run_check(args: &Args) -> ExitCode {
             }
             for f in &plan_findings {
                 println!("{f}  [{}]", addressing::of_plan_finding(f).id);
+            }
+            for f in &member_findings {
+                println!("{f}  [{}]", f.member());
             }
         }
         if let Some(report) = &nkp {

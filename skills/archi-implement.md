@@ -165,7 +165,9 @@ It prints `DONE`. After the final commit, anchor the seat:
 `archi version anchor` for the home repo, then
 `archi version anchor --repo <member>` for every cascaded member the
 seat carries — the landing gate refuses a stale mark, and anchoring at
-DONE is what keeps the merge clean. Then offer the user, through the
+DONE is what keeps the merge clean. After a squashed PR lands, the
+anchor is what keeps baselines on real branches; skipping it is what
+strands them. Then offer the user, through the
 poll tool, to close the seat now — the `archi-finish-worktree` skill:
 land the unit, push member branches, retire the worktree — or leave
 the seat standing.

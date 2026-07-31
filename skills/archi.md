@@ -86,7 +86,10 @@ code — and merges once, at the end. The opening move of every working
 session, before any mutation:
 
 1. `archi status` — the checkout, its branch, its binding, the version
-   state, the open stress round, every plan with open lifecycle.
+   state, the open stress round, every plan with open lifecycle. Beside
+   it, before the session's first `archi check`, run
+   `archi check-update` — one line; when it names a newer version,
+   relay that to the user and continue — never install unasked.
    **"not a git repository" is a full stop.** The seat model — isolation,
    branches, one clean landing — stands on git. Put ONE question to the
    user through the poll tool (AskUserQuestion), exactly two options, no
@@ -118,6 +121,13 @@ relay the choice through the poll tool and re-run with `--base
 same way — `archi version anchor --repo <member>` records one from the
 member's clean checkout, or `--base` names the branch outright; the tool
 never guesses a member's main.
+
+Right after a cascade mint, sweep the fresh seats: `git log --oneline
+<base>..HEAD` in every member worktree the mint printed — a newborn
+seat shows nothing; anything listed is relayed to the user verbatim
+before any work starts. The member map's decay rides `archi check`
+findings — stale rows, wrong clones, stranded baselines — read them,
+they are the worklist.
 
 The registry moves only by verbs — `archi worktree ls | drop` — never by
 hand. Closing a seat is `archi worktree merge <slug>` (the
