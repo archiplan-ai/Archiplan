@@ -659,6 +659,20 @@ fn plan_cascade(
                 refusals.push(format!("`{name}`: base branch `{b}` does not exist"));
                 continue;
             }
+            // The escape lane never refuses — the branch is the caller's own
+            // choice — but when the pinned version records a baseline the
+            // named branch does not carry (or the object is missing here),
+            // it says so once and continues: eyes open, off the audited line.
+            if let Some(sha) = baselines.get(name.as_str()) {
+                let refname = format!("refs/heads/{b}");
+                if git_out(&repo_top, &["merge-base", "--is-ancestor", sha, &refname]).is_none() {
+                    println!(
+                        "note: member {name}: the named base `{b}` does not contain the \
+                         recorded baseline {} — continuing off the audited line",
+                        &sha[..sha.len().min(7)]
+                    );
+                }
+            }
             b.clone()
         } else {
             // auto: the recorded baseline must be reachable from the
