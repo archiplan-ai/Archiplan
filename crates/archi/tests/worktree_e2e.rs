@@ -1,7 +1,7 @@
-//! End to end through the real binary: the one-worktree rule —
-//! mutation runs only inside a bound worktree (unconditionally: the guard
-//! sits at the router), protected branches refuse local merges, the
-//! registry moves by commands, context follows the checkout
+//! End to end through the real binary: the binding discipline —
+//! a mutation runs only inside a bound worktree, and the guard sits at
+//! the router. Protected branches refuse local merges, the registry
+//! moves by commands, context follows the checkout
 //! (`archi/requirements/worktree-parallelism/`).
 
 mod util;
@@ -123,7 +123,7 @@ fn protected_repo(tag: &str) -> (PathBuf, PathBuf) {
 }
 
 #[test]
-fn an_unbound_checkout_mints_the_worktree_and_the_work_proceeds() {
+fn an_unbound_checkout_mints_the_seat_and_the_worktree_proceeds() {
     // No protected list: the discipline is unconditional — any unbound
     // checkout refuses, the primary on `main` included.
     let (_ws, spec) = open_repo("guard");
@@ -200,7 +200,7 @@ fn a_gitless_project_refuses_mutation_loudly() {
 }
 
 #[test]
-fn mint_without_a_plan_binds_spec_work_and_drop_retires_it() {
+fn mint_without_a_plan_seats_spec_work_and_drop_retires_it() {
     let (_ws, spec) = protected_repo("effort");
     let out = ok(&spec, &["worktree", "mint", "storm"]);
     assert!(out.contains("minted"), "{out}");
@@ -247,7 +247,7 @@ fn status_names_the_checkout_and_its_open_work() {
 }
 
 #[test]
-fn a_clean_merge_lands_the_work_and_retires_the_worktree() {
+fn a_clean_merge_lands_the_work_and_retires_the_seat() {
     let (_ws, spec) = open_repo("merge");
     ok(&spec, &["worktree", "mint", "feature"]);
     let wt = spec.parent().unwrap().join("spec-worktrees/feature");
@@ -265,7 +265,7 @@ fn a_clean_merge_lands_the_work_and_retires_the_worktree() {
 }
 
 #[test]
-fn a_conflicted_merge_stops_and_keeps_the_worktree() {
+fn a_conflicted_merge_stops_and_keeps_the_seat() {
     let (_ws, spec) = open_repo("conflict");
     ok(&spec, &["worktree", "mint", "feature"]);
     let wt = spec.parent().unwrap().join("spec-worktrees/feature");
@@ -290,7 +290,7 @@ fn a_conflicted_merge_stops_and_keeps_the_worktree() {
 }
 
 #[test]
-fn a_worktree_lands_only_after_its_plan_closes() {
+fn a_seat_lands_only_after_its_plan_closes() {
     let (_ws, spec) = open_repo("plan-gate");
     ok(&spec, &["worktree", "mint", "feat", "--plan", "feat"]);
     let wt = spec.parent().unwrap().join("spec-worktrees/feat");
@@ -401,7 +401,7 @@ fn a_bound_worktrees_own_members_are_not_rot_to_check() {
 }
 
 #[test]
-fn the_cascade_mints_member_worktrees_and_the_overlay() {
+fn the_cascade_mints_member_worktrees_and_the_seat_overlay() {
     let (ws, spec, backend) = cascade_repo("cascade");
     let bare = ws.join("origin.git");
     git(&ws, &["init", "-q", "--bare", bare.to_str().unwrap()]);
@@ -425,7 +425,7 @@ fn the_cascade_mints_member_worktrees_and_the_overlay() {
     assert!(ls.contains("(base main) — ok"), "{ls}");
 
     // Close, the contract's way: the spec saves mid-unit while member code
-    // is in flight (the save names the omission), the member commits, the
+    // is in flight (the save names the omission), the member commits,
     // the worktree anchors the fresh tip — then member work goes by push, spec by
     // local merge, all retired.
     fs::write(bwt.join("src/lib.rs"), "pub fn serve() { /* new */ }\n").unwrap();
@@ -457,7 +457,7 @@ fn the_cascade_mints_member_worktrees_and_the_overlay() {
 }
 
 #[test]
-fn an_unanchored_member_refuses_the_landing_until_the_worktree_anchors() {
+fn an_unanchored_member_refuses_the_landing_until_the_seat_anchors() {
     let (ws, spec, backend) = cascade_repo("anchor-gate");
     let bare = ws.join("origin.git");
     git(&ws, &["init", "-q", "--bare", bare.to_str().unwrap()]);
@@ -576,7 +576,7 @@ fn a_stale_but_reachable_auto_base_notes_how_far_behind() {
 }
 
 #[test]
-fn an_extension_resolves_members_from_the_worktree() {
+fn a_seat_extension_resolves_members_from_the_seat() {
     // The unit lives in its worktree: member declarations and anchors made
     // there exist on no other branch — the mid-unit extension must read
     // them from the worktree, not the primary checkout.
@@ -728,7 +728,7 @@ fn a_re_mint_extension_attaches_without_the_gate() {
     // the gate never fires on an already-bound member
     let (success, out, err) = run(&wt, &["worktree", "mint", "feat", "--repos", "backend"]);
     assert!(success, "a re-mint extension attaches: {err}");
-    assert!(out.contains("extended"), "{out}");
+    assert!(out.contains("— it carries"), "{out}");
     assert!(!out.contains("linked worktree"), "no gate output: {out}");
     assert!(!err.contains("linked worktree"), "no gate output: {err}");
     assert!(out.contains("member backend:"), "the binding still carries the member: {out}");
@@ -925,7 +925,7 @@ fn a_doctored_session_stamp_surfaces_as_a_stale_stamp_finding() {
 }
 
 #[test]
-fn a_dirty_spec_outside_a_worktree_fails_check_and_build() {
+fn a_dirty_spec_outside_a_seat_fails_check_and_build() {
     let (_ws, spec) = open_repo("verdict");
     // clean unbound tree: both verdicts answer
     ok(&spec, &["check"]);

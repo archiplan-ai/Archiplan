@@ -74,7 +74,7 @@ inverts: the return channel.
    that writer is the orchestrator. These are the session charter, a
    plan's record folder, and edits to one shared module. A plan's
    `state.json` is never hand-edited.
-3. **Check the files.** After every fan-out, before anything else, the
+3. **The materialization gate.** After every fan-out, before anything else, the
    orchestrator verifies the result on disk. Run `archi check`, then
    count the artifacts against what the fan-out claims: `archi search
    --kind stressor`, and `ls` on the round's folder. A fan-out that
@@ -170,7 +170,8 @@ in one worktree and lands once.
    directory with a starter module, this skill and the CLAUDE.md brief.
    The manifest sets `protected = ["main"]`. A protected branch never
    receives a local merge, only `--to` plus a push and a PR. The
-   one-worktree rule itself is unconditional and needs no declaration.
+   discipline itself is unconditional and needs no declaration: a
+   mutation runs only inside a bound worktree.
    Init is create-only and safe to run again: it reports existing files
    and never rewrites them. `archi build` must pass before anything else.
 2. **Capture intent.** Use one folder per problem area:
@@ -242,7 +243,8 @@ in one worktree and lands once.
 
    *For each stressor — identify, attractor, verdict:*
 
-   a. **Identify.** Look past the happy path, think lateraliry. Pick a stakeholder, a
+   a. **Identify.** Think hyperliminally: look past the happy path.
+      Pick a stakeholder, a
       failure mode, a scale concern, or a regulatory or operational
       constraint that the happy path ignores. The valuable stressors
       cross a boundary that the architecture treats as separate. Create
@@ -303,7 +305,7 @@ in one worktree and lands once.
 
    You articulate the axes on each side. A fix is not free virtue: it
    pays in new operational surface, in a higher K̄, and in spent budget.
-   The user's pick is a recorded priority. Never derive it
+   The user's pick is a revealed priority. Never derive it
    automatically. The axes are a fixed nine, and `archi axes` lists them
    with their definitions. Any other label is legal and kept verbatim,
    and `check` surfaces it as `off_list_axis`. Recurring off-list labels
@@ -390,7 +392,7 @@ in one worktree and lands once.
    tool, that no new ones surface. Triage the incidence findings before
    you open the next round. Each kind above prescribes its move.
 
-   Principles of the round. Look past the happy path first. One stressor
+   Principles of the round. Think hyperliminally first. One stressor
    is one pressure. `affects` names terms or types of the pinned version,
    never edges. Surviving is not the same as irrelevant. An accepted
    break is a real verdict that must carry its decision, and incidence

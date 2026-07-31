@@ -184,7 +184,7 @@ pub fn init(target: &Path) -> Result<Outcome, String> {
     if manifest.is_file() {
         steps.push(step(Act::Ok, &target, &manifest, Some("present".into())));
     } else {
-        // the one-worktree rule is on from birth: mutation runs in worktrees,
+        // the discipline is on from birth: mutation runs only in bound worktrees,
         // never in the primary checkout; deleting the line is the opt-out
         write_new(
             &manifest,
@@ -461,7 +461,7 @@ fn claude_block(src: &str) -> String {
          \x20 `.claude/skills/archi/`; authoring a plan is `archi-plan`; executing\n\
          \x20 it in waves is `archi-implement`; closing a worktree is\n\
          \x20 `archi-finish-worktree`; merging parallel spec work is `archi-merge`,\n\
-         \x20 and importing a project from the old fractal client is\n\
+         \x20 and moving a project off the old fractal client is\n\
          \x20 `archi-migrate-fractal`.\n\
          \n\
          No silent assumptions: state what you assume, surface the tradeoffs.\n\

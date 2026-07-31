@@ -1,4 +1,4 @@
-//! Worktrees: the machine-local binding of work to checkouts.
+//! Worktree bindings: the machine-local registry that binds work to checkouts.
 //!
 //! Parallel agent sessions each live in their own git worktree; which
 //! worktree carries which plan is a machine fact, not shared truth. The
@@ -1315,7 +1315,7 @@ mod tests {
     }
 
     #[test]
-    fn the_guard_mints_for_an_unbound_checkout_and_names_the_worktree() {
+    fn the_guard_mints_for_an_unbound_checkout_and_names_the_seat() {
         let outer = scratch();
         let spec = repo(&outer, "spec");
         manifest(&spec, "protected = [\"main\"]\n");
@@ -1362,7 +1362,7 @@ mod tests {
     }
 
     #[test]
-    fn the_verdict_gate_refuses_only_a_dirty_spec_outside_a_worktree() {
+    fn the_verdict_gate_refuses_only_a_dirty_spec_outside_a_seat() {
         // gitless: free — the post-init smoke predates the repository
         let plain = scratch();
         manifest(&plain, "");

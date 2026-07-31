@@ -85,7 +85,7 @@ fn a_fresh_init_stands_up_a_building_project() {
     assert!(ignore.contains("archi/*.local.toml"), "{ignore}");
     assert!(ignore.contains("archi/plans/.current"), "{ignore}");
 
-    // The one-worktree rule is declared from birth; deleting the line opts out.
+    // The protected branch is declared from birth. Deleting the line opts out.
     let manifest = fs::read_to_string(root.join("proj/archi.toml")).unwrap();
     assert!(manifest.contains("protected = [\"main\"]"), "{manifest}");
 
