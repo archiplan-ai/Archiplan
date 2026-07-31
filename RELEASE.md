@@ -13,6 +13,39 @@ downloadable and that is the migration model.
 
 ## Releases
 
+### 0.1.14
+
+The member map gets guard rails. `archi repo map` refuses a path that is a
+linked worktree: the refusal names the branch that stands there and the main
+checkout to map instead. The cascade in `archi worktree mint` refuses a
+member that resolves to a linked worktree and gives both repairs verbatim:
+re-map the main checkout, or name the base with `--base <member>=<branch>`.
+An explicit `--base` lifts the gate. A seat extension never sees it. New
+member worktrees always sit beside the repo's main checkout, never beside a
+mapped scratch path.
+
+An explicit base off the audited line says so. When `--base` names a branch
+that does not contain the member's recorded baseline, the mint prints one
+note and continues. No recorded baseline, no note. The escape stays open for
+squashed histories.
+
+`archi check` surveys the member map. Four advisory probes run per declared
+member: a path that does not resolve, a row that points at a linked
+worktree, a clone whose origin differs from the declared url, and a baseline
+that sits on no branch after a squashed landing. Each finding names the
+row's source file and the repair. A bound seat's own member worktrees are
+the working map and never grade as rot. Findings do not move exit codes, and
+a memberless project prints nothing new.
+
+The briefing calls the moments. A session opens with `archi check-update`
+before the first spec check and relays the answer, never installs. A cascade
+mint is followed by a sweep of each newborn member worktree —
+`git log <base>..HEAD` must show nothing. The DONE anchor step names the
+squash it protects against.
+
+The root cause was a field incident: a stale overlay row based a seat on a
+dead feature branch. These changes close that hole from four ends.
+
 ### 0.1.13
 
 A seventh skill joins the briefing: `ste-writing`. It writes prose in
