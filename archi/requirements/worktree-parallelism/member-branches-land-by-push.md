@@ -26,5 +26,5 @@ question by design (the-cascade-follows-the-plan).
 and retires the member seat; a refused push keeps the member bound and the re-run is
 idempotent).
 
-- test — a clean close pushes the member branch to the bare remote and retires its worktree (`the_cascade_mints_member_worktrees_and_the_seat_overlay`)
+- test — a clean close pushes the member branch to the bare remote and retires its worktree (`the_cascade_mints_member_worktrees_and_the_overlay`)
 - test — a refused push keeps the member bound; repairing the remote and re-running finishes the retire (`a_refused_push_keeps_the_member_until_repaired`)

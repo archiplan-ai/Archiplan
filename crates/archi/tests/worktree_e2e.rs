@@ -123,7 +123,7 @@ fn protected_repo(tag: &str) -> (PathBuf, PathBuf) {
 }
 
 #[test]
-fn an_unbound_checkout_mints_the_seat_and_the_worktree_proceeds() {
+fn an_unbound_checkout_mints_the_worktree_and_the_work_proceeds() {
     // No protected list: the discipline is unconditional — any unbound
     // checkout refuses, the primary on `main` included.
     let (_ws, spec) = open_repo("guard");
@@ -200,7 +200,7 @@ fn a_gitless_project_refuses_mutation_loudly() {
 }
 
 #[test]
-fn mint_without_a_plan_seats_spec_work_and_drop_retires_it() {
+fn mint_without_a_plan_binds_spec_work_and_drop_retires_it() {
     let (_ws, spec) = protected_repo("effort");
     let out = ok(&spec, &["worktree", "mint", "storm"]);
     assert!(out.contains("minted"), "{out}");
@@ -247,7 +247,7 @@ fn status_names_the_checkout_and_its_open_work() {
 }
 
 #[test]
-fn a_clean_merge_lands_the_work_and_retires_the_seat() {
+fn a_clean_merge_lands_the_work_and_retires_the_worktree() {
     let (_ws, spec) = open_repo("merge");
     ok(&spec, &["worktree", "mint", "feature"]);
     let wt = spec.parent().unwrap().join("spec-worktrees/feature");
@@ -265,7 +265,7 @@ fn a_clean_merge_lands_the_work_and_retires_the_seat() {
 }
 
 #[test]
-fn a_conflicted_merge_stops_and_keeps_the_seat() {
+fn a_conflicted_merge_stops_and_keeps_the_worktree() {
     let (_ws, spec) = open_repo("conflict");
     ok(&spec, &["worktree", "mint", "feature"]);
     let wt = spec.parent().unwrap().join("spec-worktrees/feature");
@@ -290,7 +290,7 @@ fn a_conflicted_merge_stops_and_keeps_the_seat() {
 }
 
 #[test]
-fn a_seat_lands_only_after_its_plan_closes() {
+fn a_worktree_lands_only_after_its_plan_closes() {
     let (_ws, spec) = open_repo("plan-gate");
     ok(&spec, &["worktree", "mint", "feat", "--plan", "feat"]);
     let wt = spec.parent().unwrap().join("spec-worktrees/feat");
@@ -401,7 +401,7 @@ fn a_bound_worktrees_own_members_are_not_rot_to_check() {
 }
 
 #[test]
-fn the_cascade_mints_member_worktrees_and_the_seat_overlay() {
+fn the_cascade_mints_member_worktrees_and_the_overlay() {
     let (ws, spec, backend) = cascade_repo("cascade");
     let bare = ws.join("origin.git");
     git(&ws, &["init", "-q", "--bare", bare.to_str().unwrap()]);
@@ -457,7 +457,7 @@ fn the_cascade_mints_member_worktrees_and_the_seat_overlay() {
 }
 
 #[test]
-fn an_unanchored_member_refuses_the_landing_until_the_seat_anchors() {
+fn an_unanchored_member_refuses_the_landing_until_the_worktree_anchors() {
     let (ws, spec, backend) = cascade_repo("anchor-gate");
     let bare = ws.join("origin.git");
     git(&ws, &["init", "-q", "--bare", bare.to_str().unwrap()]);
@@ -576,7 +576,7 @@ fn a_stale_but_reachable_auto_base_notes_how_far_behind() {
 }
 
 #[test]
-fn a_seat_extension_resolves_members_from_the_seat() {
+fn an_extension_resolves_members_from_the_worktree() {
     // The unit lives in its worktree: member declarations and anchors made
     // there exist on no other branch — the mid-unit extension must read
     // them from the worktree, not the primary checkout.
@@ -925,7 +925,7 @@ fn a_doctored_session_stamp_surfaces_as_a_stale_stamp_finding() {
 }
 
 #[test]
-fn a_dirty_spec_outside_a_seat_fails_check_and_build() {
+fn a_dirty_spec_outside_a_worktree_fails_check_and_build() {
     let (_ws, spec) = open_repo("verdict");
     // clean unbound tree: both verdicts answer
     ok(&spec, &["check"]);

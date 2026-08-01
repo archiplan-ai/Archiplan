@@ -26,5 +26,5 @@ Spelled-out refusals are the contract that lets an agent recover without guessin
 spelled-out outcomes from `Seats.Registry` lookups keyed by the checkout's toplevel — no
 environment variable or flag replaces cwd.
 
-- test — bound here proceeds; bound elsewhere refuses naming the owner (`an_unbound_checkout_mints_the_seat_and_the_worktree_proceeds`)
-- test — unbound with standing seats lists them and refuses to mint over them (`the_guard_mints_for_an_unbound_checkout_and_names_the_seat`)
+- test — bound here proceeds; bound elsewhere refuses naming the owner (`an_unbound_checkout_mints_the_worktree_and_the_work_proceeds`)
+- test — unbound with standing seats lists them and refuses to mint over them (`the_guard_mints_for_an_unbound_checkout_and_names_the_worktree`)

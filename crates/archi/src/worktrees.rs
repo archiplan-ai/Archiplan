@@ -1315,7 +1315,7 @@ mod tests {
     }
 
     #[test]
-    fn the_guard_mints_for_an_unbound_checkout_and_names_the_seat() {
+    fn the_guard_mints_for_an_unbound_checkout_and_names_the_worktree() {
         let outer = scratch();
         let spec = repo(&outer, "spec");
         manifest(&spec, "protected = [\"main\"]\n");
@@ -1362,7 +1362,7 @@ mod tests {
     }
 
     #[test]
-    fn the_verdict_gate_refuses_only_a_dirty_spec_outside_a_seat() {
+    fn the_verdict_gate_refuses_only_a_dirty_spec_outside_a_worktree() {
         // gitless: free — the post-init smoke predates the repository
         let plain = scratch();
         manifest(&plain, "");

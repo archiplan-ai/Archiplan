@@ -28,4 +28,4 @@ its member worktree, members outside the cascade get no row — and teaches the 
 shared exclude the seat artifacts; `Members` resolves through the overlay first. Retire
 scrubs before removal.
 
-- test — the seat overlay resolves members to their worktrees from inside the seat (`the_cascade_mints_member_worktrees_and_the_seat_overlay`)
+- test — the seat overlay resolves members to their worktrees from inside the seat (`the_cascade_mints_member_worktrees_and_the_overlay`)
