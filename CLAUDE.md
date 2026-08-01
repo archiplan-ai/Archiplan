@@ -23,7 +23,7 @@ or `closed:` stamps.
   `.claude/skills/archi/`; authoring a plan is `archi-plan`; executing
   it in waves is `archi-implement`; closing a worktree is
   `archi-finish-worktree`; merging parallel spec work is `archi-merge`,
-  and importing a project from the old fractal client is
+  and moving a project off the old fractal client is
   `archi-migrate-fractal`.
 
 No silent assumptions: state what you assume, surface the tradeoffs.

@@ -1,7 +1,7 @@
-//! End to end through the real binary: the one-worktree rule —
-//! mutation runs only inside a bound worktree (unconditionally: the guard
-//! sits at the router), protected branches refuse local merges, the
-//! registry moves by commands, context follows the checkout
+//! End to end through the real binary: the binding discipline —
+//! a mutation runs only inside a bound worktree, and the guard sits at
+//! the router. Protected branches refuse local merges, the registry
+//! moves by commands, context follows the checkout
 //! (`archi/requirements/worktree-parallelism/`).
 
 mod util;
@@ -425,7 +425,7 @@ fn the_cascade_mints_member_worktrees_and_the_overlay() {
     assert!(ls.contains("(base main) — ok"), "{ls}");
 
     // Close, the contract's way: the spec saves mid-unit while member code
-    // is in flight (the save names the omission), the member commits, the
+    // is in flight (the save names the omission), the member commits,
     // the worktree anchors the fresh tip — then member work goes by push, spec by
     // local merge, all retired.
     fs::write(bwt.join("src/lib.rs"), "pub fn serve() { /* new */ }\n").unwrap();
@@ -728,7 +728,7 @@ fn a_re_mint_extension_attaches_without_the_gate() {
     // the gate never fires on an already-bound member
     let (success, out, err) = run(&wt, &["worktree", "mint", "feat", "--repos", "backend"]);
     assert!(success, "a re-mint extension attaches: {err}");
-    assert!(out.contains("extended"), "{out}");
+    assert!(out.contains("— it carries"), "{out}");
     assert!(!out.contains("linked worktree"), "no gate output: {out}");
     assert!(!err.contains("linked worktree"), "no gate output: {err}");
     assert!(out.contains("member backend:"), "the binding still carries the member: {out}");

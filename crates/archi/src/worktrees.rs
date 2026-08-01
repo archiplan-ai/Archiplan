@@ -1,4 +1,4 @@
-//! Worktrees: the machine-local binding of work to checkouts.
+//! Worktree bindings: the machine-local registry that binds work to checkouts.
 //!
 //! Parallel agent sessions each live in their own git worktree; which
 //! worktree carries which plan is a machine fact, not shared truth. The

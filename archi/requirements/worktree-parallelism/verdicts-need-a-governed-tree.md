@@ -29,5 +29,5 @@ untouched (merge-retires-the-worktree).
 manifest, the model source dir — in an unbound checkout refuse with the seat recipe);
 `Cli` wires the gate at the router for `check` and `build` alone.
 
-- test — a dirty spec outside a seat fails check and build with the seat recipe; the same edit inside a seat answers (`a_dirty_spec_outside_a_seat_fails_check_and_build`)
-- test — a mid-merge tree is exempt and a clean unbound tree passes (`the_verdict_gate_refuses_only_a_dirty_spec_outside_a_seat`)
+- test — a dirty spec outside a seat fails check and build with the seat recipe; the same edit inside a seat answers (`a_dirty_spec_outside_a_worktree_fails_check_and_build`)
+- test — a mid-merge tree is exempt and a clean unbound tree passes (`the_verdict_gate_refuses_only_a_dirty_spec_outside_a_worktree`)

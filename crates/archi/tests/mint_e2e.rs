@@ -271,7 +271,7 @@ fn a_whole_round_materializes_from_one_batch_and_the_guard_covers_every_line() {
     };
     let (success, _o, e) = run(&primary, &["stress", "add", "Rogue", "--affects", "Gate"]);
     assert!(!success);
-    assert!(e.contains("unbound") || e.contains("worktree"), "{e}");
+    assert!(e.contains("unbound") || e.contains("archi worktree mint"), "{e}");
 }
 
 #[test]
