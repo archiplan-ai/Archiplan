@@ -39,7 +39,7 @@
 //! archi --help | --version
 //! ```
 //!
-//! Every verb locates its project by precedence: `--project`, then the
+//! Every command locates its project by precedence: `--project`, then the
 //! nearest `archi.toml` upward from the working directory. A project of
 //! `.arch` files is compiled fresh each run — the source is the model, and
 //! the only source of truth: the CLI offers no JSON editing of the model;
@@ -133,7 +133,7 @@ const USAGE: &str = "usage:
   archi --help | --version";
 
 struct Args {
-    verb: String,
+    command: String,
     project: Option<String>,
     emit_batch: Option<String>,
     json: bool,
@@ -202,7 +202,7 @@ fn usage_err(msg: &str) -> ExitCode {
 
 fn parse_args(argv: &[String]) -> Result<Args, String> {
     let mut args = Args {
-        verb: String::new(),
+        command: String::new(),
         project: None,
         emit_batch: None,
         json: false,
@@ -264,10 +264,10 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         positional: Vec::new(),
     };
     let mut it = argv.iter().peekable();
-    let Some(verb) = it.next() else {
+    let Some(command) = it.next() else {
         return Err("missing command".into());
     };
-    args.verb = verb.clone();
+    args.command = command.clone();
     let value = |it: &mut std::iter::Peekable<std::slice::Iter<String>>,
                  flag: &str|
      -> Result<String, String> {
@@ -296,7 +296,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--emit-batch" => args.emit_batch = Some(value(&mut it, "--emit-batch")?),
             // `query` composes repeatable scopes; nkp and link audit keep
             // the single --scope.
-            "--scope" if args.verb == "query" => {
+            "--scope" if args.command == "query" => {
                 args.scopes.push(value(&mut it, "--scope")?)
             }
             "--scope" => args.scope = Some(value(&mut it, "--scope")?),
@@ -322,7 +322,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--spec" => args.spec = Some(value(&mut it, "--spec")?),
             // `worktree merge` receives per-member branches; link repin
             // keeps the single --to.
-            "--to" if args.verb == "worktree" => {
+            "--to" if args.command == "worktree" => {
                 args.to_many.push(value(&mut it, "--to")?)
             }
             "--to" => args.to = Some(value(&mut it, "--to")?),
@@ -336,7 +336,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--desc" => args.desc = Some(value(&mut it, "--desc")?),
             // `link` reads the singular `--kind literal|indirect`; the
             // incidence filter keeps the repeatable list.
-            "--kind" if args.verb == "link" || args.verb == "req" => {
+            "--kind" if args.command == "link" || args.command == "req" => {
                 args.kind_flag = Some(value(&mut it, "--kind")?)
             }
             "--kind" => args.kind.push(value(&mut it, "--kind")?),
@@ -357,7 +357,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "-m" | "--message" => args.message = Some(value(&mut it, "-m")?),
             other if other.starts_with("--") => return Err(format!("unknown flag `{other}`")),
             other if matches!(
-                args.verb.as_str(),
+                args.command.as_str(),
                 "version"
                     | "link"
                     | "plan"
@@ -396,7 +396,7 @@ fn locate_project(args: &Args) -> Result<PathBuf, String> {
         .ok_or_else(|| {
             format!(
                 "`{}` needs a project: pass --project <dir> or run inside one (archi.toml)",
-                args.verb
+                args.command
             )
         })
 }
@@ -468,10 +468,10 @@ fn run_check(args: &Args) -> ExitCode {
     });
     // The member map is machine state and decays like one: four probes per
     // declared member, advisory like every finding — a memberless project
-    // prints nothing new (archi/requirements/multi-repo/). A bound seat's
+    // prints nothing new (archi/requirements/multi-repo/). A bound worktree's
     // own member worktrees are its working map, not rot: they ride the
     // exemption.
-    let seat_members: Vec<std::path::PathBuf> = worktrees::toplevel(&root)
+    let bound_members: Vec<std::path::PathBuf> = worktrees::toplevel(&root)
         .and_then(|top| {
             worktrees::Registry::load(&root).ok().flatten().map(|reg| {
                 reg.binding_of(&top)
@@ -480,7 +480,7 @@ fn run_check(args: &Args) -> ExitCode {
             })
         })
         .unwrap_or_default();
-    let member_findings = members::check(&root, &seat_members);
+    let member_findings = members::check(&root, &bound_members);
     let clean = archive_errors.is_empty() && doc.diagnostics.is_empty();
     // A check with no errors closes on the landscape read: the NKP scoring
     // and the refactoring directions it implies, over the default slice.
@@ -1065,7 +1065,7 @@ fn run_status(args: &Args) -> ExitCode {
             }
         }
         None => println!(
-            "checkout: {} (not a git repository — the seat model needs one; \
+            "checkout: {} (not a git repository — the worktree model needs one; \
              `git init` enables it, ask the user before creating)",
             root.display()
         ),
@@ -1156,8 +1156,8 @@ fn run_worktree(args: &Args) -> ExitCode {
                 Ok(m) => m,
                 Err(e) => return fail(e),
             };
-            if m.seated {
-                println!("seated: {} carries `{slug}` on {}", m.path.display(), m.branch);
+            if m.extended {
+                println!("extended {} — it carries `{slug}` on {}", m.path.display(), m.branch);
             } else {
                 println!(
                     "minted {} on branch {}{} — cd {} to work there; \
@@ -1297,7 +1297,7 @@ fn run_worktree(args: &Args) -> ExitCode {
             if worktrees::list_worktrees(&root).iter().any(|w| w.path == path) {
                 if let Some(top) = worktrees::toplevel(&root) {
                     let rel = root.strip_prefix(&top).unwrap_or(Path::new(""));
-                    worktrees::scrub_seat(&path.join(rel));
+                    worktrees::scrub_worktree(&path.join(rel));
                 }
                 if let Err(e) = worktrees::worktree_remove(&root, &path, false) {
                     return fail(format!(
@@ -1391,7 +1391,7 @@ fn run_link(args: &Args) -> ExitCode {
         Err(e) => return usage_err(&e),
     };
     // Subcommands touching the spec side — add, verify, audit — compile the
-    // live tree first; journal-only verbs don't need a compiling model.
+    // live tree first; journal-only commands don't need a compiling model.
     let live_model = || -> Result<modeling_lang::Workspace, ExitCode> {
         compile_or_report(&root, false).map(|c| c.workspace)
     };
@@ -1735,7 +1735,7 @@ fn run_viz(args: &Args) -> ExitCode {
 }
 
 /// `archi search`: ranked retrieval by phrase across every KB object
-/// (`archi/requirements/agent-retrieval/`). The one verb that does not die with the
+/// (`archi/requirements/agent-retrieval/`). The one command that does not die with the
 /// model: a failed compile darkens the element corpus alone — doc cards
 /// still answer, the report names what went dark, and the exit stays zero
 /// (a-dark-corpus-stays-partial). Diagnosing the breakage is `check`'s job.
@@ -1799,7 +1799,7 @@ fn run_plan(args: &Args) -> ExitCode {
         Ok(r) => r,
         Err(e) => return usage_err(&e),
     };
-    // Every plan verb resolves against models: the live tree for drift and
+    // Every plan command resolves against models: the live tree for drift and
     // pinning, the archived pin for structure — so the live tree compiles
     // first, exactly as for `link`.
     let live_model = || -> Result<modeling_lang::Workspace, ExitCode> {
@@ -2134,7 +2134,7 @@ fn run_plan(args: &Args) -> ExitCode {
 
 /// `archi init [<dir>]`: stand a directory up as an archiplan project
 /// (`archi/requirements/cli/`, `archi/requirements/cold-start/`) — the one
-/// verb that takes its target as an argument; there is no project to
+/// command that takes its target as an argument; there is no project to
 /// locate yet. Exit 0 covers the nothing-to-do re-run: create-only is the
 /// contract, not an error.
 fn run_init(args: &Args) -> ExitCode {
@@ -2160,12 +2160,12 @@ fn run_init(args: &Args) -> ExitCode {
 
 /// `archi check-update | update` — the self-updater (`update.rs`): like
 /// `init`, it runs without a project — the subject is this binary, not a
-/// spec — so no project is located and no seat guard applies.
+/// spec — so no project is located and no worktree guard applies.
 fn run_self_update(args: &Args) -> ExitCode {
     if args.project.is_some() || !args.positional.is_empty() {
-        return usage_err(&format!("`{}` takes no arguments", args.verb));
+        return usage_err(&format!("`{}` takes no arguments", args.command));
     }
-    let outcome = if args.verb == "update" { update::apply() } else { update::check() };
+    let outcome = if args.command == "update" { update::apply() } else { update::check() };
     match outcome {
         Ok(report) => {
             println!("{report}");
@@ -2179,7 +2179,7 @@ fn run_self_update(args: &Args) -> ExitCode {
 }
 
 
-/// `archi req add|rm` — requirement skeletons come from a verb: every
+/// `archi req add|rm` — requirement skeletons come from a command: every
 /// machine field an explicit parameter, the text slots left for the
 /// author, removal pre-flighted against owning plans.
 fn run_req(args: &Args) -> ExitCode {
@@ -2232,7 +2232,7 @@ fn run_req(args: &Args) -> ExitCode {
     }
 }
 
-/// `archi stress open|add|rm` — the round's records come from verbs: the
+/// `archi stress open|add|rm` — the round's records come from commands: the
 /// charter pins the saved version, stressors land in the open round with
 /// affects resolved against its pinned version, removal never touches
 /// sealed history.
@@ -2576,7 +2576,7 @@ fn run_nkp(args: &Args) -> ExitCode {
 }
 
 /// `archi session fold` — two concurrent rounds into one deliberate record;
-/// the verb-shaped repair for what a merge assembles
+/// the command-shaped repair for what a merge assembles
 /// (archi/requirements/spec-docs/, rounds-fold-deliberately).
 fn run_session(args: &Args) -> ExitCode {
     let fail = |e: String| -> ExitCode {
@@ -2620,7 +2620,7 @@ fn run_session(args: &Args) -> ExitCode {
                 Err(e) => fail(e),
             }
         }
-        _ => usage_err("`session` verbs: fold <slug> [-m <note>] [--into <winner>] [--keep theirs]"),
+        _ => usage_err("`session` commands: fold <slug> [-m <note>] [--into <winner>] [--keep theirs]"),
     }
 }
 
@@ -2723,7 +2723,7 @@ fn run_tradeoffs(args: &Args) -> ExitCode {
 /// `over:` fields speak (`archi/requirements/spec-docs/a-decision-prices-the-fork.md`).
 /// Code-defined and project-independent: no project is located. Any other
 /// label is legal and recorded verbatim as off-list — `check` surfaces it,
-/// this verb teaches the set.
+/// this command teaches the set.
 fn run_axes(args: &Args) -> ExitCode {
     if args.json {
         let list: Vec<Value> = axes::Axis::KNOWN
@@ -2753,7 +2753,7 @@ fn run_axes(args: &Args) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// The plan-ownership hint a guarded route hands the seat gate.
+/// The plan-ownership hint a guarded route hands the worktree gate.
 enum PlanHint<'a> {
     /// Mutation with no plan identity of its own (version, session, link…).
     None,
@@ -2766,12 +2766,12 @@ enum PlanHint<'a> {
 /// The router's single answer to "is this route guarded?" — `None` is a
 /// free route. Mutations of governed state (versions, sessions, links, the
 /// repo map, plans) are guarded; reads, bootstrap (`init`, `sync-skills`)
-/// and the seat verbs themselves (`worktree`, `status`, `batch` — each
-/// batch line re-enters the router on its own) stay free. Verb bodies
+/// and the worktree commands themselves (`worktree`, `status`, `batch` — each
+/// batch line re-enters the router on its own) stay free. Command bodies
 /// never guard themselves.
 fn guarded_route(args: &Args) -> Option<PlanHint<'_>> {
     let sub = |i: usize| args.positional.get(i).map(String::as_str);
-    match args.verb.as_str() {
+    match args.command.as_str() {
         "version" if matches!(sub(0), Some("save" | "remint" | "anchor")) => Some(PlanHint::None),
         "session" if sub(0) == Some("fold") => Some(PlanHint::None),
         "link" if matches!(sub(0), Some("add" | "confirm" | "rm" | "repin" | "capture")) => {
@@ -2786,7 +2786,7 @@ fn guarded_route(args: &Args) -> Option<PlanHint<'_>> {
             Some("use") => Some(args.positional.get(1).map_or(PlanHint::None, |n| PlanHint::Named(n))),
             Some("repin" | "start" | "next" | "close" | "reset") => Some(PlanHint::Active),
             // Of `task`, only the mints mutate; content edits are file
-            // edits, outside any verb. Everything else under plan reads.
+            // edits, outside any command. Everything else under plan reads.
             Some("task") if matches!(sub(1), Some("add" | "rm")) => Some(PlanHint::Active),
             _ => None,
         },
@@ -2795,7 +2795,7 @@ fn guarded_route(args: &Args) -> Option<PlanHint<'_>> {
 }
 
 fn main() -> ExitCode {
-    // A verb piped into `head` dies of SIGPIPE like any unix tool — never
+    // A command piped into `head` dies of SIGPIPE like any unix tool — never
     // of a rust panic on a closed stdout.
     #[cfg(unix)]
     unsafe {
@@ -2820,7 +2820,7 @@ fn main() -> ExitCode {
         Ok(a) => a,
         Err(e) => return usage_err(&e),
     };
-    // The seat gate, wired once: a guarded route refuses before its runner
+    // The worktree gate, wired once: a guarded route refuses before its runner
     // is entered.
     if let Some(hint) = guarded_route(&args) {
         let root = match locate_project(&args) {
@@ -2838,8 +2838,8 @@ fn main() -> ExitCode {
         }
     }
     // The verdict gate: `check` and `build` answer anywhere, but refuse to
-    // bless uncommitted spec edits sitting outside a seat.
-    if matches!(args.verb.as_str(), "check" | "build") {
+    // bless uncommitted spec edits sitting outside a worktree.
+    if matches!(args.command.as_str(), "check" | "build") {
         let root = match locate_project(&args) {
             Ok(r) => r,
             Err(e) => return usage_err(&e),
@@ -2849,7 +2849,7 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     }
-    match args.verb.as_str() {
+    match args.command.as_str() {
         "init" => run_init(&args),
         "check-update" | "update" => run_self_update(&args),
         "sync-skills" => run_sync_skills(&args),

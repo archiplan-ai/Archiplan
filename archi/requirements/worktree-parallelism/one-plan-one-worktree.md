@@ -24,4 +24,4 @@ verb, so they must never see two concurrent writers in the first place.
 plan verb from any other checkout, naming the owning path — backed by git's one-branch-one-
 checkout rule.
 
-- test — a second checkout mutating a bound plan refuses with the owner's path (`an_unbound_checkout_mints_the_seat_and_the_worktree_proceeds`)
+- test — a second checkout mutating a bound plan refuses with the owner's path (`an_unbound_checkout_mints_the_worktree_and_the_work_proceeds`)

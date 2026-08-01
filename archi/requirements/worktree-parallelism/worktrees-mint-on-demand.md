@@ -26,5 +26,5 @@ machine (one-plan-one-worktree).
 writes the row last and prints the path — the CLI never changes the caller's directory;
 `Seats.Guard`'s refusal lists standing seats first and mints only work nothing carries.
 
-- test — the guard mints for an unbound checkout and names the seat; standing seats list instead of minting over (`the_guard_mints_for_an_unbound_checkout_and_names_the_seat`)
-- test — a pushed branch re-attaches instead of forking a duplicate (`an_unbound_checkout_mints_the_seat_and_the_worktree_proceeds`)
+- test — the guard mints for an unbound checkout and names the seat; standing seats list instead of minting over (`the_guard_mints_for_an_unbound_checkout_and_names_the_worktree`)
+- test — a pushed branch re-attaches instead of forking a duplicate (`an_unbound_checkout_mints_the_worktree_and_the_work_proceeds`)

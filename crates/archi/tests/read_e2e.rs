@@ -32,7 +32,7 @@ fn temp_project() -> PathBuf {
     fs::create_dir_all(dir.join("archi/src")).unwrap();
     fs::write(dir.join("archi.toml"), "[project]\nname = \"t\"\n").unwrap();
     fs::write(dir.join("archi/src/model.arch"), MODEL).unwrap();
-    util::seat(&dir)
+    util::worktree(&dir)
 }
 
 /// Run the binary; return (exit code, stdout, stderr).

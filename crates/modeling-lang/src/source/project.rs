@@ -31,7 +31,7 @@ pub(crate) struct Manifest {
     pub preset: String,
     /// Declared member repositories, in declaration order.
     pub repos: Vec<RepoDecl>,
-    /// Branches where mutating verbs refuse, consumed by `archi`; empty
+    /// Branches where mutating commands refuse, consumed by `archi`; empty
     /// means no protection.
     pub protected: Vec<String>,
 }

@@ -21,7 +21,7 @@ use crate::axes::{self, Axis};
 use crate::docs;
 
 /// Where the configuration lives, relative to the project root. Its own file,
-/// not `archi.toml`: operator priorities are mutated by their own verb and sit
+/// not `archi.toml`: operator priorities are mutated by their own command and sit
 /// beside the other operator state under `archi/`.
 const CONFIG_PATH: &str = "archi/tradeoffs.toml";
 

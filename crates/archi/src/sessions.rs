@@ -5,7 +5,7 @@
 //! different-slug merge, or one file claimed by two charters after a
 //! same-slug merge (the conflict markers git leaves are the only honest
 //! boundary — fold-pressure falsified `merge=union` here, the fusion
-//! commits itself). The fold is the verb-shaped repair: it keeps both
+//! commits itself). The fold is the command-shaped repair: it keeps both
 //! charters — the folded round's charter, pin and stamp land under a
 //! `## Folded: <label>` heading the doc schema validates forever — and it
 //! refuses what it cannot keep true: folds across pins (a stressor's ground

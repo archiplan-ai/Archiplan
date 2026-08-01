@@ -846,7 +846,7 @@ fn cross_check(
     let mut out = findings(tree);
     // Closed stamps are verified by content, not id alone: a remint that
     // moved an id out from under a record surfaces as a finding naming the
-    // repair verb, never as silent reinterpretation. Hash-less records stay
+    // repair command, never as silent reinterpretation. Hash-less records stay
     // silent (pins-survive-a-remint).
     for s in &tree.sessions {
         let (Some((c, _)), Some((h, _))) = (&s.closed, &s.version_hash) else {

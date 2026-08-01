@@ -1,4 +1,4 @@
-//! End to end through the real binary: one verb searches everything
+//! End to end through the real binary: one command searches everything
 //! (`archi/requirements/agent-retrieval/one-verb-searches-everything`), a
 //! dark corpus stays partial and never breaks the exit code, advisory doc
 //! states search fine, and a search perturbs nothing a `version save`
@@ -30,7 +30,7 @@ fn temp_project() -> PathBuf {
     )
     .unwrap();
     fs::write(dir.join("archi/src/model.arch"), MODEL).unwrap();
-    util::seat(&dir)
+    util::worktree(&dir)
 }
 
 fn put(root: &Path, rel_path: &str, text: &str) {
@@ -163,7 +163,7 @@ fn advisory_states_search_fine_and_a_save_still_reports_unchanged() {
     let root = temp_project();
     docs(&root);
 
-    // The KB carries findings (a deferred requirement); the verb is
+    // The KB carries findings (a deferred requirement); the command is
     // unbothered — advisory states are content, never blockers.
     let out = ok(&root, &["search", "token", "rotation"]);
     assert!(out.contains("state: deferred"), "{out}");

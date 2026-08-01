@@ -1,5 +1,5 @@
 //! End to end through the real binary: a plan is a folder of markdown
-//! records with lifecycle in `state.json` — minted by verbs, authored by
+//! records with lifecycle in `state.json` — minted by commands, authored by
 //! editing the files — and waves gate on captured-then-asserted
 //! code-links (`archi/requirements/planning/`,
 //! `archi/requirements/planning/a-plan-is-a-folder-of-records.md`,
@@ -47,7 +47,7 @@ fn temp_project() -> PathBuf {
     fs::write(dir.join("code/auth.rs"), "pub fn login() -> bool { true }\n").unwrap();
     put_requirement(&dir, "store-encrypted", "Store encrypted", "Store");
     put_requirement(&dir, "service-hardening", "Service hardening", "Service");
-    util::seat(&dir)
+    util::worktree(&dir)
 }
 
 fn put_requirement(root: &Path, slug: &str, name: &str, satisfied_by: &str) {
@@ -91,7 +91,7 @@ fn fails(root: &Path, args: &[&str]) -> (String, String) {
     (stdout, stderr)
 }
 
-/// A verb cut from the surface is an unknown subverb: the plan usage
+/// A command cut from the surface is an unknown subverb: the plan usage
 /// error, exit 2 — no tombstones.
 fn usage_error(root: &Path, args: &[&str]) {
     let out = Command::new(env!("CARGO_BIN_EXE_archi"))
@@ -164,7 +164,7 @@ fn the_record_folder_authors_by_editing_files() {
     assert_eq!(state_json(&root, "mvp")["state"], "draft");
     assert!(!dir.join("plan.json").exists());
 
-    // The old authoring verbs are gone from the surface: a dead verb
+    // The old authoring commands are gone from the surface: a dead command
     // falls through to usage, exit 2 — content is the files, edited in
     // place.
     for dead in [
@@ -187,7 +187,7 @@ fn the_record_folder_authors_by_editing_files() {
     assert!(out.contains("already minted"), "{out}");
     assert!(out.contains("t1-store.md stands"), "{out}");
 
-    // Author the plan by editing its files — the whole old verb surface
+    // Author the plan by editing its files — the whole old command surface
     // is a text editor now.
     write_record(
         &root,
@@ -485,7 +485,7 @@ fn a_legacy_plan_json_reads_forever_and_its_lifecycle_verbs_advance_it() {
     let root = temp_project();
     ok(&root, &["version", "save", "-m", "first"]);
 
-    // The old form, written by hand — no verb mints it anymore.
+    // The old form, written by hand — no command mints it anymore.
     fs::create_dir_all(root.join("archi/plans/mvp")).unwrap();
     fs::write(
         root.join("archi/plans/mvp/plan.json"),
@@ -521,7 +521,7 @@ fn a_legacy_plan_json_reads_forever_and_its_lifecycle_verbs_advance_it() {
     assert!(ok(&root, &["plan", "status"]).contains("plan `mvp` @ v0001 (draft)"));
     assert!(ok(&root, &["plan", "show"]).contains("problem: kept as it was"));
 
-    // The form only shrinks: the mint verbs refuse.
+    // The form only shrinks: the mint commands refuse.
     let (_, err) = fails(&root, &["plan", "task", "add", "Auth"]);
     assert!(err.contains("legacy plan.json is read-only"), "{err}");
     let (_, err) = fails(&root, &["plan", "task", "rm", "t1"]);
@@ -610,26 +610,26 @@ fn a_named_show_reads_any_plan_without_moving_the_marker() {
     fs::remove_dir_all(&root).unwrap();
 }
 
-/// The named show is what an unbound checkout gets: once the seat's plan
-/// lands on `main`, the primary — no seat, no `.current` — reads it by
+/// The named show is what an unbound checkout gets: once the worktree's plan
+/// lands on `main`, the primary — unbound, no `.current` — reads it by
 /// name; the read never mints a marker, and the nameless form still
 /// needs one.
 #[test]
 fn a_named_show_answers_from_an_unbound_checkout() {
-    let seat = temp_project();
-    ok(&seat, &["version", "save", "-m", "first"]);
-    ok(&seat, &["plan", "use", "mvp"]);
+    let wt = temp_project();
+    ok(&wt, &["version", "save", "-m", "first"]);
+    ok(&wt, &["plan", "use", "mvp"]);
 
-    // Land the seat's work on the primary checkout's branch.
-    util::git(&seat, &["add", "-A"]);
-    util::git(&seat, &["commit", "-qm", "plan"]);
-    let wt_dir = seat.parent().unwrap();
+    // Land the worktree's work on the primary checkout's branch.
+    util::git(&wt, &["add", "-A"]);
+    util::git(&wt, &["commit", "-qm", "plan"]);
+    let wt_dir = wt.parent().unwrap();
     let name = wt_dir.file_name().unwrap().to_str().unwrap();
     let primary = wt_dir
         .parent()
         .unwrap()
         .join(name.strip_suffix("-worktrees").unwrap());
-    util::git(&primary, &["merge", "-q", "archi/seat"]);
+    util::git(&primary, &["merge", "-q", "archi/wt"]);
 
     // The marker is machine-local by construction — mint's repo-local
     // exclude keeps it out of any commit — so the primary carries none.
@@ -645,6 +645,6 @@ fn a_named_show_answers_from_an_unbound_checkout() {
     let (_, err) = fails(&primary, &["plan", "show"]);
     assert!(err.contains("no active plan"), "{err}");
 
-    fs::remove_dir_all(&seat).unwrap();
+    fs::remove_dir_all(&wt).unwrap();
     fs::remove_dir_all(&primary).unwrap();
 }

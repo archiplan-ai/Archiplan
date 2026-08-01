@@ -30,7 +30,7 @@ parallel dependent effort that must pin its published version.
 the seat's plan is open; retire removes the worktree, scrubs seat artifacts and clears the
 registry row in the same move).
 
-- test — a clean merge lands the work and retires the seat in one verb (`a_clean_merge_lands_the_work_and_retires_the_seat`)
-- test — an open plan refuses the landing until `plan close` (`a_seat_lands_only_after_its_plan_closes`)
+- test — a clean merge lands the work and retires the seat in one verb (`a_clean_merge_lands_the_work_and_retires_the_worktree`)
+- test — an open plan refuses the landing until `plan close` (`a_worktree_lands_only_after_its_plan_closes`)
 - test — `--to` lands the worktree head on a new branch without touching the current one (`to_lands_the_worktree_head_on_a_new_branch_without_merging`)
-- test — a conflicted merge stops, keeps the seat and names the ceremony (`a_conflicted_merge_stops_and_keeps_the_seat`)
+- test — a conflicted merge stops, keeps the seat and names the ceremony (`a_conflicted_merge_stops_and_keeps_the_worktree`)

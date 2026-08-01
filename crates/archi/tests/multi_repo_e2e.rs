@@ -97,14 +97,14 @@ fn ok(root: &Path, args: &[&str]) -> String {
     stdout
 }
 
-/// Seat the spec and map each member to its real checkout — the seat's
+/// Mint the spec worktree and map each member to its real checkout — its
 /// relative `[[repo]]` paths resolve nowhere from the worktree.
-fn seat_mapped(spec: &Path, members: &[(&str, &Path)]) -> PathBuf {
-    let seat = util::seat(spec);
+fn worktree_mapped(spec: &Path, members: &[(&str, &Path)]) -> PathBuf {
+    let wt = util::worktree(spec);
     for (name, dir) in members {
-        ok(&seat, &["repo", "map", name, dir.to_str().unwrap()]);
+        ok(&wt, &["repo", "map", name, dir.to_str().unwrap()]);
     }
-    seat
+    wt
 }
 
 #[test]
@@ -114,7 +114,7 @@ fn qualified_refs_run_the_whole_link_loop_across_members() {
     let backend = ws.join("backend");
     spec_project(&spec, "[[repo]]\nname = \"backend\"\npath = \"../backend\"\n");
     member_repo(&backend);
-    let spec = seat_mapped(&spec, &[("backend", &backend)]);
+    let spec = worktree_mapped(&spec, &[("backend", &backend)]);
 
     // The doctor sees home and the member, both reachable.
     let ls = ok(&spec, &["repo", "ls"]);
@@ -160,7 +160,7 @@ fn absence_is_reported_never_decayed_and_fails_only_in_scope() {
     let backend = ws.join("backend");
     spec_project(&spec, "[[repo]]\nname = \"backend\"\npath = \"../backend\"\n");
     member_repo(&backend);
-    let spec = seat_mapped(&spec, &[("backend", &backend)]);
+    let spec = worktree_mapped(&spec, &[("backend", &backend)]);
     ok(&spec, &[
         "link", "add", "Gate", "backend//src/lib.rs#serve_gate", "--kind", "indirect",
     ]);
@@ -209,7 +209,7 @@ fn baselines_and_audit_go_per_member() {
     let backend = ws.join("backend");
     spec_project(&spec, "[[repo]]\nname = \"backend\"\npath = \"../backend\"\n");
     member_repo(&backend);
-    let spec = seat_mapped(&spec, &[("backend", &backend)]);
+    let spec = worktree_mapped(&spec, &[("backend", &backend)]);
     // Home stays dirty at save — no home baseline, the per-member wording
     // below keeps its subject.
     fs::write(spec.join("wip.txt"), "uncommitted\n").unwrap();
@@ -256,12 +256,12 @@ fn a_home_rooted_below_its_git_root_rebases_the_audit() {
     fs::write(spec.join("gadget.rs"), "pub fn gadget() {}\n").unwrap();
     git(&repo, &["add", "-A"]);
     git(&repo, &["commit", "-qm", "seed"]);
-    // Seat the monorepo: home rides two directories below the worktree
+    // The monorepo worktree: home sits two directories below the worktree
     // root exactly as it sat below the git root.
-    ok(&spec, &["worktree", "mint", "seat"]);
+    ok(&spec, &["worktree", "mint", "wt"]);
     let name = repo.file_name().unwrap().to_str().unwrap();
-    let seat = repo.parent().unwrap().join(format!("{name}-worktrees")).join("seat");
-    let spec = seat.join("tools").join("plan");
+    let wt = repo.parent().unwrap().join(format!("{name}-worktrees")).join("wt");
+    let spec = wt.join("tools").join("plan");
     ok(&spec, &["version", "save", "-m", "first"]);
     ok(&spec, &["version", "anchor"]);
 
@@ -282,7 +282,7 @@ fn a_home_rooted_below_its_git_root_rebases_the_audit() {
 fn a_memberless_project_is_todays_byte_for_byte() {
     let spec = scratch("plain");
     spec_project(&spec, "");
-    let spec = util::seat(&spec);
+    let spec = util::worktree(&spec);
 
     // The doctor shows home alone; bare refs render bare; the audit keeps
     // its original no-delta-source wording.
@@ -313,11 +313,11 @@ fn map_refuses_a_linked_worktree_and_names_the_main_checkout() {
     let backend = ws.join("backend");
     spec_project(&spec, "[[repo]]\nname = \"backend\"\npath = \"../backend\"\n");
     member_repo(&backend);
-    let spec = util::seat(&spec);
+    let spec = util::worktree(&spec);
 
     // The field incident's shape: a scratch worktree of the member offered
     // as its mapping. The row would outlive the worktree and a later mint
-    // would base seats on the dead branch standing there.
+    // would base worktrees on the dead branch standing there.
     let wt = ws.join("backend-scratch");
     git(&backend, &["worktree", "add", "-q", wt.to_str().unwrap(), "-b", "feature/dead"]);
     let (success, out, err) = run(&spec, &["repo", "map", "backend", wt.to_str().unwrap()]);
@@ -357,10 +357,10 @@ fn check_reports_an_unresolved_member_path_from_either_source() {
          [[repo]]\nname = \"frontend\"\npath = \"../frontend\"\n",
     );
     member_repo(&backend);
-    let spec = seat_mapped(&spec, &[("backend", &backend)]);
+    let spec = worktree_mapped(&spec, &[("backend", &backend)]);
 
     // backend's mapped checkout leaves; frontend's manifest convention
-    // resolves nowhere from the seat. Both decay modes are advisory: the
+    // resolves nowhere from the worktree. Both decay modes are advisory: the
     // check still exits 0.
     fs::remove_dir_all(&backend).unwrap();
     let (success, out, err) = run(&spec, &["check"]);
@@ -386,7 +386,7 @@ fn check_reports_a_linked_worktree_standing_in_the_map() {
     let backend = ws.join("backend");
     spec_project(&spec, "[[repo]]\nname = \"backend\"\npath = \"../backend\"\n");
     member_repo(&backend);
-    let spec = seat_mapped(&spec, &[("backend", &backend)]);
+    let spec = worktree_mapped(&spec, &[("backend", &backend)]);
 
     // The map decays under the write-time gate: a scratch worktree comes to
     // stand where the row points (the row predates the worktree).
@@ -429,7 +429,7 @@ fn check_reports_a_wrong_clone_and_lets_absent_urls_be() {
     git(&backend, &["remote", "add", "origin", "git@github.com:acme/other.git"]);
     // frontend declares a url but its checkout has no origin remote —
     // absence is not drift, that probe stays silent.
-    let spec = seat_mapped(&spec, &[("backend", &backend), ("frontend", &frontend)]);
+    let spec = worktree_mapped(&spec, &[("backend", &backend), ("frontend", &frontend)]);
 
     let (success, out, err) = run(&spec, &["check"]);
     assert!(success, "{out}\n{err}");
@@ -461,7 +461,7 @@ fn check_reports_a_squash_stranded_baseline() {
     let backend = ws.join("backend");
     spec_project(&spec, "[[repo]]\nname = \"backend\"\npath = \"../backend\"\n");
     member_repo(&backend);
-    let spec = seat_mapped(&spec, &[("backend", &backend)]);
+    let spec = worktree_mapped(&spec, &[("backend", &backend)]);
     let saved = ok(&spec, &["version", "save", "-m", "first"]);
     assert!(saved.contains("baseline backend:"), "{saved}");
     let index = fs::read_to_string(spec.join("archi/versions/index.toml")).unwrap();
@@ -501,7 +501,7 @@ fn a_healthy_member_map_adds_nothing_to_check() {
     // origin is the ssh form of the declared https url: normalization meets
     // in the middle, no drift.
     git(&backend, &["remote", "add", "origin", "ssh://git@github.com/acme/backend/"]);
-    let spec = seat_mapped(&spec, &[("backend", &backend)]);
+    let spec = worktree_mapped(&spec, &[("backend", &backend)]);
     // A recorded baseline standing on its branch — the healthy shape of the
     // fourth probe too.
     let saved = ok(&spec, &["version", "save", "-m", "first"]);
@@ -527,7 +527,7 @@ fn a_dangling_baseline_degrades_alone() {
     );
     member_repo(&backend);
     member_repo(&frontend);
-    let spec = seat_mapped(&spec, &[("backend", &backend), ("frontend", &frontend)]);
+    let spec = worktree_mapped(&spec, &[("backend", &backend), ("frontend", &frontend)]);
 
     // Both baselines land on clean members.
     let saved = ok(&spec, &["version", "save", "-m", "first"]);

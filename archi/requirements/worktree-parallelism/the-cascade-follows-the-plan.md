@@ -30,8 +30,8 @@ branch grown from the baseline `Archive` recorded, the whole cascade validated b
 anything is created and rolled back whole on partial failure; a re-mint extends the seat and
 resolves members from the invoked root — the seat's own manifest and overlay mid-unit.
 
-- test — the cascade mints member worktrees and the seat overlay (`the_cascade_mints_member_worktrees_and_the_seat_overlay`)
+- test — the cascade mints member worktrees and the seat overlay (`the_cascade_mints_member_worktrees_and_the_overlay`)
 - test — an off-branch baseline refuses with candidate branches and the `--base` escape (`a_baseline_off_the_branch_refuses_with_the_base_escape`)
 - test — a missing baseline names both repairs (`a_missing_baseline_names_both_repairs`)
 - test — a partial cascade rolls back whole (`a_partial_cascade_rolls_back_whole`)
-- test — a seat extension resolves members from the seat, not the primary (`a_seat_extension_resolves_members_from_the_seat`)
+- test — a seat extension resolves members from the seat, not the primary (`an_extension_resolves_members_from_the_worktree`)

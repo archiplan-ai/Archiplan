@@ -1,7 +1,7 @@
-//! End to end through the real binary: the worktree seat discipline —
-//! mutation runs only inside a seated worktree (unconditionally: the guard
-//! sits at the router), protected branches refuse local merges, the
-//! registry moves by verbs, context follows the checkout
+//! End to end through the real binary: the binding discipline —
+//! a mutation runs only inside a bound worktree, and the guard sits at
+//! the router. Protected branches refuse local merges, the registry
+//! moves by commands, context follows the checkout
 //! (`archi/requirements/worktree-parallelism/`).
 
 mod util;
@@ -80,10 +80,10 @@ fn head(dir: &Path) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
-/// Run a save on `main` the disciplined way: a bootstrap seat maps the
+/// Run a save on `main` the governed way: a bootstrap worktree maps the
 /// members, saves, commits, and merges back — mutations never run unbound,
 /// and the retire leaves the registry empty.
-fn seat_save(spec: &Path, slug: &str, map: &[(&str, &Path)], msg: &str) {
+fn worktree_save(spec: &Path, slug: &str, map: &[(&str, &Path)], msg: &str) {
     ok(spec, &["worktree", "mint", slug]);
     let name = spec.file_name().unwrap().to_str().unwrap();
     let wt = spec.parent().unwrap().join(format!("{name}-worktrees")).join(slug);
@@ -109,7 +109,7 @@ fn open_repo(tag: &str) -> (PathBuf, PathBuf) {
     git(&spec, &["config", "commit.gpgsign", "false"]);
     git(&spec, &["add", "-A"]);
     git(&spec, &["commit", "-qm", "seed"]);
-    seat_save(&spec, "boot", &[], "seed");
+    worktree_save(&spec, "boot", &[], "seed");
     (ws, spec)
 }
 
@@ -123,7 +123,7 @@ fn protected_repo(tag: &str) -> (PathBuf, PathBuf) {
 }
 
 #[test]
-fn an_unbound_checkout_mints_the_seat_and_the_worktree_proceeds() {
+fn an_unbound_checkout_mints_the_worktree_and_the_work_proceeds() {
     // No protected list: the discipline is unconditional — any unbound
     // checkout refuses, the primary on `main` included.
     let (_ws, spec) = open_repo("guard");
@@ -132,7 +132,7 @@ fn an_unbound_checkout_mints_the_seat_and_the_worktree_proceeds() {
     let (success, _out, err) = run(&spec, &["plan", "use", "auth"]);
     assert!(!success, "mutation on an unbound checkout must refuse");
     assert!(err.contains("unbound"), "{err}");
-    assert!(err.contains("seated worktree"), "{err}");
+    assert!(err.contains("bound worktree"), "{err}");
     assert!(err.contains("archi/auth"), "{err}");
     assert!(err.contains("never changes your directory"), "{err}");
     let wt = spec.parent().unwrap().join("spec-worktrees/auth");
@@ -145,7 +145,7 @@ fn an_unbound_checkout_mints_the_seat_and_the_worktree_proceeds() {
         .unwrap();
     assert_eq!(String::from_utf8_lossy(&list.stdout).trim(), "main");
 
-    // The same verb from the minted worktree proceeds and binds.
+    // The same command from the minted worktree proceeds and binds.
     let out = ok(&wt, &["plan", "use", "auth"]);
     assert!(out.contains("created plan `auth`"), "{out}");
     let ls = ok(&spec, &["worktree", "ls", "--plan", "auth"]);
@@ -155,7 +155,7 @@ fn an_unbound_checkout_mints_the_seat_and_the_worktree_proceeds() {
     // Any other checkout mutating the bound plan refuses with the owner.
     let (success, _out, err) = run(&spec, &["plan", "use", "auth"]);
     assert!(!success);
-    assert!(err.contains("seated at"), "{err}");
+    assert!(err.contains("is bound to"), "{err}");
     assert!(err.contains("spec-worktrees"), "{err}");
 }
 
@@ -200,7 +200,7 @@ fn a_gitless_project_refuses_mutation_loudly() {
 }
 
 #[test]
-fn mint_without_a_plan_seats_spec_work_and_drop_retires_it() {
+fn mint_without_a_plan_binds_spec_work_and_drop_retires_it() {
     let (_ws, spec) = protected_repo("effort");
     let out = ok(&spec, &["worktree", "mint", "storm"]);
     assert!(out.contains("minted"), "{out}");
@@ -224,7 +224,7 @@ fn mint_without_a_plan_seats_spec_work_and_drop_retires_it() {
 #[test]
 fn status_names_the_checkout_and_its_open_work() {
     let (_ws, spec) = protected_repo("status");
-    let _ = run(&spec, &["plan", "use", "auth"]); // refuses on main, mints the seat
+    let _ = run(&spec, &["plan", "use", "auth"]); // refuses on main, mints the worktree
     let wt = spec.parent().unwrap().join("spec-worktrees/auth");
     ok(&wt, &["plan", "use", "auth"]);
 
@@ -247,7 +247,7 @@ fn status_names_the_checkout_and_its_open_work() {
 }
 
 #[test]
-fn a_clean_merge_lands_the_work_and_retires_the_seat() {
+fn a_clean_merge_lands_the_work_and_retires_the_worktree() {
     let (_ws, spec) = open_repo("merge");
     ok(&spec, &["worktree", "mint", "feature"]);
     let wt = spec.parent().unwrap().join("spec-worktrees/feature");
@@ -265,7 +265,7 @@ fn a_clean_merge_lands_the_work_and_retires_the_seat() {
 }
 
 #[test]
-fn a_conflicted_merge_stops_and_keeps_the_seat() {
+fn a_conflicted_merge_stops_and_keeps_the_worktree() {
     let (_ws, spec) = open_repo("conflict");
     ok(&spec, &["worktree", "mint", "feature"]);
     let wt = spec.parent().unwrap().join("spec-worktrees/feature");
@@ -290,7 +290,7 @@ fn a_conflicted_merge_stops_and_keeps_the_seat() {
 }
 
 #[test]
-fn a_seat_lands_only_after_its_plan_closes() {
+fn a_worktree_lands_only_after_its_plan_closes() {
     let (_ws, spec) = open_repo("plan-gate");
     ok(&spec, &["worktree", "mint", "feat", "--plan", "feat"]);
     let wt = spec.parent().unwrap().join("spec-worktrees/feat");
@@ -302,7 +302,7 @@ fn a_seat_lands_only_after_its_plan_closes() {
     assert!(!success, "an open plan never merges");
     assert!(err.contains("is draft"), "{err}");
     assert!(err.contains("plan close"), "{err}");
-    assert!(wt.is_dir(), "the seat stays");
+    assert!(wt.is_dir(), "the worktree stays");
 
     ok(&wt, &["plan", "close"]);
     git(&wt, &["add", "-A"]);
@@ -375,15 +375,15 @@ fn cascade_repo(tag: &str) -> (PathBuf, PathBuf, PathBuf) {
     git(&spec, &["config", "commit.gpgsign", "false"]);
     git(&spec, &["add", "-A"]);
     git(&spec, &["commit", "-qm", "seed"]);
-    // The bootstrap seat maps the real member so the save records its
-    // baseline — the seat's own relative `../backend` resolves nowhere.
-    seat_save(&spec, "boot", &[("backend", &backend)], "seed");
+    // The bootstrap worktree maps the real member so the save records its
+    // baseline — its own relative `../backend` resolves nowhere.
+    worktree_save(&spec, "boot", &[("backend", &backend)], "seed");
     (ws, spec, backend)
 }
 
 #[test]
-fn a_bound_seats_own_members_are_not_rot_to_check() {
-    let (ws, spec, backend) = cascade_repo("seatown");
+fn a_bound_worktrees_own_members_are_not_rot_to_check() {
+    let (ws, spec, backend) = cascade_repo("bindown");
     let bare = ws.join("origin.git");
     git(&ws, &["init", "-q", "--bare", bare.to_str().unwrap()]);
     git(&backend, &["remote", "add", "origin", bare.to_str().unwrap()]);
@@ -391,17 +391,17 @@ fn a_bound_seats_own_members_are_not_rot_to_check() {
     ok(&spec, &["worktree", "mint", "own", "--repos", "backend"]);
     let wt = spec.parent().unwrap().join("spec-worktrees/own");
 
-    // Inside the seat the overlay maps the member to its own worktree —
+    // Inside the worktree the overlay maps the member to its own worktree —
     // written by the mint, the working map, not a stale row.
     let out = ok(&wt, &["check"]);
     assert!(
         !out.contains("linked worktree"),
-        "the seat's own member worktree graded as rot:\n{out}"
+        "the worktree's own member worktree graded as rot:\n{out}"
     );
 }
 
 #[test]
-fn the_cascade_mints_member_worktrees_and_the_seat_overlay() {
+fn the_cascade_mints_member_worktrees_and_the_overlay() {
     let (ws, spec, backend) = cascade_repo("cascade");
     let bare = ws.join("origin.git");
     git(&ws, &["init", "-q", "--bare", bare.to_str().unwrap()]);
@@ -413,8 +413,8 @@ fn the_cascade_mints_member_worktrees_and_the_seat_overlay() {
     let bwt = backend.parent().unwrap().join("backend-worktrees/feat");
     assert!(bwt.is_dir(), "the member worktree cascaded");
 
-    // The seat's overlay points the member at its worktree — resolution
-    // inside the seat sees the cascade, not someone else's checkout.
+    // The overlay points the member at its worktree — resolution inside
+    // the worktree sees the cascade, not someone else's checkout.
     let overlay = fs::read_to_string(wt.join("archi/repos.local.toml")).unwrap();
     assert!(overlay.contains("backend-worktrees"), "{overlay}");
     let ls = ok(&wt, &["repo", "ls"]);
@@ -425,8 +425,8 @@ fn the_cascade_mints_member_worktrees_and_the_seat_overlay() {
     assert!(ls.contains("(base main) — ok"), "{ls}");
 
     // Close, the contract's way: the spec saves mid-unit while member code
-    // is in flight (the save names the omission), the member commits, the
-    // seat anchors the fresh tip — then member work goes by push, spec by
+    // is in flight (the save names the omission), the member commits,
+    // the worktree anchors the fresh tip — then member work goes by push, spec by
     // local merge, all retired.
     fs::write(bwt.join("src/lib.rs"), "pub fn serve() { /* new */ }\n").unwrap();
     fs::write(
@@ -457,7 +457,7 @@ fn the_cascade_mints_member_worktrees_and_the_seat_overlay() {
 }
 
 #[test]
-fn an_unanchored_member_refuses_the_landing_until_the_seat_anchors() {
+fn an_unanchored_member_refuses_the_landing_until_the_worktree_anchors() {
     let (ws, spec, backend) = cascade_repo("anchor-gate");
     let bare = ws.join("origin.git");
     git(&ws, &["init", "-q", "--bare", bare.to_str().unwrap()]);
@@ -491,12 +491,12 @@ fn an_unanchored_member_refuses_the_landing_until_the_seat_anchors() {
     );
     assert!(err.contains("is past the recorded baseline none"), "{err}");
     assert!(err.contains("archi version anchor --repo backend --project"), "{err}");
-    assert!(err.contains(wt.to_str().unwrap()), "the recipe names the seat: {err}");
+    assert!(err.contains(wt.to_str().unwrap()), "the recipe names the worktree: {err}");
     assert!(err.contains("then re-run the merge"), "{err}");
     assert!(bwt.is_dir(), "nothing pushed, nothing retired");
 
-    // The repair: the seat is bound so anchor passes the guard, and the
-    // member resolves through the seat overlay to the member worktree.
+    // The repair: the worktree is bound so anchor passes the guard, and
+    // the member resolves through its overlay to the member worktree.
     let out = ok(&wt, &["version", "anchor", "--repo", "backend"]);
     assert!(out.contains(&format!("baseline backend at {tip}")), "{out}");
     git(&wt, &["add", "-A"]);
@@ -576,10 +576,10 @@ fn a_stale_but_reachable_auto_base_notes_how_far_behind() {
 }
 
 #[test]
-fn a_seat_extension_resolves_members_from_the_seat() {
-    // The unit lives in its seat: member declarations and anchors made
+fn an_extension_resolves_members_from_the_worktree() {
+    // The unit lives in its worktree: member declarations and anchors made
     // there exist on no other branch — the mid-unit extension must read
-    // them from the seat, not the primary checkout.
+    // them from the worktree, not the primary checkout.
     let (ws, spec) = open_repo("extend");
     let svc = ws.join("svc");
     member_repo(&svc);
@@ -597,7 +597,7 @@ fn a_seat_extension_resolves_members_from_the_seat() {
     assert!(out.contains("member svc:"), "{out}");
     assert!(out.contains("(base main)"), "{out}");
     let swt = svc.parent().unwrap().join("svc-worktrees/unit");
-    assert!(swt.is_dir(), "the member worktree cascaded from the seat");
+    assert!(swt.is_dir(), "the member worktree cascaded from the worktree");
     let ls = ok(&wt, &["worktree", "ls"]);
     assert!(ls.contains("member svc:"), "{ls}");
     assert!(ls.contains("— ok"), "{ls}");
@@ -643,7 +643,7 @@ fn a_member_mapped_onto_a_linked_worktree_refuses_the_mint() {
     map_overlay(&spec, "backend", &scratch);
 
     let (success, _out, err) = run(&spec, &["worktree", "mint", "feat", "--repos", "backend"]);
-    assert!(!success, "a stale overlay row never seeds a seat");
+    assert!(!success, "a stale overlay row never seeds a worktree");
     assert!(err.contains("member backend: the mapped checkout"), "{err}");
     assert!(err.contains(scratch.to_str().unwrap()), "{err}");
     assert!(err.contains("is a linked worktree standing on `dead/feature`"), "{err}");
@@ -653,8 +653,8 @@ fn a_member_mapped_onto_a_linked_worktree_refuses_the_mint() {
         "the repair names the main checkout: {err}"
     );
     assert!(err.contains("--base backend="), "{err}");
-    // the full-rollback contract: no seat, no branches, no registry row
-    assert!(!spec.parent().unwrap().join("spec-worktrees/feat").exists(), "no seat");
+    // the full-rollback contract: no worktree, no branches, no registry row
+    assert!(!spec.parent().unwrap().join("spec-worktrees/feat").exists(), "no worktree");
     assert!(!has_branch(&spec, "archi/feat"), "no spec branch");
     assert!(!has_branch(&backend, "archi/feat"), "no member branch");
     let ls = ok(&spec, &["worktree", "ls"]);
@@ -682,7 +682,7 @@ fn an_explicit_base_skips_the_gate_and_placement_anchors_on_the_main_checkout() 
         !ws.join("backend-scratch-worktrees").exists(),
         "nothing lands beside the scratch path"
     );
-    // the seat overlay points the member at the anchored worktree
+    // the overlay points the member at the anchored worktree
     let wt = spec.parent().unwrap().join("spec-worktrees/feat");
     let overlay = fs::read_to_string(wt.join("archi/repos.local.toml")).unwrap();
     assert!(overlay.contains("backend-worktrees"), "{overlay}");
@@ -723,12 +723,12 @@ fn a_re_mint_extension_attaches_without_the_gate() {
     let bwt = backend.parent().unwrap().join("backend-worktrees/feat");
     assert!(bwt.is_dir());
 
-    // the seat's own overlay maps the member at its member worktree — a
+    // the worktree's own overlay maps the member at its member worktree — a
     // linked checkout by construction; the re-mint attaches in silence,
     // the gate never fires on an already-bound member
     let (success, out, err) = run(&wt, &["worktree", "mint", "feat", "--repos", "backend"]);
     assert!(success, "a re-mint extension attaches: {err}");
-    assert!(out.contains("seated:"), "{out}");
+    assert!(out.contains("— it carries"), "{out}");
     assert!(!out.contains("linked worktree"), "no gate output: {out}");
     assert!(!err.contains("linked worktree"), "no gate output: {err}");
     assert!(out.contains("member backend:"), "the binding still carries the member: {out}");
@@ -751,7 +751,7 @@ fn a_baseline_off_the_branch_refuses_with_the_base_escape() {
     .unwrap();
     git(&spec, &["add", "-A"]);
     git(&spec, &["commit", "-qm", "model grows"]);
-    seat_save(&spec, "boot2", &[("backend", &backend)], "v2 with side baseline");
+    worktree_save(&spec, "boot2", &[("backend", &backend)], "v2 with side baseline");
     let baseline = head(&backend);
     git(&backend, &["switch", "-q", "main"]);
 
@@ -789,7 +789,7 @@ fn a_missing_baseline_names_both_repairs() {
     git(&spec, &["config", "user.name", "t"]);
     git(&spec, &["add", "-A"]);
     git(&spec, &["commit", "-qm", "seed"]);
-    seat_save(&spec, "boot", &[], "seed");
+    worktree_save(&spec, "boot", &[], "seed");
     spec_project(&spec, "[[repo]]\nname = \"backend\"\npath = \"../backend\"\n");
     let (success, _out, err) = run(&spec, &["worktree", "mint", "feat", "--repos", "backend"]);
     assert!(!success);
@@ -826,7 +826,7 @@ fn a_refused_push_keeps_the_member_until_repaired() {
     let wt = spec.parent().unwrap().join("spec-worktrees/feat");
     let bwt = backend.parent().unwrap().join("backend-worktrees/feat");
     // member work lands the contract's way — save mid-flight, commit,
-    // anchor in the seat — so the landing gate passes and the push itself
+    // anchor in the worktree — so the landing gate passes and the push itself
     // is what refuses below
     fs::write(bwt.join("note.txt"), "work\n").unwrap();
     fs::write(
@@ -876,7 +876,7 @@ fn a_doctored_plan_pin_surfaces_as_a_stale_pin_finding() {
     let ws = scratch("stale-plan");
     let spec = ws.join("spec");
     spec_project(&spec, "");
-    let spec = util::seat(&spec);
+    let spec = util::worktree(&spec);
     ok(&spec, &["version", "save", "-m", "seed"]);
     ok(&spec, &["plan", "use", "auth"]);
     let state_path = spec.join("archi/plans/auth/state.json");
@@ -898,7 +898,7 @@ fn a_doctored_session_stamp_surfaces_as_a_stale_stamp_finding() {
     let ws = scratch("stale-session");
     let spec = ws.join("spec");
     spec_project(&spec, "");
-    let spec = util::seat(&spec);
+    let spec = util::worktree(&spec);
     ok(&spec, &["version", "save", "-m", "seed"]);
     let round = spec.join("archi/stress/round");
     fs::create_dir_all(&round).unwrap();
@@ -925,20 +925,20 @@ fn a_doctored_session_stamp_surfaces_as_a_stale_stamp_finding() {
 }
 
 #[test]
-fn a_dirty_spec_outside_a_seat_fails_check_and_build() {
+fn a_dirty_spec_outside_a_worktree_fails_check_and_build() {
     let (_ws, spec) = open_repo("verdict");
     // clean unbound tree: both verdicts answer
     ok(&spec, &["check"]);
     ok(&spec, &["build"]);
-    // an ungoverned spec edit: both refuse with the seat recipe
+    // an ungoverned spec edit: both refuse with the worktree recipe
     fs::write(
         spec.join("archi/src/model.arch"),
         format!("{MODEL}def node Rogue:\n  port x\n"),
     )
     .unwrap();
-    for verb in ["check", "build"] {
-        let (success, _out, err) = run(&spec, &[verb]);
-        assert!(!success, "{verb} blessed ungoverned work");
+    for command in ["check", "build"] {
+        let (success, _out, err) = run(&spec, &[command]);
+        assert!(!success, "{command} blessed ungoverned work");
         assert!(err.contains("uncommitted"), "{err}");
         assert!(err.contains("model.arch"), "{err}");
         assert!(err.contains("worktree mint"), "{err}");
@@ -948,12 +948,12 @@ fn a_dirty_spec_outside_a_seat_fails_check_and_build() {
     git(&spec, &["commit", "-qm", "grow"]);
     fs::write(spec.join("notes.md"), "scratch\n").unwrap();
     ok(&spec, &["check"]);
-    // the same edit inside a seat is governed work: check answers
+    // the same edit inside a worktree is governed work: check answers
     ok(&spec, &["worktree", "mint", "grow"]);
     let wt = spec.parent().unwrap().join("spec-worktrees/grow");
     fs::write(
         wt.join("archi/src/model.arch"),
-        format!("{MODEL}def node Seated:\n  port x\n"),
+        format!("{MODEL}def node Governed:\n  port x\n"),
     )
     .unwrap();
     ok(&wt, &["check"]);

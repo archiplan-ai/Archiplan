@@ -101,7 +101,7 @@ pub struct Session {
     pub version: Option<(String, usize)>,
     /// The closing version id (empty while open) and its line.
     pub closed: Option<(String, usize)>,
-    /// The closing version's content hash, stamped by the closing verbs;
+    /// The closing version's content hash, stamped by the closing commands;
     /// absent on pre-hash records.
     pub version_hash: Option<(String, usize)>,
     /// Rounds folded into this record (`## Folded:` sections), in file order.

@@ -192,7 +192,7 @@ pub fn map_member(project_root: &Path, name: &str, dir: &str) -> Result<Member, 
 
 /// The write-time gate on `repo map`: a mapping must name the repo's main
 /// checkout. A linked worktree's row outlives the worktree — the checkout
-/// retires, the row stands, and a later `worktree mint` bases seats on
+/// retires, the row stands, and a later `worktree mint` bases worktrees on
 /// whatever dead branch stood there. Detection is git's own frame: in a
 /// linked worktree the git-dir sits under `<common>/worktrees/<name>`, so
 /// git-dir and git-common-dir disagree; in a main checkout they coincide.
@@ -531,11 +531,11 @@ impl fmt::Display for MemberFinding {
 /// declared member. Never errors and never crashes on an unreachable
 /// member — each probe degrades to its own finding or to silence — and a
 /// resolve fault (unparsable overlay, ghost row) stays silent here: every
-/// repo and link verb already raises it loudly. `seat_members` are the
+/// repo and link command already raises it loudly. `bound_members` are the
 /// current checkout's own member worktrees (its registry binding): rows
-/// pointing there are the seat's working map, written by the mint — the
+/// pointing there are the worktree's working map, written by the mint — the
 /// linked-worktree probe never grades them as rot.
-pub fn check(project_root: &Path, seat_members: &[PathBuf]) -> Vec<MemberFinding> {
+pub fn check(project_root: &Path, bound_members: &[PathBuf]) -> Vec<MemberFinding> {
     let Ok(set) = MemberSet::resolve(project_root) else {
         return Vec::new();
     };
@@ -562,11 +562,11 @@ pub fn check(project_root: &Path, seat_members: &[PathBuf]) -> Vec<MemberFinding
             });
             continue;
         };
-        let seat_owned = {
+        let bound_owned = {
             let canonical = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
-            seat_members.iter().any(|p| *p == canonical)
+            bound_members.iter().any(|p| *p == canonical)
         };
-        if !seat_owned
+        if !bound_owned
             && let Some(wt) = linked_worktree(root)
         {
             out.push(MemberFinding::LinkedWorktreeMapping {

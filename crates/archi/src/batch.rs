@@ -1,7 +1,7 @@
-//! `archi batch` — many verbs, one invocation, zero drift.
+//! `archi batch` — many commands, one invocation, zero drift.
 //!
 //! Commands arrive on stdin, one per line; each line is split shell-style
-//! and re-executed as the running binary itself, so every verb the CLI
+//! and re-executed as the running binary itself, so every command the CLI
 //! grows is batchable the day it lands — there is no second dispatch
 //! surface to hardcode or to rot. Execution is fail-fast: the first
 //! non-zero line stops the batch with its line number; what ran, ran —

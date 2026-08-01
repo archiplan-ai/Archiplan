@@ -1,7 +1,7 @@
-//! Doc skeletons come from verbs (`archi/requirements/spec-docs/
+//! Doc skeletons come from commands (`archi/requirements/spec-docs/
 //! skeletons-come-from-a-verb.md`): `req add|rm`, `stress open|add|rm`.
 //!
-//! The split is the settled boundary — records through verbs, prose by
+//! The split is the settled boundary — records through commands, prose by
 //! editing. A mint writes the full schema shape with every machine field
 //! decided by an explicit parameter or derived from an invariant (never a
 //! default), and leaves the text slots empty: the schema's own E_DOC

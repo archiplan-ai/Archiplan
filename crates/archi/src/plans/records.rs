@@ -2,14 +2,14 @@
 //! apart in `state.json`
 //! (`archi/requirements/planning/a-plan-is-a-folder-of-records.md`).
 //!
-//! Content is the files — there is no write verb for prose. The charter
+//! Content is the files — there is no write command for prose. The charter
 //! `<name>.md` carries the envelope: problem prose, `## Stack` bullets
 //! with provenance, `## Architecture` bullets for summary lines and stack
 //! mappings. Each task is `t<N>-<node-slug>.md`: `node` and hand-curated
 //! `owns` in the frontmatter, description prose, then `## Spec`,
 //! `## Inputs`, `## Outputs`, `## Stack` bullets and `## Verifications`
 //! keyed by owned slug. `scenarios.md` is a bullet list. `state.json`
-//! alone moves through verbs — the mint writes it, `save_state` rewrites
+//! alone moves through commands — the mint writes it, `save_state` rewrites
 //! it, and nothing else in the folder is machine-written past its mint.
 //!
 //! Parsing is tolerant on whitespace and strict on shape: an unknown
@@ -78,7 +78,7 @@ pub(crate) fn task_path(root: &Path, name: &str, id: &str) -> Option<PathBuf> {
 
 // ---- state.json --------------------------------------------------------------
 
-/// The lifecycle file: exactly the fields verbs move — state, waves, the
+/// The lifecycle file: exactly the fields commands move — state, waves, the
 /// latches, the pin. Unknown fields refuse: this is the one machine-owned
 /// file of the folder, and drift in it cannot be tolerated silently.
 #[derive(Serialize, Deserialize)]
@@ -101,7 +101,7 @@ struct StateFile {
 }
 
 /// Persist the lifecycle fields of a record plan — the only write any
-/// verb performs on the folder past its mint.
+/// command performs on the folder past its mint.
 pub(crate) fn write_state(root: &Path, plan: &Plan) -> Result<(), String> {
     let state = StateFile {
         state: plan.state,

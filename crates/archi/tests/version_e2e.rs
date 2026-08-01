@@ -31,7 +31,7 @@ fn temp_project() -> PathBuf {
     )
     .unwrap();
     fs::write(dir.join("archi/src/model.arch"), MODEL).unwrap();
-    util::seat(&dir)
+    util::worktree(&dir)
 }
 
 /// An open stress session pinned to `version`, with one stressor so the

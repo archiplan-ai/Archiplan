@@ -15,10 +15,10 @@
 //! `spec_refs`, `owns`, `verifications`, scenarios — lives in the record
 //! folder's markdown files ([`records`]) and is edited there directly,
 //! exactly as requirements are edited in their markdown; lifecycle state
-//! moves only through verbs, into `state.json`, and every verb
+//! moves only through commands, into `state.json`, and every command
 //! re-validates the files on load, so a hand edit cannot drift silently.
 //! A legacy `plan.json` stays readable forever — read-only: its lifecycle
-//! verbs work, its authoring surface refuses
+//! commands work, its authoring surface refuses
 //! (`archi/requirements/planning/a-plan-is-a-folder-of-records.md`).
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -243,7 +243,7 @@ pub(crate) fn load_plan(root: &Path, name: &str) -> Result<Plan, String> {
 fn store_plan(root: &Path, plan: &Plan) -> Result<(), String> {
     if records::is_record(root, &plan.name) {
         return Err(
-            "a record plan's content is its files — edit them; verbs move lifecycle alone".into(),
+            "a record plan's content is its files — edit them; commands move lifecycle alone".into(),
         );
     }
     let dir = plan_dir(root, &plan.name);
@@ -337,7 +337,7 @@ fn compile_pinned(root: &Path, version: &str) -> Result<Workspace, String> {
     docs::compile_version(root, &archive, version)
 }
 
-// ---- verbs: use, repin, task add --------------------------------------------
+// ---- commands: use, repin, task add --------------------------------------------
 
 /// The outcome of `archi plan use`.
 #[derive(Debug)]
@@ -351,7 +351,7 @@ pub enum Used {
 /// `archi plan use <name>`: switch to a named plan, minting an empty
 /// record folder pinned to the current spec version on first use —
 /// charter and scenarios skeletons for the author, `state.json` for the
-/// verbs. Switching reaches both forms; re-`use` of an existing plan is
+/// commands. Switching reaches both forms; re-`use` of an existing plan is
 /// a switch, as always.
 pub fn use_plan(root: &Path, model: &Model, name: &str) -> Result<Used, String> {
     validate_name(name)?;
@@ -429,7 +429,7 @@ pub(crate) fn check(root: &Path) -> Result<Vec<PlanFinding>, String> {
     Ok(out)
 }
 
-/// The refusal every content-writing verb meets on a legacy plan: the
+/// The refusal every content-writing command meets on a legacy plan: the
 /// old json form is history — readable forever, never grown.
 const LEGACY_READ_ONLY: &str =
     "legacy plan.json is read-only — plans author as record folders now";
@@ -472,7 +472,7 @@ pub fn task_add(root: &Path, node: &str, description: Option<&str>) -> Result<Ta
     if let Some(t) = plan.tasks.iter().find(|t| t.node == node) {
         // The node is already cut. Byte-equal to what this mint would
         // write means nothing happened yet — converge; anything else is
-        // authored content this verb must not touch.
+        // authored content this command must not touch.
         let path = records::task_path(root, &plan.name, &t.id)
             .ok_or_else(|| format!("no file carries `{}`", t.id))?;
         let on_disk = fs::read_to_string(&path)
@@ -776,7 +776,7 @@ pub fn show(root: &Path, model: &Model) -> Result<(Plan, PlanReport), String> {
 }
 
 /// `archi plan show <name>`: the same view for a named plan — a pure read
-/// that never consults or rewrites `.current`, so any checkout, seated or
+/// that never consults or rewrites `.current`, so any checkout, bound or
 /// not, reads any stored plan. An unknown name lists what exists.
 pub fn show_named(root: &Path, model: &Model, name: &str) -> Result<(Plan, PlanReport), String> {
     if !plan_path(root, name).exists() && !records::is_record(root, name) {
@@ -798,7 +798,7 @@ pub(crate) fn verify_plan(root: &Path, live: &Model, plan: &Plan) -> Result<Plan
     let ws = compile_pinned(root, &plan.version)?;
     let pinned = ws.model();
 
-    // Latch order — hand edits cannot outrun the verbs.
+    // Latch order — hand edits cannot outrun the commands.
     if plan.scenarios_closed && !plan.scenarios_displayed {
         errors.push("scenarios_closed without scenarios_displayed — the latches are ordered".into());
     }
@@ -1490,7 +1490,7 @@ mod tests {
 
     /// The record form's "full save": author by rewriting the files —
     /// exactly what a human does between mints. Lifecycle is not
-    /// touched; state.json stays the verbs' alone.
+    /// touched; state.json stays the commands' alone.
     fn store_authored(root: &Path, plan: &Plan) {
         let dir = plan_dir(root, &plan.name);
         fs::write(
@@ -2116,7 +2116,7 @@ mod tests {
             "pub struct Store;\nimpl Store {\n    pub fn put(&mut self) {}\n}\n",
         );
 
-        // Hand-construct the old form — no verb mints it anymore.
+        // Hand-construct the old form — no command mints it anymore.
         let legacy = Plan {
             name: "old".into(),
             version: v1,
@@ -2153,7 +2153,7 @@ mod tests {
             Used::Switched(p) if p.problem == "kept as it was"
         ));
 
-        // The form only shrinks: the mint verbs refuse.
+        // The form only shrinks: the mint commands refuse.
         let err = task_add(&root, "Auth", None).unwrap_err();
         assert!(err.contains("read-only"), "{err}");
         let err = task_rm(&root, "t1").unwrap_err();
