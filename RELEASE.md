@@ -13,6 +13,23 @@ downloadable and that is the migration model.
 
 ## Releases
 
+### 0.1.16
+
+The briefing speaks plain technical English. Every skill, the README and
+the CLI messages drop the invented jargon: a seat is a worktree, a verb
+is a command, the envelope is the charter. The instructions stay the
+same, step for step: the same poll points, the same gates, the same
+refusal recipes, the same sub-agent contract. The methodology terms
+stay: think hyperliminally, the materialization gate, a revealed
+priority. The discipline reads as it is: a mutation runs only inside a
+bound worktree.
+
+Eleven test names follow the vocabulary. The requirement docs update
+their citations, and the ten anchored links move to the new symbols
+through the link commands. The journal stays append-only. No command,
+gate, format or finding moves. A 0.1.15 tree brought current with
+`archi sync-skills` reports every skill as `updated`.
+
 ### 0.1.15
 
 The opening learns the standing seat. When `archi status` shows the
