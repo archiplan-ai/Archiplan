@@ -18,10 +18,9 @@ duplicate implementation.
 
 ## Resolution
 
-Two answers, one per layer. The command: a bare `--base <branch>` names
-the home fork point, and every mint report prints the branch and commit
-the home branch forked from — a wrong base becomes visible in the same
-breath it happens. The briefing: new work that builds on an unlanded
-unit is a poll, never a silent mint — continue in that unit's worktree,
-fork from its branch with `--base`, or land it first. Derived
-`the-mint-names-its-fork`.
+The incident never touched the command — the branch came from raw git.
+The answer is discipline, in the briefing: the mint is the only branch
+maker, the base is named aloud before every fork, and new work that
+builds on an unlanded unit is a poll, never the agent's own call —
+continue in that unit's worktree, mint from inside it, or land it
+first. Derived `a-fork-is-a-spoken-choice`.
