@@ -67,7 +67,11 @@ standing worktree, or work that may depend on another unit — confirm it
 through the poll tool: stay in this worktree and the member worktrees
 `archi status` prints, or attach another one. A task that depends on
 unlanded work standing elsewhere is a question to the user, never your
-own call. Branches come only from the mint cascade.
+own call. Branches come only from the mint cascade. Never run a raw
+`git checkout`, `git switch` or `git checkout -b` yourself, in the home
+worktree or in a member worktree. The worktrees already stand on the
+branches of the unit. When the ground looks wrong, that is the poll
+above, not a checkout.
 
 ## Step 1 — Pick the plan
 
@@ -229,5 +233,8 @@ Sub-agents cannot prompt for permission on their own.
   latches), and least of all the version archive or the link journal. The
   authored plan fields were the business of `/archi-plan`, through its
   commands, not of this skill.
+- **No raw checkouts.** The orchestrator never creates or switches a
+  branch by hand. The mint cascade is the only branch maker, and the
+  worktrees stand on the branches of the unit.
 - **Code lands only in worktrees** — the worktree of the plan and its
   member worktrees, never a primary checkout.
