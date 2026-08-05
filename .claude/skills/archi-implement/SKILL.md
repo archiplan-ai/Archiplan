@@ -62,6 +62,13 @@ it:
 Edit member code only in the member worktree paths that `archi status`
 prints.
 
+Before the first wave, when the ground is ambiguous — more than one
+standing worktree, or work that may depend on another unit — confirm it
+through the poll tool: stay in this worktree and the member worktrees
+`archi status` prints, or attach another one. A task that depends on
+unlanded work standing elsewhere is a question to the user, never your
+own call. Branches come only from the mint cascade.
+
 ## Step 1 — Pick the plan
 
 ```
@@ -189,6 +196,8 @@ working directory of the worktree, and the member worktree path when the
 outputs of the task live in a member repo. Include the task id, its
 `archi plan task show` brief verbatim, and the per-task contract: TDD,
 context7 when available, and implementation inside the declared outputs.
+Every sub-agent prompt forbids branch creation and branch switching —
+sub-agents write code on the branches the worktrees already stand on.
 Sub-agents write code and tests only. Every `plan` and `link` command stays
 with you, the orchestrator. Wait for every sub-agent before you call
 `archi plan next`.

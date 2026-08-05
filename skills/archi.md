@@ -134,7 +134,14 @@ start of every working session, before any mutation.
    then prints the path. `cd` into it yourself, because the CLI never
    changes your directory. A mutating command in an unbound checkout refuses
    with the same choices: the worktrees that stand, or the command that
-   creates one.
+   creates one. The mint is the only branch maker. Never create a
+   branch with raw `git`, in the home repo or in a member. Name the
+   base aloud before the mint: the new branch grows from the checkout
+   the mint runs from, so tell the user which branch that is. New work
+   that builds on an unlanded unit is one poll question, never your own
+   call. Three options: **continue the unit in that worktree** — or
+   **mint from inside that worktree**, so the fork grows from its
+   branch — or **land that unit first** and mint from the landed base.
 
 Multi-repo work cascades. Derive the participating members from the spec
 and the plan through task outputs, spec refs and links. Then extend the
