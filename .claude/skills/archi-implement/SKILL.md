@@ -59,9 +59,6 @@ it:
 - **"not a git repository"** is a full stop. Follow the opening steps of
   the `archi` skill: create or cancel.
 
-Edit member code only in the member worktree paths that `archi status`
-prints.
-
 Before the first wave, when the ground is ambiguous — more than one
 standing worktree, or work that may depend on another unit — confirm it
 through the poll tool: stay in this worktree and the member worktrees
