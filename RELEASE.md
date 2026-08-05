@@ -13,6 +13,28 @@ downloadable and that is the migration model.
 
 ## Releases
 
+### 0.1.17
+
+A fork is a spoken choice. The briefing forbids silent branches: the
+mint is the only branch maker, and a raw `git checkout`, `git switch`
+or `git checkout -b` is forbidden for the orchestrator and for the
+sub-agents, in the home worktree and in the members. The agent names
+the base aloud before every mint. New work that builds on an unlanded
+unit is one poll question with three options: continue in that unit's
+worktree, mint from inside it, or land it first. Before the first wave
+the implement skill confirms the ground when it is ambiguous, and
+member code stays in the member worktree paths that `archi status`
+prints — the rule stands in Step 0 and in the sub-agent contract.
+
+The root cause was a field incident: an agent decided that two
+independent specs mean two independent code slices, branched from the
+default base by hand in a member repo, and said nothing. The dependency
+surfaced later as missing code.
+
+Skill-only. `archi sync-skills` reports the `archi` and
+`archi-implement` skills as `updated`. Every other file stays
+byte-identical.
+
 ### 0.1.16
 
 The briefing speaks plain technical English. Every skill, the README and
