@@ -526,7 +526,7 @@ fn member_baselines(root: &Path) -> (BTreeMap<String, Baseline>, Vec<String>) {
         };
         match (ctx.clean(), ctx.head()) {
             (Some(true), Some(sha)) => {
-                notes.push(format!("baseline {}: {}", m.name, &sha[..sha.len().min(7)]));
+                notes.push(format!("baseline {}: {}", m.name, crate::gitcmd::sha7(&sha)));
                 commits.insert(
                     m.name.clone(),
                     Baseline {

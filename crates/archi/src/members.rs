@@ -25,6 +25,8 @@ use std::process::Command;
 
 use serde::Serialize;
 
+use crate::gitcmd;
+
 /// The implicit home member's name. Renders as `home` in reports; the empty
 /// string keeps unqualified refs and pre-member journal events meaning home
 /// without a migration.
@@ -199,8 +201,8 @@ pub fn map_member(project_root: &Path, name: &str, dir: &str) -> Result<Member, 
 /// A path that is no git checkout at all is not this gate's business —
 /// `None`, today's behavior untouched.
 fn linked_worktree_refusal(dir: &str, target: &Path, member: &str) -> Option<String> {
-    let wt = linked_worktree(target)?;
-    let LinkedWorktree { branch, main } = wt;
+    let wt = gitcmd::linked_worktree(target)?;
+    let (branch, main) = (wt.branch, wt.main.display());
     Some(format!(
         "{dir} is a linked worktree of the repo, standing on `{branch}` — a mapping \
          outlives the worktree and poisons future mints. The main checkout is {main}: \
@@ -208,48 +210,10 @@ fn linked_worktree_refusal(dir: &str, target: &Path, member: &str) -> Option<Str
     ))
 }
 
-/// A linked worktree seen at `target`: the branch standing in it and the
-/// repository's main checkout. `None` for a main checkout — and for a path
-/// that is no git checkout at all, which is not this probe's business.
-struct LinkedWorktree {
-    branch: String,
-    main: String,
-}
-
-fn linked_worktree(target: &Path) -> Option<LinkedWorktree> {
-    // git-dir may come back relative to the queried directory; the common
-    // dir is asked absolute. Canonicalized, the two agree exactly when the
-    // checkout is the main one (symlinked tmp dirs included).
-    let canon = |s: &str| {
-        let p = PathBuf::from(s);
-        let p = if p.is_relative() { target.join(p) } else { p };
-        fs::canonicalize(&p).unwrap_or(p)
-    };
-    let git_dir = canon(&git_out(target, &["rev-parse", "--git-dir"])?);
-    let common = canon(&git_out(target, &["rev-parse", "--path-format=absolute", "--git-common-dir"])?);
-    if git_dir == common {
-        return None;
-    }
-    let branch = git_out(target, &["rev-parse", "--abbrev-ref", "HEAD"])
-        .unwrap_or_else(|| "HEAD".to_string());
-    // The first `worktree` entry of the porcelain listing is the main
-    // checkout — the ready repair.
-    let main = git_out(target, &["worktree", "list", "--porcelain"])
-        .and_then(|list| {
-            list.lines()
-                .find_map(|l| l.strip_prefix("worktree ").map(str::to_string))
-        })
-        .unwrap_or_else(|| common.parent().unwrap_or(&common).display().to_string());
-    Some(LinkedWorktree { branch, main })
-}
-
 /// One git consultation: trimmed stdout on success, `None` on any failure —
 /// the degrade every probe rides.
 fn git_out(dir: &Path, args: &[&str]) -> Option<String> {
-    let out = Command::new("git").arg("-C").arg(dir).args(args).output().ok()?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    gitcmd::out(dir, args)
 }
 
 pub(crate) fn toml_string(s: &str) -> String {
@@ -273,18 +237,9 @@ impl GitContext {
     /// The context of the repository containing `dir`, or `None` when `dir`
     /// is not inside a git work tree (or git is unavailable).
     pub fn of(dir: &Path) -> Option<GitContext> {
-        let out = Command::new("git")
-            .arg("-C")
-            .arg(dir)
-            .args(["rev-parse", "--show-toplevel"])
-            .output()
-            .ok()?;
-        if !out.status.success() {
-            return None;
-        }
-        let top = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
-        let top = fs::canonicalize(&top).unwrap_or(top);
-        let dir_canon = fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+        let top = PathBuf::from(gitcmd::out(dir, &["rev-parse", "--show-toplevel"])?);
+        let top = gitcmd::canon(&top);
+        let dir_canon = gitcmd::canon(dir);
         let prefix = dir_canon
             .strip_prefix(&top)
             .ok()?
@@ -310,15 +265,7 @@ impl GitContext {
 
     /// HEAD's sha, when the repository has one.
     pub fn head(&self) -> Option<String> {
-        let out = Command::new("git")
-            .arg("-C")
-            .arg(&self.top)
-            .args(["rev-parse", "HEAD"])
-            .output()
-            .ok()?;
-        out.status.success().then(|| {
-            String::from_utf8_lossy(&out.stdout).trim().to_string()
-        })
+        gitcmd::out(&self.top, &["rev-parse", "HEAD"])
     }
 
     /// Whether the member's subtree is clean — scoped to the frame, so a
@@ -563,18 +510,18 @@ pub fn check(project_root: &Path, bound_members: &[PathBuf]) -> Vec<MemberFindin
             continue;
         };
         let bound_owned = {
-            let canonical = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+            let canonical = gitcmd::canon(root);
             bound_members.iter().any(|p| *p == canonical)
         };
         if !bound_owned
-            && let Some(wt) = linked_worktree(root)
+            && let Some(wt) = gitcmd::linked_worktree(root)
         {
             out.push(MemberFinding::LinkedWorktreeMapping {
                 member: m.name.clone(),
                 path: path.clone(),
                 source: source.clone(),
                 branch: wt.branch,
-                main: wt.main,
+                main: wt.main.display().to_string(),
             });
         }
         // Url drift — skipped entirely when either side is absent: a
@@ -605,7 +552,7 @@ pub fn check(project_root: &Path, bound_members: &[PathBuf]) -> Vec<MemberFindin
             if !o.status.success() || holders.trim().is_empty() {
                 out.push(MemberFinding::StrandedBaseline {
                     member: m.name.clone(),
-                    sha7: b.sha[..b.sha.len().min(7)].to_string(),
+                    sha7: gitcmd::sha7(&b.sha).to_string(),
                 });
             }
         }

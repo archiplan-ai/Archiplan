@@ -1519,13 +1519,7 @@ fn changed_files(
 /// instead of aborting the scan
 /// (`archi/requirements/multi-repo/an-unresolvable-baseline-says-so`).
 fn commit_present(ctx: &crate::members::GitContext, rev: &str) -> bool {
-    Command::new("git")
-        .arg("-C")
-        .arg(&ctx.top)
-        .args(["cat-file", "-e", &format!("{rev}^{{commit}}")])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    crate::gitcmd::out(&ctx.top, &["cat-file", "-e", &format!("{rev}^{{commit}}")]).is_some()
 }
 
 // ---- audit -----------------------------------------------------------------

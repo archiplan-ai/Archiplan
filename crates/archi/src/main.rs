@@ -49,6 +49,7 @@ mod addressing;
 mod axes;
 mod batch;
 mod docs;
+mod gitcmd;
 mod incidence;
 mod links;
 mod members;
