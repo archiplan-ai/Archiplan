@@ -59,6 +59,9 @@ it:
 - **"not a git repository"** is a full stop. Follow the opening steps of
   the `archi` skill: create or cancel.
 
+Edit member code only in the member worktree paths that `archi status`
+prints.
+
 Before the first wave, when the ground is ambiguous — more than one
 standing worktree, or work that may depend on another unit — confirm it
 through the poll tool: stay in this worktree and the member worktrees
@@ -198,7 +201,9 @@ outputs of the task live in a member repo. Include the task id, its
 `archi plan task show` brief verbatim, and the per-task contract: TDD,
 context7 when available, and implementation inside the declared outputs.
 Every sub-agent prompt forbids branch creation and branch switching —
-sub-agents write code on the branches the worktrees already stand on.
+sub-agents write code on the branches the worktrees already stand on,
+and edit member code only in the member worktree paths that
+`archi status` prints.
 Sub-agents write code and tests only. Every `plan` and `link` command stays
 with you, the orchestrator. Wait for every sub-agent before you call
 `archi plan next`.
