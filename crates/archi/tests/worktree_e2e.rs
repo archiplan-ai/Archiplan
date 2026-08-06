@@ -9,9 +9,8 @@ mod util;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
-static NEXT: AtomicUsize = AtomicUsize::new(0);
+use util::{git, ok, run};
 
 const MODEL: &str = "def conn wire := * -> *\n\
                      def node Gate:\n  port serve\n\
@@ -19,13 +18,7 @@ const MODEL: &str = "def conn wire := * -> *\n\
                      Gate.serve wire Ledger.keep\n";
 
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "archi-wt-e2e-{tag}-{}-{}",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::SeqCst)
-    ));
-    fs::create_dir_all(&dir).unwrap();
-    fs::canonicalize(&dir).unwrap()
+    util::scratch("archi-wt-e2e", tag)
 }
 
 fn spec_project(dir: &Path, manifest_extra: &str) {
@@ -36,40 +29,6 @@ fn spec_project(dir: &Path, manifest_extra: &str) {
     )
     .unwrap();
     fs::write(dir.join("archi/src/model.arch"), MODEL).unwrap();
-}
-
-fn git(dir: &Path, args: &[&str]) {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
-        .args(args)
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-}
-
-fn run(root: &Path, args: &[&str]) -> (bool, String, String) {
-    let out = Command::new(env!("CARGO_BIN_EXE_archi"))
-        .args(args)
-        .args(["--project", root.to_str().unwrap()])
-        .output()
-        .expect("archi runs");
-    (
-        out.status.success(),
-        String::from_utf8_lossy(&out.stdout).into_owned(),
-        String::from_utf8_lossy(&out.stderr).into_owned(),
-    )
-}
-
-fn ok(root: &Path, args: &[&str]) -> String {
-    let (success, stdout, stderr) = run(root, args);
-    assert!(success, "archi {args:?} failed:\n{stdout}\n{stderr}");
-    stdout
 }
 
 fn head(dir: &Path) -> String {

@@ -161,10 +161,38 @@ the asserted coverage of the refs that the delta presses:
   `link confirm` on the load-bearing candidates, and `link rm` on the
   incidental ones. A removal sticks. Then run `archi plan next` again.
 - It prints the next wave. Loop with it.
-- It prints the scenarios block. Go to Step 5.
+- It prints the cleanup block. The waves are done. Go to "The cleanup
+  wave".
 - It prints `DONE`. Stop.
 
 `archi link verify` must be clean before the wave closes.
+
+## The cleanup wave
+
+`plan next` printed the cleanup block. Dispatch **one** sub-agent with
+the sweep contract. Its write surface is the whole worktree. Its scope
+is the delta of the unit only: `git diff <base>..HEAD` in this
+worktree, and in the member worktrees when the unit cascades. The step
+never reaches outside that delta.
+
+The sweep contract, carried by the prompt of the sub-agent:
+
+a. Fold mechanisms born twice — a helper written in two files, a probe
+   duplicated across waves, copied test fixtures.
+b. Zero behavior change. Shipped strings stay byte-identical.
+c. The whole suite stays green with no assertion edits.
+d. Journal-anchored symbols survive as thin wrappers when a fold moves
+   them.
+
+An empty sweep is a one-line return, and nothing is committed. When the
+sweep changed anything: commit it, run `archi link verify`, and repin
+what the fold drifted with `archi link repin`. Only then run:
+
+```
+archi plan next
+```
+
+It prints the scenarios block. Go to Step 5.
 
 ## Step 5 — The scenarios step
 
@@ -225,6 +253,8 @@ Sub-agents cannot prompt for permission on their own.
 - **Capture seals each wave.** A wave does not advance until every
   pressed ref is covered. Confirm and prune the candidates. Never skip
   the gate.
+- **The scenarios bless folded code.** The cleanup wave runs before
+  them, and its sweep stays inside the delta of the unit.
 - **Every task runs in a sub-agent. There are no exceptions.** One Agent
   call per task, single-task waves included, all in one message, and you
   wait for every return. The orchestrator never writes task code inline.

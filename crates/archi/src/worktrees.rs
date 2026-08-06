@@ -15,9 +15,10 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde::{Deserialize, Serialize};
+
+use crate::gitcmd::{self, canon, out as git_out, run as git_run};
 
 /// The registry file, relative to the common git dir.
 const REGISTRY: &str = "archi/worktrees.toml";
@@ -28,38 +29,8 @@ pub fn branch_of(slug: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Git plumbing
-
-fn canon(p: &Path) -> PathBuf {
-    fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
-}
-
-/// Lenient query: `None` on any failure (no git, not a repo, bad rev).
-fn git_out(dir: &Path, args: &[&str]) -> Option<String> {
-    let out = Command::new("git").arg("-C").arg(dir).args(args).output().ok()?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
-}
-
-/// Loud mutation: `Err` carries git's stderr verbatim.
-fn git_run(dir: &Path, args: &[&str]) -> Result<String, String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .output()
-        .map_err(|e| format!("git {}: {e}", args.join(" ")))?;
-    if out.status.success() {
-        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
-    } else {
-        Err(format!(
-            "git {}: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&out.stderr).trim()
-        ))
-    }
-}
+// Git plumbing — the shapes live in [`crate::gitcmd`]; here only the
+// derivations this module owns.
 
 /// The work tree containing `dir`, canonicalized.
 pub fn toplevel(dir: &Path) -> Option<PathBuf> {
@@ -70,29 +41,6 @@ pub fn toplevel(dir: &Path) -> Option<PathBuf> {
 pub fn common_dir(dir: &Path) -> Option<PathBuf> {
     git_out(dir, &["rev-parse", "--path-format=absolute", "--git-common-dir"])
         .map(|s| canon(Path::new(&s)))
-}
-
-/// True when `dir` sits in a linked worktree — its git dir is not the
-/// repository's common dir. `false` on any git failure (absence stays a
-/// value; the arms that follow refuse on their own terms).
-fn is_linked_worktree(dir: &Path) -> bool {
-    let Some(out) =
-        git_out(dir, &["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"])
-    else {
-        return false;
-    };
-    let mut lines = out.lines();
-    match (lines.next(), lines.next()) {
-        (Some(git_dir), Some(common)) => canon(Path::new(git_dir)) != canon(Path::new(common)),
-        _ => false,
-    }
-}
-
-/// The repository's main checkout — the first worktree git lists,
-/// canonicalized. From a linked worktree this answers the primary, not the
-/// caller's own path.
-fn main_checkout(dir: &Path) -> Option<PathBuf> {
-    list_worktrees(dir).into_iter().next().map(|w| w.path)
 }
 
 /// The checked-out branch; `None` when detached (or no git).
@@ -601,16 +549,16 @@ fn plan_cascade(
         // branch surgery, shared-repo dedup — never on the mapped path,
         // which a stale overlay row can leave standing in a scratch
         // worktree. For an ordinary mapping the two coincide.
-        let repo_top = main_checkout(&checkout).unwrap_or(repo_top);
+        let linked = gitcmd::linked_worktree(&checkout);
+        let repo_top = linked.as_ref().map(|w| canon(&w.main)).unwrap_or(repo_top);
         // A member mapped onto a linked worktree is a stale overlay row:
         // without an explicit `--base` the worktree would branch from whatever
         // dead branch stands there — foreign commits from birth. A named
         // base skips the check (the branch is chosen; the checkout's
         // identity stops mattering), and an already-bound member never
         // reaches the cascade — a re-mint extension attaches, gate-free.
-        if !bases.contains_key(name) && is_linked_worktree(&checkout) {
-            let standing = git_out(&checkout, &["rev-parse", "--abbrev-ref", "HEAD"])
-                .unwrap_or_else(|| "HEAD".to_string());
+        if !bases.contains_key(name) && let Some(wt) = linked {
+            let standing = wt.branch;
             refusals.push(format!(
                 "member {name}: the mapped checkout {} is a linked worktree standing on \
                  `{standing}` — a stale overlay row. Re-map: `archi repo map {name} {}`, \
@@ -669,7 +617,7 @@ fn plan_cascade(
                     println!(
                         "note: member {name}: the named base `{b}` does not contain the \
                          recorded baseline {} — continuing off the audited line",
-                        &sha[..sha.len().min(7)]
+                        gitcmd::sha7(sha)
                     );
                 }
             }
@@ -697,7 +645,7 @@ fn plan_cascade(
                 refusals.push(format!(
                     "baseline {} for `{name}` is not in {} — fetch there, or pass \
                      `--base {name}=<branch>`",
-                    &sha[..sha.len().min(7)],
+                    gitcmd::sha7(&sha),
                     repo_top.display()
                 ));
                 continue;
@@ -717,7 +665,7 @@ fn plan_cascade(
                 refusals.push(format!(
                     "baseline {} for `{name}` is not on `{b}` — {candidates}; \
                      choose with `--base {name}=<branch>`",
-                    &sha[..sha.len().min(7)]
+                    gitcmd::sha7(&sha)
                 ));
                 continue;
             }
@@ -733,7 +681,7 @@ fn plan_cascade(
                     "note: member {name}: baseline {} is {n} commit(s) behind `{b}` — \
                      continuing an older pinned version; fresh work anchors first \
                      (`archi version anchor --repo {name}`)",
-                    &sha[..sha.len().min(7)]
+                    gitcmd::sha7(&sha)
                 );
             }
             b
@@ -892,9 +840,6 @@ pub fn merge(
                 })
             })
             .unwrap_or_default();
-        fn short(s: &str) -> &str {
-            &s[..s.len().min(7)]
-        }
         let stale: Vec<String> = binding
             .members
             .iter()
@@ -907,8 +852,8 @@ pub fn merge(
                     format!(
                         "member {name}: worktree tip {} is past the recorded baseline {} — \
                          `archi version anchor --repo {name} --project {}`, then re-run the merge",
-                        short(&tip),
-                        recorded.map_or("none", |s| short(s)),
+                        gitcmd::sha7(&tip),
+                        recorded.map_or("none", |s| gitcmd::sha7(s)),
                         wt_project.display()
                     )
                 })
@@ -1197,6 +1142,7 @@ pub fn bind_plan(root: &Path, plan: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     static NEXT: AtomicUsize = AtomicUsize::new(0);

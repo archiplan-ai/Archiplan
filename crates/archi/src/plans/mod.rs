@@ -167,6 +167,13 @@ pub struct Plan {
     /// Free-text user stories, displayed as the final `plan next` step.
     #[serde(default)]
     pub scenarios: Vec<String>,
+    /// The cleanup block was printed after the last wave closed — the
+    /// sweep stage between the waves and the scenarios. Defaults false,
+    /// so every legacy state file still parses; the stage itself is
+    /// additionally gated on `!scenarios_displayed`, so a legacy plan
+    /// already past the waves never regresses into it.
+    #[serde(default)]
+    pub cleanup_displayed: bool,
     /// The scenarios block was printed after the last wave closed.
     #[serde(default)]
     pub scenarios_displayed: bool,
@@ -802,7 +809,9 @@ pub(crate) fn verify_plan(root: &Path, live: &Model, plan: &Plan) -> Result<Plan
     if plan.scenarios_closed && !plan.scenarios_displayed {
         errors.push("scenarios_closed without scenarios_displayed — the latches are ordered".into());
     }
-    if plan.state == PlanState::Draft && (plan.closed_waves > 0 || plan.scenarios_displayed) {
+    if plan.state == PlanState::Draft
+        && (plan.closed_waves > 0 || plan.cleanup_displayed || plan.scenarios_displayed)
+    {
         errors.push("a draft plan carries lifecycle state — `plan reset` clears it whole".into());
     }
 
@@ -1112,7 +1121,11 @@ pub enum Step {
         /// The task ids now in flight.
         next_tasks: Vec<String>,
     },
-    /// All waves closed: the scenarios block, printed as the final step.
+    /// The last wave closed: the cleanup wave — one sweep over the
+    /// unit's whole delta before the scenarios. Printed once; the next
+    /// `plan next` brings the scenarios.
+    Cleanup,
+    /// All waves closed and swept: the scenarios block.
     Scenarios(Vec<String>),
     /// The plan completed.
     Done,
@@ -1149,9 +1162,46 @@ pub fn next(root: &Path, model: &Model) -> Result<NextOutcome, String> {
     let report = verify_plan(root, model, &plan)?;
     let waves = &report.derived.waves;
 
-    // Past the last wave: the scenario latch dance.
+    // Past the last wave: the cleanup stage, then the scenario latch
+    // dance.
     if plan.closed_waves >= waves.len() {
-        if plan.scenarios_displayed && !plan.scenarios_closed {
+        // The cleanup stage gates only while the scenarios block has
+        // not been displayed. Field interplay: a legacy state file (an
+        // old binary's) parses with `cleanup_displayed = false`, but
+        // any such file that reached past the waves carries
+        // `scenarios_displayed = true` — the old wave-close set it in
+        // the same save, or completed the plan outright — so it lands
+        // below and never regresses into the cleanup stage. A
+        // hand-written state past the waves with scenarios not yet
+        // displayed enters here: the cleanup block prints once (the
+        // latch records it), and the call after brings the scenarios.
+        if !plan.scenarios_displayed {
+            if !plan.cleanup_displayed {
+                plan.cleanup_displayed = true;
+                save_state(root, &plan)?;
+                return Ok(NextOutcome {
+                    capture: None,
+                    step: Step::Cleanup,
+                    checklist: Vec::new(),
+                });
+            }
+            // The sweep ran: the scenarios block, exactly as before —
+            // or straight to done when none are recorded.
+            let step = if plan.scenarios.is_empty() {
+                plan.state = PlanState::Completed;
+                Step::Done
+            } else {
+                plan.scenarios_displayed = true;
+                Step::Scenarios(plan.scenarios.clone())
+            };
+            save_state(root, &plan)?;
+            return Ok(NextOutcome {
+                capture: None,
+                step,
+                checklist: Vec::new(),
+            });
+        }
+        if !plan.scenarios_closed {
             plan.scenarios_closed = true;
             plan.state = PlanState::Completed;
             save_state(root, &plan)?;
@@ -1190,13 +1240,13 @@ pub fn next(root: &Path, model: &Model) -> Result<NextOutcome, String> {
             closed: wave,
             next_tasks: waves[wave].clone(),
         }
-    } else if plan.scenarios.is_empty() {
-        // No scenarios recorded: skip the step and close the plan.
-        plan.state = PlanState::Completed;
-        Step::Done
     } else {
-        plan.scenarios_displayed = true;
-        Step::Scenarios(plan.scenarios.clone())
+        // The last wave closed: the cleanup wave comes before the
+        // scenarios. The latch records the block as printed — the next
+        // `plan next` brings the scenarios (or done, when none are
+        // recorded).
+        plan.cleanup_displayed = true;
+        Step::Cleanup
     };
     save_state(root, &plan)?;
     Ok(NextOutcome {
@@ -1210,7 +1260,9 @@ pub fn next(root: &Path, model: &Model) -> Result<NextOutcome, String> {
 pub enum InFlight {
     /// The 1-based wave and its task ids.
     Wave(usize, Vec<String>),
-    /// All waves closed; the scenario step is pending.
+    /// All waves closed; the cleanup wave gates the scenarios.
+    CleanupStep,
+    /// All waves closed and swept; the scenario step is pending.
     ScenarioStep,
 }
 
@@ -1223,7 +1275,12 @@ pub fn current_wave(root: &Path, model: &Model) -> Result<(Plan, InFlight), Stri
     let report = verify_plan(root, model, &plan)?;
     let waves = report.derived.waves;
     if plan.closed_waves >= waves.len() {
-        return Ok((plan, InFlight::ScenarioStep));
+        let step = if plan.scenarios_displayed {
+            InFlight::ScenarioStep
+        } else {
+            InFlight::CleanupStep
+        };
+        return Ok((plan, step));
     }
     let ids = waves[plan.closed_waves].clone();
     let wave = plan.closed_waves + 1;
@@ -1247,6 +1304,7 @@ pub fn reset(root: &Path) -> Result<Plan, String> {
     let mut plan = load_active(root)?;
     plan.state = PlanState::Draft;
     plan.closed_waves = 0;
+    plan.cleanup_displayed = false;
     plan.scenarios_displayed = false;
     plan.scenarios_closed = false;
     let waves_dir = plan_dir(root, &plan.name).join("waves");
@@ -1807,10 +1865,11 @@ mod tests {
         assert!(matches!(in_flight, InFlight::Wave(2, ids) if ids == vec!["t2".to_string()]));
 
         // Wave 2's delta shares no term with any of t2's refs: nothing is
-        // pressed, so nothing gates — the wave closes straight through,
-        // the no-signal product suppressed and the uncovered surface
-        // suggested for hand-authoring. A pre-asserted ref is silent in
-        // the checklist: covered is covered, however the link was born.
+        // pressed, so nothing gates — the wave closes into the cleanup
+        // stage, the no-signal product suppressed and the uncovered
+        // surface suggested for hand-authoring. A pre-asserted ref is
+        // silent in the checklist: covered is covered, however the link
+        // was born.
         links::add(&root, ws.model(), "Auth", "code/auth.rs", links::LinkKind::Indirect).unwrap();
         put(
             &root,
@@ -1826,11 +1885,12 @@ mod tests {
         );
         assert_eq!(capture.suppressed.len(), 4, "every pair lacks signal");
         assert!(capture.pressed.is_empty(), "{:?}", capture.pressed);
-        let Step::Scenarios(scenarios) = &outcome.step else {
-            panic!("the unpressed wave closes to the scenario step");
-        };
-        assert_eq!(scenarios, &vec!["a user logs in end to end".to_string()]);
-        assert!(active(&root).scenarios_displayed);
+        assert!(
+            matches!(outcome.step, Step::Cleanup),
+            "the unpressed wave closes to the cleanup wave"
+        );
+        assert!(active(&root).cleanup_displayed);
+        assert!(!active(&root).scenarios_displayed);
         assert_eq!(outcome.checklist.len(), 3, "{:?}", outcome.checklist);
         assert!(
             outcome
@@ -1847,6 +1907,15 @@ mod tests {
         );
         assert!(outcome.checklist.iter().any(|s| s.contains("Auth peer Audit")));
 
+        // The next call brings the scenarios — the block exactly as
+        // before the cleanup stage existed.
+        let outcome = next(&root, ws.model()).unwrap();
+        let Step::Scenarios(scenarios) = &outcome.step else {
+            panic!("after the cleanup wave comes the scenario step");
+        };
+        assert_eq!(scenarios, &vec!["a user logs in end to end".to_string()]);
+        assert!(active(&root).scenarios_displayed);
+
         // One more next completes; a completed plan refuses.
         let outcome = next(&root, ws.model()).unwrap();
         assert!(matches!(outcome.step, Step::Done));
@@ -1854,10 +1923,11 @@ mod tests {
         assert!(next(&root, ws.model()).is_err());
 
         // Reset rewinds whole; without scenarios the waves sail through on
-        // the standing asserted links and the plan closes directly.
+        // the standing asserted links, the cleanup wave still gates, and
+        // the plan closes directly past it.
         let plan = reset(&root).unwrap();
         assert_eq!((plan.state, plan.closed_waves), (PlanState::Draft, 0));
-        assert!(!plan.scenarios_displayed && !plan.scenarios_closed);
+        assert!(!plan.cleanup_displayed && !plan.scenarios_displayed && !plan.scenarios_closed);
         assert!(!plan_dir(&root, "mvp").join("waves").exists());
         let mut plan = active(&root);
         plan.scenarios.clear();
@@ -1865,6 +1935,8 @@ mod tests {
         start(&root, ws.model()).unwrap();
         let outcome = next(&root, ws.model()).unwrap();
         assert!(matches!(outcome.step, Step::Wave { closed: 1, .. }));
+        let outcome = next(&root, ws.model()).unwrap();
+        assert!(matches!(outcome.step, Step::Cleanup));
         let outcome = next(&root, ws.model()).unwrap();
         assert!(matches!(outcome.step, Step::Done));
         assert_eq!(active(&root).state, PlanState::Completed);
@@ -1910,11 +1982,12 @@ mod tests {
         assert_eq!(minted, vec!["Gate.out wire Auth.inn"], "{minted:?}");
         assert_eq!(capture.suppressed.len(), 3, "{:?}", capture.suppressed);
 
-        // Confirm the pressed candidate: the wave closes and the same
-        // suggestions ride the passing step as the voluntary checklist.
+        // Confirm the pressed candidate: the wave closes into the cleanup
+        // wave and the same suggestions ride the passing step as the
+        // voluntary checklist; one more next completes (no scenarios).
         links::confirm(&root, &capture.minted[0].id).unwrap();
         let outcome = next(&root, ws.model()).unwrap();
-        assert!(matches!(outcome.step, Step::Done));
+        assert!(matches!(outcome.step, Step::Cleanup));
         assert_eq!(outcome.checklist.len(), 3, "{:?}", outcome.checklist);
         assert!(
             outcome
@@ -1924,6 +1997,8 @@ mod tests {
             "{:?}",
             outcome.checklist
         );
+        let outcome = next(&root, ws.model()).unwrap();
+        assert!(matches!(outcome.step, Step::Done));
 
         fs::remove_dir_all(&root).unwrap();
     }
@@ -2129,6 +2204,7 @@ mod tests {
             architecture_summary: Vec::new(),
             stack_mapping: Vec::new(),
             scenarios: Vec::new(),
+            cleanup_displayed: false,
             scenarios_displayed: false,
             scenarios_closed: false,
             tasks: vec![Task {
@@ -2174,10 +2250,13 @@ mod tests {
         );
         store_plan(&root, &legacy).unwrap();
 
-        // Lifecycle still moves the old form: start, next to done, reset.
+        // Lifecycle still moves the old form: start, next through the
+        // cleanup wave to done, reset.
         let (started, wave1) = start(&root, ws.model()).unwrap();
         assert_eq!(started.state, PlanState::Started);
         assert_eq!(wave1, vec!["t1".to_string()]);
+        let outcome = next(&root, ws.model()).unwrap();
+        assert!(matches!(outcome.step, Step::Cleanup));
         let outcome = next(&root, ws.model()).unwrap();
         assert!(matches!(outcome.step, Step::Done));
         assert_eq!(active(&root).state, PlanState::Completed);

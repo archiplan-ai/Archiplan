@@ -91,9 +91,12 @@ struct StateFile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     version_hash: Option<String>,
     created: String,
-    // The scenario latches are lifecycle too — `plan next` moves them —
-    // but they serialize only once flipped, so a fresh state.json stays
-    // the five-field record the mint wrote.
+    // The cleanup and scenario latches are lifecycle too — `plan next`
+    // moves them — but they serialize only once flipped, so a fresh
+    // state.json stays the five-field record the mint wrote, and a
+    // legacy file without them parses as unflipped.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    cleanup_displayed: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     scenarios_displayed: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -109,6 +112,7 @@ pub(crate) fn write_state(root: &Path, plan: &Plan) -> Result<(), String> {
         version: plan.version.clone(),
         version_hash: plan.version_hash.clone(),
         created: plan.created.clone(),
+        cleanup_displayed: plan.cleanup_displayed,
         scenarios_displayed: plan.scenarios_displayed,
         scenarios_closed: plan.scenarios_closed,
     };
@@ -571,6 +575,7 @@ pub(crate) fn load(root: &Path, name: &str) -> Result<Plan, String> {
         architecture_summary,
         stack_mapping,
         scenarios,
+        cleanup_displayed: state.cleanup_displayed,
         scenarios_displayed: state.scenarios_displayed,
         scenarios_closed: state.scenarios_closed,
         tasks: by_ordinal.into_values().map(|(_, t)| t).collect(),
@@ -598,6 +603,7 @@ pub(crate) fn mint(
         architecture_summary: Vec::new(),
         stack_mapping: Vec::new(),
         scenarios: Vec::new(),
+        cleanup_displayed: false,
         scenarios_displayed: false,
         scenarios_closed: false,
         tasks: Vec::new(),
@@ -669,6 +675,7 @@ mod tests {
             architecture_summary: Vec::new(),
             stack_mapping: Vec::new(),
             scenarios: Vec::new(),
+            cleanup_displayed: false,
             scenarios_displayed: false,
             scenarios_closed: false,
             tasks: Vec::new(),
@@ -775,8 +782,12 @@ mod tests {
 
     #[test]
     fn state_json_refuses_drift() {
+        // The latch-less shape an old binary wrote parses — the latches
+        // default unflipped; a flipped cleanup latch parses too.
         let ok = r#"{"state":"draft","closed_waves":0,"version":"v0001","created":"now"}"#;
         assert!(serde_json::from_str::<StateFile>(ok).is_ok());
+        let latched = r#"{"state":"started","closed_waves":1,"version":"v0001","created":"now","cleanup_displayed":true}"#;
+        assert!(serde_json::from_str::<StateFile>(latched).unwrap().cleanup_displayed);
         let unknown = r#"{"state":"draft","closed_waves":0,"version":"v0001","created":"now","extra":1}"#;
         let err = serde_json::from_str::<StateFile>(unknown).err().unwrap().to_string();
         assert!(err.contains("extra"), "{err}");

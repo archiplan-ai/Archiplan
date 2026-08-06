@@ -136,6 +136,14 @@ fn write_record(root: &Path, rel: &str, text: &str) {
     fs::write(root.join(rel), text).unwrap();
 }
 
+/// The curated t1 Store record — requirement owned, proof authored —
+/// shared by the tests that drive the lifecycle past the start gate.
+const T1_STORE_CURATED: &str =
+    "---\nnode: Store\nowns: [store-encrypted]\n---\n\n# t1 — Store\n\npersist rows\n\n\
+     ## Spec\n\n- `Store`\n- `Auth.creds wire Store.inn`\n\n\
+     ## Inputs\n\n## Outputs\n\n- code/store.rs\n\n## Stack\n\n## Verifications\n\n\
+     ### store-encrypted\n\n- test — proves store-encrypted\n";
+
 /// The `captured lNNNN …` ids of a `plan next` transcript.
 fn captured_ids(stdout: &str) -> Vec<String> {
     stdout
@@ -387,14 +395,7 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     let (verify_out, _) = fails(&root, &["plan", "verify", "--json"]);
     let verify: Value = serde_json::from_str(&verify_out).unwrap();
     assert_eq!(verify["matched"]["t1"][1]["req"], "store-encrypted", "{verify}");
-    write_record(
-        &root,
-        "archi/plans/mvp/t1-store.md",
-        "---\nnode: Store\nowns: [store-encrypted]\n---\n\n# t1 — Store\n\npersist rows\n\n\
-         ## Spec\n\n- `Store`\n- `Auth.creds wire Store.inn`\n\n\
-         ## Inputs\n\n## Outputs\n\n- code/store.rs\n\n## Stack\n\n## Verifications\n\n\
-         ### store-encrypted\n\n- test — proves store-encrypted\n",
-    );
+    write_record(&root, "archi/plans/mvp/t1-store.md", T1_STORE_CURATED);
     write_record(
         &root,
         "archi/plans/mvp/t2-auth.md",
@@ -440,9 +441,10 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     assert!(out.contains("wave 1 closed — in flight: t2"), "{out}");
 
     // Wave 2's delta shares no term with any of t2's refs: nothing is
-    // pressed, so nothing gates — the wave closes straight to the
-    // scenarios, the no-signal product suppressed and the untouched
-    // surface suggested as a checklist instead of a jam.
+    // pressed, so nothing gates — the last wave closes into the cleanup
+    // wave, the no-signal product suppressed and the untouched surface
+    // suggested as a checklist instead of a jam. The cleanup block
+    // prints once and latches in state.json; the scenarios wait.
     fs::write(
         root.join("code/auth.rs"),
         "pub fn login(u: &str) -> bool { !u.is_empty() }\n",
@@ -453,7 +455,16 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     assert!(out.contains("suppressed 3 no-signal pair(s)"), "{out}");
     assert!(out.contains("hand-author"), "{out}");
     assert!(out.contains("archi link add \"Auth\" <file#symbol> --kind indirect"), "{out}");
+    assert_eq!(out.matches("the cleanup wave").count(), 1, "{out}");
+    assert!(!out.contains("a user logs in end to end"), "{out}");
+    assert_eq!(state_json(&root, "mvp")["cleanup_displayed"], true);
+
+    // The next call brings the scenarios block exactly as before the
+    // cleanup stage existed.
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("all waves closed — scenarios:"), "{out}");
     assert!(out.contains("a user logs in end to end"), "{out}");
+    assert!(!out.contains("the cleanup wave"), "printed once: {out}");
 
     // One more next closes the plan — in state.json; the content files
     // never moved, and no plan.json ever appeared.
@@ -527,10 +538,13 @@ fn a_legacy_plan_json_reads_forever_and_its_lifecycle_verbs_advance_it() {
     let (_, err) = fails(&root, &["plan", "task", "rm", "t1"]);
     assert!(err.contains("read-only"), "{err}");
 
-    // Lifecycle still moves the old form: start, next to done, reset —
-    // written back as plan.json, never as a record folder.
+    // Lifecycle still moves the old form: start, next through the
+    // cleanup wave to done, reset — written back as plan.json, never as
+    // a record folder.
     let out = ok(&root, &["plan", "start"]);
     assert!(out.contains("wave 1 in flight: t1"), "{out}");
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("the cleanup wave"), "{out}");
     let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("DONE"), "{out}");
     let text = fs::read_to_string(root.join("archi/plans/mvp/plan.json")).unwrap();
@@ -541,6 +555,66 @@ fn a_legacy_plan_json_reads_forever_and_its_lifecycle_verbs_advance_it() {
     assert!(!root.join("archi/plans/mvp/state.json").exists());
     ok(&root, &["plan", "reset"]);
     assert!(ok(&root, &["plan", "status"]).contains("(draft)"));
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// A state.json an old binary wrote — no cleanup latch field — still
+/// parses, and the field interplay holds: waves closed with the
+/// scenarios already displayed completes without demanding the cleanup
+/// stage; waves closed with the scenarios not yet displayed enters it.
+/// Reset clears the new latch with the others.
+#[test]
+fn a_legacy_state_json_never_regresses_into_the_cleanup_stage() {
+    let root = temp_project();
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Store"]);
+    write_record(&root, "archi/plans/mvp/t1-store.md", T1_STORE_CURATED);
+    write_record(
+        &root,
+        "archi/plans/mvp/scenarios.md",
+        "# Scenarios\n\n- a row survives a restart\n",
+    );
+    let created = state_json(&root, "mvp")["created"].as_str().unwrap().to_string();
+    let legacy_state = |latches: &str| {
+        format!(
+            "{{\n  \"state\": \"started\",\n  \"closed_waves\": 1,\n  \
+             \"version\": \"v0001\",\n  \"created\": \"{created}\"{latches}\n}}\n"
+        )
+    };
+
+    // As the old binary left it mid-dance: waves closed, scenarios
+    // displayed — one next completes; the cleanup stage is not demanded.
+    write_record(
+        &root,
+        "archi/plans/mvp/state.json",
+        &legacy_state(",\n  \"scenarios_displayed\": true"),
+    );
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("DONE"), "{out}");
+    assert!(!out.contains("the cleanup wave"), "no regression: {out}");
+    assert_eq!(state_json(&root, "mvp")["state"], "completed");
+
+    // Waves closed but the scenarios never displayed: the cleanup stage
+    // appears, latches, then the scenarios, then done.
+    write_record(&root, "archi/plans/mvp/state.json", &legacy_state(""));
+    let out = ok(&root, &["plan", "next"]);
+    assert_eq!(out.matches("the cleanup wave").count(), 1, "{out}");
+    assert_eq!(state_json(&root, "mvp")["cleanup_displayed"], true);
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("all waves closed — scenarios:"), "{out}");
+    assert!(out.contains("a row survives a restart"), "{out}");
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("DONE"), "{out}");
+
+    // Reset clears the cleanup latch like the others: unflipped latches
+    // drop out of state.json entirely.
+    ok(&root, &["plan", "reset"]);
+    let state = state_json(&root, "mvp");
+    assert_eq!(state["state"], "draft");
+    assert!(state.get("cleanup_displayed").is_none(), "{state}");
+    assert!(state.get("scenarios_displayed").is_none(), "{state}");
 
     fs::remove_dir_all(&root).unwrap();
 }

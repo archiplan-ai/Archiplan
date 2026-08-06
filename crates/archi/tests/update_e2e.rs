@@ -12,25 +12,18 @@
 
 #![cfg(unix)]
 
+mod util;
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicUsize, Ordering};
-
-static NEXT: AtomicUsize = AtomicUsize::new(0);
 
 /// This build's own version — the fixture number for the "equal" case.
 const CURRENT: &str = env!("CARGO_PKG_VERSION");
 
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "archi-update-e2e-{tag}-{}-{}",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::SeqCst)
-    ));
-    fs::create_dir_all(&dir).unwrap();
-    fs::canonicalize(&dir).unwrap()
+    util::scratch("archi-update-e2e", tag)
 }
 
 /// The release platform tag — the same cfg! map the binary compiles in.
