@@ -136,6 +136,14 @@ fn write_record(root: &Path, rel: &str, text: &str) {
     fs::write(root.join(rel), text).unwrap();
 }
 
+/// The curated t1 Store record — requirement owned, proof authored —
+/// shared by the tests that drive the lifecycle past the start gate.
+const T1_STORE_CURATED: &str =
+    "---\nnode: Store\nowns: [store-encrypted]\n---\n\n# t1 — Store\n\npersist rows\n\n\
+     ## Spec\n\n- `Store`\n- `Auth.creds wire Store.inn`\n\n\
+     ## Inputs\n\n## Outputs\n\n- code/store.rs\n\n## Stack\n\n## Verifications\n\n\
+     ### store-encrypted\n\n- test — proves store-encrypted\n";
+
 /// The `captured lNNNN …` ids of a `plan next` transcript.
 fn captured_ids(stdout: &str) -> Vec<String> {
     stdout
@@ -387,14 +395,7 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     let (verify_out, _) = fails(&root, &["plan", "verify", "--json"]);
     let verify: Value = serde_json::from_str(&verify_out).unwrap();
     assert_eq!(verify["matched"]["t1"][1]["req"], "store-encrypted", "{verify}");
-    write_record(
-        &root,
-        "archi/plans/mvp/t1-store.md",
-        "---\nnode: Store\nowns: [store-encrypted]\n---\n\n# t1 — Store\n\npersist rows\n\n\
-         ## Spec\n\n- `Store`\n- `Auth.creds wire Store.inn`\n\n\
-         ## Inputs\n\n## Outputs\n\n- code/store.rs\n\n## Stack\n\n## Verifications\n\n\
-         ### store-encrypted\n\n- test — proves store-encrypted\n",
-    );
+    write_record(&root, "archi/plans/mvp/t1-store.md", T1_STORE_CURATED);
     write_record(
         &root,
         "archi/plans/mvp/t2-auth.md",
@@ -569,14 +570,7 @@ fn a_legacy_state_json_never_regresses_into_the_cleanup_stage() {
     ok(&root, &["version", "save", "-m", "first"]);
     ok(&root, &["plan", "use", "mvp"]);
     ok(&root, &["plan", "task", "add", "Store"]);
-    write_record(
-        &root,
-        "archi/plans/mvp/t1-store.md",
-        "---\nnode: Store\nowns: [store-encrypted]\n---\n\n# t1 — Store\n\npersist rows\n\n\
-         ## Spec\n\n- `Store`\n- `Auth.creds wire Store.inn`\n\n\
-         ## Inputs\n\n## Outputs\n\n- code/store.rs\n\n## Stack\n\n## Verifications\n\n\
-         ### store-encrypted\n\n- test — proves store-encrypted\n",
-    );
+    write_record(&root, "archi/plans/mvp/t1-store.md", T1_STORE_CURATED);
     write_record(
         &root,
         "archi/plans/mvp/scenarios.md",
