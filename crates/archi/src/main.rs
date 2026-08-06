@@ -2033,6 +2033,16 @@ fn run_plan(args: &Args) -> ExitCode {
                             );
                             ExitCode::SUCCESS
                         }
+                        plans::Step::Cleanup => {
+                            println!(
+                                "all waves closed — the cleanup wave: one sub-agent sweeps the \
+                                 unit's whole delta for mechanisms born twice and folds them — \
+                                 zero behavior change, tests green with no assertion edits; an \
+                                 empty sweep is one line"
+                            );
+                            println!("then `archi plan next` brings the scenarios");
+                            ExitCode::SUCCESS
+                        }
                         plans::Step::Scenarios(scenarios) => {
                             println!("all waves closed — scenarios:");
                             for s in scenarios {
@@ -2063,6 +2073,12 @@ fn run_plan(args: &Args) -> ExitCode {
                             println!("  {} {} — {}", t.id, t.node, t.description);
                         }
                     }
+                    ExitCode::SUCCESS
+                }
+                Ok((_, plans::InFlight::CleanupStep)) => {
+                    println!(
+                        "all waves closed — the cleanup wave is pending (`archi plan next`)"
+                    );
                     ExitCode::SUCCESS
                 }
                 Ok((_, plans::InFlight::ScenarioStep)) => {
