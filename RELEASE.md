@@ -13,6 +13,27 @@ downloadable and that is the migration model.
 
 ## Releases
 
+### 0.1.18
+
+The plan gets a cleanup wave. When the last wave closes, `plan next`
+announces the stage once: one sub-agent sweeps the unit's whole delta
+for mechanisms born twice and folds them — zero behavior change, tests
+green with no assertion edits, an empty sweep is one line. The next
+`plan next` brings the scenarios, so the scenarios always bless folded
+code. The stage rides a latch in the plan state. Legacy plans never
+regress into it, and `plan reset` clears it. The implement skill
+carries the sweep contract and the repin step for what a fold drifts.
+On its first run the sweep found and folded a real twin in this
+repository.
+
+The git plumbing dedups. One module now carries the shared primitives
+— the lenient read, the loud run, `canon`, `sha7` and the one
+linked-worktree probe — and four modules ride it where the behavior
+matches byte for byte. The divergent spawns stay local, each with its
+reason. The duplicated test fixtures move into the shared util. No
+output string moved. Ninety-seven drifted links repinned through the
+link commands.
+
 ### 0.1.17
 
 A fork is a spoken choice. The briefing forbids silent branches: the
