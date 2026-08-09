@@ -475,8 +475,14 @@ fn run_check(args: &Args) -> ExitCode {
     let bound_members: Vec<std::path::PathBuf> = worktrees::toplevel(&root)
         .and_then(|top| {
             worktrees::Registry::load(&root).ok().flatten().map(|reg| {
-                reg.binding_of(&top)
-                    .map(|b| b.members.values().map(|m| m.path.clone()).collect())
+                reg.active_binding_of(&top)
+                    .map(|b| {
+                        b.members
+                            .values()
+                            .filter(|m| m.status.is_active())
+                            .map(|m| m.path.clone())
+                            .collect()
+                    })
                     .unwrap_or_default()
             })
         })
