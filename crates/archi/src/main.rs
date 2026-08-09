@@ -479,13 +479,7 @@ fn run_check(args: &Args) -> ExitCode {
         .and_then(|top| {
             worktrees::Registry::load(&root).ok().flatten().map(|reg| {
                 reg.active_binding_of(&top)
-                    .map(|b| {
-                        b.members
-                            .values()
-                            .filter(|m| m.status.is_active())
-                            .map(|m| m.path.clone())
-                            .collect()
-                    })
+                    .map(|b| b.active_members().map(|(_, m)| m.path.clone()).collect())
                     .unwrap_or_default()
             })
         })
@@ -1135,7 +1129,7 @@ fn run_status(args: &Args) -> ExitCode {
                             println!("binding: none — this checkout is unbound");
                         }
                         let standing: Vec<(&str, &worktrees::Binding)> =
-                            reg.entries().filter(|(_, b)| b.status.is_active()).collect();
+                            reg.active_entries().collect();
                         if standing.is_empty() {
                             println!("standing work: none — no seat on this machine carries work");
                         } else {

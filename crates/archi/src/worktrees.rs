@@ -79,9 +79,10 @@ pub fn list_worktrees(dir: &Path) -> Vec<Wt> {
     out
 }
 
+/// Whether `refs/heads/<name>` stands here — the same verified read the
+/// integration probe rides, asked for a yes or no.
 pub fn branch_exists(repo: &Path, name: &str) -> bool {
-    let refname = format!("refs/heads/{name}");
-    git_out(repo, &["rev-parse", "--verify", "--quiet", &refname]).is_some()
+    commit_of(repo, &format!("refs/heads/{name}")).is_some()
 }
 
 fn worktree_add(
@@ -235,6 +236,19 @@ impl Binding {
     pub fn slug(&self) -> Option<&str> {
         self.plan.as_deref().or(self.effort.as_deref())
     }
+
+    /// The members still standing — the only ones a cascade, a push or a
+    /// sweep ever touches. A closed member is history: it carries no work
+    /// to land and no folder to free.
+    pub fn active_members(&self) -> impl Iterator<Item = (&String, &MemberBinding)> {
+        self.members.iter().filter(|(_, m)| m.status.is_active())
+    }
+
+    /// True when no member still stands — the members' half of the row's
+    /// close condition, which the spec side completes.
+    pub fn members_done(&self) -> bool {
+        self.active_members().next().is_none()
+    }
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -292,7 +306,7 @@ impl Registry {
             // member of it still waits: the row stays open until the sweep
             // frees that folder too.
             let standing = live.iter().any(|p| p.as_path() == Path::new(k));
-            let members_done = b.members.values().all(|m| !m.status.is_active());
+            let members_done = b.members_done();
             if b.status.is_active() && !standing && members_done {
                 b.status = Status::Closed;
                 healed = true;
@@ -333,13 +347,16 @@ impl Registry {
         self.binding_of(worktree).filter(|b| b.status.is_active())
     }
 
+    /// The rows still standing — the seats this machine can continue in, and
+    /// the only ones a licensing question ever consults.
+    pub fn active_entries(&self) -> impl Iterator<Item = (&str, &Binding)> {
+        self.entries().filter(|(_, b)| b.status.is_active())
+    }
+
     /// The standing worktree that carries `plan`, when one does. A closed
     /// row owns nothing: its plan is free to be carried again.
     pub fn owner_of_plan(&self, plan: &str) -> Option<(&str, &Binding)> {
-        self.entries
-            .iter()
-            .find(|(_, b)| b.status.is_active() && b.plan.as_deref() == Some(plan))
-            .map(|(k, b)| (k.as_str(), b))
+        self.active_entries().find(|(_, b)| b.plan.as_deref() == Some(plan))
     }
 
     pub fn bind(&mut self, worktree: &Path, binding: Binding) {
@@ -458,13 +475,7 @@ pub fn mint(
     // cascades again like a fresh name.
     let known: Vec<String> = existing
         .as_ref()
-        .map(|b| {
-            b.members
-                .iter()
-                .filter(|(_, m)| m.status.is_active())
-                .map(|(n, _)| n.clone())
-                .collect()
-        })
+        .map(|b| b.active_members().map(|(n, _)| n.clone()).collect())
         .unwrap_or_default();
     // Members resolve against the invoked project root — the checkout that
     // carries the unit's manifest, overlay and archive: the primary on a
@@ -1045,7 +1056,7 @@ pub fn merge(
     // already closed carries no work to land — it is history.
     let mut members: Vec<(String, RepoOutcome)> = Vec::new();
     let mut landings: BTreeMap<String, Landing> = BTreeMap::new();
-    for (name, m) in binding.members.iter().filter(|(_, m)| m.status.is_active()) {
+    for (name, m) in binding.active_members() {
         let repo = if m.checkout.is_dir() {
             m.checkout.clone()
         } else if m.path.is_dir() {
@@ -1150,7 +1161,7 @@ pub fn merge(
         let mut reg = Registry::load(&root)?.expect("still a repository");
         if let Some(b) = reg.get_mut(&key) {
             b.landed = None;
-            if b.members.values().all(|m| !m.status.is_active()) {
+            if b.members_done() {
                 b.status = Status::Closed;
             }
         }
@@ -1238,8 +1249,8 @@ pub fn sweep(root: &Path) -> SweepReport {
         // folder — the grouping the cascade gave them — so they share one
         // verdict and one removal.
         let mut groups: BTreeMap<PathBuf, Vec<String>> = BTreeMap::new();
-        for (name, m) in b.members.iter() {
-            if m.status.is_active() && m.landed.is_some() {
+        for (name, m) in b.active_members() {
+            if m.landed.is_some() {
                 groups.entry(m.path.clone()).or_default().push(name.clone());
             }
         }
@@ -1268,7 +1279,7 @@ pub fn sweep(root: &Path) -> SweepReport {
         }
         // Every side arrived: the row becomes the record of what this
         // machine carried.
-        let members_done = b.members.values().all(|m| !m.status.is_active());
+        let members_done = b.members_done();
         if !spec_standing && b.landed.is_none() && members_done {
             b.status = Status::Closed;
             moved = true;
@@ -1323,8 +1334,7 @@ pub fn guard_mutation(root: &Path, work: Option<&str>) -> Result<(), String> {
     // CLI cannot know which spec a new plan serves, the caller can. A closed
     // row is no place to continue, so only standing rows are offered.
     let standing: Vec<String> = reg
-        .entries()
-        .filter(|(_, b)| b.status.is_active())
+        .active_entries()
         .map(|(k, b)| {
             let mut parts = Vec::new();
             if let Some(s) = &b.effort {

@@ -422,15 +422,12 @@ fn to_lands_the_worktree_head_on_a_new_branch_without_merging() {
     assert!(ls.contains("spec feature — waiting on feat/x → main"), "{ls}");
 }
 
-#[test]
-fn the_sweep_frees_an_integrated_seat_and_keeps_one_with_stray_work() {
-    let (_ws, spec) = protected_repo("sweep-merge");
-    // ignored build output is the reason the folder is worth freeing at all
-    fs::write(spec.join(".gitignore"), "junk/\n").unwrap();
-    git(&spec, &["add", "-A"]);
-    git(&spec, &["commit", "-qm", "ignore the build output"]);
-    ok(&spec, &["worktree", "mint", "one"]);
-    ok(&spec, &["worktree", "mint", "two"]);
+/// Two seats, `one` and `two`, each carrying one commit and landed sideways
+/// on `feat/<slug>`: the state every sweep test starts from — both folders
+/// standing, both rows waiting on `main`.
+fn two_landed_seats(spec: &Path) -> (PathBuf, PathBuf) {
+    ok(spec, &["worktree", "mint", "one"]);
+    ok(spec, &["worktree", "mint", "two"]);
     let one = spec.parent().unwrap().join("spec-worktrees/one");
     let two = spec.parent().unwrap().join("spec-worktrees/two");
     for (wt, name) in [(&one, "one"), (&two, "two")] {
@@ -438,8 +435,19 @@ fn the_sweep_frees_an_integrated_seat_and_keeps_one_with_stray_work() {
         git(wt, &["add", "-A"]);
         git(wt, &["commit", "-qm", "work"]);
     }
-    ok(&spec, &["worktree", "merge", "one", "--to", "feat/one"]);
-    ok(&spec, &["worktree", "merge", "two", "--to", "feat/two"]);
+    ok(spec, &["worktree", "merge", "one", "--to", "feat/one"]);
+    ok(spec, &["worktree", "merge", "two", "--to", "feat/two"]);
+    (one, two)
+}
+
+#[test]
+fn the_sweep_frees_an_integrated_seat_and_keeps_one_with_stray_work() {
+    let (_ws, spec) = protected_repo("sweep-merge");
+    // ignored build output is the reason the folder is worth freeing at all
+    fs::write(spec.join(".gitignore"), "junk/\n").unwrap();
+    git(&spec, &["add", "-A"]);
+    git(&spec, &["commit", "-qm", "ignore the build output"]);
+    let (one, two) = two_landed_seats(&spec);
 
     // nothing arrived yet: the reading command sweeps and stays silent
     let ls = ok(&spec, &["worktree", "ls"]);
@@ -498,17 +506,7 @@ fn the_sweep_frees_a_seat_the_forge_squashed() {
 #[test]
 fn a_resumed_seat_survives_the_sweep() {
     let (_ws, spec) = protected_repo("resumed");
-    ok(&spec, &["worktree", "mint", "one"]);
-    ok(&spec, &["worktree", "mint", "two"]);
-    let one = spec.parent().unwrap().join("spec-worktrees/one");
-    let two = spec.parent().unwrap().join("spec-worktrees/two");
-    for (wt, name) in [(&one, "one"), (&two, "two")] {
-        fs::write(wt.join(format!("{name}.md")), "work\n").unwrap();
-        git(wt, &["add", "-A"]);
-        git(wt, &["commit", "-qm", "work"]);
-    }
-    ok(&spec, &["worktree", "merge", "one", "--to", "feat/one"]);
-    ok(&spec, &["worktree", "merge", "two", "--to", "feat/two"]);
+    let (one, two) = two_landed_seats(&spec);
 
     // the review sends the operator back into both seats: one answers with a
     // commit, the other with an edit still in the tree
