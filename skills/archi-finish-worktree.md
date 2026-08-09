@@ -22,11 +22,9 @@ spec, lands freely.
 **The landing runs from the receiving checkout**, never from inside the
 worktree.
 
-**Retirement is the job of the command.** Retirement follows the
-integration, not the push: a local merge frees the folder at once, and a
-sideways landing or a member push frees it later, once the receiving
-branch carries the work. Never run `git worktree remove`, and never edit
-`worktrees.toml` by hand.
+**Retirement is the job of the command.** Never remove a worktree that
+still waits on a pull request. Never run `git worktree remove`, and
+never edit `worktrees.toml` by hand.
 
 ## The landing, in order
 
@@ -50,16 +48,12 @@ branch carries the work. Never run `git worktree remove`, and never edit
 3. **Land.** From the receiving checkout, run `archi worktree merge
    <slug> [--to [<member>=]<branch>]...`.
    - Member branches push to their remotes. Their integration is a PR on
-     the forge, never a local merge into a member checkout, so the member
-     worktree stays until its base carries the work. Open the PR. The
-     next archi command frees the folder.
+     the forge, never a local merge into a member checkout. Open the PR.
    - The spec merges into the current branch. It lands sideways with
      `--to <branch>` when the receiving branch is protected. A protected
-     branch never receives a local merge, so the worktree stays: push the
-     landed branch, open the PR, and the folder frees itself on the next
-     archi command once the receiving branch carries the work.
-   - A local merge puts the work in the receiving branch at that moment,
-     so it removes the worktree and closes its row in the same move.
+     branch never receives a local merge, so push the landed branch and
+     open a PR.
+   - Read what the command reports and do what it names next.
 4. **On a refusal, repair and run it again.** The command is idempotent.
    - *open plan* — close it, as in step 1.
    - *protected receiving branch* — use `--to <branch>`, push, and open a
@@ -75,9 +69,7 @@ branch carries the work. Never run `git worktree remove`, and never edit
      mint <slug>` when the landing already retired it. Then run the merge
      again to finish the retire.
 5. **To abandon instead of landing**, run `archi worktree close <slug>`.
-   The folders go away, members included, and the row stays as the record
-   of what this machine carried. Unpushed branches stay, for deletion by
-   hand.
+   Unpushed branches stay, for deletion by hand.
 
 Where `gh` is available, you may ask the forge whether the PR merged and
 then run `archi worktree close <slug>` — optional, never a requirement.
@@ -92,8 +84,7 @@ then run `archi worktree close <slug>` — optional, never a requirement.
   failed landing. Delete it and run the landing again. Its work either
   landed already, or it comes again.
 - The registry still lists a retired path. It self-heals on the next
-  read: the row closes, it does not vanish, because the row is the
-  record. A row that still reads as live work is a worktree that git
+  read. A row that still reads as live work is a worktree that git
   still knows.
 - A seat still stands after its pull request merged. The sweep compares
   against the *local* receiving branch, and archi never fetches, so a

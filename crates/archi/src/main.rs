@@ -113,7 +113,8 @@ const USAGE: &str = "usage:
   archi repo map <member> <dir> [--project <dir>]
   archi batch [-] [--project <dir>]   # commands from stdin, one per line, fail-fast
   archi status [--project <dir>]
-  archi worktree mint <slug> [--plan <name>] [--repos <a,b>] [--base [<member>=]<branch>]... [--project <dir>]
+  archi worktree mint <slug> [--plan <name>] [--repos <a,b>] [--base [<member>=]<branch>]...
+              [--no-fetch] [--project <dir>]
   archi worktree ls [--plan <slug>] [--spec <effort>] [--status active|closed|all] [--json] [--project <dir>]
   archi worktree close <slug|path> [--project <dir>]
   archi worktree merge <slug|path> [--to [<member>=]<branch>]... [--project <dir>]
@@ -194,6 +195,7 @@ struct Args {
     to_many: Vec<String>,
     plan_flag: Option<String>,
     status_flag: Option<String>,
+    no_fetch: bool,
     positional: Vec<String>,
 }
 
@@ -264,6 +266,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         to_many: Vec::new(),
         plan_flag: None,
         status_flag: None,
+        no_fetch: false,
         positional: Vec::new(),
     };
     let mut it = argv.iter().peekable();
@@ -333,6 +336,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--base" => args.base.push(value(&mut it, "--base")?),
             "--plan" => args.plan_flag = Some(value(&mut it, "--plan")?),
             "--status" => args.status_flag = Some(value(&mut it, "--status")?),
+            "--no-fetch" => args.no_fetch = true,
             "--into" => args.into = Some(value(&mut it, "--into")?),
             "--keep" => args.keep = Some(value(&mut it, "--keep")?),
             "--task" => args.task = Some(value(&mut it, "--task")?),
@@ -1236,19 +1240,31 @@ fn run_worktree(args: &Args) -> ExitCode {
                 };
                 bases.insert(m.to_string(), br.to_string());
             }
-            let m = match worktrees::mint(&root, slug, plan, effort, &repos, &bases) {
+            let m = match worktrees::mint(
+                &root,
+                slug,
+                plan,
+                effort,
+                &repos,
+                &bases,
+                !args.no_fetch,
+            ) {
                 Ok(m) => m,
                 Err(e) => return fail(e),
             };
+            // A fresh seat names what it grew from — the ref, its commit and
+            // the divergence that chose it; an attach and an extension grew
+            // nothing and say nothing. `worktrees::grew` owns the phrase.
             if m.extended {
                 println!("extended {} — it carries `{slug}` on {}", m.path.display(), m.branch);
             } else {
                 println!(
-                    "minted {} on branch {}{} — cd {} to work there; \
+                    "minted {} on branch {}{}{} — cd {} to work there; \
                      the CLI never changes your directory",
                     m.path.display(),
                     m.branch,
                     if m.attached { " (existing branch attached)" } else { "" },
+                    worktrees::grew(m.point.as_ref()),
                     m.path.display()
                 );
             }
@@ -1256,10 +1272,11 @@ fn run_worktree(args: &Args) -> ExitCode {
                 if let Some(b) = reg.binding_of(&m.path) {
                     for (name, mb) in &b.members {
                         println!(
-                            "member {name}: {} on {} (base {})",
+                            "member {name}: {} on {} (base {}){}",
                             mb.path.display(),
                             mb.branch,
-                            mb.base
+                            mb.base,
+                            worktrees::grew(m.member_points.get(name))
                         );
                     }
                 }

@@ -22,10 +22,27 @@ pub(crate) fn out(dir: &Path, args: &[&str]) -> Option<String> {
 
 /// Loud mutation: trimmed stdout, or `Err` carrying git's stderr verbatim.
 pub(crate) fn run(dir: &Path, args: &[&str]) -> Result<String, String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
+    run_quietly(dir, args, false)
+}
+
+/// The same, with every credential helper silenced: a remote that would
+/// ask for a password fails instead of blocking the caller forever. The
+/// refresh before a mint rides this — a network that cannot answer is a
+/// note in the report, never a hung command.
+pub(crate) fn run_offline_safe(dir: &Path, args: &[&str]) -> Result<String, String> {
+    run_quietly(dir, args, true)
+}
+
+fn run_quietly(dir: &Path, args: &[&str], no_prompt: bool) -> Result<String, String> {
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(dir).args(args);
+    if no_prompt {
+        cmd.env("GIT_TERMINAL_PROMPT", "0")
+            .env("GCM_INTERACTIVE", "never")
+            .env("SSH_ASKPASS", "")
+            .env("GIT_ASKPASS", "");
+    }
+    let out = cmd
         .output()
         .map_err(|e| format!("git {}: {e}", args.join(" ")))?;
     if out.status.success() {

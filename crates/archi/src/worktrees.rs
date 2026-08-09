@@ -93,8 +93,12 @@ fn worktree_add(
     base: Option<&str>,
 ) -> Result<(), String> {
     let path_s = path.to_string_lossy().into_owned();
+    // `--no-track`: a base of `origin/<branch>` would otherwise make the
+    // remote branch this seat's upstream, so a bare `git push` in the seat
+    // would aim at someone else's branch. A seat's work travels by the
+    // landing's explicit refspec, never by an inherited upstream.
     let mut args: Vec<&str> = if create {
-        vec!["worktree", "add", "-b", branch, &path_s]
+        vec!["worktree", "add", "--no-track", "-b", branch, &path_s]
     } else {
         vec!["worktree", "add", &path_s, branch]
     };
@@ -389,6 +393,155 @@ impl Registry {
 }
 
 // ---------------------------------------------------------------------------
+// The branch point — the refresh, the divergence, the ref a seat grows from
+
+/// The ref a fresh branch grew from, and what decided it.
+#[derive(Clone, Debug)]
+pub struct BranchPoint {
+    /// The ref as the report names it: `main`, or `origin/main`.
+    pub from: String,
+    /// Its commit when the seat was cut.
+    pub sha: String,
+    /// The divergence, the unpushed work, or the refresh that did not run —
+    /// `None` when the local ref simply was the whole answer.
+    pub reason: Option<String>,
+}
+
+impl BranchPoint {
+    /// `from origin/main 1a2b3c4 (local main was 3 behind)` — the phrase a
+    /// mint report appends to the line it already prints.
+    pub fn describe(&self) -> String {
+        match &self.reason {
+            Some(r) => format!("from {} {} ({r})", self.from, gitcmd::sha7(&self.sha)),
+            None => format!("from {} {}", self.from, gitcmd::sha7(&self.sha)),
+        }
+    }
+}
+
+/// The phrase a report line appends to say what a branch grew from: a
+/// leading space and the description, or nothing at all when nothing grew —
+/// an attach continues a branch, an extension creates none. Every report
+/// that names a branch point rides this, so all of them read alike.
+pub fn grew(point: Option<&BranchPoint>) -> String {
+    point.map(|p| format!(" {}", p.describe())).unwrap_or_default()
+}
+
+/// The remote that answers for `branch`: its configured one, else `origin`
+/// when the repository has it — and only while a counterpart is on record,
+/// which is either an upstream the branch declares or a remote-tracking ref
+/// some earlier fetch or push left behind. `None` — nothing to refresh from,
+/// and the silence is the whole answer: a repository with no remote, and a
+/// branch that has never been on one (a seat's own `archi/<slug>`, forked
+/// from inside another seat, among them) have no counterpart to compare
+/// against, so neither one is worth a network call or a word of report.
+fn remote_of(repo: &Path, branch: &str) -> Option<String> {
+    let configured = git_out(repo, &["config", "--get", &format!("branch.{branch}.remote")])
+        .filter(|r| !r.is_empty() && r != ".");
+    let remote = configured.or_else(|| {
+        let remotes = git_out(repo, &["remote"])?;
+        remotes.lines().any(|l| l.trim() == "origin").then(|| "origin".to_string())
+    })?;
+    let declared =
+        git_out(repo, &["config", "--get", &format!("branch.{branch}.merge")]).is_some();
+    let known = commit_of(repo, &format!("refs/remotes/{remote}/{branch}")).is_some();
+    (declared || known).then_some(remote)
+}
+
+/// How far the local branch stands from its remote counterpart, as
+/// (ahead, behind). `None` when either side does not resolve — no remote
+/// ref yet, no comparison, no verdict.
+fn divergence(repo: &Path, branch: &str, remote: &str) -> Option<(u64, u64)> {
+    let range = format!("refs/heads/{branch}...refs/remotes/{remote}/{branch}");
+    let counts = git_out(repo, &["rev-list", "--left-right", "--count", &range])?;
+    let mut fields = counts.split_whitespace();
+    let ahead = fields.next()?.parse().ok()?;
+    let behind = fields.next()?.parse().ok()?;
+    Some((ahead, behind))
+}
+
+/// Git's failure in one line: the first thing it said, without its severity
+/// word, short enough to ride inside a report line.
+fn brief(err: &str) -> String {
+    let line = err.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
+    let line = line.strip_prefix("fatal: ").or_else(|| line.strip_prefix("error: ")).unwrap_or(line);
+    if line.chars().count() > 72 {
+        format!("{}…", line.chars().take(72).collect::<String>())
+    } else {
+        line.to_string()
+    }
+}
+
+/// Unpushed commits, counted the way a sentence counts them.
+fn unpushed(n: u64) -> String {
+    if n == 1 {
+        "1 unpushed commit rides with the seat".to_string()
+    } else {
+        format!("{n} unpushed commits ride with the seat")
+    }
+}
+
+/// Refresh `branch` in `repo`, then read where a fresh branch should grow
+/// from. The fetch carries one branch and writes remote-tracking refs alone
+/// — never a pull, so no checked-out branch moves and no working tree is
+/// touched — and it is never a gate: no remote, no network or a refusal all
+/// degrade to the local ref with the reason in hand
+/// (`archi/requirements/worktree-parallelism/the-refresh-never-blocks-the-mint.md`).
+/// The choice that follows keeps unpushed work: behind the remote takes the
+/// remote ref, ahead of it or diverged from it takes the local branch
+/// (`…/the-branch-point-follows-the-divergence.md`). `hint` names the flag
+/// that overrides the choice on this side, where one exists. `None` — the
+/// branch does not resolve here, and the caller keeps its implicit base.
+fn branch_point(
+    repo: &Path,
+    branch: &str,
+    refresh: bool,
+    hint: Option<&str>,
+) -> Option<BranchPoint> {
+    let sha = commit_of(repo, &format!("refs/heads/{branch}"))?;
+    let local = |reason: Option<String>| {
+        Some(BranchPoint { from: branch.to_string(), sha: sha.clone(), reason })
+    };
+    // no remote to ask: the local ref is the world, and says so silently
+    let Some(remote) = remote_of(repo, branch) else {
+        return local(None);
+    };
+    if !refresh {
+        return local(Some("no fetch".to_string()));
+    }
+    let args = ["fetch", "--quiet", "--no-tags", remote.as_str(), branch];
+    if let Err(e) = gitcmd::run_offline_safe(repo, &args) {
+        let prefix = format!("git {}: ", args.join(" "));
+        let said = e.strip_prefix(&prefix).unwrap_or(&e);
+        return local(Some(format!("no fetch: {}", brief(said))));
+    }
+    let Some((ahead, behind)) = divergence(repo, branch, &remote) else {
+        return local(None);
+    };
+    let tracking = format!("{remote}/{branch}");
+    match (ahead, behind) {
+        (0, 0) => local(None),
+        // behind only: the remote carries everything local does, and more
+        (0, behind) => match commit_of(repo, &format!("refs/remotes/{tracking}")) {
+            Some(sha) => Some(BranchPoint {
+                from: tracking,
+                sha,
+                reason: Some(format!("local {branch} was {behind} behind")),
+            }),
+            None => local(None),
+        },
+        // unpushed commits are work: they ride with the seat
+        (ahead, 0) => local(Some(unpushed(ahead))),
+        (ahead, behind) => {
+            let mut reason = format!("{ahead} ahead, {behind} behind {tracking}");
+            if let Some(h) = hint {
+                reason.push_str(&format!(" — `{h}` overrides"));
+            }
+            local(Some(reason))
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Mint
 
 /// Where a slug's worktree goes: a sibling folder of the checkout.
@@ -400,6 +553,17 @@ pub fn default_worktree_dir(top: &Path, slug: &str) -> PathBuf {
     top.parent().unwrap_or(top).join(format!("{name}-worktrees")).join(slug)
 }
 
+/// The checkout a seat folder anchors on: the repository's main checkout,
+/// whichever of its worktrees the mint runs from. Minting from inside a seat
+/// would otherwise nest the new folder under its parent, one level deeper
+/// every time — the anchor the member cascade already uses
+/// (`archi/requirements/worktree-parallelism/a-seat-sits-beside-the-main-checkout.md`).
+fn folder_anchor(top: &Path) -> PathBuf {
+    gitcmd::linked_worktree(top)
+        .map(|w| canon(&w.main))
+        .unwrap_or_else(|| top.to_path_buf())
+}
+
 #[derive(Debug)]
 pub struct Minted {
     pub path: PathBuf,
@@ -409,6 +573,11 @@ pub struct Minted {
     /// True when the caller already sits in the slug's worktree and the
     /// binding was merely extended.
     pub extended: bool,
+    /// Where the fresh branch grew from. `None` when nothing grew: an
+    /// attach continues a branch, an extension creates nothing at all.
+    pub point: Option<BranchPoint>,
+    /// The same, per member the cascade branched in this run.
+    pub member_points: BTreeMap<String, BranchPoint>,
 }
 
 /// Mint the worktree for `slug`: the branch (created, or attached when it
@@ -418,6 +587,9 @@ pub struct Minted {
 /// own worktree extends the binding (new members, plan/effort upserts)
 /// instead of creating anything anew, and a slug whose row closed re-opens
 /// that row — its folder comes back, its record continues.
+///
+/// `refresh` fetches each base branch before the branch points resolve;
+/// `false` is `--no-fetch`, and a failed fetch is never a gate.
 pub fn mint(
     root: &Path,
     slug: &str,
@@ -425,6 +597,7 @@ pub fn mint(
     effort: Option<&str>,
     repos: &[String],
     bases: &BTreeMap<String, String>,
+    refresh: bool,
 ) -> Result<Minted, String> {
     let root = canon(root);
     let top =
@@ -490,7 +663,7 @@ pub fn mint(
     let targets = if fresh_repos.is_empty() {
         Vec::new()
     } else {
-        plan_cascade(&root, slug, plan, &fresh_repos, bases)?
+        plan_cascade(&root, slug, plan, &fresh_repos, bases, refresh)?
     };
 
     // create: spec worktree (unless it exists), then member worktrees — any
@@ -504,12 +677,13 @@ pub fn mint(
             }
         }
     };
+    let mut point: Option<BranchPoint> = None;
     let (wt_path, attached) = match &extended {
         Some(wt) => (wt.clone(), true),
         None => {
             let path = match &reopen {
                 Some((p, _)) => p.clone(),
-                None => default_worktree_dir(&top, slug),
+                None => default_worktree_dir(&folder_anchor(&top), slug),
             };
             if path.exists() {
                 return Err(format!(
@@ -518,7 +692,16 @@ pub fn mint(
                 ));
             }
             let attached = branch_exists(&top, &branch);
-            worktree_add(&top, &path, &branch, !attached, None)?;
+            // A fresh branch grows from the branch this checkout stands on —
+            // refreshed first, and taken from whichever side of the remote
+            // carries everything. An attach continues a branch that already
+            // exists: nothing to choose, nothing to fetch.
+            if !attached {
+                point = current_branch(&top)
+                    .and_then(|b| branch_point(&top, &b, refresh, None));
+            }
+            let from = point.as_ref().map(|p| p.from.as_str());
+            worktree_add(&top, &path, &branch, !attached, from)?;
             let path = canon(&path);
             created.push((top.clone(), path.clone(), !attached));
             (path, attached)
@@ -526,15 +709,22 @@ pub fn mint(
     };
     let mut members: BTreeMap<String, MemberBinding> =
         existing.as_ref().map(|b| b.members.clone()).unwrap_or_default();
+    let mut member_points: BTreeMap<String, BranchPoint> = BTreeMap::new();
     for t in &targets {
-        let base = (!t.attach).then_some(t.base.as_str());
-        if let Err(e) = worktree_add(&t.repo_top, &t.target, &branch, !t.attach, base) {
+        // The branch point the cascade chose; the recorded base stays the
+        // local branch this member lands back on.
+        let from = (!t.attach)
+            .then(|| t.point.as_ref().map_or(t.base.as_str(), |p| p.from.as_str()));
+        if let Err(e) = worktree_add(&t.repo_top, &t.target, &branch, !t.attach, from) {
             rollback(&created);
             return Err(format!("{}: {e}", t.carries[0].0));
         }
         created.push((t.repo_top.clone(), canon(&t.target), !t.attach));
         let target = canon(&t.target);
         for (name, checkout) in &t.carries {
+            if let Some(p) = &t.point {
+                member_points.insert(name.clone(), p.clone());
+            }
             members.insert(
                 name.clone(),
                 MemberBinding {
@@ -573,7 +763,14 @@ pub fn mint(
     };
     reg.bind(&wt_path, binding);
     reg.save()?;
-    Ok(Minted { path: wt_path, branch, attached, extended: extended.is_some() })
+    Ok(Minted {
+        path: wt_path,
+        branch,
+        attached,
+        extended: extended.is_some(),
+        point,
+        member_points,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -587,6 +784,9 @@ struct CascadeTarget {
     target: PathBuf,
     /// The branch the worktree is based on — the default receiving branch.
     base: String,
+    /// Where the branch grows from, once the refresh spoke. `None` on the
+    /// attach path and whenever the caller named the base itself.
+    point: Option<BranchPoint>,
     /// True when `archi/<slug>` already exists in this repo.
     attach: bool,
     /// The members this repo carries: (name, checkout root).
@@ -631,6 +831,7 @@ fn plan_cascade(
     plan: Option<&str>,
     repos: &[String],
     bases: &BTreeMap<String, String>,
+    refresh: bool,
 ) -> Result<Vec<CascadeTarget>, String> {
     let set = crate::members::MemberSet::resolve(project)?;
     let branch = branch_of(slug);
@@ -807,10 +1008,19 @@ fn plan_cascade(
             ));
             continue;
         }
+        // The refresh and the divergence read run on the auto arm alone: a
+        // named base is the caller's own choice, so it is taken as given —
+        // no fetch, no second-guessing.
+        let point = (!attach && !bases.contains_key(name))
+            .then(|| {
+                branch_point(&repo_top, &base, refresh, Some(&format!("--base {name}=<branch>")))
+            })
+            .flatten();
         targets.push(CascadeTarget {
             repo_top,
             target,
             base,
+            point,
             attach,
             carries: vec![(name.clone(), checkout)],
         });
@@ -1417,11 +1627,14 @@ pub fn guard_mutation(root: &Path, work: Option<&str>) -> Result<(), String> {
         .collect();
     match work {
         Some(slug) if standing.is_empty() => {
-            let minted = mint(&root, slug, Some(slug), None, &[], &BTreeMap::new())?;
+            let minted = mint(&root, slug, Some(slug), None, &[], &BTreeMap::new(), true)?;
+            // a seat born here names its branch point too — it is as fresh
+            // as one the operator minted by hand
+            let grew = grew(minted.point.as_ref());
             Err(format!(
                 "this checkout is unbound — mutating commands run only inside a bound \
-                 worktree; minted worktree {} on branch {}; cd {} and re-run this command; \
-                 the CLI never changes your directory",
+                 worktree; minted worktree {} on branch {}{grew}; cd {} and re-run this \
+                 command; the CLI never changes your directory",
                 minted.path.display(),
                 minted.branch,
                 minted.path.display()
@@ -1595,7 +1808,7 @@ mod tests {
     }
 
     fn mint_plain(root: &Path, slug: &str, plan: Option<&str>, effort: Option<&str>) -> Result<Minted, String> {
-        mint(root, slug, plan, effort, &[], &BTreeMap::new())
+        mint(root, slug, plan, effort, &[], &BTreeMap::new(), true)
     }
 
     #[test]

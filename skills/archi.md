@@ -172,14 +172,10 @@ decay of the member map: stale rows, wrong clones and stranded baselines.
 Read them. They are the work to do.
 
 The registry moves only by the commands `archi worktree ls` and `archi
-worktree close`. Never move it by hand. A row is never deleted. `close`
-removes the folders and marks the row: `closed <key> (<branch>) — the
-folder is gone, the row stays as the record`. The opening looks for an
-**active** row to continue, so narrow the listing with `archi worktree ls
---status active`. A seat that reads `waiting on <landed-branch> →
-<receiving>` is normal work in flight, not a leftover: it landed sideways
-for a pull request, and it frees itself once the receiving branch carries
-the work. To land a worktree, run `archi worktree merge <slug>` (the
+worktree close`. Never move it by hand. Look for an **active** row to
+continue: `archi worktree ls --status active`. Never close a row that
+reads `waiting` — that worktree carries work in flight. To land a
+worktree, run `archi worktree merge <slug>` (the
 archi-finish-worktree skill). Merge a spec early, before the rest of its
 unit, in one case only: another effort that depends on yours must pin
 your published version. The default unit stays in one worktree and lands
