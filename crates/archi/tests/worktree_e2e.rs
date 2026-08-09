@@ -1189,6 +1189,231 @@ fn a_dirty_spec_outside_a_worktree_fails_check_and_build() {
     ok(&wt, &["check"]);
 }
 
+// ---------------------------------------------------------------------------
+// The branch point: the refresh, the divergence, the folder anchor
+
+/// A bare remote of `repo` named `origin`, fetched once — the shape a clone
+/// leaves behind, so the base has a counterpart on record.
+fn bare_remote(ws: &Path, repo: &Path, name: &str) -> PathBuf {
+    let bare = ws.join(format!("{name}.git"));
+    git(ws, &["clone", "-q", "--bare", repo.to_str().unwrap(), bare.to_str().unwrap()]);
+    git(repo, &["remote", "add", "origin", bare.to_str().unwrap()]);
+    git(repo, &["fetch", "-q", "origin"]);
+    bare
+}
+
+/// A second clone of the remote: the colleague whose pushes this machine has
+/// not seen yet.
+fn colleague(ws: &Path, bare: &Path, name: &str) -> PathBuf {
+    let dir = ws.join(name);
+    git(ws, &["clone", "-q", bare.to_str().unwrap(), dir.to_str().unwrap()]);
+    dir
+}
+
+/// One commit the colleague pushes to `branch`; hands back the new remote tip.
+fn colleague_pushes(other: &Path, branch: &str, file: &str) -> String {
+    git(other, &["switch", "-q", branch]);
+    fs::write(other.join(file), "the world moved on\n").unwrap();
+    git(other, &["add", "-A"]);
+    git(other, &["commit", "-qm", "colleague"]);
+    git(other, &["push", "-q", "origin", branch]);
+    head(other)
+}
+
+fn porcelain(dir: &Path) -> String {
+    let out = Command::new("git")
+        .args(["-C", dir.to_str().unwrap(), "status", "--porcelain"])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+fn checked_out(dir: &Path) -> String {
+    let out = Command::new("git")
+        .args(["-C", dir.to_str().unwrap(), "rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+fn config(dir: &Path, key: &str) -> Option<String> {
+    let out = Command::new("git")
+        .args(["-C", dir.to_str().unwrap(), "config", "--get", key])
+        .output()
+        .unwrap();
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+fn rev(dir: &Path, name: &str) -> Option<String> {
+    let out = Command::new("git")
+        .args(["-C", dir.to_str().unwrap(), "rev-parse", "--verify", "--quiet", name])
+        .output()
+        .unwrap();
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+#[test]
+fn an_unreachable_remote_never_blocks_the_mint() {
+    let (ws, spec) = open_repo("no-network");
+    bare_remote(&ws, &spec, "origin");
+    // the plane, the proxy, the dead host: the remote is on record and out
+    // of reach
+    git(&spec, &["remote", "set-url", "origin", ws.join("gone.git").to_str().unwrap()]);
+    let local = head(&spec);
+
+    let out = ok(&spec, &["worktree", "mint", "solo"]);
+    assert!(out.contains(&format!("from main {}", &local[..7])), "the local ref carried it: {out}");
+    assert!(out.contains("(no fetch:"), "the failure is named, not swallowed: {out}");
+    let wt = ws.join("spec-worktrees/solo");
+    assert!(wt.is_dir(), "a failed refresh is no gate: {out}");
+    assert_eq!(head(&wt), local, "the seat grew from the local ref");
+}
+
+#[test]
+fn no_fetch_skips_the_refresh() {
+    let (ws, spec) = open_repo("no-fetch");
+    let bare = bare_remote(&ws, &spec, "origin");
+    let seen = rev(&spec, "refs/remotes/origin/main").unwrap();
+    let other = colleague(&ws, &bare, "other");
+    let pushed = colleague_pushes(&other, "main", "colleague.md");
+    assert_ne!(pushed, seen, "the remote moved");
+
+    let out = ok(&spec, &["worktree", "mint", "blind", "--no-fetch"]);
+    assert!(out.contains(&format!("from main {}", &head(&spec)[..7])), "{out}");
+    assert!(out.contains("(no fetch)"), "{out}");
+    assert_eq!(
+        rev(&spec, "refs/remotes/origin/main").unwrap(),
+        seen,
+        "the remote-tracking ref never moved — nothing was fetched"
+    );
+    assert_eq!(head(&ws.join("spec-worktrees/blind")), head(&spec));
+}
+
+#[test]
+fn a_base_behind_its_remote_branches_from_the_remote() {
+    let (ws, spec) = open_repo("behind");
+    let bare = bare_remote(&ws, &spec, "origin");
+    let other = colleague(&ws, &bare, "other");
+    let pushed = colleague_pushes(&other, "main", "colleague.md");
+    let local = head(&spec);
+
+    let out = ok(&spec, &["worktree", "mint", "fresh"]);
+    assert!(
+        out.contains(&format!("from origin/main {} (local main was 1 behind)", &pushed[..7])),
+        "{out}"
+    );
+    let wt = ws.join("spec-worktrees/fresh");
+    assert_eq!(head(&wt), pushed, "the seat starts where the remote stands");
+    assert!(wt.join("colleague.md").is_file(), "the colleague's work rides with it");
+    assert_eq!(head(&spec), local, "a fetch moves no branch of this checkout");
+    assert_eq!(
+        config(&spec, "branch.archi/fresh.merge"),
+        None,
+        "a remote base is a start point, never the seat's upstream"
+    );
+}
+
+#[test]
+fn a_base_ahead_of_its_remote_keeps_the_unpushed_commits() {
+    let (ws, spec) = open_repo("ahead");
+    bare_remote(&ws, &spec, "origin");
+    // an hour of local work that never reached the remote
+    for note in ["first.md", "second.md"] {
+        fs::write(spec.join(note), "unpushed\n").unwrap();
+        git(&spec, &["add", "-A"]);
+        git(&spec, &["commit", "-qm", note]);
+    }
+    let local = head(&spec);
+
+    let out = ok(&spec, &["worktree", "mint", "onward"]);
+    assert!(
+        out.contains(&format!(
+            "from main {} (2 unpushed commits ride with the seat)",
+            &local[..7]
+        )),
+        "{out}"
+    );
+    let wt = ws.join("spec-worktrees/onward");
+    assert_eq!(head(&wt), local, "the safe side is local — unpushed commits are work");
+    assert!(wt.join("first.md").is_file() && wt.join("second.md").is_file(), "both rode along");
+}
+
+#[test]
+fn a_diverged_base_branches_locally_and_names_both_counts() {
+    let (ws, spec) = open_repo("diverged");
+    let bare = bare_remote(&ws, &spec, "origin");
+    let other = colleague(&ws, &bare, "other");
+    colleague_pushes(&other, "main", "colleague.md");
+    fs::write(spec.join("mine.md"), "unpushed\n").unwrap();
+    git(&spec, &["add", "-A"]);
+    git(&spec, &["commit", "-qm", "mine"]);
+    let local = head(&spec);
+
+    let out = ok(&spec, &["worktree", "mint", "both"]);
+    assert!(
+        out.contains(&format!("from main {} (1 ahead, 1 behind origin/main)", &local[..7])),
+        "{out}"
+    );
+    let wt = ws.join("spec-worktrees/both");
+    assert_eq!(head(&wt), local, "diverged takes the local side");
+    assert!(!wt.join("colleague.md").exists(), "the remote side was not taken");
+}
+
+#[test]
+fn a_mint_from_inside_a_seat_lands_beside_the_main_checkout() {
+    let (ws, spec) = open_repo("nested");
+    ok(&spec, &["worktree", "mint", "parent"]);
+    let parent = ws.join("spec-worktrees/parent");
+
+    // the briefing's shape: work that builds on an unlanded unit is minted
+    // from inside that unit's seat, so the fork grows from its branch
+    let out = ok(&parent, &["worktree", "mint", "fork"]);
+    let fork = ws.join("spec-worktrees/fork");
+    assert!(fork.is_dir(), "the seat sits beside the main checkout: {out}");
+    assert!(
+        !ws.join("spec-worktrees/parent-worktrees").exists(),
+        "nothing nests under the parent seat: {out}"
+    );
+    assert!(out.contains("from archi/parent "), "the fork grew from the seat's branch: {out}");
+    // no counterpart on the remote, so no word about a fetch that had
+    // nothing to ask for
+    assert!(!out.contains("no fetch"), "{out}");
+    let ls = ok(&spec, &["worktree", "ls"]);
+    assert!(ls.contains(&format!("{}  archi/fork", fork.display())), "{ls}");
+}
+
+#[test]
+fn a_busy_member_checkout_is_refreshed_without_moving() {
+    let (ws, spec, backend) = cascade_repo("busy-member");
+    let bare = bare_remote(&ws, &backend, "backend-origin");
+    // the member's own checkout is busy: another branch, work in the tree
+    git(&backend, &["switch", "-qc", "busy"]);
+    git(&backend, &["push", "-q", "origin", "busy"]);
+    let other = colleague(&ws, &bare, "backend-other");
+    let pushed = colleague_pushes(&other, "busy", "colleague.rs");
+    fs::write(backend.join("scratch.rs"), "half-done\n").unwrap();
+    let (was_dirty, was_on, was_at) = (porcelain(&backend), checked_out(&backend), head(&backend));
+
+    let out = ok(&spec, &["worktree", "mint", "feat", "--repos", "backend"]);
+    assert!(out.contains("member backend:"), "{out}");
+    assert!(out.contains("(base busy)"), "the receiving branch stays the local one: {out}");
+    assert!(
+        out.contains(&format!("from origin/busy {} (local busy was 1 behind)", &pushed[..7])),
+        "{out}"
+    );
+    let bwt = ws.join("backend-worktrees/feat");
+    assert_eq!(head(&bwt), pushed, "the member seat starts where its remote stands");
+
+    // a fetch writes remote-tracking refs and nothing else
+    assert_eq!(checked_out(&backend), was_on, "the busy checkout stayed on its branch");
+    assert_eq!(head(&backend), was_at, "its branch never moved");
+    assert_eq!(porcelain(&backend), was_dirty, "its working tree is exactly as it was");
+}
+
 #[test]
 fn a_hand_removed_worktree_closes_its_row() {
     let (_ws, spec) = protected_repo("heal");
