@@ -351,10 +351,6 @@ impl Registry {
         self.entries.get_mut(key)
     }
 
-    pub fn remove(&mut self, key: &str) -> Option<Binding> {
-        self.entries.remove(key)
-    }
-
     /// Resolve a user-supplied handle — a path, a plan/effort slug, or a
     /// worktree directory name — to a registry key.
     pub fn resolve_key(&self, arg: &str) -> Option<String> {
@@ -1178,7 +1174,6 @@ pub enum Side {
 
 /// One folder the sweep freed.
 #[derive(Debug)]
-#[allow(dead_code)] // read by the caller t2 wires
 pub struct Freed {
     pub path: PathBuf,
     pub side: Side,
@@ -1203,9 +1198,8 @@ pub struct SweepReport {
 /// arrived. Silent by construction: an unreachable member, an unresolvable
 /// ref or a refusing removal simply leaves that folder standing, and the
 /// checkout the caller stands in is never freed under its own feet.
-// The surface waits for its caller: the registry-reading commands run the
-// sweep and print what it freed (archi/plans/integration-sweep/t2-cli.md).
-#[allow(dead_code)]
+// The registry-reading commands — `worktree ls`, `worktree mint`, `status` —
+// run it before they render and print what it freed.
 pub fn sweep(root: &Path) -> SweepReport {
     let mut report = SweepReport::default();
     let root = canon(root);
@@ -1315,7 +1309,7 @@ pub fn guard_mutation(root: &Path, work: Option<&str>) -> Result<(), String> {
             if Path::new(owner) != top.as_path() {
                 return Err(format!(
                     "plan `{slug}` is bound to {owner} — continue there (cd {owner}); \
-                     if that checkout is gone, `archi worktree drop {slug}`"
+                     if that checkout is gone, `archi worktree close {slug}`"
                 ));
             }
         }
