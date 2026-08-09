@@ -31,12 +31,21 @@ fn spec_project(dir: &Path, manifest_extra: &str) {
     fs::write(dir.join("archi/src/model.arch"), MODEL).unwrap();
 }
 
-fn head(dir: &Path) -> String {
+/// One git query against `dir`: trimmed stdout, `None` when git refused —
+/// the read shape every probe below rides.
+fn git_read(dir: &Path, args: &[&str]) -> Option<String> {
     let out = Command::new("git")
-        .args(["-C", dir.to_str().unwrap(), "rev-parse", "HEAD"])
+        .args(["-C", dir.to_str().unwrap()])
+        .args(args)
         .output()
         .unwrap();
-    String::from_utf8_lossy(&out.stdout).trim().to_string()
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+fn head(dir: &Path) -> String {
+    git_read(dir, &["rev-parse", "HEAD"]).unwrap_or_default()
 }
 
 /// Run a save on `main` the governed way: a bootstrap worktree maps the
@@ -836,19 +845,7 @@ fn map_overlay(spec: &Path, name: &str, dir: &Path) {
 }
 
 fn has_branch(dir: &Path, name: &str) -> bool {
-    Command::new("git")
-        .args([
-            "-C",
-            dir.to_str().unwrap(),
-            "rev-parse",
-            "--verify",
-            "--quiet",
-            &format!("refs/heads/{name}"),
-        ])
-        .output()
-        .unwrap()
-        .status
-        .success()
+    rev(dir, &format!("refs/heads/{name}")).is_some()
 }
 
 #[test]
@@ -1221,39 +1218,19 @@ fn colleague_pushes(other: &Path, branch: &str, file: &str) -> String {
 }
 
 fn porcelain(dir: &Path) -> String {
-    let out = Command::new("git")
-        .args(["-C", dir.to_str().unwrap(), "status", "--porcelain"])
-        .output()
-        .unwrap();
-    String::from_utf8_lossy(&out.stdout).into_owned()
+    git_read(dir, &["status", "--porcelain"]).unwrap_or_default()
 }
 
 fn checked_out(dir: &Path) -> String {
-    let out = Command::new("git")
-        .args(["-C", dir.to_str().unwrap(), "rev-parse", "--abbrev-ref", "HEAD"])
-        .output()
-        .unwrap();
-    String::from_utf8_lossy(&out.stdout).trim().to_string()
+    git_read(dir, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_default()
 }
 
 fn config(dir: &Path, key: &str) -> Option<String> {
-    let out = Command::new("git")
-        .args(["-C", dir.to_str().unwrap(), "config", "--get", key])
-        .output()
-        .unwrap();
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    git_read(dir, &["config", "--get", key])
 }
 
 fn rev(dir: &Path, name: &str) -> Option<String> {
-    let out = Command::new("git")
-        .args(["-C", dir.to_str().unwrap(), "rev-parse", "--verify", "--quiet", name])
-        .output()
-        .unwrap();
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    git_read(dir, &["rev-parse", "--verify", "--quiet", name])
 }
 
 #[test]

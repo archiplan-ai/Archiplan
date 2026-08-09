@@ -1254,10 +1254,7 @@ fn run_worktree(args: &Args) -> ExitCode {
             };
             // A fresh seat names what it grew from — the ref, its commit and
             // the divergence that chose it; an attach and an extension grew
-            // nothing and say nothing.
-            let grew = |p: Option<&worktrees::BranchPoint>| {
-                p.map(|p| format!(" {}", p.describe())).unwrap_or_default()
-            };
+            // nothing and say nothing. `worktrees::grew` owns the phrase.
             if m.extended {
                 println!("extended {} — it carries `{slug}` on {}", m.path.display(), m.branch);
             } else {
@@ -1267,7 +1264,7 @@ fn run_worktree(args: &Args) -> ExitCode {
                     m.path.display(),
                     m.branch,
                     if m.attached { " (existing branch attached)" } else { "" },
-                    grew(m.point.as_ref()),
+                    worktrees::grew(m.point.as_ref()),
                     m.path.display()
                 );
             }
@@ -1279,7 +1276,7 @@ fn run_worktree(args: &Args) -> ExitCode {
                             mb.path.display(),
                             mb.branch,
                             mb.base,
-                            grew(m.member_points.get(name))
+                            worktrees::grew(m.member_points.get(name))
                         );
                     }
                 }

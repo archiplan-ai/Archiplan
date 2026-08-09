@@ -418,6 +418,14 @@ impl BranchPoint {
     }
 }
 
+/// The phrase a report line appends to say what a branch grew from: a
+/// leading space and the description, or nothing at all when nothing grew —
+/// an attach continues a branch, an extension creates none. Every report
+/// that names a branch point rides this, so all of them read alike.
+pub fn grew(point: Option<&BranchPoint>) -> String {
+    point.map(|p| format!(" {}", p.describe())).unwrap_or_default()
+}
+
 /// The remote that answers for `branch`: its configured one, else `origin`
 /// when the repository has it — and only while a counterpart is on record,
 /// which is either an upstream the branch declares or a remote-tracking ref
@@ -1622,8 +1630,7 @@ pub fn guard_mutation(root: &Path, work: Option<&str>) -> Result<(), String> {
             let minted = mint(&root, slug, Some(slug), None, &[], &BTreeMap::new(), true)?;
             // a seat born here names its branch point too — it is as fresh
             // as one the operator minted by hand
-            let grew =
-                minted.point.as_ref().map(|p| format!(" {}", p.describe())).unwrap_or_default();
+            let grew = grew(minted.point.as_ref());
             Err(format!(
                 "this checkout is unbound — mutating commands run only inside a bound \
                  worktree; minted worktree {} on branch {}{grew}; cd {} and re-run this \
