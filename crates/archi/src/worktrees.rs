@@ -869,11 +869,56 @@ fn branch_commit(repo: &Path, name: &str) -> Option<String> {
     commit_of(repo, &format!("refs/heads/{name}")).or_else(|| commit_of(repo, name))
 }
 
+/// `git diff --quiet` as three answers, not two: `Some(true)` — git found no
+/// difference, `Some(false)` — git found one (its exit code 1), `None` — git
+/// could not answer at all. [`git_out`] cannot serve here: it folds "they
+/// differ" and "git failed" into the same `None`, and a probe that reads a
+/// failure as a match would free a seat whose work never arrived.
+fn diff_quiet(repo: &Path, args: &[&str]) -> Option<bool> {
+    let out = std::process::Command::new("git").arg("-C").arg(repo).args(args).output().ok()?;
+    match out.status.code() {
+        Some(0) => Some(true),
+        Some(1) => Some(false),
+        _ => None,
+    }
+}
+
+/// How many bytes of pathspec one `git diff` call carries. A landing may
+/// touch more paths than a command line holds, so the content proof runs in
+/// batches; every batch must come back quiet, which is the same claim one
+/// call would make.
+const PATHSPEC_BUDGET: usize = 60_000;
+
+/// The paths cut into command-line-sized batches — every path once, in
+/// order, and never an empty batch, so one path longer than the whole
+/// budget still travels (alone).
+fn pathspec_batches<'a>(paths: &[&'a str], budget: usize) -> Vec<Vec<&'a str>> {
+    let mut batches = Vec::new();
+    let mut start = 0;
+    while start < paths.len() {
+        let (mut end, mut bytes) = (start, 0);
+        while end < paths.len() && (end == start || bytes + paths[end].len() < budget) {
+            bytes += paths[end].len() + 1;
+            end += 1;
+        }
+        batches.push(paths[start..end].to_vec());
+        start = end;
+    }
+    batches
+}
+
 /// The one integration probe, shared by the landing and the sweep: does
 /// `receiving` carry what `landing` put on its branch? Ancestry is the cheap
-/// first pass; an empty tree diff answers the squash, where the forge
-/// rewrote every sha. Both reads only — no merge ever runs to find out, and
-/// a ref that does not resolve here yields no verdict at all
+/// first pass. Content answers the squash, where the forge rewrote every
+/// sha — and it asks one-directionally, over the paths the landing itself
+/// touched (the landing against its merge base with `receiving`), never over
+/// the whole tree. A shared receiving branch carries work of its own, and a
+/// whole-tree comparison would read that work as "not yet" forever, on
+/// exactly the squash this pass exists to see. The one error left is a
+/// receiving branch that rewrote those very paths differently, which reads
+/// as `NotYet` and keeps the seat standing — the safe direction. Both reads
+/// only — no merge ever runs to find out — and anything git cannot answer
+/// yields no verdict at all, never a false arrival
 /// (`archi/requirements/worktree-parallelism/integration-is-proven-by-content.md`).
 pub(crate) fn integration(repo: &Path, landing: &Landing) -> Verdict {
     let Some(sha) = commit_of(repo, &landing.sha) else {
@@ -885,12 +930,35 @@ pub(crate) fn integration(repo: &Path, landing: &Landing) -> Verdict {
     if git_out(repo, &["merge-base", "--is-ancestor", &sha, &receiving]).is_some() {
         return Verdict::Integrated;
     }
-    // the landed branch as it stands now, else the head it landed at
-    let landed = branch_commit(repo, &landing.branch).unwrap_or(sha);
-    if git_out(repo, &["diff", "--quiet", &receiving, &landed]).is_some() {
+    // where the two sides parted: no common history, no content question
+    let Some(base) = git_out(repo, &["merge-base", &sha, &receiving]) else {
+        return Verdict::Unknown;
+    };
+    // the paths the landing itself touched. `-z` keeps odd names verbatim
+    // (quoting would break the pathspec); `--no-renames` names both sides of
+    // a rename, so a source the receiving branch still holds is not missed.
+    let Some(touched) = git_out(repo, &["diff", "--no-renames", "--name-only", "-z", &base, &sha])
+    else {
+        return Verdict::Unknown;
+    };
+    let paths: Vec<&str> = touched.split('\0').filter(|p| !p.is_empty()).collect();
+    if paths.is_empty() {
+        // the landing put nothing on top of the merge base: nothing to carry
         return Verdict::Integrated;
     }
-    Verdict::NotYet
+    // every batch quiet, or the claim is not made
+    for batch in pathspec_batches(&paths, PATHSPEC_BUDGET) {
+        // `--literal-pathspecs`: a path is a path, never a glob
+        let mut args =
+            vec!["--literal-pathspecs", "diff", "--quiet", sha.as_str(), receiving.as_str(), "--"];
+        args.extend_from_slice(&batch);
+        match diff_quiet(repo, &args) {
+            Some(true) => {}
+            Some(false) => return Verdict::NotYet,
+            None => return Verdict::Unknown,
+        }
+    }
+    Verdict::Integrated
 }
 
 /// `git status --porcelain` silent: tracked files unmodified and every
@@ -1749,6 +1817,96 @@ mod tests {
         git(&spec, &["add", "-A"]);
         git(&spec, &["commit", "-qm", "main moves on"]);
         let landing = Landing { branch: "more".to_string(), receiving: "main".to_string(), sha: more };
+        assert_eq!(integration(&spec, &landing), Verdict::Integrated);
+    }
+
+    #[test]
+    fn the_pathspec_batches_carry_every_path_once_and_in_order() {
+        let paths = ["aa", "bb", "cc", "dd"];
+        assert_eq!(
+            pathspec_batches(&paths, 100),
+            vec![vec!["aa", "bb", "cc", "dd"]],
+            "one call while the budget holds"
+        );
+        assert_eq!(pathspec_batches(&paths, 7), vec![vec!["aa", "bb"], vec!["cc", "dd"]]);
+        // a path wider than the whole budget still travels, alone
+        let wide = ["x".repeat(20), "y".to_string()];
+        let refs: Vec<&str> = wide.iter().map(String::as_str).collect();
+        let cut = pathspec_batches(&refs, 5);
+        assert_eq!(cut.len(), 2);
+        assert_eq!(cut.concat(), refs, "every path once, in order — the claim stays whole");
+        let none: [&str; 0] = [];
+        assert!(pathspec_batches(&none, 5).is_empty());
+    }
+
+    #[test]
+    fn the_probe_reads_a_squash_onto_a_branch_that_moved_on() {
+        // the live shape: the receiving branch is shared, so it carries work
+        // of its own beside the squashed landing
+        let outer = scratch();
+        let spec = repo(&outer, "spec");
+        git(&spec, &["switch", "-qc", "feat"]);
+        fs::write(spec.join("feat.txt"), "feat\n").unwrap();
+        git(&spec, &["add", "-A"]);
+        git(&spec, &["commit", "-qm", "feat"]);
+        let feat = head(&spec);
+        git(&spec, &["switch", "-q", "main"]);
+        fs::write(spec.join("other.txt"), "someone else's work\n").unwrap();
+        git(&spec, &["add", "-A"]);
+        git(&spec, &["commit", "-qm", "unrelated"]);
+        let landing =
+            Landing { branch: "feat".to_string(), receiving: "main".to_string(), sha: feat };
+
+        // unrelated work alone is not the landing
+        assert_eq!(integration(&spec, &landing), Verdict::NotYet);
+
+        // the forge squashes the pull request in beside it
+        fs::write(spec.join("feat.txt"), "feat\n").unwrap();
+        git(&spec, &["add", "-A"]);
+        git(&spec, &["commit", "-qm", "squashed"]);
+        assert!(
+            git_out(&spec, &["merge-base", "--is-ancestor", &landing.sha, "refs/heads/main"])
+                .is_none(),
+            "ancestry alone would answer no"
+        );
+        assert!(
+            git_out(&spec, &["diff", "--quiet", "refs/heads/main", "refs/heads/feat"]).is_none(),
+            "the trees differ over other.txt — a whole-tree test would answer no forever"
+        );
+        assert_eq!(integration(&spec, &landing), Verdict::Integrated);
+    }
+
+    #[test]
+    fn the_probe_keeps_the_seat_when_the_receiving_branch_rewrote_the_landings_paths() {
+        let outer = scratch();
+        let spec = repo(&outer, "spec");
+        git(&spec, &["switch", "-qc", "feat"]);
+        fs::write(spec.join("feat.txt"), "as the seat wrote it\n").unwrap();
+        git(&spec, &["add", "-A"]);
+        git(&spec, &["commit", "-qm", "feat"]);
+        let feat = head(&spec);
+        git(&spec, &["switch", "-q", "main"]);
+        fs::write(spec.join("feat.txt"), "as main wrote it\n").unwrap();
+        git(&spec, &["add", "-A"]);
+        git(&spec, &["commit", "-qm", "main's own take"]);
+        let landing =
+            Landing { branch: "feat".to_string(), receiving: "main".to_string(), sha: feat };
+        assert_eq!(
+            integration(&spec, &landing),
+            Verdict::NotYet,
+            "one of the landing's own paths differs — the seat stands"
+        );
+
+        // a landing that touched nothing has nothing to carry
+        git(&spec, &["switch", "-qc", "hollow"]);
+        git(&spec, &["commit", "-q", "--allow-empty", "-m", "nothing"]);
+        let hollow = head(&spec);
+        git(&spec, &["switch", "-q", "main"]);
+        fs::write(spec.join("main.txt"), "main moves on\n").unwrap();
+        git(&spec, &["add", "-A"]);
+        git(&spec, &["commit", "-qm", "onward"]);
+        let landing =
+            Landing { branch: "hollow".to_string(), receiving: "main".to_string(), sha: hollow };
         assert_eq!(integration(&spec, &landing), Verdict::Integrated);
     }
 

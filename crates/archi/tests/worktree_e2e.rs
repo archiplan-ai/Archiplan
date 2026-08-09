@@ -487,8 +487,16 @@ fn the_sweep_frees_a_seat_the_forge_squashed() {
     let landed = head(&wt);
     ok(&spec, &["worktree", "merge", "solo", "--to", "feat/solo"]);
 
+    // main is a shared branch: it carries work of its own while the pull
+    // request waits for review
+    fs::write(spec.join("unrelated.md"), "someone else's work\n").unwrap();
+    git(&spec, &["add", "-A"]);
+    git(&spec, &["commit", "-qm", "unrelated"]);
+
     // the forge squashes the pull request: main takes the content under a
-    // sha of its own, so ancestry answers no and the content answers yes
+    // sha of its own, so ancestry answers no and the content answers yes —
+    // over the paths the landing touched, not the whole tree, which the
+    // unrelated commit would otherwise keep apart forever
     git(&spec, &["merge", "--squash", "feat/solo"]);
     git(&spec, &["commit", "-qm", "squashed"]);
     assert_ne!(head(&spec), landed, "the forge rewrote the sha");
