@@ -159,7 +159,7 @@ fn a_gitless_project_refuses_mutation_loudly() {
 }
 
 #[test]
-fn mint_without_a_plan_binds_spec_work_and_drop_retires_it() {
+fn mint_without_a_plan_binds_spec_work_and_close_retires_it() {
     let (_ws, spec) = protected_repo("effort");
     let out = ok(&spec, &["worktree", "mint", "storm"]);
     assert!(out.contains("minted"), "{out}");
@@ -171,13 +171,114 @@ fn mint_without_a_plan_binds_spec_work_and_drop_retires_it() {
     let ls = ok(&spec, &["worktree", "ls", "--plan", "nope"]);
     assert!(ls.contains("no worktrees match"), "{ls}");
 
-    let out = ok(&spec, &["worktree", "drop", "storm"]);
-    assert!(out.contains("dropped"), "{out}");
+    let out = ok(&spec, &["worktree", "close", "storm"]);
+    assert!(out.contains("closed"), "{out}");
+    assert!(out.contains("the row stays as the record"), "{out}");
     assert!(out.contains("branch archi/storm stays"), "{out}");
-    let ls = ok(&spec, &["worktree", "ls", "--spec", "storm"]);
-    assert!(ls.contains("no worktrees match"), "{ls}");
     let wt = spec.parent().unwrap().join("spec-worktrees/storm");
-    assert!(!wt.exists(), "drop removed the worktree");
+    assert!(!wt.exists(), "close removed the worktree");
+    // The folder went; the row is the record of what this machine carried.
+    let ls = ok(&spec, &["worktree", "ls", "--spec", "storm"]);
+    assert!(ls.contains("spec storm — closed"), "the listing keeps it: {ls}");
+    let ls = ok(&spec, &["worktree", "ls", "--spec", "storm", "--status", "active"]);
+    assert!(ls.contains("no worktrees match"), "history is not live work: {ls}");
+}
+
+#[test]
+fn a_bare_drop_refuses_toward_close() {
+    let (_ws, spec) = protected_repo("drop-retired");
+    ok(&spec, &["worktree", "mint", "storm"]);
+    let wt = spec.parent().unwrap().join("spec-worktrees/storm");
+    let (success, _out, err) = run(&spec, &["worktree", "drop", "storm"]);
+    assert!(!success, "the retired verb refuses instead of doing nothing");
+    assert!(
+        err.contains(
+            "`drop` retired — the registry keeps its rows: `archi worktree close <slug>`"
+        ),
+        "{err}"
+    );
+    assert!(wt.is_dir(), "the refusal moved nothing");
+    // the bare verb, with no handle at all, answers the same
+    let (success, _out, err) = run(&spec, &["worktree", "drop"]);
+    assert!(!success);
+    assert!(err.contains("archi worktree close <slug>"), "{err}");
+}
+
+#[test]
+fn ls_filters_by_status_and_refuses_an_unknown_one() {
+    let (_ws, spec) = protected_repo("status-filter");
+    ok(&spec, &["worktree", "mint", "live"]);
+    ok(&spec, &["worktree", "mint", "done"]);
+    ok(&spec, &["worktree", "close", "done"]);
+
+    let all = ok(&spec, &["worktree", "ls"]);
+    assert!(all.contains("spec live"), "{all}");
+    assert!(all.contains("spec done — closed"), "{all}");
+    let active = ok(&spec, &["worktree", "ls", "--status", "active"]);
+    assert!(active.contains("spec live"), "{active}");
+    assert!(!active.contains("spec done"), "{active}");
+    let closed = ok(&spec, &["worktree", "ls", "--status", "closed"]);
+    assert!(closed.contains("spec done — closed"), "{closed}");
+    assert!(!closed.contains("spec live"), "{closed}");
+    // it composes with the filters that were already there
+    let ls = ok(&spec, &["worktree", "ls", "--spec", "live", "--status", "closed"]);
+    assert!(ls.contains("no worktrees match"), "{ls}");
+    let ls = ok(&spec, &["worktree", "ls", "--spec", "live", "--status", "active"]);
+    assert!(ls.contains("spec live"), "{ls}");
+    assert!(!ls.contains("spec done"), "{ls}");
+
+    let (success, _out, err) = run(&spec, &["worktree", "ls", "--status", "gone"]);
+    assert!(!success, "an unknown state is a refusal, not a silent all");
+    assert!(err.contains("`--status gone` names no state"), "{err}");
+    assert!(err.contains("active, closed or all"), "{err}");
+}
+
+#[test]
+fn status_in_an_unbound_checkout_names_the_standing_rows() {
+    let (_ws, spec) = protected_repo("pointer");
+    // the fixture's own seat landed and closed: nothing stands
+    let st = ok(&spec, &["status"]);
+    assert!(st.contains("binding: none — this checkout is unbound"), "{st}");
+    assert!(st.contains("standing work: none"), "{st}");
+
+    ok(&spec, &["worktree", "mint", "storm", "--plan", "gale"]);
+    let wt = spec.parent().unwrap().join("spec-worktrees/storm");
+    let st = ok(&spec, &["status"]);
+    assert!(
+        st.contains(&format!("standing work: {} on archi/storm — plan gale", wt.display())),
+        "{st}"
+    );
+    // closing it leaves the checkout pointing at nothing again
+    ok(&spec, &["worktree", "close", "storm"]);
+    let st = ok(&spec, &["status"]);
+    assert!(st.contains("standing work: none"), "{st}");
+}
+
+#[test]
+fn a_closed_row_leaves_its_checkout_unbound() {
+    let (_ws, spec) = protected_repo("closed-unbound");
+    ok(&spec, &["worktree", "mint", "storm"]);
+    let wt = spec.parent().unwrap().join("spec-worktrees/storm");
+    // while the row stands, the seat licenses its mutations
+    fs::write(
+        wt.join("archi/src/model.arch"),
+        format!("{MODEL}def node Governed:\n  port x\n"),
+    )
+    .unwrap();
+    ok(&wt, &["version", "save", "-m", "governed"]);
+    git(&wt, &["add", "-A"]);
+    git(&wt, &["commit", "-qm", "saved"]);
+    ok(&spec, &["worktree", "close", "storm"]);
+
+    // the operator brings the folder back by hand: the row is history, and
+    // history licenses nothing
+    git(&spec, &["worktree", "add", "-q", wt.to_str().unwrap(), "archi/storm"]);
+    let st = ok(&wt, &["status"]);
+    assert!(st.contains("binding: none"), "{st}");
+    assert!(st.contains("row closed"), "{st}");
+    let (success, _out, err) = run(&wt, &["version", "save", "-m", "ungoverned"]);
+    assert!(!success, "a closed row is no license to mutate");
+    assert!(err.contains("unbound"), "{err}");
 }
 
 #[test]
@@ -219,7 +320,10 @@ fn a_clean_merge_lands_the_work_and_retires_the_worktree() {
     assert!(out.contains("retired"), "{out}");
     assert!(spec.join("notes.md").is_file(), "the work landed on main");
     assert!(!wt.exists(), "the worktree is gone");
+    // the folder is gone, the row is the record
     let ls = ok(&spec, &["worktree", "ls", "--spec", "feature"]);
+    assert!(ls.contains("spec feature — closed"), "{ls}");
+    let ls = ok(&spec, &["worktree", "ls", "--spec", "feature", "--status", "active"]);
     assert!(ls.contains("no worktrees match"), "{ls}");
 }
 
@@ -299,13 +403,134 @@ fn to_lands_the_worktree_head_on_a_new_branch_without_merging() {
 
     let out = ok(&spec, &["worktree", "merge", "feature", "--to", "feat/x"]);
     assert!(out.contains("landed archi/feature on new branch feat/x"), "{out}");
-    assert!(out.contains("retired"), "{out}");
     assert!(!spec.join("notes.md").exists(), "main is untouched");
-    let out = Command::new("git")
+    let verify = Command::new("git")
         .args(["-C", spec.to_str().unwrap(), "rev-parse", "--verify", "refs/heads/feat/x"])
         .output()
         .unwrap();
-    assert!(out.status.success(), "feat/x exists");
+    assert!(verify.status.success(), "feat/x exists");
+
+    // A departure, not an arrival: the seat survives the review window and
+    // the report says what is left to do.
+    assert!(!out.contains("retired"), "nothing retired on the sideways path: {out}");
+    assert!(out.contains(&format!("{} stays", wt.display())), "{out}");
+    assert!(out.contains("push feat/x and open the PR"), "{out}");
+    assert!(out.contains("the row closes once main carries the work"), "{out}");
+    assert!(out.contains("the next archi command frees the folder"), "{out}");
+    assert!(wt.is_dir(), "the worktree stays until the work lands");
+    let ls = ok(&spec, &["worktree", "ls", "--spec", "feature"]);
+    assert!(ls.contains("spec feature — waiting on feat/x → main"), "{ls}");
+}
+
+/// Two seats, `one` and `two`, each carrying one commit and landed sideways
+/// on `feat/<slug>`: the state every sweep test starts from — both folders
+/// standing, both rows waiting on `main`.
+fn two_landed_seats(spec: &Path) -> (PathBuf, PathBuf) {
+    ok(spec, &["worktree", "mint", "one"]);
+    ok(spec, &["worktree", "mint", "two"]);
+    let one = spec.parent().unwrap().join("spec-worktrees/one");
+    let two = spec.parent().unwrap().join("spec-worktrees/two");
+    for (wt, name) in [(&one, "one"), (&two, "two")] {
+        fs::write(wt.join(format!("{name}.md")), "work\n").unwrap();
+        git(wt, &["add", "-A"]);
+        git(wt, &["commit", "-qm", "work"]);
+    }
+    ok(spec, &["worktree", "merge", "one", "--to", "feat/one"]);
+    ok(spec, &["worktree", "merge", "two", "--to", "feat/two"]);
+    (one, two)
+}
+
+#[test]
+fn the_sweep_frees_an_integrated_seat_and_keeps_one_with_stray_work() {
+    let (_ws, spec) = protected_repo("sweep-merge");
+    // ignored build output is the reason the folder is worth freeing at all
+    fs::write(spec.join(".gitignore"), "junk/\n").unwrap();
+    git(&spec, &["add", "-A"]);
+    git(&spec, &["commit", "-qm", "ignore the build output"]);
+    let (one, two) = two_landed_seats(&spec);
+
+    // nothing arrived yet: the reading command sweeps and stays silent
+    let ls = ok(&spec, &["worktree", "ls"]);
+    assert!(!ls.contains("freed"), "an empty sweep says nothing: {ls}");
+    assert!(ls.contains("spec one — waiting on feat/one → main"), "{ls}");
+    assert!(one.is_dir() && two.is_dir());
+
+    // the forge merges both pull requests; one seat holds ignored build
+    // output, the other an untracked file no rule covers
+    git(&spec, &["merge", "--no-edit", "feat/one"]);
+    git(&spec, &["merge", "--no-edit", "feat/two"]);
+    fs::create_dir_all(one.join("junk")).unwrap();
+    fs::write(one.join("junk/build.bin"), "tens of gigabytes\n").unwrap();
+    fs::write(two.join("stray.txt"), "unfinished\n").unwrap();
+
+    let ls = ok(&spec, &["worktree", "ls"]);
+    assert!(
+        ls.contains(&format!("freed {} — spec integrated into main", one.display())),
+        "{ls}"
+    );
+    assert!(ls.contains(&format!("closed {}", one.display())), "{ls}");
+    assert!(!one.exists(), "ignored files never veto a cleanup");
+    assert!(two.is_dir(), "an unignored untracked file keeps its seat");
+    assert!(ls.contains("spec one — closed"), "{ls}");
+    // the kept seat is live work again — its landing record no longer stands
+    assert!(!ls.contains("waiting on feat/two"), "{ls}");
+}
+
+#[test]
+fn the_sweep_frees_a_seat_the_forge_squashed() {
+    let (_ws, spec) = protected_repo("sweep-squash");
+    ok(&spec, &["worktree", "mint", "solo"]);
+    let wt = spec.parent().unwrap().join("spec-worktrees/solo");
+    fs::write(wt.join("notes.md"), "landed\n").unwrap();
+    git(&wt, &["add", "-A"]);
+    git(&wt, &["commit", "-qm", "work"]);
+    let landed = head(&wt);
+    ok(&spec, &["worktree", "merge", "solo", "--to", "feat/solo"]);
+
+    // main is a shared branch: it carries work of its own while the pull
+    // request waits for review
+    fs::write(spec.join("unrelated.md"), "someone else's work\n").unwrap();
+    git(&spec, &["add", "-A"]);
+    git(&spec, &["commit", "-qm", "unrelated"]);
+
+    // the forge squashes the pull request: main takes the content under a
+    // sha of its own, so ancestry answers no and the content answers yes —
+    // over the paths the landing touched, not the whole tree, which the
+    // unrelated commit would otherwise keep apart forever
+    git(&spec, &["merge", "--squash", "feat/solo"]);
+    git(&spec, &["commit", "-qm", "squashed"]);
+    assert_ne!(head(&spec), landed, "the forge rewrote the sha");
+
+    let st = ok(&spec, &["status"]);
+    assert!(
+        st.contains(&format!("freed {} — spec integrated into main", wt.display())),
+        "{st}"
+    );
+    assert!(!wt.exists(), "content proves the arrival, not ancestry");
+    let ls = ok(&spec, &["worktree", "ls", "--status", "closed"]);
+    assert!(ls.contains("spec solo — closed"), "{ls}");
+}
+
+#[test]
+fn a_resumed_seat_survives_the_sweep() {
+    let (_ws, spec) = protected_repo("resumed");
+    let (one, two) = two_landed_seats(&spec);
+
+    // the review sends the operator back into both seats: one answers with a
+    // commit, the other with an edit still in the tree
+    fs::write(one.join("answer.md"), "review answered\n").unwrap();
+    git(&one, &["add", "-A"]);
+    git(&one, &["commit", "-qm", "answer"]);
+    fs::write(two.join("two.md"), "still editing\n").unwrap();
+    // main takes what it was given
+    git(&spec, &["merge", "--no-edit", "feat/one"]);
+    git(&spec, &["merge", "--no-edit", "feat/two"]);
+
+    let ls = ok(&spec, &["worktree", "ls"]);
+    assert!(!ls.contains("freed"), "a resumed seat is live work: {ls}");
+    assert!(one.is_dir(), "a commit on top keeps the seat");
+    assert!(two.is_dir(), "an uncommitted edit keeps the seat");
+    assert!(!ls.contains("waiting on"), "both read as live work: {ls}");
 }
 
 /// A member repo beside the spec: committed, on `main`, repo-local identity.
@@ -386,7 +611,7 @@ fn the_cascade_mints_member_worktrees_and_the_overlay() {
     // Close, the contract's way: the spec saves mid-unit while member code
     // is in flight (the save names the omission), the member commits,
     // the worktree anchors the fresh tip — then member work goes by push, spec by
-    // local merge, all retired.
+    // local merge. The spec retires at once; the member seat waits on its base.
     fs::write(bwt.join("src/lib.rs"), "pub fn serve() { /* new */ }\n").unwrap();
     fs::write(
         wt.join("archi/src/model.arch"),
@@ -403,9 +628,10 @@ fn the_cascade_mints_member_worktrees_and_the_overlay() {
     git(&wt, &["commit", "-qm", "baseline anchored"]);
     let out = ok(&spec, &["worktree", "merge", "feat"]);
     assert!(out.contains("member backend: pushed"), "{out}");
+    assert!(out.contains("the member worktree stays until main carries the work"), "{out}");
     assert!(out.contains("merged archi/feat"), "{out}");
     assert!(out.contains("retired"), "{out}");
-    assert!(!bwt.exists(), "member worktree retired");
+    assert!(bwt.is_dir(), "a push is not an arrival — the member seat stays");
     assert!(!wt.exists(), "spec worktree retired");
     let heads = Command::new("git")
         .args(["-C", bare.to_str().unwrap(), "branch", "--format=%(refname:short)"])
@@ -413,6 +639,21 @@ fn the_cascade_mints_member_worktrees_and_the_overlay() {
         .unwrap();
     let heads = String::from_utf8_lossy(&heads.stdout).into_owned();
     assert!(heads.contains("archi/feat"), "the member branch reached the remote: {heads}");
+    // the listing names the branch the member landed on and the one it waits on
+    let ls = ok(&spec, &["worktree", "ls"]);
+    assert!(ls.contains("member backend:"), "{ls}");
+    assert!(ls.contains("waiting on archi/feat → main"), "{ls}");
+
+    // the forge merges the member's pull request: the next archi command
+    // frees the folder and the row closes
+    git(&backend, &["merge", "--no-edit", "archi/feat"]);
+    let ls = ok(&spec, &["worktree", "ls"]);
+    assert!(
+        ls.contains(&format!("freed {} — member backend integrated into main", bwt.display())),
+        "{ls}"
+    );
+    assert!(!bwt.exists(), "the member seat frees once its base carries the work");
+    assert!(ls.contains("spec feat — closed"), "every side arrived: {ls}");
 }
 
 #[test]
@@ -462,8 +703,14 @@ fn an_unanchored_member_refuses_the_landing_until_the_worktree_anchors() {
     git(&wt, &["commit", "-qm", "baseline anchored"]);
     let out = ok(&spec, &["worktree", "merge", "feat"]);
     assert!(out.contains("member backend: pushed"), "{out}");
-    assert!(out.contains("retired"), "{out}");
-    assert!(!bwt.exists(), "anchored, landed, retired");
+    assert!(out.contains("retired"), "the spec side merged locally: {out}");
+    assert!(bwt.is_dir(), "anchored and pushed — the member seat waits on its base");
+    let ls = ok(&spec, &["worktree", "ls"]);
+    assert!(ls.contains("waiting on archi/feat → main"), "{ls}");
+    // the base carries the work: the folder frees itself
+    git(&backend, &["merge", "--no-edit", "archi/feat"]);
+    ok(&spec, &["worktree", "ls"]);
+    assert!(!bwt.exists(), "anchored, landed, arrived, freed");
 }
 
 #[test]
@@ -511,8 +758,21 @@ fn the_to_landing_runs_the_same_baseline_gate() {
     let out = ok(&spec, &["worktree", "merge", "feat", "--to", "feat/x"]);
     assert!(out.contains("member backend: pushed"), "{out}");
     assert!(out.contains("landed archi/feat on new branch feat/x"), "{out}");
-    assert!(out.contains("retired"), "{out}");
-    assert!(!bwt.exists(), "re-anchored, landed sideways, retired");
+    assert!(!out.contains("retired"), "neither side arrived yet: {out}");
+    assert!(bwt.is_dir(), "re-anchored and pushed — the member seat stays");
+    assert!(wt.is_dir(), "landed sideways — the spec seat stays");
+    let ls = ok(&spec, &["worktree", "ls"]);
+    assert!(ls.contains("spec feat — waiting on feat/x → main"), "{ls}");
+    assert!(ls.contains("waiting on archi/feat → main"), "{ls}");
+
+    // both pull requests merge: the next archi command frees both folders
+    // and the row closes
+    git(&backend, &["merge", "--no-edit", "archi/feat"]);
+    git(&spec, &["merge", "--no-edit", "feat/x"]);
+    let ls = ok(&spec, &["worktree", "ls"]);
+    assert!(!bwt.exists(), "the member folder freed");
+    assert!(!wt.exists(), "the spec folder freed");
+    assert!(ls.contains("spec feat — closed"), "{ls}");
 }
 
 #[test]
@@ -808,26 +1068,37 @@ fn a_refused_push_keeps_the_member_until_repaired() {
     assert!(out.contains("member backend: kept"), "{out}");
     assert!(bwt.is_dir(), "member worktree stays");
 
-    // repair the remote, re-run: idempotent close finishes the retire
+    // repair the remote, re-run: the idempotent close pushes and retires the
+    // spec side; the member seat waits on its base
     let bare = ws.join("origin.git");
     git(&ws, &["init", "-q", "--bare", bare.to_str().unwrap()]);
     git(&backend, &["remote", "add", "origin", bare.to_str().unwrap()]);
     let out = ok(&spec, &["worktree", "merge", "feat"]);
     assert!(out.contains("member backend: pushed"), "{out}");
     assert!(out.contains("retired"), "{out}");
-    assert!(!bwt.exists());
+    assert!(bwt.is_dir(), "the push is not the arrival");
+    let ls = ok(&spec, &["worktree", "ls"]);
+    assert!(ls.contains("waiting on archi/feat → main"), "{ls}");
+    // the base carries the work: the folder frees itself
+    git(&backend, &["merge", "--no-edit", "archi/feat"]);
+    ok(&spec, &["worktree", "ls"]);
+    assert!(!bwt.exists(), "freed once the base carried it");
 }
 
 #[test]
-fn drop_cascades_over_member_worktrees() {
-    let (_ws, spec, backend) = cascade_repo("drop-cascade");
+fn close_cascades_over_member_worktrees() {
+    let (_ws, spec, backend) = cascade_repo("close-cascade");
     ok(&spec, &["worktree", "mint", "feat", "--repos", "backend"]);
     let bwt = backend.parent().unwrap().join("backend-worktrees/feat");
     assert!(bwt.is_dir());
-    let out = ok(&spec, &["worktree", "drop", "feat"]);
-    assert!(out.contains("dropped"), "{out}");
-    assert!(!bwt.exists(), "member worktree dropped");
+    let out = ok(&spec, &["worktree", "close", "feat"]);
+    assert!(out.contains("closed"), "{out}");
+    assert!(!bwt.exists(), "member worktree closed");
     assert!(out.contains("member backend: branch archi/feat stays"), "{out}");
+    // the row and its member stay as the record of what this machine carried
+    let ls = ok(&spec, &["worktree", "ls", "--spec", "feat"]);
+    assert!(ls.contains("spec feat — closed"), "{ls}");
+    assert!(ls.contains("member backend:"), "{ls}");
 }
 
 #[test]
@@ -919,11 +1190,15 @@ fn a_dirty_spec_outside_a_worktree_fails_check_and_build() {
 }
 
 #[test]
-fn a_hand_removed_worktree_heals_out_of_the_registry() {
+fn a_hand_removed_worktree_closes_its_row() {
     let (_ws, spec) = protected_repo("heal");
     ok(&spec, &["worktree", "mint", "storm"]);
     let wt = spec.parent().unwrap().join("spec-worktrees/storm");
     git(&spec, &["worktree", "remove", "--force", wt.to_str().unwrap()]);
+    // the folder git no longer backs is a finished seat: the row closes and
+    // stays — nothing leaves the registry
     let ls = ok(&spec, &["worktree", "ls", "--spec", "storm"]);
+    assert!(ls.contains(&format!("{}  archi/storm  spec storm — closed", wt.display())), "{ls}");
+    let ls = ok(&spec, &["worktree", "ls", "--spec", "storm", "--status", "active"]);
     assert!(ls.contains("no worktrees match"), "{ls}");
 }

@@ -114,8 +114,8 @@ const USAGE: &str = "usage:
   archi batch [-] [--project <dir>]   # commands from stdin, one per line, fail-fast
   archi status [--project <dir>]
   archi worktree mint <slug> [--plan <name>] [--repos <a,b>] [--base [<member>=]<branch>]... [--project <dir>]
-  archi worktree ls [--plan <slug>] [--spec <effort>] [--json] [--project <dir>]
-  archi worktree drop <slug|path> [--project <dir>]
+  archi worktree ls [--plan <slug>] [--spec <effort>] [--status active|closed|all] [--json] [--project <dir>]
+  archi worktree close <slug|path> [--project <dir>]
   archi worktree merge <slug|path> [--to [<member>=]<branch>]... [--project <dir>]
   archi plan use <name> | repin | show [<name>] [--json] | verify [--json] | list | status [--project <dir>]
   archi plan task add <node> [--desc <text>] | rm <id> | show <id> [--project <dir>]
@@ -193,6 +193,7 @@ struct Args {
     base: Vec<String>,
     to_many: Vec<String>,
     plan_flag: Option<String>,
+    status_flag: Option<String>,
     positional: Vec<String>,
 }
 
@@ -262,6 +263,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         base: Vec::new(),
         to_many: Vec::new(),
         plan_flag: None,
+        status_flag: None,
         positional: Vec::new(),
     };
     let mut it = argv.iter().peekable();
@@ -330,6 +332,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--repos" => args.repos = Some(value(&mut it, "--repos")?),
             "--base" => args.base.push(value(&mut it, "--base")?),
             "--plan" => args.plan_flag = Some(value(&mut it, "--plan")?),
+            "--status" => args.status_flag = Some(value(&mut it, "--status")?),
             "--into" => args.into = Some(value(&mut it, "--into")?),
             "--keep" => args.keep = Some(value(&mut it, "--keep")?),
             "--task" => args.task = Some(value(&mut it, "--task")?),
@@ -475,8 +478,8 @@ fn run_check(args: &Args) -> ExitCode {
     let bound_members: Vec<std::path::PathBuf> = worktrees::toplevel(&root)
         .and_then(|top| {
             worktrees::Registry::load(&root).ok().flatten().map(|reg| {
-                reg.binding_of(&top)
-                    .map(|b| b.members.values().map(|m| m.path.clone()).collect())
+                reg.active_binding_of(&top)
+                    .map(|b| b.active_members().map(|(_, m)| m.path.clone()).collect())
                     .unwrap_or_default()
             })
         })
@@ -1024,11 +1027,74 @@ fn run_repo(args: &Args) -> ExitCode {
     }
 }
 
+/// Free every folder whose work arrived, then say what moved — run by the
+/// registry-reading commands before they render, so a seat whose pull
+/// request merged is gone by the time the operator looks
+/// (`archi/requirements/worktree-parallelism/`). Silent when nothing moved,
+/// and never a prompt. On the `--json` path the notice goes to stderr, so
+/// the document on stdout stays a document.
+fn run_sweep(root: &Path, json_out: bool) {
+    let report = worktrees::sweep(root);
+    let say = |line: String| {
+        if json_out {
+            eprintln!("{line}");
+        } else {
+            println!("{line}");
+        }
+    };
+    for f in &report.freed {
+        let side = match &f.side {
+            worktrees::Side::Spec => "spec".to_string(),
+            worktrees::Side::Members(names) if names.len() == 1 => format!("member {}", names[0]),
+            worktrees::Side::Members(names) => format!("members {}", names.join(", ")),
+        };
+        say(format!(
+            "freed {} — {side} integrated into {}",
+            f.path.display(),
+            f.receiving
+        ));
+    }
+    for key in &report.closed {
+        say(format!("closed {key} — every side arrived; the row stays as the record"));
+    }
+}
+
+/// What a binding carries, for one line: its plan, its spec effort, or the
+/// bare fact that it binds.
+fn carried(b: &worktrees::Binding, sep: &str) -> String {
+    let mut parts = Vec::new();
+    if let Some(p) = &b.plan {
+        parts.push(format!("plan {p}"));
+    }
+    if let Some(s) = &b.effort {
+        parts.push(format!("spec {s}"));
+    }
+    if parts.is_empty() { "bound".to_string() } else { parts.join(sep) }
+}
+
+/// How one side reads: history, a landing that still stands, or live work.
+/// `None` is live work — the caller renders it the way it always did. A
+/// landing whose seat moved on (a commit, an uncommitted edit) is live work
+/// again, so the record is read here and never trusted blindly.
+fn seat_state(
+    status: worktrees::Status,
+    worktree: &Path,
+    landed: Option<&worktrees::Landing>,
+) -> Option<String> {
+    if !status.is_active() {
+        return Some("closed".to_string());
+    }
+    let l = landed?;
+    worktrees::landing_stands(worktree, l)
+        .then(|| format!("waiting on {} → {}", l.branch, l.receiving))
+}
+
 fn run_status(args: &Args) -> ExitCode {
     let root = match locate_project(args) {
         Ok(r) => r,
         Err(e) => return usage_err(&e),
     };
+    run_sweep(&root, false);
     // Checkout identity: where am I, per git and the registry. Every read
     // here is lenient — status answers from whatever state exists.
     match worktrees::toplevel(&root) {
@@ -1037,18 +1103,11 @@ fn run_status(args: &Args) -> ExitCode {
                 worktrees::current_branch(&top).unwrap_or_else(|| "(detached)".to_string());
             println!("checkout: {} on {branch}", top.display());
             match worktrees::Registry::load(&root) {
-                Ok(Some(reg)) => match reg.binding_of(&top) {
+                // Only a standing row binds: a closed one is the record of
+                // what this checkout carried and licenses nothing.
+                Ok(Some(reg)) => match reg.active_binding_of(&top) {
                     Some(b) => {
-                        let mut parts = Vec::new();
-                        if let Some(p) = &b.plan {
-                            parts.push(format!("plan {p}"));
-                        }
-                        if let Some(s) = &b.effort {
-                            parts.push(format!("spec {s}"));
-                        }
-                        let work =
-                            if parts.is_empty() { "bound".to_string() } else { parts.join("  ") };
-                        println!("binding: {work} on {}", b.branch);
+                        println!("binding: {} on {}", carried(b, "  "), b.branch);
                         for (name, m) in &b.members {
                             let state = if m.path.is_dir() { "ok" } else { "worktree missing" };
                             println!(
@@ -1059,7 +1118,30 @@ fn run_status(args: &Args) -> ExitCode {
                             );
                         }
                     }
-                    None => println!("binding: none — this checkout is unbound"),
+                    // Unbound: the checkout carries nothing, so it points at
+                    // the seats that do — a session opens by walking into one.
+                    None => {
+                        if reg.binding_of(&top).is_some() {
+                            println!(
+                                "binding: none — this checkout's row closed; history licenses nothing"
+                            );
+                        } else {
+                            println!("binding: none — this checkout is unbound");
+                        }
+                        let standing: Vec<(&str, &worktrees::Binding)> =
+                            reg.active_entries().collect();
+                        if standing.is_empty() {
+                            println!("standing work: none — no seat on this machine carries work");
+                        } else {
+                            for (k, b) in standing {
+                                println!(
+                                    "standing work: {k} on {} — {}",
+                                    b.branch,
+                                    carried(b, ", ")
+                                );
+                            }
+                        }
+                    }
                 },
                 Ok(None) => {}
                 Err(e) => eprintln!("archi: warning: {e}"),
@@ -1134,6 +1216,7 @@ fn run_worktree(args: &Args) -> ExitCode {
     let rest = args.positional.get(1..).unwrap_or_default();
     match (sub, rest) {
         (Some("mint"), [slug]) => {
+            run_sweep(&root, false);
             let plan = args.plan_flag.as_deref();
             let effort = if plan.is_none() { Some(slug.as_str()) } else { None };
             let repos: Vec<String> = args
@@ -1184,32 +1267,70 @@ fn run_worktree(args: &Args) -> ExitCode {
             ExitCode::SUCCESS
         }
         (Some("ls"), []) => {
+            // `--status` narrows the read to one half of the record; the
+            // default shows the whole of it.
+            let want: Option<bool> = match args.status_flag.as_deref() {
+                None | Some("all") => None,
+                Some("active") => Some(true),
+                Some("closed") => Some(false),
+                Some(other) => {
+                    return usage_err(&format!(
+                        "`--status {other}` names no state — active, closed or all"
+                    ));
+                }
+            };
+            run_sweep(&root, args.json);
             let reg = match load() {
                 Ok(r) => r,
                 Err(e) => return fail(e),
             };
             let matches = |b: Option<&worktrees::Binding>| -> bool {
-                match (args.plan_flag.as_deref(), args.spec.as_deref()) {
-                    (None, None) => true,
-                    (p, s) => b.is_some_and(|b| {
-                        p.map_or(true, |p| b.plan.as_deref() == Some(p))
-                            && s.map_or(true, |s| b.effort.as_deref() == Some(s))
-                    }),
+                let (p, s) = (args.plan_flag.as_deref(), args.spec.as_deref());
+                if p.is_none() && s.is_none() && want.is_none() {
+                    // unfiltered: a checkout with no row of its own is a row
+                    // of the listing too
+                    return true;
                 }
+                b.is_some_and(|b| {
+                    p.is_none_or(|p| b.plan.as_deref() == Some(p))
+                        && s.is_none_or(|s| b.effort.as_deref() == Some(s))
+                        && want.is_none_or(|active| b.status.is_active() == active)
+                })
             };
+            // Every row this machine carries: the worktrees git lists, then
+            // the rows whose folder is gone — the record outlives the folder,
+            // so a closed seat still answers for what it carried.
             let wts = worktrees::list_worktrees(&root);
+            let mut rows: Vec<(PathBuf, String, Option<&worktrees::Binding>)> = wts
+                .iter()
+                .map(|w| {
+                    let branch = w.branch.clone().unwrap_or_else(|| "(detached)".to_string());
+                    (w.path.clone(), branch, reg.binding_of(&w.path))
+                })
+                .collect();
+            for (k, b) in reg.entries() {
+                let path = PathBuf::from(k);
+                if !wts.iter().any(|w| w.path == path) {
+                    rows.push((path, b.branch.clone(), Some(b)));
+                }
+            }
+            rows.retain(|(_, _, b)| matches(*b));
             if args.json {
-                let rows: Vec<Value> = wts
+                let rows: Vec<Value> = rows
                     .iter()
-                    .filter(|w| matches(reg.binding_of(&w.path)))
-                    .map(|w| {
-                        let b = reg.binding_of(&w.path);
+                    .map(|(path, branch, b)| {
+                        let waiting = b
+                            .and_then(|b| b.landed.as_ref())
+                            .filter(|l| worktrees::landing_stands(path, l))
+                            .map(|l| json!({ "landed": l.branch, "receiving": l.receiving }));
                         json!({
-                            "path": w.path.display().to_string(),
-                            "branch": w.branch,
+                            "path": path.display().to_string(),
+                            "branch": branch,
                             "plan": b.and_then(|b| b.plan.clone()),
                             "spec": b.and_then(|b| b.effort.clone()),
                             "bound": b.is_some(),
+                            "status": b.map(|b| if b.status.is_active() { "active" } else { "closed" }),
+                            "waiting_on": waiting,
                         })
                     })
                     .collect();
@@ -1220,52 +1341,37 @@ fn run_worktree(args: &Args) -> ExitCode {
                 );
                 return ExitCode::SUCCESS;
             }
-            let mut shown = 0usize;
-            for wt in &wts {
-                let b = reg.binding_of(&wt.path);
-                if !matches(b) {
-                    continue;
-                }
-                shown += 1;
-                let branch = wt.branch.clone().unwrap_or_else(|| "(detached)".to_string());
+            for (path, branch, b) in &rows {
                 let work = match b {
-                    Some(b) => {
-                        let mut parts = Vec::new();
-                        if let Some(p) = &b.plan {
-                            parts.push(format!("plan {p}"));
-                        }
-                        if let Some(s) = &b.effort {
-                            parts.push(format!("spec {s}"));
-                        }
-                        if parts.is_empty() { "bound".to_string() } else { parts.join("  ") }
-                    }
+                    Some(b) => carried(b, "  "),
                     None => "unbound".to_string(),
                 };
-                println!("{}  {branch}  {work}", wt.path.display());
-                if let Some(b) = b {
-                    for (name, m) in &b.members {
-                        let state = if !m.checkout.is_dir() {
-                            "checkout unresolved"
-                        } else if m.path.is_dir() {
-                            "ok"
-                        } else {
-                            "worktree missing"
-                        };
-                        println!(
-                            "  member {name}: {} {} (base {}) — {state}",
-                            m.path.display(),
-                            m.branch,
-                            m.base
-                        );
-                    }
+                match b.and_then(|b| seat_state(b.status, path, b.landed.as_ref())) {
+                    Some(state) => println!("{}  {branch}  {work} — {state}", path.display()),
+                    None => println!("{}  {branch}  {work}", path.display()),
+                }
+                let Some(b) = b else { continue };
+                for (name, m) in &b.members {
+                    let state = match seat_state(m.status, &m.path, m.landed.as_ref()) {
+                        Some(state) => state,
+                        None if !m.checkout.is_dir() => "checkout unresolved".to_string(),
+                        None if m.path.is_dir() => "ok".to_string(),
+                        None => "worktree missing".to_string(),
+                    };
+                    println!(
+                        "  member {name}: {} {} (base {}) — {state}",
+                        m.path.display(),
+                        m.branch,
+                        m.base
+                    );
                 }
             }
-            if shown == 0 {
+            if rows.is_empty() {
                 println!("no worktrees match");
             }
             ExitCode::SUCCESS
         }
-        (Some("drop"), [handle]) => {
+        (Some("close"), [handle]) => {
             let mut reg = match load() {
                 Ok(r) => r,
                 Err(e) => return fail(e),
@@ -1281,7 +1387,7 @@ fn run_worktree(args: &Args) -> ExitCode {
                 if worktrees::list_worktrees(repo).iter().any(|w| w.path == m.path) {
                     if let Err(e) = worktrees::worktree_remove(repo, &m.path, false) {
                         return fail(format!(
-                            "{name}: {e}\nnothing dropped; commit or stash the member \
+                            "{name}: {e}\nnothing closed; commit or stash the member \
                              worktree's changes (or remove it by hand), then re-run"
                         ));
                     }
@@ -1307,19 +1413,31 @@ fn run_worktree(args: &Args) -> ExitCode {
                     ));
                 }
             }
-            let b = reg.remove(&key).expect("resolved key");
+            // The folder is a disposable derivative; the row is the record of
+            // what this machine carried, so the close marks it and every
+            // member folder it just removed (nothing-leaves-the-registry).
+            let b = reg.get_mut(&key).expect("resolved key");
+            b.status = worktrees::Status::Closed;
+            for m in b.members.values_mut() {
+                m.status = worktrees::Status::Closed;
+            }
+            let branch = b.branch.clone();
             if let Err(e) = reg.save() {
                 return fail(e);
             }
-            println!("dropped {key} ({})", b.branch);
-            if worktrees::branch_exists(&root, &b.branch) {
+            println!("closed {key} ({branch}) — the folder is gone, the row stays as the record");
+            if worktrees::branch_exists(&root, &branch) {
                 println!(
-                    "branch {} stays — delete it by hand once its work is integrated",
-                    b.branch
+                    "branch {branch} stays — delete it by hand once its work is integrated"
                 );
             }
             ExitCode::SUCCESS
         }
+        // Muscle memory is not silence: the verb that deleted rows names the
+        // one that keeps them.
+        (Some("drop"), _) => usage_err(
+            "`drop` retired — the registry keeps its rows: `archi worktree close <slug>`",
+        ),
         (Some("merge"), [handle]) => {
             let mut to = std::collections::BTreeMap::new();
             for t in &args.to_many {
@@ -1332,13 +1450,25 @@ fn run_worktree(args: &Args) -> ExitCode {
                 Ok(r) => r,
                 Err(e) => return fail(e),
             };
+            // The row as the landing just left it: which branch each side
+            // went to, and which branch must carry it before the folder goes.
+            let reg = worktrees::Registry::load(&root).ok().flatten();
+            let row = reg.as_ref().and_then(|r| r.binding_of(&report.worktree));
             let mut failed = false;
             for (name, outcome) in &report.members {
                 match outcome {
-                    worktrees::RepoOutcome::Pushed { remote_branch } => println!(
-                        "member {name}: pushed {} -> origin/{remote_branch}, worktree retired",
-                        report.branch
-                    ),
+                    worktrees::RepoOutcome::Pushed { remote_branch } => {
+                        let base = row
+                            .and_then(|b| b.members.get(name))
+                            .map(|m| m.base.clone())
+                            .unwrap_or_else(|| "its base".to_string());
+                        println!(
+                            "member {name}: pushed {} -> origin/{remote_branch}; the member \
+                             worktree stays until {base} carries the work — open the PR; the \
+                             next archi command frees the folder",
+                            report.branch
+                        );
+                    }
                     worktrees::RepoOutcome::Refused { detail } => {
                         failed = true;
                         println!("member {name}: kept — {detail}");
@@ -1348,8 +1478,20 @@ fn run_worktree(args: &Args) -> ExitCode {
             }
             match &report.spec {
                 worktrees::RepoOutcome::Merged => println!("merged {}", report.branch),
+                // A sideways landing is a departure, not an arrival: it says
+                // what it did and what is left to do.
                 worktrees::RepoOutcome::Landed { branch } => {
-                    println!("landed {} on new branch {branch}", report.branch)
+                    let receiving = row
+                        .and_then(|b| b.landed.as_ref())
+                        .map(|l| l.receiving.clone())
+                        .unwrap_or_else(|| "the receiving branch".to_string());
+                    println!("landed {} on new branch {branch}", report.branch);
+                    println!(
+                        "{} stays — push {branch} and open the PR; the row closes once \
+                         {receiving} carries the work, and the next archi command frees \
+                         the folder",
+                        report.worktree.display()
+                    );
                 }
                 worktrees::RepoOutcome::Conflict { detail } => {
                     failed = true;
@@ -1367,16 +1509,15 @@ fn run_worktree(args: &Args) -> ExitCode {
                 _ => {}
             }
             if report.retired {
-                println!("retired {} — binding cleared", report.worktree.display());
-            } else if !failed {
                 println!(
-                    "not retired yet — repair the refusals above and re-run `archi worktree merge {handle}`"
+                    "retired {} — the folder is gone, the row stays as the record",
+                    report.worktree.display()
                 );
             }
             if failed { ExitCode::from(1) } else { ExitCode::SUCCESS }
         }
         _ => usage_err(
-            "usage: archi worktree mint <slug> [--plan <name>] | ls [--plan <slug>] [--spec <effort>] [--json] | drop <slug|path> | merge <slug|path> [--to [<member>=]<branch>]...",
+            "usage: archi worktree mint <slug> [--plan <name>] | ls [--plan <slug>] [--spec <effort>] [--status active|closed|all] [--json] | close <slug|path> | merge <slug|path> [--to [<member>=]<branch>]...",
         ),
     }
 }

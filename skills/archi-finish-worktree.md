@@ -1,6 +1,6 @@
 ---
 name: archi-finish-worktree
-description: Close a worktree — land its spec/plan/code unit, push member branches for their PRs, retire the worktree and its registry binding in one move. Use when a unit of work in an archi worktree is done and must land. A conflicted merge hands off to archi-merge.
+description: Close a worktree — land its spec/plan/code unit, push member branches for their PRs, free the worktree once the receiving branch carries the work, and keep its row as the record. Use when a unit of work in an archi worktree is done and must land. A conflicted merge hands off to archi-merge.
 ---
 
 > **Skill freshness — the first step.** In an initialized project, run
@@ -22,9 +22,11 @@ spec, lands freely.
 **The landing runs from the receiving checkout**, never from inside the
 worktree.
 
-**Retirement is the job of the command.** The worktree and its registry
-entry go away with a clean landing. Never run `git worktree remove`, and
-never edit `worktrees.toml` by hand.
+**Retirement is the job of the command.** Retirement follows the
+integration, not the push: a local merge frees the folder at once, and a
+sideways landing or a member push frees it later, once the receiving
+branch carries the work. Never run `git worktree remove`, and never edit
+`worktrees.toml` by hand.
 
 ## The landing, in order
 
@@ -47,14 +49,17 @@ never edit `worktrees.toml` by hand.
      check` green. Commit the printed unit, then land.
 3. **Land.** From the receiving checkout, run `archi worktree merge
    <slug> [--to [<member>=]<branch>]...`.
-   - Member branches push to their remotes and retire. Their integration
-     is a PR on the forge, never a local merge into a member checkout.
+   - Member branches push to their remotes. Their integration is a PR on
+     the forge, never a local merge into a member checkout, so the member
+     worktree stays until its base carries the work. Open the PR. The
+     next archi command frees the folder.
    - The spec merges into the current branch. It lands sideways with
      `--to <branch>` when the receiving branch is protected. A protected
-     branch never receives a local merge, so push the landed branch and
-     open a PR.
-   - A clean landing removes the worktree and clears its binding in the
-     same move.
+     branch never receives a local merge, so the worktree stays: push the
+     landed branch, open the PR, and the folder frees itself on the next
+     archi command once the receiving branch carries the work.
+   - A local merge puts the work in the receiving branch at that moment,
+     so it removes the worktree and closes its row in the same move.
 4. **On a refusal, repair and run it again.** The command is idempotent.
    - *open plan* — close it, as in step 1.
    - *protected receiving branch* — use `--to <branch>`, push, and open a
@@ -69,8 +74,13 @@ never edit `worktrees.toml` by hand.
      runs in this worktree. Re-attach the worktree with `archi worktree
      mint <slug>` when the landing already retired it. Then run the merge
      again to finish the retire.
-5. **To abandon instead of landing**, run `archi worktree drop <slug>`.
-   The worktrees go away. Unpushed branches stay, for deletion by hand.
+5. **To abandon instead of landing**, run `archi worktree close <slug>`.
+   The folders go away, members included, and the row stays as the record
+   of what this machine carried. Unpushed branches stay, for deletion by
+   hand.
+
+Where `gh` is available, you may ask the forge whether the PR merged and
+then run `archi worktree close <slug>` — optional, never a requirement.
 
 ## Failure modes
 
@@ -82,7 +92,14 @@ never edit `worktrees.toml` by hand.
   failed landing. Delete it and run the landing again. Its work either
   landed already, or it comes again.
 - The registry still lists a retired path. It self-heals on the next
-  read. A row that survives is a live worktree that git still knows.
+  read: the row closes, it does not vanish, because the row is the
+  record. A row that still reads as live work is a worktree that git
+  still knows.
+- A seat still stands after its pull request merged. The sweep compares
+  against the *local* receiving branch, and archi never fetches, so a
+  merge on the forge stays invisible here. Run `git pull` in the
+  receiving checkout. Any archi command then frees the folder and closes
+  the row.
 
 The two-writer merge that this skill hands off to is the `archi-merge`
 skill. The opening counterpart is the worktree protocol in the `archi`

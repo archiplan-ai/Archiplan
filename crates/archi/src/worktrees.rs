@@ -4,8 +4,14 @@
 //! worktree carries which plan is a machine fact, not shared truth. The
 //! registry lives under the repository's common git dir — the one place
 //! every worktree shares, tracked by none — and moves only through commands:
-//! mint writes entries, merge clears them, `worktree ls`/`drop` read and
+//! mint writes rows, the landing marks them, `worktree ls`/`close` read and
 //! repair (`archi/requirements/worktree-parallelism/`).
+//!
+//! A row outlives its folder. It carries `active` or `closed`, never
+//! disappears, and a side that landed carries where the work went. The
+//! folder is a disposable derivative: the sweep frees it as soon as the
+//! receiving branch carries its content, and the row closes when every
+//! side arrived.
 //!
 //! Git queries are lenient (`Option`, absence is a value); git mutations are
 //! loud (`Result` carrying git's own stderr). No command here ever changes the
@@ -73,9 +79,10 @@ pub fn list_worktrees(dir: &Path) -> Vec<Wt> {
     out
 }
 
+/// Whether `refs/heads/<name>` stands here — the same verified read the
+/// integration probe rides, asked for a yes or no.
 pub fn branch_exists(repo: &Path, name: &str) -> bool {
-    let refname = format!("refs/heads/{name}");
-    git_out(repo, &["rev-parse", "--verify", "--quiet", &refname]).is_some()
+    commit_of(repo, &format!("refs/heads/{name}")).is_some()
 }
 
 fn worktree_add(
@@ -153,6 +160,39 @@ pub fn worktree_remove(repo: &Path, path: &Path, force: bool) -> Result<(), Stri
 // ---------------------------------------------------------------------------
 // The registry
 
+/// Whether a row still stands, or is history. Absent in a file written
+/// before the status existed, which reads as `active` — every registry
+/// ever written keeps loading.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Status {
+    /// Live work: the row binds, the guard licenses, the folder stands.
+    #[default]
+    Active,
+    /// History: the work arrived (or the operator closed the seat). The row
+    /// stays as the record of what this machine carried and licenses nothing.
+    Closed,
+}
+
+impl Status {
+    pub fn is_active(self) -> bool {
+        self == Status::Active
+    }
+}
+
+/// Where one side's work was put, and where it must arrive.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Landing {
+    /// The branch the work was put on: the `--to` target for the spec,
+    /// `archi/<slug>` for a member.
+    pub branch: String,
+    /// The branch the work must reach: the receiving checkout's branch for
+    /// the spec, the recorded base for a member.
+    pub receiving: String,
+    /// The side's head at landing time.
+    pub sha: String,
+}
+
 /// One member's cascaded worktree within a binding.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MemberBinding {
@@ -165,16 +205,28 @@ pub struct MemberBinding {
     /// The member's main checkout at mint time: the self-heal fallback when
     /// the overlay no longer resolves.
     pub checkout: PathBuf,
+    #[serde(default)]
+    pub status: Status,
+    /// Written by the push, cleared by nothing: where this member's work
+    /// went and where it must arrive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub landed: Option<Landing>,
 }
 
 /// What one worktree carries.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Binding {
     pub branch: String,
+    #[serde(default)]
+    pub status: Status,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
+    /// Written by the sideways landing: where the spec work went and where
+    /// it must arrive. The local merge needs none — it arrives at once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub landed: Option<Landing>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub members: BTreeMap<String, MemberBinding>,
 }
@@ -183,6 +235,19 @@ impl Binding {
     /// The slug this binding answers to: the plan, or the spec effort.
     pub fn slug(&self) -> Option<&str> {
         self.plan.as_deref().or(self.effort.as_deref())
+    }
+
+    /// The members still standing — the only ones a cascade, a push or a
+    /// sweep ever touches. A closed member is history: it carries no work
+    /// to land and no folder to free.
+    pub fn active_members(&self) -> impl Iterator<Item = (&String, &MemberBinding)> {
+        self.members.iter().filter(|(_, m)| m.status.is_active())
+    }
+
+    /// True when no member still stands — the members' half of the row's
+    /// close condition, which the spec side completes.
+    pub fn members_done(&self) -> bool {
+        self.active_members().next().is_none()
     }
 }
 
@@ -202,10 +267,12 @@ pub struct Registry {
 impl Registry {
     /// Load the registry of the repository containing `root`; `None` when
     /// `root` is not inside a git repository. A missing file is the empty
-    /// registry — it appears at the first write, no init step. Entries whose
-    /// worktree git no longer lists are dropped (written back only when
-    /// something dropped); a member worktree is dropped only when its own repo
-    /// confirms the worktree gone, an unreachable member repo keeps it.
+    /// registry — it appears at the first write, no init step. Rows whose
+    /// worktree git no longer lists close (written back only when something
+    /// moved) — nothing leaves the registry; a row whose members still wait
+    /// on their receiving branches stays open, so the sweep can still free
+    /// their folders. A member closes only when its own repo confirms the
+    /// worktree gone, an unreachable member repo keeps it standing.
     pub fn load(root: &Path) -> Result<Option<Registry>, String> {
         let Some(common) = common_dir(root) else {
             return Ok(None);
@@ -222,21 +289,28 @@ impl Registry {
         let mut reg = Registry { path, entries };
         let live: Vec<PathBuf> = list_worktrees(root).into_iter().map(|w| w.path).collect();
         let mut healed = false;
-        reg.entries.retain(|k, _| {
-            let keep = live.iter().any(|p| p.as_path() == Path::new(k));
-            healed |= !keep;
-            keep
-        });
-        for b in reg.entries.values_mut() {
-            b.members.retain(|_, m| {
+        for (k, b) in reg.entries.iter_mut() {
+            for m in b.members.values_mut() {
+                if !m.status.is_active() {
+                    continue;
+                }
                 let repo = if m.checkout.is_dir() { &m.checkout } else { &m.path };
                 let listed = list_worktrees(repo);
-                // an unreachable repo lists nothing — keep the worktree
-                let keep = listed.is_empty()
-                    || listed.iter().any(|w| w.path == m.path);
-                healed |= !keep;
-                keep
-            });
+                // an unreachable repo lists nothing — keep the member standing
+                if !listed.is_empty() && !listed.iter().any(|w| w.path == m.path) {
+                    m.status = Status::Closed;
+                    healed = true;
+                }
+            }
+            // A folder git no longer backs is a finished seat — unless a
+            // member of it still waits: the row stays open until the sweep
+            // frees that folder too.
+            let standing = live.iter().any(|p| p.as_path() == Path::new(k));
+            let members_done = b.members_done();
+            if b.status.is_active() && !standing && members_done {
+                b.status = Status::Closed;
+                healed = true;
+            }
         }
         if healed {
             reg.save()?;
@@ -260,16 +334,29 @@ impl Registry {
         self.entries.iter().map(|(k, v)| (k.as_str(), v))
     }
 
+    /// The row this checkout carries, whatever its status — the reading
+    /// lookup: a listing renders history, it does not act on it.
     pub fn binding_of(&self, worktree: &Path) -> Option<&Binding> {
         self.entries.get(&canon(worktree).to_string_lossy().into_owned())
     }
 
-    /// The worktree that carries `plan`, when one does.
+    /// The row this checkout carries while it stands — the licensing lookup.
+    /// A closed row is history and grants nothing
+    /// (`archi/requirements/worktree-parallelism/only-an-active-row-binds.md`).
+    pub fn active_binding_of(&self, worktree: &Path) -> Option<&Binding> {
+        self.binding_of(worktree).filter(|b| b.status.is_active())
+    }
+
+    /// The rows still standing — the seats this machine can continue in, and
+    /// the only ones a licensing question ever consults.
+    pub fn active_entries(&self) -> impl Iterator<Item = (&str, &Binding)> {
+        self.entries().filter(|(_, b)| b.status.is_active())
+    }
+
+    /// The standing worktree that carries `plan`, when one does. A closed
+    /// row owns nothing: its plan is free to be carried again.
     pub fn owner_of_plan(&self, plan: &str) -> Option<(&str, &Binding)> {
-        self.entries
-            .iter()
-            .find(|(_, b)| b.plan.as_deref() == Some(plan))
-            .map(|(k, b)| (k.as_str(), b))
+        self.active_entries().find(|(_, b)| b.plan.as_deref() == Some(plan))
     }
 
     pub fn bind(&mut self, worktree: &Path, binding: Binding) {
@@ -279,10 +366,6 @@ impl Registry {
 
     pub fn get_mut(&mut self, key: &str) -> Option<&mut Binding> {
         self.entries.get_mut(key)
-    }
-
-    pub fn remove(&mut self, key: &str) -> Option<Binding> {
-        self.entries.remove(key)
     }
 
     /// Resolve a user-supplied handle — a path, a plan/effort slug, or a
@@ -333,7 +416,8 @@ pub struct Minted {
 /// registry entry — entry last, and a partial cascade rolls back whole, so
 /// no failure leaves a dangling binding. Re-minting from inside the slug's
 /// own worktree extends the binding (new members, plan/effort upserts)
-/// instead of creating anything anew.
+/// instead of creating anything anew, and a slug whose row closed re-opens
+/// that row — its folder comes back, its record continues.
 pub fn mint(
     root: &Path,
     slug: &str,
@@ -366,13 +450,32 @@ pub fn mint(
             ));
         }
     }
-    let existing = match &extended {
-        Some(_) => reg.binding_of(&top).cloned(),
-        None => None,
+    // A closed row for this slug re-opens on its own key: nothing leaves the
+    // registry, so a returning seat continues the row it left instead of
+    // writing a second one. Only a row whose folder is really gone re-opens —
+    // a standing checkout is never re-created under it.
+    let reopen: Option<(PathBuf, Binding)> = extended.is_none().then(|| {
+        reg.entries
+            .iter()
+            .find(|(k, b)| {
+                !b.status.is_active()
+                    && b.slug() == Some(slug)
+                    && !worktrees.iter().any(|w| w.path.as_path() == Path::new(k))
+                    && !Path::new(k).exists()
+            })
+            .map(|(k, b)| (PathBuf::from(k), b.clone()))
+    })
+    .flatten();
+    let existing = match (&extended, &reopen) {
+        (Some(_), _) => reg.binding_of(&top).cloned(),
+        (None, Some((_, b))) => Some(b.clone()),
+        (None, None) => None,
     };
+    // Only a standing member counts as already cascaded — a closed one
+    // cascades again like a fresh name.
     let known: Vec<String> = existing
         .as_ref()
-        .map(|b| b.members.keys().cloned().collect())
+        .map(|b| b.active_members().map(|(n, _)| n.clone()).collect())
         .unwrap_or_default();
     // Members resolve against the invoked project root — the checkout that
     // carries the unit's manifest, overlay and archive: the primary on a
@@ -404,7 +507,10 @@ pub fn mint(
     let (wt_path, attached) = match &extended {
         Some(wt) => (wt.clone(), true),
         None => {
-            let path = default_worktree_dir(&top, slug);
+            let path = match &reopen {
+                Some((p, _)) => p.clone(),
+                None => default_worktree_dir(&top, slug),
+            };
             if path.exists() {
                 return Err(format!(
                     "{} already exists but is not a worktree of this repository — move it aside",
@@ -436,26 +542,33 @@ pub fn mint(
                     branch: branch.clone(),
                     base: t.base.clone(),
                     checkout: checkout.clone(),
+                    status: Status::Active,
+                    landed: None,
                 },
             );
         }
     }
     // the overlay the worktree resolves members through — every cascaded member,
     // old and new, points at its member worktree
-    if !members.is_empty() {
-        let rows: Vec<(String, PathBuf)> = members
-            .iter()
-            .map(|(name, m)| (name.clone(), member_row(&m.path, &m.checkout)))
-            .collect();
-        if let Err(e) = write_worktree_overlay(&wt_path.join(&rel), &rows) {
-            rollback(&created);
-            return Err(e);
-        }
+    let rows: Vec<(String, PathBuf)> = members
+        .iter()
+        .filter(|(_, m)| m.status.is_active())
+        .map(|(name, m)| (name.clone(), member_row(&m.path, &m.checkout)))
+        .collect();
+    if !rows.is_empty()
+        && let Err(e) = write_worktree_overlay(&wt_path.join(&rel), &rows)
+    {
+        rollback(&created);
+        return Err(e);
     }
+    // The seat is live work again: re-opened or extended, it stands on no
+    // landing of its own.
     let binding = Binding {
         branch: branch.clone(),
+        status: Status::Active,
         plan: plan.map(str::to_string).or(existing.as_ref().and_then(|b| b.plan.clone())),
         effort: effort.map(str::to_string).or(existing.as_ref().and_then(|b| b.effort.clone())),
+        landed: None,
         members,
     };
     reg.bind(&wt_path, binding);
@@ -732,6 +845,142 @@ fn write_worktree_overlay(
 }
 
 // ---------------------------------------------------------------------------
+// The integration probe — one read-only look, two proofs
+
+/// What a look at a landed side says.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Verdict {
+    /// The receiving branch carries the work — by ancestry, or by content.
+    Integrated,
+    /// The receiving branch does not carry it yet.
+    NotYet,
+    /// No verdict: a ref, or the repository itself, is out of reach.
+    Unknown,
+}
+
+/// A revision as a commit sha, or `None` when it does not resolve here.
+fn commit_of(repo: &Path, rev: &str) -> Option<String> {
+    git_out(repo, &["rev-parse", "--verify", "--quiet", &format!("{rev}^{{commit}}")])
+}
+
+/// A branch name as a commit sha — the ref namespace first, the bare name
+/// as the fallback.
+fn branch_commit(repo: &Path, name: &str) -> Option<String> {
+    commit_of(repo, &format!("refs/heads/{name}")).or_else(|| commit_of(repo, name))
+}
+
+/// `git diff --quiet` as three answers, not two: `Some(true)` — git found no
+/// difference, `Some(false)` — git found one (its exit code 1), `None` — git
+/// could not answer at all. [`git_out`] cannot serve here: it folds "they
+/// differ" and "git failed" into the same `None`, and a probe that reads a
+/// failure as a match would free a seat whose work never arrived.
+fn diff_quiet(repo: &Path, args: &[&str]) -> Option<bool> {
+    let out = std::process::Command::new("git").arg("-C").arg(repo).args(args).output().ok()?;
+    match out.status.code() {
+        Some(0) => Some(true),
+        Some(1) => Some(false),
+        _ => None,
+    }
+}
+
+/// How many bytes of pathspec one `git diff` call carries. A landing may
+/// touch more paths than a command line holds, so the content proof runs in
+/// batches; every batch must come back quiet, which is the same claim one
+/// call would make.
+const PATHSPEC_BUDGET: usize = 60_000;
+
+/// The paths cut into command-line-sized batches — every path once, in
+/// order, and never an empty batch, so one path longer than the whole
+/// budget still travels (alone).
+fn pathspec_batches<'a>(paths: &[&'a str], budget: usize) -> Vec<Vec<&'a str>> {
+    let mut batches = Vec::new();
+    let mut start = 0;
+    while start < paths.len() {
+        let (mut end, mut bytes) = (start, 0);
+        while end < paths.len() && (end == start || bytes + paths[end].len() < budget) {
+            bytes += paths[end].len() + 1;
+            end += 1;
+        }
+        batches.push(paths[start..end].to_vec());
+        start = end;
+    }
+    batches
+}
+
+/// The one integration probe, shared by the landing and the sweep: does
+/// `receiving` carry what `landing` put on its branch? Ancestry is the cheap
+/// first pass. Content answers the squash, where the forge rewrote every
+/// sha — and it asks one-directionally, over the paths the landing itself
+/// touched (the landing against its merge base with `receiving`), never over
+/// the whole tree. A shared receiving branch carries work of its own, and a
+/// whole-tree comparison would read that work as "not yet" forever, on
+/// exactly the squash this pass exists to see. The one error left is a
+/// receiving branch that rewrote those very paths differently, which reads
+/// as `NotYet` and keeps the seat standing — the safe direction. Both reads
+/// only — no merge ever runs to find out — and anything git cannot answer
+/// yields no verdict at all, never a false arrival
+/// (`archi/requirements/worktree-parallelism/integration-is-proven-by-content.md`).
+pub(crate) fn integration(repo: &Path, landing: &Landing) -> Verdict {
+    let Some(sha) = commit_of(repo, &landing.sha) else {
+        return Verdict::Unknown;
+    };
+    let Some(receiving) = branch_commit(repo, &landing.receiving) else {
+        return Verdict::Unknown;
+    };
+    if git_out(repo, &["merge-base", "--is-ancestor", &sha, &receiving]).is_some() {
+        return Verdict::Integrated;
+    }
+    // where the two sides parted: no common history, no content question
+    let Some(base) = git_out(repo, &["merge-base", &sha, &receiving]) else {
+        return Verdict::Unknown;
+    };
+    // the paths the landing itself touched. `-z` keeps odd names verbatim
+    // (quoting would break the pathspec); `--no-renames` names both sides of
+    // a rename, so a source the receiving branch still holds is not missed.
+    let Some(touched) = git_out(repo, &["diff", "--no-renames", "--name-only", "-z", &base, &sha])
+    else {
+        return Verdict::Unknown;
+    };
+    let paths: Vec<&str> = touched.split('\0').filter(|p| !p.is_empty()).collect();
+    if paths.is_empty() {
+        // the landing put nothing on top of the merge base: nothing to carry
+        return Verdict::Integrated;
+    }
+    // every batch quiet, or the claim is not made
+    for batch in pathspec_batches(&paths, PATHSPEC_BUDGET) {
+        // `--literal-pathspecs`: a path is a path, never a glob
+        let mut args =
+            vec!["--literal-pathspecs", "diff", "--quiet", sha.as_str(), receiving.as_str(), "--"];
+        args.extend_from_slice(&batch);
+        match diff_quiet(repo, &args) {
+            Some(true) => {}
+            Some(false) => return Verdict::NotYet,
+            None => return Verdict::Unknown,
+        }
+    }
+    Verdict::Integrated
+}
+
+/// `git status --porcelain` silent: tracked files unmodified and every
+/// untracked file covered by an ignore rule. Ignored build output never
+/// speaks here — it is reproducible, and it is the reason the folder is
+/// worth freeing
+/// (`archi/requirements/worktree-parallelism/ignored-files-never-veto-a-cleanup.md`).
+pub fn tree_clean(worktree: &Path) -> bool {
+    git_out(worktree, &["status", "--porcelain"]).is_some_and(|s| s.trim().is_empty())
+}
+
+/// A landing record counts only while the seat stands exactly where it
+/// landed: the same head, and a tree git reports clean. A commit on top or
+/// an uncommitted edit makes the seat live work again — derived on every
+/// read, never written back
+/// (`archi/requirements/worktree-parallelism/a-resumed-seat-is-live-again.md`).
+pub fn landing_stands(worktree: &Path, landing: &Landing) -> bool {
+    git_out(worktree, &["rev-parse", "HEAD"]).as_deref() == Some(landing.sha.as_str())
+        && tree_clean(worktree)
+}
+
+// ---------------------------------------------------------------------------
 // Merge — the closing command
 
 /// One repository's outcome inside a merge.
@@ -739,11 +988,13 @@ fn write_worktree_overlay(
 pub enum RepoOutcome {
     /// Spec: merged into the receiving branch (or already up to date).
     Merged,
-    /// Spec: landed on a new branch without merging (`--to`).
+    /// Spec: landed on a new branch without merging (`--to`). The seat keeps
+    /// standing until the receiving branch carries the work.
     Landed { branch: String },
     /// Spec: the merge stopped on conflicts; nothing retired.
     Conflict { detail: String },
-    /// Member: its branch went to the remote.
+    /// Member: its branch went to the remote. The member worktree keeps
+    /// standing until its base carries the work.
     Pushed { remote_branch: String },
     /// Member: kept in the binding, with the reason.
     Refused { detail: String },
@@ -755,16 +1006,20 @@ pub struct MergeReport {
     pub branch: String,
     pub spec: RepoOutcome,
     pub members: Vec<(String, RepoOutcome)>,
-    /// True when the worktree and its binding are gone.
+    /// True when the local merge removed the worktree in this run.
     pub retired: bool,
 }
 
 /// Close a worktree: merge its branch into the current branch of this
-/// checkout — or land it on a new branch with `to` — push each member's
-/// branch, then remove the worktree and clear its binding in the same move.
-/// A conflict (or a refused member) stops short of retiring; re-running
-/// after the repair is idempotent. `to` keys: `""` = spec, member name =
-/// that member's remote branch.
+/// checkout — or land it on a new branch with `to` — and push each member's
+/// branch. Retirement follows integration, never the push: the local merge
+/// puts the work in the receiving branch at that moment, so it removes the
+/// worktree and marks the row in the same move; the sideways landing and
+/// every member push record where the work went and keep their folders,
+/// which the sweep frees once the receiving branch carries the content. A
+/// conflict (or a refused member) stops short of retiring; re-running after
+/// the repair is idempotent. `to` keys: `""` = spec, member name = that
+/// member's remote branch.
 pub fn merge(
     root: &Path,
     handle: &str,
@@ -865,9 +1120,11 @@ pub fn merge(
     }
 
     // Members first: push is independent of the spec merge, and a refused
-    // member must not block the spec's landing (or vice versa).
+    // member must not block the spec's landing (or vice versa). A member
+    // already closed carries no work to land — it is history.
     let mut members: Vec<(String, RepoOutcome)> = Vec::new();
-    for (name, m) in &binding.members {
+    let mut landings: BTreeMap<String, Landing> = BTreeMap::new();
+    for (name, m) in binding.active_members() {
         let repo = if m.checkout.is_dir() {
             m.checkout.clone()
         } else if m.path.is_dir() {
@@ -888,15 +1145,22 @@ pub fn merge(
         let refspec = format!("{}:refs/heads/{}", m.branch, remote_branch);
         match git_run(&repo, &["push", "origin", &refspec]) {
             Ok(_) => {
-                if m.path.is_dir() && m.path != repo {
-                    if let Err(e) = worktree_remove(&repo, &m.path, false) {
-                        members.push((name.clone(), RepoOutcome::Refused {
-                            detail: format!("pushed, but the worktree stays: {e}"),
-                        }));
-                        continue;
-                    }
+                // The push is not the arrival: the branch waits on a pull
+                // request that merges hours or days later, and the member
+                // keeps its worktree and its branch until the base carries
+                // the work (a-seat-lives-until-its-work-lands).
+                if let Some(sha) = git_out(&m.path, &["rev-parse", "HEAD"])
+                    .or_else(|| branch_commit(&repo, &m.branch))
+                {
+                    landings.insert(
+                        name.clone(),
+                        Landing {
+                            branch: m.branch.clone(),
+                            receiving: m.base.clone(),
+                            sha,
+                        },
+                    );
                 }
-                let _ = git_run(&repo, &["branch", "-D", &m.branch]);
                 members.push((name.clone(), RepoOutcome::Pushed { remote_branch }));
             }
             Err(e) => {
@@ -905,12 +1169,15 @@ pub fn merge(
         }
     }
     let b = reg.get_mut(&key).expect("resolved key");
-    for (name, outcome) in &members {
-        if matches!(outcome, RepoOutcome::Pushed { .. }) {
-            b.members.remove(name);
+    for (name, landing) in landings {
+        if let Some(m) = b.members.get_mut(&name) {
+            m.landed = Some(landing);
         }
     }
-    let members_clear = b.members.is_empty();
+    // Today's retire gate, stated the way it always meant: every member that
+    // had work to push pushed it. A refused member still stops the seat.
+    let members_landed =
+        members.iter().all(|(_, o)| !matches!(o, RepoOutcome::Refused { .. }));
     reg.save()?;
 
     // The spec repo: land on a new branch, or merge into the current one.
@@ -929,6 +1196,16 @@ pub fn merge(
         } else {
             git_run(&top, &["branch", new_branch, &sha])?;
         }
+        // The sideways landing is a departure, not an arrival: the branch
+        // waits on its pull request. Record where the work went and keep the
+        // seat standing; the sweep frees the folder once the receiving branch
+        // carries the content.
+        if let Some(receiving) = current_branch(&top)
+            && let Some(b) = reg.get_mut(&key)
+        {
+            b.landed = Some(Landing { branch: new_branch.clone(), receiving, sha });
+            reg.save()?;
+        }
         RepoOutcome::Landed { branch: new_branch.clone() }
     } else {
         match git_run(&top, &["merge", "--no-edit", &branch]) {
@@ -937,23 +1214,150 @@ pub fn merge(
         }
     };
 
-    // Retire — worktree first, then the binding, so no failure leaves a
-    // dangling entry pointing at nothing.
+    // Retire — the local merge alone. The work is in the receiving branch at
+    // this moment, so the folder goes now: worktree first, then the row, so
+    // no failure leaves a row pointing at nothing. The row is marked, never
+    // removed — it closes once every member arrived too
+    // (nothing-leaves-the-registry).
     let mut retired = false;
-    if !matches!(spec, RepoOutcome::Conflict { .. }) && members_clear {
+    if matches!(spec, RepoOutcome::Merged) && members_landed {
         scrub_worktree(&wt_project);
         worktree_remove(&top, &wt_path, false).map_err(|e| {
             format!("{e}\nthe worktree keeps its binding; commit or clean it, then re-run")
         })?;
-        if matches!(spec, RepoOutcome::Merged) {
-            let _ = git_run(&top, &["branch", "-d", &branch]);
-        }
+        let _ = git_run(&top, &["branch", "-d", &branch]);
         let mut reg = Registry::load(&root)?.expect("still a repository");
-        reg.remove(&key);
+        if let Some(b) = reg.get_mut(&key) {
+            b.landed = None;
+            if b.members_done() {
+                b.status = Status::Closed;
+            }
+        }
         reg.save()?;
         retired = true;
     }
     Ok(MergeReport { worktree: wt_path, branch, spec, members, retired })
+}
+
+// ---------------------------------------------------------------------------
+// The sweep — an integrated folder frees itself
+
+/// Which side of a row a sweep freed.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Side {
+    /// The seat's own checkout.
+    Spec,
+    /// The member checkouts sharing one folder.
+    Members(Vec<String>),
+}
+
+/// One folder the sweep freed.
+#[derive(Debug)]
+pub struct Freed {
+    pub path: PathBuf,
+    pub side: Side,
+    /// The branch that carries the work now.
+    pub receiving: String,
+}
+
+/// What one sweep did — empty on the ordinary run, one line for the caller
+/// otherwise.
+#[derive(Debug, Default)]
+pub struct SweepReport {
+    pub freed: Vec<Freed>,
+    /// The registry keys whose row closed in this pass.
+    pub closed: Vec<String>,
+}
+
+/// Free every folder whose work arrived. For each standing row, each side
+/// that carries a live landing record is probed read-only; a side whose
+/// receiving branch carries the content, and whose tree git reports clean,
+/// loses its folder (forced — ignored build output never vetoes a cleanup)
+/// and is marked done. The row closes when the spec side and every member
+/// arrived. Silent by construction: an unreachable member, an unresolvable
+/// ref or a refusing removal simply leaves that folder standing, and the
+/// checkout the caller stands in is never freed under its own feet.
+// The registry-reading commands — `worktree ls`, `worktree mint`, `status` —
+// run it before they render and print what it freed.
+pub fn sweep(root: &Path) -> SweepReport {
+    let mut report = SweepReport::default();
+    let root = canon(root);
+    let Some(top) = toplevel(&root) else {
+        return report;
+    };
+    let Ok(Some(mut reg)) = Registry::load(&root) else {
+        return report;
+    };
+    let live: Vec<PathBuf> = list_worktrees(&top).into_iter().map(|w| w.path).collect();
+    let mut moved = false;
+    for (key, b) in reg.entries.iter_mut() {
+        if !b.status.is_active() {
+            continue;
+        }
+        let wt = PathBuf::from(key);
+        let mut spec_standing = live.iter().any(|p| p.as_path() == wt.as_path());
+        // The spec side: its landing record names the branch it waits on.
+        if let Some(landing) = b.landed.clone()
+            && spec_standing
+            && !root.starts_with(&wt)
+            && landing_stands(&wt, &landing)
+            && integration(&top, &landing) == Verdict::Integrated
+            && worktree_remove(&top, &wt, true).is_ok()
+        {
+            b.landed = None;
+            spec_standing = false;
+            moved = true;
+            report.freed.push(Freed {
+                path: wt.clone(),
+                side: Side::Spec,
+                receiving: landing.receiving,
+            });
+        }
+        // The members: those sharing one physical repository share one
+        // folder — the grouping the cascade gave them — so they share one
+        // verdict and one removal.
+        let mut groups: BTreeMap<PathBuf, Vec<String>> = BTreeMap::new();
+        for (name, m) in b.active_members() {
+            if m.landed.is_some() {
+                groups.entry(m.path.clone()).or_default().push(name.clone());
+            }
+        }
+        for (path, names) in groups {
+            let Some(m) = b.members.get(&names[0]) else { continue };
+            let Some(landing) = m.landed.clone() else { continue };
+            let repo = if m.checkout.is_dir() { m.checkout.clone() } else { path.clone() };
+            if root.starts_with(&path)
+                || !landing_stands(&path, &landing)
+                || integration(&path, &landing) != Verdict::Integrated
+                || worktree_remove(&repo, &path, true).is_err()
+            {
+                continue;
+            }
+            for name in &names {
+                if let Some(m) = b.members.get_mut(name) {
+                    m.status = Status::Closed;
+                }
+            }
+            moved = true;
+            report.freed.push(Freed {
+                path,
+                side: Side::Members(names),
+                receiving: landing.receiving,
+            });
+        }
+        // Every side arrived: the row becomes the record of what this
+        // machine carried.
+        let members_done = b.members_done();
+        if !spec_standing && b.landed.is_none() && members_done {
+            b.status = Status::Closed;
+            moved = true;
+            report.closed.push(key.clone());
+        }
+    }
+    if moved {
+        let _ = reg.save();
+    }
+    report
 }
 
 // ---------------------------------------------------------------------------
@@ -984,20 +1388,21 @@ pub fn guard_mutation(root: &Path, work: Option<&str>) -> Result<(), String> {
             if Path::new(owner) != top.as_path() {
                 return Err(format!(
                     "plan `{slug}` is bound to {owner} — continue there (cd {owner}); \
-                     if that checkout is gone, `archi worktree drop {slug}`"
+                     if that checkout is gone, `archi worktree close {slug}`"
                 ));
             }
         }
     }
-    if reg.binding_of(&top).is_some() {
+    if reg.active_binding_of(&top).is_some() {
         return Ok(());
     }
     // One worktree carries the whole unit — spec, plan, code. When some
     // exist,
     // continuation belongs to one of them: list, never mint over them; the
-    // CLI cannot know which spec a new plan serves, the caller can.
+    // CLI cannot know which spec a new plan serves, the caller can. A closed
+    // row is no place to continue, so only standing rows are offered.
     let standing: Vec<String> = reg
-        .entries()
+        .active_entries()
         .map(|(k, b)| {
             let mut parts = Vec::new();
             if let Some(s) = &b.effort {
@@ -1059,7 +1464,7 @@ pub fn guard_verdict(root: &Path) -> Result<(), String> {
         return Ok(());
     };
     if let Some(reg) = Registry::load(&root)? {
-        if reg.binding_of(&top).is_some() {
+        if reg.active_binding_of(&top).is_some() {
             return Ok(());
         }
     }
@@ -1130,8 +1535,10 @@ pub fn bind_plan(root: &Path, plan: &str) {
         Some(b) => Binding { plan: Some(plan.to_string()), ..b },
         None => Binding {
             branch,
+            status: Status::Active,
             plan: Some(plan.to_string()),
             effort: None,
+            landed: None,
             members: BTreeMap::new(),
         },
     };
@@ -1177,6 +1584,10 @@ mod tests {
         git(&dir, &["add", "-A"]);
         git(&dir, &["commit", "-qm", "seed"]);
         fs::canonicalize(&dir).unwrap()
+    }
+
+    fn head(dir: &Path) -> String {
+        git_out(dir, &["rev-parse", "HEAD"]).expect("a head")
     }
 
     fn manifest(root: &Path, extra: &str) {
@@ -1359,6 +1770,347 @@ mod tests {
         bind_plan(&spec, "search");
         let reg = Registry::load(&spec).unwrap().unwrap();
         assert_eq!(reg.binding_of(&spec).unwrap().plan.as_deref(), Some("search"));
+    }
+
+    #[test]
+    fn the_probe_answers_ancestry_content_and_absence() {
+        let outer = scratch();
+        let spec = repo(&outer, "spec");
+        git(&spec, &["switch", "-qc", "work"]);
+        fs::write(spec.join("a.txt"), "a\n").unwrap();
+        git(&spec, &["add", "-A"]);
+        git(&spec, &["commit", "-qm", "work"]);
+        let sha = head(&spec);
+        git(&spec, &["switch", "-q", "main"]);
+        let landing =
+            Landing { branch: "work".to_string(), receiving: "main".to_string(), sha: sha.clone() };
+
+        // main carries neither the commit nor the content
+        assert_eq!(integration(&spec, &landing), Verdict::NotYet);
+        // a ref out of reach is no verdict at all — never a "not yet"
+        let nowhere = Landing { receiving: "nowhere".to_string(), ..landing.clone() };
+        assert_eq!(integration(&spec, &nowhere), Verdict::Unknown);
+        let gone = Landing { sha: "0".repeat(40), ..landing.clone() };
+        assert_eq!(integration(&spec, &gone), Verdict::Unknown);
+
+        // the squash: main takes the content under a sha of its own, so
+        // ancestry answers no and the tree diff answers yes
+        git(&spec, &["merge", "--squash", "work"]);
+        git(&spec, &["commit", "-qm", "squashed"]);
+        assert_ne!(head(&spec), sha, "the forge rewrote the sha");
+        assert!(
+            git_out(&spec, &["merge-base", "--is-ancestor", &sha, "refs/heads/main"]).is_none(),
+            "ancestry alone would answer no"
+        );
+        assert_eq!(integration(&spec, &landing), Verdict::Integrated);
+
+        // ancestry: a merged branch stays integrated once main moves on and
+        // the trees part
+        git(&spec, &["switch", "-qc", "more"]);
+        fs::write(spec.join("b.txt"), "b\n").unwrap();
+        git(&spec, &["add", "-A"]);
+        git(&spec, &["commit", "-qm", "more"]);
+        let more = head(&spec);
+        git(&spec, &["switch", "-q", "main"]);
+        git(&spec, &["merge", "--no-edit", "more"]);
+        fs::write(spec.join("c.txt"), "c\n").unwrap();
+        git(&spec, &["add", "-A"]);
+        git(&spec, &["commit", "-qm", "main moves on"]);
+        let landing = Landing { branch: "more".to_string(), receiving: "main".to_string(), sha: more };
+        assert_eq!(integration(&spec, &landing), Verdict::Integrated);
+    }
+
+    #[test]
+    fn the_pathspec_batches_carry_every_path_once_and_in_order() {
+        let paths = ["aa", "bb", "cc", "dd"];
+        assert_eq!(
+            pathspec_batches(&paths, 100),
+            vec![vec!["aa", "bb", "cc", "dd"]],
+            "one call while the budget holds"
+        );
+        assert_eq!(pathspec_batches(&paths, 7), vec![vec!["aa", "bb"], vec!["cc", "dd"]]);
+        // a path wider than the whole budget still travels, alone
+        let wide = ["x".repeat(20), "y".to_string()];
+        let refs: Vec<&str> = wide.iter().map(String::as_str).collect();
+        let cut = pathspec_batches(&refs, 5);
+        assert_eq!(cut.len(), 2);
+        assert_eq!(cut.concat(), refs, "every path once, in order — the claim stays whole");
+        let none: [&str; 0] = [];
+        assert!(pathspec_batches(&none, 5).is_empty());
+    }
+
+    #[test]
+    fn the_probe_reads_a_squash_onto_a_branch_that_moved_on() {
+        // the live shape: the receiving branch is shared, so it carries work
+        // of its own beside the squashed landing
+        let outer = scratch();
+        let spec = repo(&outer, "spec");
+        git(&spec, &["switch", "-qc", "feat"]);
+        fs::write(spec.join("feat.txt"), "feat\n").unwrap();
+        git(&spec, &["add", "-A"]);
+        git(&spec, &["commit", "-qm", "feat"]);
+        let feat = head(&spec);
+        git(&spec, &["switch", "-q", "main"]);
+        fs::write(spec.join("other.txt"), "someone else's work\n").unwrap();
+        git(&spec, &["add", "-A"]);
+        git(&spec, &["commit", "-qm", "unrelated"]);
+        let landing =
+            Landing { branch: "feat".to_string(), receiving: "main".to_string(), sha: feat };
+
+        // unrelated work alone is not the landing
+        assert_eq!(integration(&spec, &landing), Verdict::NotYet);
+
+        // the forge squashes the pull request in beside it
+        fs::write(spec.join("feat.txt"), "feat\n").unwrap();
+        git(&spec, &["add", "-A"]);
+        git(&spec, &["commit", "-qm", "squashed"]);
+        assert!(
+            git_out(&spec, &["merge-base", "--is-ancestor", &landing.sha, "refs/heads/main"])
+                .is_none(),
+            "ancestry alone would answer no"
+        );
+        assert!(
+            git_out(&spec, &["diff", "--quiet", "refs/heads/main", "refs/heads/feat"]).is_none(),
+            "the trees differ over other.txt — a whole-tree test would answer no forever"
+        );
+        assert_eq!(integration(&spec, &landing), Verdict::Integrated);
+    }
+
+    #[test]
+    fn the_probe_keeps_the_seat_when_the_receiving_branch_rewrote_the_landings_paths() {
+        let outer = scratch();
+        let spec = repo(&outer, "spec");
+        git(&spec, &["switch", "-qc", "feat"]);
+        fs::write(spec.join("feat.txt"), "as the seat wrote it\n").unwrap();
+        git(&spec, &["add", "-A"]);
+        git(&spec, &["commit", "-qm", "feat"]);
+        let feat = head(&spec);
+        git(&spec, &["switch", "-q", "main"]);
+        fs::write(spec.join("feat.txt"), "as main wrote it\n").unwrap();
+        git(&spec, &["add", "-A"]);
+        git(&spec, &["commit", "-qm", "main's own take"]);
+        let landing =
+            Landing { branch: "feat".to_string(), receiving: "main".to_string(), sha: feat };
+        assert_eq!(
+            integration(&spec, &landing),
+            Verdict::NotYet,
+            "one of the landing's own paths differs — the seat stands"
+        );
+
+        // a landing that touched nothing has nothing to carry
+        git(&spec, &["switch", "-qc", "hollow"]);
+        git(&spec, &["commit", "-q", "--allow-empty", "-m", "nothing"]);
+        let hollow = head(&spec);
+        git(&spec, &["switch", "-q", "main"]);
+        fs::write(spec.join("main.txt"), "main moves on\n").unwrap();
+        git(&spec, &["add", "-A"]);
+        git(&spec, &["commit", "-qm", "onward"]);
+        let landing =
+            Landing { branch: "hollow".to_string(), receiving: "main".to_string(), sha: hollow };
+        assert_eq!(integration(&spec, &landing), Verdict::Integrated);
+    }
+
+    #[test]
+    fn a_moved_head_or_a_dirty_tree_stops_a_landing_record_counting() {
+        let outer = scratch();
+        let spec = repo(&outer, "spec");
+        let minted = mint_plain(&spec, "feat", None, Some("feat")).unwrap();
+        let landing = Landing {
+            branch: "feat/x".to_string(),
+            receiving: "main".to_string(),
+            sha: head(&minted.path),
+        };
+        assert!(landing_stands(&minted.path, &landing));
+
+        // the review sends the operator back into the seat
+        fs::write(minted.path.join("seed.txt"), "answering the review\n").unwrap();
+        assert!(!landing_stands(&minted.path, &landing), "an uncommitted edit is live work");
+        git(&minted.path, &["checkout", "--", "seed.txt"]);
+        assert!(
+            landing_stands(&minted.path, &landing),
+            "the state derives from head and tree — nothing was written to say so"
+        );
+
+        // a commit on top: the record describes a head that moved
+        fs::write(minted.path.join("more.txt"), "more\n").unwrap();
+        git(&minted.path, &["add", "-A"]);
+        git(&minted.path, &["commit", "-qm", "resumed"]);
+        assert!(!landing_stands(&minted.path, &landing));
+    }
+
+    #[test]
+    fn the_sweep_frees_an_integrated_folder_and_leaves_live_work_alone() {
+        let outer = scratch();
+        let spec = repo(&outer, "spec");
+        fs::write(spec.join(".gitignore"), "junk/\n").unwrap();
+        git(&spec, &["add", "-A"]);
+        git(&spec, &["commit", "-qm", "ignore the build output"]);
+        let one = mint_plain(&spec, "one", None, Some("one")).unwrap().path;
+        let two = mint_plain(&spec, "two", None, Some("two")).unwrap().path;
+        for (wt, name) in [(&one, "one"), (&two, "two")] {
+            fs::write(wt.join(format!("{name}.txt")), "work\n").unwrap();
+            git(wt, &["add", "-A"]);
+            git(wt, &["commit", "-qm", "work"]);
+        }
+        let to = |branch: &str| BTreeMap::from([(String::new(), branch.to_string())]);
+        merge(&spec, "one", &to("feat/one")).unwrap();
+        merge(&spec, "two", &to("feat/two")).unwrap();
+
+        // the sideways landing kept both seats and recorded where they went
+        assert!(one.is_dir() && two.is_dir(), "a landing is not an arrival");
+        let reg = Registry::load(&spec).unwrap().unwrap();
+        let landed = reg.binding_of(&one).unwrap().landed.clone().unwrap();
+        assert_eq!(landed.branch, "feat/one");
+        assert_eq!(landed.receiving, "main");
+        assert!(sweep(&spec).freed.is_empty(), "nothing arrived yet");
+
+        // main takes both branches; one seat holds ignored build output, the
+        // other holds an untracked file no rule covers
+        git(&spec, &["merge", "--no-edit", "feat/one"]);
+        git(&spec, &["merge", "--no-edit", "feat/two"]);
+        fs::create_dir_all(one.join("junk")).unwrap();
+        fs::write(one.join("junk/build.bin"), "tens of gigabytes\n").unwrap();
+        fs::write(two.join("stray.txt"), "unfinished\n").unwrap();
+
+        let report = sweep(&spec);
+        assert_eq!(report.freed.len(), 1, "one folder freed, one left standing");
+        assert_eq!(report.freed[0].path, one);
+        assert_eq!(report.freed[0].receiving, "main");
+        assert_eq!(report.freed[0].side, Side::Spec);
+        assert!(!one.exists(), "ignored files never veto a cleanup");
+        assert!(two.is_dir(), "an untracked file keeps its folder");
+        let reg = Registry::load(&spec).unwrap().unwrap();
+        assert_eq!(reg.binding_of(&one).unwrap().status, Status::Closed);
+        assert_eq!(report.closed, vec![one.to_string_lossy().into_owned()]);
+        let standing = reg.binding_of(&two).unwrap();
+        assert_eq!(standing.status, Status::Active);
+        assert!(standing.landed.is_some(), "the record stays — it is read, never rewritten");
+    }
+
+    #[test]
+    fn the_sweep_gives_members_of_one_repository_one_folder_and_one_verdict() {
+        let outer = scratch();
+        let spec = repo(&outer, "spec");
+        let backend = repo(&outer, "backend");
+        let minted = mint_plain(&spec, "feat", None, Some("feat")).unwrap();
+        // the shape the cascade leaves behind: two members carried by one
+        // repository, so one folder and one branch answer for both
+        let bwt = outer.join("backend-worktrees").join("feat");
+        git(&backend, &["worktree", "add", "-q", "-b", "archi/feat", bwt.to_str().unwrap()]);
+        let bwt = fs::canonicalize(&bwt).unwrap();
+        fs::write(bwt.join("lib.txt"), "member work\n").unwrap();
+        git(&bwt, &["add", "-A"]);
+        git(&bwt, &["commit", "-qm", "member work"]);
+        let sha = head(&bwt);
+        let carried = |path: &Path, checkout: &Path| MemberBinding {
+            path: path.to_path_buf(),
+            branch: "archi/feat".to_string(),
+            base: "main".to_string(),
+            checkout: checkout.to_path_buf(),
+            status: Status::Active,
+            landed: Some(Landing {
+                branch: "archi/feat".to_string(),
+                receiving: "main".to_string(),
+                sha: sha.clone(),
+            }),
+        };
+        let mut reg = Registry::load(&spec).unwrap().unwrap();
+        let key = reg.resolve_key("feat").unwrap();
+        let b = reg.get_mut(&key).unwrap();
+        b.members.insert("api".to_string(), carried(&bwt, &backend));
+        b.members.insert("web".to_string(), carried(&bwt, &backend));
+        // a member no repository answers for: no verdict, no action, no error
+        let gone = outer.join("gone");
+        b.members.insert("ghost".to_string(), carried(&gone, &gone));
+        reg.save().unwrap();
+
+        assert!(sweep(&spec).freed.is_empty(), "the base does not carry it yet");
+        assert!(bwt.is_dir());
+
+        // the forge squashes the branch into the base
+        git(&backend, &["merge", "--squash", "archi/feat"]);
+        git(&backend, &["commit", "-qm", "squashed"]);
+        let report = sweep(&spec);
+        assert_eq!(report.freed.len(), 1, "one folder, one removal");
+        assert_eq!(
+            report.freed[0].side,
+            Side::Members(vec!["api".to_string(), "web".to_string()])
+        );
+        assert!(!bwt.exists());
+        let reg = Registry::load(&spec).unwrap().unwrap();
+        let b = reg.binding_of(&minted.path).unwrap();
+        assert_eq!(b.members["api"].status, Status::Closed);
+        assert_eq!(b.members["web"].status, Status::Closed);
+        assert_eq!(b.members["ghost"].status, Status::Active, "unreachable is not gone");
+        assert_eq!(b.status, Status::Active, "the spec side still stands");
+    }
+
+    #[test]
+    fn a_hand_removed_worktree_closes_its_row_and_keeps_it() {
+        let outer = scratch();
+        let spec = repo(&outer, "spec");
+        let minted = mint_plain(&spec, "auth", Some("auth"), None).unwrap();
+        git(&spec, &["worktree", "remove", "--force", minted.path.to_str().unwrap()]);
+        let reg = Registry::load(&spec).unwrap().unwrap();
+        assert_eq!(reg.entries().count(), 1, "nothing leaves the registry");
+        assert_eq!(reg.binding_of(&minted.path).unwrap().status, Status::Closed);
+        assert!(reg.active_binding_of(&minted.path).is_none());
+        assert!(reg.owner_of_plan("auth").is_none(), "history owns no plan");
+        let text = fs::read_to_string(common_dir(&spec).unwrap().join(REGISTRY)).unwrap();
+        assert!(text.contains("status = \"closed\""), "the heal was written back: {text}");
+    }
+
+    #[test]
+    fn a_closed_row_licenses_nothing() {
+        let outer = scratch();
+        let spec = repo(&outer, "spec");
+        manifest(&spec, "");
+        fs::create_dir_all(spec.join("archi/src")).unwrap();
+        git(&spec, &["add", "-A"]);
+        git(&spec, &["commit", "-qm", "manifest"]);
+        bind_plan(&spec, "auth");
+        // the row stands: this checkout mutates, and its edits are governed
+        assert!(guard_mutation(&spec, Some("auth")).is_ok());
+        fs::write(spec.join("archi/src/model.arch"), "def node A\n").unwrap();
+        assert!(guard_verdict(&spec).is_ok());
+
+        let mut reg = Registry::load(&spec).unwrap().unwrap();
+        let key = reg.resolve_key("auth").unwrap();
+        reg.get_mut(&key).unwrap().status = Status::Closed;
+        reg.save().unwrap();
+
+        let reg = Registry::load(&spec).unwrap().unwrap();
+        assert!(reg.binding_of(&spec).is_some(), "the row stays as the record");
+        assert!(reg.active_binding_of(&spec).is_none(), "history binds nothing");
+        assert!(reg.owner_of_plan("auth").is_none());
+        let e = guard_verdict(&spec).unwrap_err();
+        assert!(e.contains("uncommitted"), "{e}");
+        let e = guard_mutation(&spec, Some("auth")).unwrap_err();
+        assert!(e.contains("unbound"), "{e}");
+        assert!(e.contains("minted worktree"), "the recipe mints a live seat: {e}");
+    }
+
+    #[test]
+    fn a_mint_of_a_closed_slug_re_opens_the_same_row() {
+        let outer = scratch();
+        let spec = repo(&outer, "spec");
+        let first = mint_plain(&spec, "auth", Some("auth"), None).unwrap();
+        git(&spec, &["worktree", "remove", "--force", first.path.to_str().unwrap()]);
+        assert_eq!(
+            Registry::load(&spec).unwrap().unwrap().binding_of(&first.path).unwrap().status,
+            Status::Closed
+        );
+
+        let second = mint_plain(&spec, "auth", None, Some("auth-spec")).unwrap();
+        assert_eq!(second.path, first.path, "the seat comes back on its own key");
+        assert!(second.attached, "the branch it left is the branch it returns to");
+        let reg = Registry::load(&spec).unwrap().unwrap();
+        assert_eq!(reg.entries().count(), 1, "one row, re-opened — never a second");
+        let b = reg.binding_of(&first.path).unwrap();
+        assert_eq!(b.status, Status::Active);
+        assert_eq!(b.plan.as_deref(), Some("auth"), "the row keeps what it carried");
+        assert_eq!(b.effort.as_deref(), Some("auth-spec"));
+        assert!(reg.owner_of_plan("auth").is_some());
     }
 
     #[test]

@@ -102,6 +102,13 @@ One worktree carries one whole unit of work: the spec, then its plan,
 then the code. The unit merges once, at the end. Do these steps at the
 start of every working session, before any mutation.
 
+**Asked what was done here, ask the record first.** A session that must
+report instead of work reads the record before any archaeology: `archi
+worktree ls` (closed rows included), `archi plan list`, `archi version
+list`, and `archi search <phrase>` for anything the question names. Git
+history is the last resort, and reading it first is what produces a
+report about the wrong round.
+
 1. Run `archi status`. It prints the checkout, its branch, its binding,
    the version state, the open stress round, and every plan with open
    lifecycle. Beside it, before the session's first `archi check`, run
@@ -165,11 +172,18 @@ decay of the member map: stale rows, wrong clones and stranded baselines.
 Read them. They are the work to do.
 
 The registry moves only by the commands `archi worktree ls` and `archi
-worktree drop`. Never move it by hand. To close a worktree, run `archi
-worktree merge <slug>` (the archi-finish-worktree skill). Merge a spec
-early, before the rest of its unit, in one case only: another effort that
-depends on yours must pin your published version. The default unit stays
-in one worktree and lands once.
+worktree close`. Never move it by hand. A row is never deleted. `close`
+removes the folders and marks the row: `closed <key> (<branch>) — the
+folder is gone, the row stays as the record`. The opening looks for an
+**active** row to continue, so narrow the listing with `archi worktree ls
+--status active`. A seat that reads `waiting on <landed-branch> →
+<receiving>` is normal work in flight, not a leftover: it landed sideways
+for a pull request, and it frees itself once the receiving branch carries
+the work. To land a worktree, run `archi worktree merge <slug>` (the
+archi-finish-worktree skill). Merge a spec early, before the rest of its
+unit, in one case only: another effort that depends on yours must pin
+your published version. The default unit stays in one worktree and lands
+once.
 
 ## Greenfield
 
@@ -570,6 +584,11 @@ fact, and marks it as anchor-born.
 - `worktree merge` refuses a stale member baseline, because the worktree
   tip is past the recorded mark. Run `archi version anchor --repo
   <member>` in the worktree, then run the merge again.
+- A seat still stands after its pull request merged. The sweep compares
+  against the *local* receiving branch, and archi never fetches, so a
+  merge on the forge stays invisible here. Run `git pull` in the
+  receiving checkout. Any archi command then frees the folder and closes
+  the row.
 - `check` after a merge says the manifest holds conflict markers. Two
   branches minted the same version id. Keep the first-landed entry and
   its patch file. Then run `archi version remint -m <note> --session
