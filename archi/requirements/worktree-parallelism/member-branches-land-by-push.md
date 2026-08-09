@@ -9,7 +9,7 @@ deferred:
 
 A member's finished branch goes to its remote — pushed by the closing verb,
 integrated as a PR on the forge — never merged locally into the member's
-checkout. A refused push keeps the member bound and the close idempotent: a
+checkout. A pushed member keeps its worktree until its base carries the work (a-seat-lives-until-its-work-lands), and a refused push keeps the member bound and the close idempotent: a
 member's retirement is its push.
 
 ## System Context
