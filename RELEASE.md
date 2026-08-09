@@ -13,6 +13,50 @@ downloadable and that is the migration model.
 
 ## Releases
 
+### 0.1.19
+
+A worktree lives until its work lands. A local merge still retires it at
+once, because the work is in the receiving branch that moment. A sideways
+landing — the only path into a protected branch — and every member push
+record where the work went and keep the worktree standing, so a review
+that asks for a change still has somewhere to answer it. The row closes
+when the spec side and every member carry their work in their receiving
+branches.
+
+The registry keeps its rows. `archi worktree close` replaces `drop`: it
+frees the folders and marks the row. Self-heal closes a row git no longer
+backs. No command deletes one, and a bare `drop` refuses toward `close`.
+A row that outlives its work is the record of what this machine carried,
+and only an active row licenses a mutation.
+
+A sweep frees the workspace. It runs on `worktree ls`, `worktree mint`
+and `status`, proves integration against the local receiving branch —
+ancestry first, then a one-directional comparison scoped to the paths the
+landing touched, so a squashed pull request still counts — and removes
+the folder silently when the tree is clean. Ignored build output never
+vetoes the cleanup. An unignored file or a commit on top makes the seat
+read as live work again and the sweep passes it by. `worktree ls` states
+every row and member — live, `waiting on <branch> → <receiving>`, or
+closed — and narrows by `--status`. `archi status` in an unbound checkout
+names the standing work.
+
+The mint refreshes the base it branches from. A fetch of that one branch,
+home and every cascaded member alike, precedes every fresh mint. It is
+best-effort: no remote, no upstream, no network or a refusal degrades to
+the local ref and says so, `--no-fetch` skips the attempt, and credential
+prompts are silenced so a remote that cannot answer becomes a note
+instead of a hung command. Nothing is pulled, so no working tree moves.
+The branch point then follows the divergence: behind the remote takes the
+remote ref, ahead of it or diverged keeps the local branch and the
+unpushed commits it carries. The report names the ref, its commit and the
+reason. A worktree folder now anchors on the repository's main checkout,
+so minting from inside another worktree no longer nests them.
+
+The briefing follows, and only where the agent has something to do: use
+`close`, look for an active row, never close a waiting one, `git pull`
+when a seat outlives its merged pull request, and answer "what was done
+here" from the record before any git archaeology.
+
 ### 0.1.18
 
 The plan gets a cleanup wave. When the last wave closes, `plan next`
