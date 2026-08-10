@@ -148,8 +148,6 @@ const T1_STORE_CURATED: &str =
 /// a person fills: the three lists, the conditioning paragraph, the killer
 /// and a `Scenarios` block (`archi/requirements/world-facts/`).
 fn put_fact(root: &Path, slug: &str, title: &str, covers: &str, scenarios: &[&str]) {
-    let dir = root.join("archi/world");
-    fs::create_dir_all(&dir).unwrap();
     let mut block = format!("Feature: {title}\n");
     for s in scenarios {
         block.push_str(&format!(
@@ -157,15 +155,15 @@ fn put_fact(root: &Path, slug: &str, title: &str, covers: &str, scenarios: &[&st
              When the rider opens the door\n    Then the door holds\n"
         ));
     }
-    fs::write(
-        dir.join(format!("{slug}.md")),
-        format!(
-            "---\ncovers: [{covers}]\nsources: [https://example.org/thread/42]\nuses: []\n---\n\n\
-             # {title}\n\nThe carriage drops the network for minutes at a time.\n\n\
-             ## What kills this\n\nThe condition ends.\n\n## Scenarios\n\n{block}"
-        ),
-    )
-    .unwrap();
+    util::Fact {
+        covers,
+        sources: "https://example.org/thread/42",
+        uses: "",
+        condition: "The carriage drops the network for minutes at a time.",
+        killer: "The condition ends.",
+        scenarios: &block,
+    }
+    .write(root, slug, title);
 }
 
 /// Curate a minted task file the way a person does: own one requirement,

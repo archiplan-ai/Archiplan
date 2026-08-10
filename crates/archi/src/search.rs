@@ -297,16 +297,10 @@ fn fill_doc_text(root: &Path, card: &mut Card) -> bool {
 /// fact. A tree with no wing is an empty one — the scan neither needs the
 /// directory nor makes it (the-wing-arrives-without-noise).
 fn world_files(root: &Path) -> Vec<PathBuf> {
-    let Ok(rd) = fs::read_dir(root.join("archi").join("world")) else {
-        return Vec::new();
-    };
-    let mut paths: Vec<PathBuf> = rd
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|e| e == "md"))
-        .collect();
-    paths.sort();
-    paths
+    docs::sorted_entries(&root.join("archi").join("world"))
+        .into_iter()
+        .filter(|p| docs::is_md(p))
+        .collect()
 }
 
 /// One world fact's card: its name, its conditioning paragraph, its killer.

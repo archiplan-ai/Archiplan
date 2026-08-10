@@ -399,20 +399,19 @@ fn a_migrated_fact_rests_on_its_origin_file_and_reports_nothing() {
     // The record the skill leaves behind: the condition, its killer, its
     // scenarios, the node it conditions, and the intent the claim was lifted
     // from — the provenance that makes the fact rest on something recorded.
-    fs::create_dir_all(root.join("archi/world")).unwrap();
-    fs::write(
-        root.join("archi/world/trains-lose-the-signal.md"),
-        "---\ncovers: [AuthService]\nsources: [archi/requirements/riding/riding.md]\nuses: []\n---\n\n\
-         # Trains lose the signal\n\n\
-         The carriage drops the network for minutes at a time, so a reader on the move \
-         works from what the device already holds.\n\n\
-         ## What kills this\n\nTrackside coverage that never drops.\n\n\
-         ## Scenarios\n\nFeature: Offline open\n  \
-         Scenario: the app opens with no network\n    \
-         Given the device has no network\n    When the reader opens the app\n    \
-         Then the last synced view appears\n",
-    )
-    .unwrap();
+    util::Fact {
+        covers: "AuthService",
+        sources: "archi/requirements/riding/riding.md",
+        uses: "",
+        condition: "The carriage drops the network for minutes at a time, so a reader on the move \
+                    works from what the device already holds.",
+        killer: "Trackside coverage that never drops.",
+        scenarios: "Feature: Offline open\n  \
+                    Scenario: the app opens with no network\n    \
+                    Given the device has no network\n    When the reader opens the app\n    \
+                    Then the last synced view appears\n",
+    }
+    .write(&root, "trains-lose-the-signal", "Trains lose the signal");
 
     // The wing counts the fact as grounded and says nothing else about it: a
     // migration that swapped one finding for another would defeat its purpose.

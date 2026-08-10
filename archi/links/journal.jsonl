@@ -4008,3 +4008,10 @@
 {"event":"confirm","id":"l2274-71c78c","at":"2026-08-10T23:24:12Z"}
 {"event":"confirm","id":"l2275-0c7afb","at":"2026-08-10T23:24:12Z"}
 {"event":"confirm","id":"l2276-7ab094","at":"2026-08-10T23:24:12Z"}
+{"event":"add","link":{"id":"l2417-b4108b","spec":{"ref":"Cli.drive consult(->Command, <-Report) Scaffold.stand_up"},"anchor":{"file":"crates/archi/src/scaffold.rs","symbol":"claude_block"},"kind":"indirect","standing":"evidence","origin":{"kind":"captured","task":"t10"},"birth":{"created":"2026-08-10T23:43:46Z","commit":"3e5e42e76f20de8c046fb8c0a9b06aa1b1eee346","spans":[{"file":"crates/archi/src/scaffold.rs","start":430,"end":434,"hash":"sha256:156fca0b3f4e798b868979e0c3403910ded936caa80ef8486503a6194dc001ba"}]},"pins":{"canonicalizer":"rust-tok-v1","interface":"sha256:d12fb4bfc1830fe99a717f69f694c41efbe22da8b835519a38becf5ac1941386","body":"sha256:1537fa326cce3ddb70813a52f807bb193b63acb395bfb079ca7d4a12de0ffb61"}}}
+{"event":"add","link":{"id":"l2418-429589","spec":{"ref":"Cli.drive consult(->Command, <-Report) Scaffold.stand_up"},"anchor":{"file":"crates/archi/tests/init_e2e.rs","symbol":"a_fresh_init_stands_up_a_building_project"},"kind":"indirect","standing":"evidence","origin":{"kind":"captured","task":"t10"},"birth":{"created":"2026-08-10T23:43:46Z","commit":"3e5e42e76f20de8c046fb8c0a9b06aa1b1eee346","spans":[{"file":"crates/archi/tests/init_e2e.rs","start":78,"end":106,"hash":"sha256:979f9bf8f5de602716986ffcc8aed12eea0e975de7cda1440b39f9e1e25425c8"}]},"pins":{"canonicalizer":"rust-tok-v1","interface":"sha256:4222a0a3f43c48deee3a25b2d99d43bc4e40e4eed86dc7d8fac60d21235c47d4","body":"sha256:027a210a36f5258d6779f73c64c7d9b07000c544fa924562f1a60fb29079711a"}}}
+{"event":"decay","id":"l0757-ec5aa9","task":"t10","at":"2026-08-10T23:43:46Z"}
+{"event":"decay","id":"l0758-69050e","task":"t10","at":"2026-08-10T23:43:46Z"}
+{"event":"decay","id":"l0759-1970f7","task":"t10","at":"2026-08-10T23:43:46Z"}
+{"event":"decay","id":"l0778-6cd15e","task":"t10","at":"2026-08-10T23:43:46Z"}
+{"event":"decay","id":"l0779-5f5e40","task":"t10","at":"2026-08-10T23:43:46Z"}

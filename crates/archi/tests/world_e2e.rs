@@ -55,19 +55,18 @@ fn put(root: &Path, rel_path: &str, text: &str) {
 /// One whole world fact: the three lists as given, the conditioning
 /// paragraph, the killer and one scenario.
 fn fact(root: &Path, slug: &str, title: &str, covers: &str, sources: &str, uses: &str) {
-    put(
-        root,
-        &format!("archi/world/{slug}.md"),
-        &format!(
-            "---\ncovers: [{covers}]\nsources: [{sources}]\nuses: [{uses}]\n---\n\n\
-             # {title}\n\nThe carriage drops the network for minutes at a time.\n\n\
-             ## What kills this\n\nTrackside coverage that never drops.\n\n\
-             ## Scenarios\n\nFeature: Offline open\n  \
-             Scenario: the app opens with no network\n    \
-             Given the device has no network\n    When the user opens the app\n    \
-             Then the last synced view appears\n"
-        ),
-    );
+    util::Fact {
+        covers,
+        sources,
+        uses,
+        condition: "The carriage drops the network for minutes at a time.",
+        killer: "Trackside coverage that never drops.",
+        scenarios: "Feature: Offline open\n  \
+                    Scenario: the app opens with no network\n    \
+                    Given the device has no network\n    When the user opens the app\n    \
+                    Then the last synced view appears\n",
+    }
+    .write(root, slug, title);
 }
 
 /// Three standing facts: one on the gate, one on both, one on the limiter —

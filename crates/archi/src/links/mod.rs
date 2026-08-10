@@ -692,9 +692,19 @@ fn fact_scenarios(root: &Path, slug: &str) -> Option<Vec<(String, usize)>> {
 }
 
 /// The `Scenario:` lines of a `Scenarios` block and the names on them. The
-/// smallest reader an address needs: the grammar
-/// (`archi/requirements/world-facts/the-grammar-is-a-named-subset.md`) parses
-/// the block whole, and replaces this reader with its names.
+/// smallest reader an address needs.
+///
+/// [`docs::gherkin::parse`] now reads the same block whole, and it does not
+/// replace this reader: the grammar reports form, and a link resolves an
+/// address. The grammar drops every scenario any refusal touched — a `But`
+/// step, a `@runs:` naming no declared member, a block with no `Feature`
+/// line — and keeps a name with its inner whitespace as written, which a
+/// normalized ref never matches. Reading through it would turn a doc-grammar
+/// error into `spec-drifted` on a link whose code never moved, and would fail
+/// a `link verify` on a malformed fact that `archi check` already reports.
+/// The two readers answer two questions; only `check` gates on form
+/// (`archi/requirements/world-facts/the-grammar-is-a-named-subset.md`,
+/// `archi/requirements/world-facts/the-scenario-is-the-address-not-the-step.md`).
 fn scenario_names(block: &docs::world::Block) -> Vec<(String, usize)> {
     block
         .text

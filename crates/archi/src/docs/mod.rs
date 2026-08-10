@@ -272,7 +272,7 @@ pub(crate) fn load(root: &Path, model: &Model) -> (Tree, DocReport) {
 
 // ---- discovery -------------------------------------------------------------
 
-fn sorted_entries(dir: &Path) -> Vec<PathBuf> {
+pub(crate) fn sorted_entries(dir: &Path) -> Vec<PathBuf> {
     let Ok(rd) = fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -281,7 +281,7 @@ fn sorted_entries(dir: &Path) -> Vec<PathBuf> {
     v
 }
 
-fn is_md(path: &Path) -> bool {
+pub(crate) fn is_md(path: &Path) -> bool {
     path.extension().is_some_and(|e| e == "md")
 }
 

@@ -106,20 +106,19 @@ Ledger.post ledger_wire Vault.keep
 /// One whole world fact under `archi/world/`: the covers list as given, the
 /// conditioning paragraph, the killer and one scenario named after the fact.
 fn fact(root: &Path, slug: &str, title: &str, covers: &str, condition: &str) {
-    let dir = root.join("archi/world");
-    fs::create_dir_all(&dir).unwrap();
-    fs::write(
-        dir.join(format!("{slug}.md")),
-        format!(
-            "---\ncovers: [{covers}]\nsources: [https://example.org/thread/42]\nuses: []\n---\n\n\
-             # {title}\n\n{condition}\n\n\
-             ## What kills this\n\nTrackside coverage that never drops.\n\n\
-             ## Scenarios\n\nFeature: {title}\n  Scenario: {slug} holds\n    \
+    util::Fact {
+        covers,
+        sources: "https://example.org/thread/42",
+        uses: "",
+        condition,
+        killer: "Trackside coverage that never drops.",
+        scenarios: &format!(
+            "Feature: {title}\n  Scenario: {slug} holds\n    \
              Given the device has no network\n    When the user opens the app\n    \
              Then the last synced view appears\n"
         ),
-    )
-    .unwrap();
+    }
+    .write(root, slug, title);
 }
 
 /// A project on both halves of the model, with the wing when `wing` says so:

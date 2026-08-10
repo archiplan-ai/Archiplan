@@ -64,6 +64,45 @@ pub fn git(dir: &Path, args: &[&str]) {
     );
 }
 
+/// One world fact on disk, in the shape `archi world add` mints and a person
+/// fills (`archi/requirements/world-facts/`): the three frontmatter lists, the
+/// name, the conditioning paragraph, what would make the fact false, and the
+/// `Scenarios` block. Every e2e family fills the same skeleton with its own
+/// words, so the skeleton lives here once.
+pub struct Fact<'a> {
+    /// The `covers:` entries, already comma-joined.
+    pub covers: &'a str,
+    /// The `sources:` entries, already comma-joined; empty is the recorded
+    /// hypothesis state.
+    pub sources: &'a str,
+    /// The `uses:` entries, already comma-joined.
+    pub uses: &'a str,
+    /// The conditioning paragraph, under the name.
+    pub condition: &'a str,
+    /// What would make the fact false, under `## What kills this`.
+    pub killer: &'a str,
+    /// The `Scenarios` block, its `Feature` line and all.
+    pub scenarios: &'a str,
+}
+
+impl Fact<'_> {
+    /// Write the fact as `archi/world/<slug>.md`. The folder arrives with the
+    /// file, exactly as the mint makes it.
+    pub fn write(&self, root: &Path, slug: &str, title: &str) {
+        let dir = root.join("archi/world");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(format!("{slug}.md")),
+            format!(
+                "---\ncovers: [{}]\nsources: [{}]\nuses: [{}]\n---\n\n\
+                 # {title}\n\n{}\n\n## What kills this\n\n{}\n\n## Scenarios\n\n{}",
+                self.covers, self.sources, self.uses, self.condition, self.killer, self.scenarios
+            ),
+        )
+        .unwrap();
+    }
+}
+
 /// Turn a scaffolded directory into a committed repo and mint its worktree;
 /// returns the worktree the test mutates from. The primary checkout
 /// stays on `main`, unbound and untouched.

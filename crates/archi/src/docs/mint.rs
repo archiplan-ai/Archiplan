@@ -314,40 +314,17 @@ fn world_dir(root: &Path) -> PathBuf {
     root.join("archi").join("world")
 }
 
-/// Every world fact on disk, by slug. A tree with no wing yields none —
+/// Every world fact on disk, by slug — the wing's own walk, which the
+/// removal reads for the records alone. A tree with no wing yields none —
 /// the folder arrives with the first mint, and no read makes it. A file
-/// the structural reader cannot open is skipped: a broken record is a
-/// `check` finding, not a hold on someone else's removal.
+/// the structural reader cannot open is skipped, and every diagnostic the
+/// walk raises is dropped: a broken record is a `check` finding, not a hold
+/// on someone else's removal.
 fn world_facts(root: &Path) -> Vec<super::world::WorldDoc> {
-    let dir = world_dir(root);
-    let Ok(entries) = fs::read_dir(&dir) else {
-        return Vec::new();
-    };
-    let mut names: Vec<String> = entries
-        .filter_map(Result::ok)
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|n| n.ends_with(".md"))
-        .collect();
-    names.sort();
-    let mut out = Vec::new();
-    for name in names {
-        let stem = name.trim_end_matches(".md");
-        let Ok(text) = fs::read_to_string(dir.join(&name)) else {
-            continue;
-        };
-        let Ok(doc) = super::md::parse(&text) else {
-            continue;
-        };
-        let mut diags = Vec::new();
-        out.push(super::world::parse(
-            &doc,
-            &format!("archi/world/{name}"),
-            stem,
-            root,
-            &mut diags,
-        ));
-    }
-    out
+    super::world_check::discover(root, &mut Vec::new())
+        .into_iter()
+        .map(|f| f.doc)
+        .collect()
 }
 
 /// Mint a world-fact skeleton. Nothing here is a choice: the slug comes
