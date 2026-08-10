@@ -17,9 +17,10 @@ cannot read is a paragraph wearing a costume.
 
 The scenario is the half of the unit a machine can hold. Its grain is free — a unit
 check, an end-to-end run, whatever decides the behavior — but its shape is not,
-because the shape is what a later `archi link` anchors to a step definition. That link
-is the one edge from spec to code a run decides instead of a person, and it exists
-only while the steps stay addressable. What the grammar accepts is the whole language
+because the shape is what a later `archi link` anchors to running code. That link is the
+one edge from spec to code a run decides instead of a person, and it exists only while a
+scenario parses and carries a name — `the-scenario-is-the-address-not-the-step` holds the
+addressing. What the grammar accepts is the whole language
 and is owned by `the-grammar-takes-the-whole-language`; this claim owns the blocking
 and the location of the failure.
 

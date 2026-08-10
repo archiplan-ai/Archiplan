@@ -18,7 +18,7 @@ def node Cli:
   port session     // fold: two concurrent rounds into one deliberate record
   port req         // add, rm: requirement skeletons minted and retired by verb
   port stress      // open, add, rm: the round's records minted and retired by verb
-  port world       // add, rm: world-fact skeletons minted and retired by verb
+  port world       // add, rm, ls: world-fact skeletons minted and retired, and the covers traversal
   port link        // add, ls, verify, confirm, rm, repin, capture, audit
   port repo        // ls, map: the member registry and its local mappings
   port plan        // use, task add, verify, start, next, close, reset
@@ -42,6 +42,7 @@ def node DocsCompiler:
   port serve_pin       // hands pinned models to incidence, links and plans
   port parse_scenarios // the Scenarios block of a world fact, handed to the grammar
   port serve_world     // hands the loaded world facts to the plan, keyed by what they cover
+  port resolve_runners // the member a scenario's runs-tag names, against the declared set
 
 // crates/archi/src/docs/gherkin.rs — the one grammar a scenario block answers to.
 def node Gherkin:
@@ -231,6 +232,7 @@ DocsCompiler.load_docs recall(RequirementDoc) SourceTree.serve in harden_flow
 DocsCompiler.load_docs recall(StressDoc) SourceTree.serve in harden_flow
 DocsCompiler.load_docs recall(WorldDoc) SourceTree.serve in harden_flow
 DocsCompiler.parse_scenarios consult(->WorldDoc, <-Diagnostics) Gherkin.parse in harden_flow
+DocsCompiler.resolve_runners recall(MemberSet) Members.resolve in harden_flow
 DocsCompiler.pin_model recall(CanonicalRender) Archive.serve in harden_flow
 DocsCompiler.compile_pin compile Compiler.compile in harden_flow
 
@@ -261,3 +263,4 @@ Planner.load_plan recall(PlanState) SourceTree.serve in trace_flow
 Planner.run_capture consult(->ItemHashIndex, <-LinkEvent) Links.capture in trace_flow
 Planner.coverage recall(LinkEvent) Links.serve_links in trace_flow
 Planner.load_world recall(WorldDoc) DocsCompiler.serve_world in trace_flow
+Links.pin_spec recall(WorldDoc) DocsCompiler.serve_world in trace_flow

@@ -1,0 +1,35 @@
+--- original
++++ modified
+@@ -37,7 +37,7 @@
+   port update // check-update, update: the binary against the release feed's latest
+   port version // save, anchor, remint, list, show, diff (archived or live), current
+   port worktree // mint, ls, drop, merge: the seat lifecycle
+-  port world // add, rm: world-fact skeletons minted and retired by verb
++  port world // add, rm, ls: world-fact skeletons minted and retired, and the covers traversal
+ def node CodeItem // a source item of the code tree, addressed by symbol
+ def node Command // one CLI invocation: verb + flags
+ def node Compiler:
+@@ -83,6 +83,7 @@
+   port load_docs // pulls requirement, stress and world markdown from the tree
+   port parse_scenarios // the Scenarios block of a world fact, handed to the grammar
+   port pin_model // reconstructs archived versions for pinned checks
++  port resolve_runners // the member a scenario's runs-tag names, against the declared set
+   port serve_pin // hands pinned models to incidence, links and plans
+   port serve_world // hands the loaded world facts to the plan, keyed by what they cover
+ def node Engine:
+@@ -385,6 +386,7 @@
+ DocsCompiler.load_docs recall(<-WorldDoc) SourceTree.serve in harden_flow
+ DocsCompiler.parse_scenarios consult(->WorldDoc, <-Diagnostics) Gherkin.parse in harden_flow
+ DocsCompiler.pin_model recall(<-CanonicalRender) Archive.serve in harden_flow
++DocsCompiler.resolve_runners recall(<-MemberSet) Members.resolve in harden_flow
+ Engine.fetch_preset seed(<-StatementBatch) Preset.serve in compile_flow
+ Engine.slice consult(->ModelGraph, <-Findings) Query.audit in read_flow
+ Engine.slice consult(->ModelGraph, <-SubgraphResult) Query.subgraph in read_flow
+@@ -398,6 +400,7 @@
+ Links.locate recall(<-MemberSet) Members.resolve in trace_flow
+ Links.locate_scan recall(<-MemberSet) Members.resolve in trace_flow
+ Links.pin_spec recall(<-ModelGraph) DocsCompiler.serve_pin in trace_flow
++Links.pin_spec recall(<-WorldDoc) DocsCompiler.serve_world in trace_flow
+ Links.read_code recall(<-CodeItem) SourceTree.serve in trace_flow
+ Links.read_index recall(<-ItemHashIndex) SourceTree.serve in trace_flow
+ Members.read_decls recall(<-MemberDecl) SourceTree.serve in trace_flow
