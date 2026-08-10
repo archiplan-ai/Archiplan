@@ -8,10 +8,11 @@ deferred:
 # The agent arrives briefed
 
 Init installs the operating knowledge beside the tree it scaffolds: the workflow,
-merge and fractal-migration skills land verbatim — byte-equal to the binary's
-embedded copies — under `.claude/skills/archi/SKILL.md`,
-`.claude/skills/archi-merge/SKILL.md` and
-`.claude/skills/archi-migrate-fractal/SKILL.md`, and `CLAUDE.md` carries a fenced
+merge, fractal-migration and world-migration skills land verbatim — byte-equal to
+the binary's embedded copies — under `.claude/skills/archi/SKILL.md`,
+`.claude/skills/archi-merge/SKILL.md`,
+`.claude/skills/archi-migrate-fractal/SKILL.md` and
+`.claude/skills/archi-migrate-world/SKILL.md`, and `CLAUDE.md` carries a fenced
 archi block naming the source dir, the `archi check` loop, `archi search` and the
 installed skills. A `CLAUDE.md` that already exists gains the block by append — its
 own prose does not move; a file already carrying the fence is left as found.
