@@ -41,6 +41,7 @@ def node DocsCompiler:
   port compile_pin     // compiles a reconstructed render through the compiler
   port serve_pin       // hands pinned models to incidence, links and plans
   port parse_scenarios // the Scenarios block of a world fact, handed to the grammar
+  port serve_world     // hands the loaded world facts to the plan, keyed by what they cover
 
 // crates/archi/src/docs/gherkin.rs — the one grammar a scenario block answers to.
 def node Gherkin:
@@ -150,6 +151,7 @@ def node Planner:
   port load_plan   // re-reads and re-validates plan.json on every verb
   port run_capture // fires the wave capture at each close
   port coverage    // reads the folded links for the asserted-coverage gate
+  port load_world  // the facts covering a task's node, and the block the close prints
 
 Storage type_of SourceTree
 Storage type_of Archive
@@ -257,3 +259,4 @@ Planner.load_plan recall(PlanFile) SourceTree.serve in trace_flow
 Planner.load_plan recall(PlanState) SourceTree.serve in trace_flow
 Planner.run_capture consult(->ItemHashIndex, <-LinkEvent) Links.capture in trace_flow
 Planner.coverage recall(LinkEvent) Links.serve_links in trace_flow
+Planner.load_world recall(WorldDoc) DocsCompiler.serve_world in trace_flow
