@@ -18,6 +18,7 @@ def node Cli:
   port session     // fold: two concurrent rounds into one deliberate record
   port req         // add, rm: requirement skeletons minted and retired by verb
   port stress      // open, add, rm: the round's records minted and retired by verb
+  port world       // add, rm: world-fact skeletons minted and retired by verb
   port link        // add, ls, verify, confirm, rm, repin, capture, audit
   port repo        // ls, map: the member registry and its local mappings
   port plan        // use, task add, verify, start, next, close, reset
@@ -34,11 +35,16 @@ def node Cli:
   port drive       // consults every subsystem, one verb at a time
 
 def node DocsCompiler:
-  port compile_docs // parse + schema + cross-check docs against the model
-  port load_docs    // pulls requirement and stress markdown from the tree
-  port pin_model    // reconstructs archived versions for pinned checks
-  port compile_pin  // compiles a reconstructed render through the compiler
-  port serve_pin    // hands pinned models to incidence, links and plans
+  port compile_docs    // parse + schema + cross-check docs against the model
+  port load_docs       // pulls requirement, stress and world markdown from the tree
+  port pin_model       // reconstructs archived versions for pinned checks
+  port compile_pin     // compiles a reconstructed render through the compiler
+  port serve_pin       // hands pinned models to incidence, links and plans
+  port parse_scenarios // the Scenarios block of a world fact, handed to the grammar
+
+// crates/archi/src/docs/gherkin.rs — the one grammar a scenario block answers to.
+def node Gherkin:
+  port parse // a scenario block in, its steps or one located error out
 
 // crates/archi/src/docs/mint.rs — skeletons come from verbs: schema shape
 // out, text slots empty, placement derived from the tree's invariants.
@@ -149,6 +155,7 @@ Storage type_of Archive
 Function type_of Members
 Service type_of Cli
 Function type_of DocsCompiler
+Function type_of Gherkin
 Function type_of Search
 Function type_of DocMint
 Function type_of Scaffold
@@ -190,14 +197,17 @@ Cli.drive consult(->Command, <-Report) DocMint.mint in harden_flow
 Cli.drive consult(->Command, <-Report) DocMint.remove in harden_flow
 DocMint.read_tree recall(RequirementDoc) SourceTree.serve in harden_flow
 DocMint.read_tree recall(StressDoc) SourceTree.serve in harden_flow
+DocMint.read_tree recall(WorldDoc) SourceTree.serve in harden_flow
 DocMint.pin recall(CanonicalRender) Archive.serve in harden_flow
 DocMint.emit persist(RequirementDoc) SourceTree.store in harden_flow
 DocMint.emit persist(StressDoc) SourceTree.store in harden_flow
+DocMint.emit persist(WorldDoc) SourceTree.store in harden_flow
 
 // search: one scan over the docs and the model it was handed, ranked cards out
 Cli.drive consult(->ModelGraph, <-SearchReport) Search.find in read_flow
 Search.read_docs recall(RequirementDoc) SourceTree.serve in read_flow
 Search.read_docs recall(StressDoc) SourceTree.serve in read_flow
+Search.read_docs recall(WorldDoc) SourceTree.serve in read_flow
 
 // init: read what exists, emit what is missing — the one verb with no project to locate
 Cli.drive consult(->Command, <-Report) Scaffold.stand_up in compile_flow
@@ -214,6 +224,8 @@ Cli.drive consult(->Command, <-Report) Updater.swap in compile_flow
 // docs cross-check: markdown in, pinned models on demand
 DocsCompiler.load_docs recall(RequirementDoc) SourceTree.serve in harden_flow
 DocsCompiler.load_docs recall(StressDoc) SourceTree.serve in harden_flow
+DocsCompiler.load_docs recall(WorldDoc) SourceTree.serve in harden_flow
+DocsCompiler.parse_scenarios consult(->WorldDoc, <-Diagnostics) Gherkin.parse in harden_flow
 DocsCompiler.pin_model recall(CanonicalRender) Archive.serve in harden_flow
 DocsCompiler.compile_pin compile Compiler.compile in harden_flow
 
