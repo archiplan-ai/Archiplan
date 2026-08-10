@@ -23,9 +23,13 @@ anybody has written a line of code.
 
 Accepted: no requirement can carry this, because the pressure is on the ritual and not
 on the system. What the round did instead is the answer in kind. One requirement retired, one migration dropped with its
-decision, two decisions replaced by their reversals. The count goes from thirty-one to
-twenty-nine with the largest implementation item removed, and the record shows which round
-reversed which.
+decision, two decisions replaced by their reversals. The requirement count does not move: one was retired and one
+smaller one took its place, so thirty-one stands. What went is the largest implementation
+item in the effort and one whole workstream — the migration of twenty-six plan folders. The
+record shows which round reversed which.
+
+That is worth stating plainly rather than dressing up. A round aimed at subtraction removed
+work, not requirements. The spec is the same size and cheaper to build.
 
 The deeper reading stands and is worth keeping: a round that presses a larger design finds
 more, so "repeat until a round survives" selects for growth unless a round is aimed at
