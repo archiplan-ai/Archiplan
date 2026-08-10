@@ -263,4 +263,5 @@ Planner.load_plan recall(PlanState) SourceTree.serve in trace_flow
 Planner.run_capture consult(->ItemHashIndex, <-LinkEvent) Links.capture in trace_flow
 Planner.coverage recall(LinkEvent) Links.serve_links in trace_flow
 Planner.load_world recall(WorldDoc) DocsCompiler.serve_world in trace_flow
+Query.read_world recall(WorldDoc) DocsCompiler.serve_world in read_flow
 Links.pin_spec recall(WorldDoc) DocsCompiler.serve_world in trace_flow
