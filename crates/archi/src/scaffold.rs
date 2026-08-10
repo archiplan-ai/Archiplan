@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use modeling_lang::source::{find_project_root, manifest_src};
 
 /// The briefing, embedded at build time: skill name → SKILL.md text.
-const SKILLS: [(&str, &str); 7] = [
+const SKILLS: [(&str, &str); 8] = [
     ("archi", include_str!("../../../skills/archi.md")),
     ("archi-plan", include_str!("../../../skills/archi-plan.md")),
     ("archi-implement", include_str!("../../../skills/archi-implement.md")),
@@ -28,6 +28,10 @@ const SKILLS: [(&str, &str); 7] = [
     (
         "archi-migrate-fractal",
         include_str!("../../../skills/archi-migrate-fractal.md"),
+    ),
+    (
+        "archi-migrate-world",
+        include_str!("../../../skills/archi-migrate-world.md"),
     ),
     (("ste-writing"), include_str!("../../../skills/ste-writing.md")),
 ];
@@ -457,12 +461,19 @@ fn claude_block(src: &str) -> String {
          \x20 under `archi/` (paths, not payloads): a finding that is not a file on\n\
          \x20 disk does not exist, and every fan-out is gated by `archi check` plus\n\
          \x20 a count of the files it claims to have written.\n\
+         - The conditions outside the system are their own records under\n\
+         \x20 `archi/world/`: `archi world add \"<title>\"` mints one,\n\
+         \x20 `archi world rm <slug>` retires it, and `archi world ls` with\n\
+         \x20 `--covers <element>` goes from a node to the conditions that rule it.\n\
+         \x20 A world fact is stated without the nouns of the model — a fact that\n\
+         \x20 speaks the model is a requirement in costume.\n\
          - The spec workflow (model, stress, version) is the `archi` skill in\n\
          \x20 `.claude/skills/archi/`; authoring a plan is `archi-plan`; executing\n\
          \x20 it in waves is `archi-implement`; closing a worktree is\n\
          \x20 `archi-finish-worktree`; merging parallel spec work is `archi-merge`,\n\
-         \x20 and moving a project off the old fractal client is\n\
-         \x20 `archi-migrate-fractal`.\n\
+         \x20 moving a project off the old fractal client is\n\
+         \x20 `archi-migrate-fractal`, and giving a standing project its world facts\n\
+         \x20 is `archi-migrate-world`.\n\
          \n\
          No silent assumptions: state what you assume, surface the tradeoffs.\n\
          Minimal design that solves the problem — no speculative features.\n\

@@ -3,6 +3,12 @@
 //! run changes no bytes, the manifest routes the starter and aborts the
 //! broken run, the briefing lands verbatim, and the commands around init keep
 //! their contracts.
+//!
+//! The briefing carries the wing (`archi/requirements/world-facts/`): the
+//! `world` verb and the no-model-nouns rule stand in both the workflow skill
+//! and the CLAUDE.md block, the workflow captures the world before it derives
+//! requirements, and `archi-migrate-world` installs beside the other skills so
+//! a project that stands without a wing can gain one.
 
 mod util;
 
@@ -17,6 +23,7 @@ static NEXT: AtomicUsize = AtomicUsize::new(0);
 const SKILL_ARCHI: &str = include_str!("../../../skills/archi.md");
 const SKILL_MERGE: &str = include_str!("../../../skills/archi-merge.md");
 const SKILL_MIGRATE: &str = include_str!("../../../skills/archi-migrate-fractal.md");
+const SKILL_MIGRATE_WORLD: &str = include_str!("../../../skills/archi-migrate-world.md");
 
 fn temp_dir() -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -76,7 +83,7 @@ fn a_fresh_init_stands_up_a_building_project() {
     // The report: every artifact created, the manifest on the last created
     // line, the verdict naming the project.
     let created: Vec<&str> = out.lines().filter(|l| l.starts_with("created")).collect();
-    assert_eq!(created.len(), 11, "{out}");
+    assert_eq!(created.len(), 12, "{out}");
     assert!(created.last().unwrap().contains("archi.toml"), "{out}");
     assert!(out.contains("initialized `proj`"), "{out}");
 
@@ -162,6 +169,7 @@ fn the_briefing_lands_verbatim_and_the_fence_appends_once() {
         ("archi", SKILL_ARCHI),
         ("archi-merge", SKILL_MERGE),
         ("archi-migrate-fractal", SKILL_MIGRATE),
+        ("archi-migrate-world", SKILL_MIGRATE_WORLD),
     ] {
         let installed =
             fs::read_to_string(root.join(".claude/skills").join(skill).join("SKILL.md")).unwrap();
@@ -251,6 +259,167 @@ fn the_verbs_around_init_keep_their_contracts() {
         "{}-worktrees",
         root.file_name().unwrap().to_str().unwrap()
     )));
+    fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn the_briefing_carries_the_wing() {
+    let root = temp_dir();
+    ok_in(&root, &["init", "."]);
+
+    // The workflow skill names the verb with every subcommand, and it captures
+    // the world before it derives requirements: a condition from outside
+    // decides which claims are requirements at all
+    // (archi/requirements/world-facts/the-briefing-puts-the-world-in-the-loop.md).
+    let skill = fs::read_to_string(root.join(".claude/skills/archi/SKILL.md")).unwrap();
+    for form in ["archi world add", "archi world rm", "archi world ls"] {
+        assert!(skill.contains(form), "the briefing misses `{form}`");
+    }
+    let capture = skill.find("**Capture the world.**").expect("the capture step");
+    let derive = skill
+        .find("**Derive requirements.**")
+        .expect("the derivation step");
+    assert!(capture < derive, "the world is captured after the derivation");
+
+    // The rule that keeps a fact from arriving as a requirement in costume
+    // stands in both carriers of the briefing.
+    let claude = fs::read_to_string(root.join("CLAUDE.md")).unwrap();
+    assert!(claude.contains("archi world add"), "{claude}");
+    assert!(claude.contains("archi world ls"), "{claude}");
+    for text in [&skill, &claude] {
+        assert!(
+            text.contains("without the nouns of the model"),
+            "the no-model-nouns rule is missing:\n{text}"
+        );
+    }
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn a_pre_wing_project_syncs_into_the_wing() {
+    let root = temp_dir();
+    ok_in(&root, &["init", "."]);
+
+    // A project scaffolded before the wing: its block and its workflow skill
+    // predate the verb, and the migration skill was never installed.
+    fs::write(
+        root.join("CLAUDE.md"),
+        "<!-- archi:begin -->\n## Archiplan\n\nthe briefing as it stood\n<!-- archi:end -->\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join(".claude/skills/archi/SKILL.md"),
+        "# Archi workflow\n\nthe loop as it stood\n",
+    )
+    .unwrap();
+    fs::remove_dir_all(root.join(".claude/skills/archi-migrate-world")).unwrap();
+
+    let out = ok_in(&root, &["sync-skills"]);
+    assert!(out.contains("updated  .claude/skills/archi/SKILL.md"), "{out}");
+    assert!(
+        out.contains("created  .claude/skills/archi-migrate-world/SKILL.md"),
+        "{out}"
+    );
+    assert!(out.contains("updated  CLAUDE.md"), "{out}");
+
+    // What the upgrade delivered: the verb in the block, the whole procedure
+    // in the skill.
+    let claude = fs::read_to_string(root.join("CLAUDE.md")).unwrap();
+    assert!(claude.contains("archi world add"), "{claude}");
+    assert!(claude.contains("without the nouns of the model"), "{claude}");
+    assert_eq!(
+        fs::read_to_string(root.join(".claude/skills/archi/SKILL.md")).unwrap(),
+        SKILL_ARCHI
+    );
+    assert_eq!(
+        fs::read_to_string(root.join(".claude/skills/archi-migrate-world/SKILL.md")).unwrap(),
+        SKILL_MIGRATE_WORLD
+    );
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn the_migration_skill_installs_and_names_its_gate() {
+    let root = temp_dir();
+    ok_in(&root, &["init", "."]);
+    let path = root.join(".claude/skills/archi-migrate-world/SKILL.md");
+    assert_eq!(fs::read_to_string(&path).unwrap(), SKILL_MIGRATE_WORLD);
+
+    // A drifted copy is reclaimed by sync, as every other skill's is.
+    fs::write(&path, "locally tuned\n").unwrap();
+    let out = ok_in(&root, &["sync-skills"]);
+    assert!(
+        out.contains("updated  .claude/skills/archi-migrate-world/SKILL.md"),
+        "{out}"
+    );
+    let installed = fs::read_to_string(&path).unwrap();
+    assert_eq!(installed, SKILL_MIGRATE_WORLD);
+
+    // The procedure the text must carry: the material it reads, the gate that
+    // stops a fact being written, the provenance a migrated fact records, the
+    // brief it hands back, and the check it closes on
+    // (archi/requirements/world-facts/a-skill-migrates-a-standing-project-into-the-wing.md).
+    for phrase in [
+        "archi world add",
+        "workaround",
+        "what people do today instead",
+        "writes nothing",
+        "only a wish",
+        "did not map",
+        "names the file the claim came from",
+        "provenance, not observation",
+        "deletes nothing",
+        "archi check",
+    ] {
+        assert!(installed.contains(phrase), "the skill misses `{phrase}`");
+    }
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn a_migrated_fact_rests_on_its_origin_file_and_reports_nothing() {
+    let root = temp_dir();
+    ok_in(&root, &["init", "."]);
+    fs::write(
+        root.join("archi/src/model.arch"),
+        "def node AuthService:\n  port handle_login\n",
+    )
+    .unwrap();
+    let intent = root.join("archi/requirements/riding");
+    fs::create_dir_all(&intent).unwrap();
+    fs::write(
+        intent.join("riding.md"),
+        "# Riding\n\nPeople read on the move, and the line drops.\n",
+    )
+    .unwrap();
+
+    // The record the skill leaves behind: the condition, its killer, its
+    // scenarios, the node it conditions, and the intent the claim was lifted
+    // from — the provenance that makes the fact rest on something recorded.
+    fs::create_dir_all(root.join("archi/world")).unwrap();
+    fs::write(
+        root.join("archi/world/trains-lose-the-signal.md"),
+        "---\ncovers: [AuthService]\nsources: [archi/requirements/riding/riding.md]\nuses: []\n---\n\n\
+         # Trains lose the signal\n\n\
+         The carriage drops the network for minutes at a time, so a reader on the move \
+         works from what the device already holds.\n\n\
+         ## What kills this\n\nTrackside coverage that never drops.\n\n\
+         ## Scenarios\n\nFeature: Offline open\n  \
+         Scenario: the app opens with no network\n    \
+         Given the device has no network\n    When the reader opens the app\n    \
+         Then the last synced view appears\n",
+    )
+    .unwrap();
+
+    // The wing counts the fact as grounded and says nothing else about it: a
+    // migration that swapped one finding for another would defeat its purpose.
+    let check = ok_in(&root, &["check"]);
+    assert!(check.contains("world — 1 facts · 0 ungrounded"), "{check}");
+    assert!(!check.contains("world_"), "{check}");
+
     fs::remove_dir_all(&root).unwrap();
 }
 
