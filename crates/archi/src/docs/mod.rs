@@ -17,6 +17,7 @@
 pub(crate) mod md;
 pub mod mint;
 pub(crate) mod schema;
+pub(crate) mod world;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
