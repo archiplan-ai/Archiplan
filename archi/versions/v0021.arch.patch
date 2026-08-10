@@ -1,0 +1,18 @@
+--- original
++++ modified
+@@ -74,6 +74,7 @@
+   port emit // skeleton files into the tree
+   port mint // req add, stress open, stress add: the exact schema shape, slots empty
+   port pin // the open round's version, reconstructed to resolve affects
++  port read_links // the folded live link set, read before a removal strands it
+   port read_tree // the best-effort doc tree: intents, slugs, the open round
+   port remove // req rm, stress rm: the blast radius pre-flighted, sealed history refused
+ def node DocsCompiler:
+@@ -371,6 +372,7 @@
+ DocMint.emit persist(StressDoc) SourceTree.store in harden_flow
+ DocMint.emit persist(WorldDoc) SourceTree.store in harden_flow
+ DocMint.pin recall(<-CanonicalRender) Archive.serve in harden_flow
++DocMint.read_links recall(<-LinkEvent) Links.serve_links in harden_flow
+ DocMint.read_tree recall(<-RequirementDoc) SourceTree.serve in harden_flow
+ DocMint.read_tree recall(<-StressDoc) SourceTree.serve in harden_flow
+ DocMint.read_tree recall(<-WorldDoc) SourceTree.serve in harden_flow

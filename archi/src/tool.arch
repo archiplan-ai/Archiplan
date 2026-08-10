@@ -52,6 +52,7 @@ def node DocMint:
   port mint      // req add, stress open, stress add: the exact schema shape, slots empty
   port remove    // req rm, stress rm: the blast radius pre-flighted, sealed history refused
   port read_tree // the best-effort doc tree: intents, slugs, the open round
+  port read_links // the folded live link set, read before a removal strands it
   port pin       // the open round's version, reconstructed to resolve affects
   port emit      // skeleton files into the tree
 
@@ -202,6 +203,7 @@ DocMint.pin recall(CanonicalRender) Archive.serve in harden_flow
 DocMint.emit persist(RequirementDoc) SourceTree.store in harden_flow
 DocMint.emit persist(StressDoc) SourceTree.store in harden_flow
 DocMint.emit persist(WorldDoc) SourceTree.store in harden_flow
+DocMint.read_links recall(LinkEvent) Links.serve_links in harden_flow
 
 // search: one scan over the docs and the model it was handed, ranked cards out
 Cli.drive consult(->ModelGraph, <-SearchReport) Search.find in read_flow
