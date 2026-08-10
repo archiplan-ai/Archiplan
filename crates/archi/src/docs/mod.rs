@@ -1,5 +1,5 @@
-//! Doc sources: intents, requirements, stress sessions, stressors and
-//! decisions (`archi/requirements/spec-docs/`,
+//! Doc sources: intents, requirements, stress sessions, stressors,
+//! decisions and world facts (`archi/requirements/spec-docs/`,
 //! `archi/requirements/spec-docs/an-intent-is-a-problem-statement.md`,
 //! `archi/requirements/spec-docs/a-decision-prices-the-fork.md`) — structured
 //! markdown under `archi/requirements/`, `archi/stress/` and
@@ -19,6 +19,7 @@ pub(crate) mod md;
 pub mod mint;
 pub(crate) mod schema;
 pub(crate) mod world;
+pub(crate) mod world_check;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -225,6 +226,10 @@ pub struct DocReport {
     pub diagnostics: Vec<DocDiagnostic>,
     /// Advisory findings.
     pub findings: Vec<DocFinding>,
+    /// The world wing's own advisory findings and its count line — they
+    /// carry their own kinds, and a tree with no `archi/world/` carries
+    /// neither (`archi/requirements/world-facts/`).
+    pub world: world_check::WorldReport,
 }
 
 /// Everything the doc trees hold, parsed best-effort.
@@ -235,6 +240,7 @@ pub(crate) struct Tree {
     pub(crate) sessions: Vec<Session>,
     pub(crate) stressors: Vec<Stressor>,
     pub(crate) decisions: Vec<Decision>,
+    pub(crate) world: Vec<world_check::WorldFact>,
 }
 
 /// Compile and cross-check the doc sources of a project against its
@@ -249,12 +255,17 @@ pub(crate) fn load(root: &Path, model: &Model) -> (Tree, DocReport) {
     let mut diags = Vec::new();
     let tree = discover(root, &mut diags);
     let findings = cross_check(root, model, &tree, &mut diags);
+    // The wing rides the same pass: its two open references resolve here,
+    // against the model and against the other facts, and its reports are
+    // advisory beside the others (`archi/requirements/world-facts/`).
+    let world = world_check::check(model, &tree, &mut diags);
     diags.sort_by(|a, b| (a.file.as_str(), a.line).cmp(&(b.file.as_str(), b.line)));
     (
         tree,
         DocReport {
             diagnostics: diags,
             findings,
+            world,
         },
     )
 }
@@ -491,6 +502,11 @@ fn discover(root: &Path, diags: &mut Vec<DocDiagnostic>) -> Tree {
                 .push(schema::decision(&doc, &file, &stem(&path), diags));
         }
     }
+
+    // The world wing is a flat area too, and an optional one: a tree without
+    // `archi/world/` holds no fact and never grows the folder here
+    // (`archi/requirements/world-facts/the-wing-arrives-without-noise.md`).
+    tree.world = world_check::discover(root, diags);
 
     tree
 }
