@@ -1,7 +1,9 @@
 //! End to end through the real binary: the agent read envelope
 //! (`archi/requirements/self-hosting/agents-read-lowered-statements.md`) — a batch of reads in, the response
 //! envelope out; writes are protocol errors; `--at` reads a version
-//! reconstructed from the sealed archive.
+//! reconstructed from the sealed archive. The answer also carries what
+//! conditions it: the world facts covering the elements the slice names
+//! (`archi/requirements/world-facts/the-read-envelope-carries-the-conditions.md`).
 
 mod util;
 
@@ -75,6 +77,221 @@ fn node_ids(result: &Value) -> Vec<String> {
         .iter()
         .map(|n| n["id"].as_str().unwrap().to_string())
         .collect()
+}
+
+/// The strings of a JSON array of strings.
+fn strings(value: &Value) -> Vec<&str> {
+    value
+        .as_array()
+        .unwrap_or_else(|| panic!("an array of strings, not {value}"))
+        .iter()
+        .map(|v| v.as_str().expect("a string"))
+        .collect()
+}
+
+/// The second half of the wing fixture's model: a datum of its own, so the
+/// carrier filter can compose a slice of elements no fact covers, and an
+/// island no such slice ever names.
+const WING_MODEL: &str = "\
+def node Ledger:
+  port post
+def node Vault:
+  port keep
+def node LedgerId
+def node Island
+def conn ledger_wire := * ->LedgerId *
+Ledger.post ledger_wire Vault.keep
+";
+
+/// One whole world fact under `archi/world/`: the covers list as given, the
+/// conditioning paragraph, the killer and one scenario named after the fact.
+fn fact(root: &Path, slug: &str, title: &str, covers: &str, condition: &str) {
+    let dir = root.join("archi/world");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join(format!("{slug}.md")),
+        format!(
+            "---\ncovers: [{covers}]\nsources: [https://example.org/thread/42]\nuses: []\n---\n\n\
+             # {title}\n\n{condition}\n\n\
+             ## What kills this\n\nTrackside coverage that never drops.\n\n\
+             ## Scenarios\n\nFeature: {title}\n  Scenario: {slug} holds\n    \
+             Given the device has no network\n    When the user opens the app\n    \
+             Then the last synced view appears\n"
+        ),
+    )
+    .unwrap();
+}
+
+/// A project on both halves of the model, with the wing when `wing` says so:
+/// one fact on a node the carrier slice names, one on two of its nodes at
+/// once, one on a port it names, and one on the island it never reaches.
+fn wing_project(wing: bool) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "archi-read-wing-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::SeqCst)
+    ));
+    fs::create_dir_all(dir.join("archi/src")).unwrap();
+    fs::write(dir.join("archi.toml"), "[project]\nname = \"t\"\n").unwrap();
+    fs::write(
+        dir.join("archi/src/model.arch"),
+        format!("{MODEL}{WING_MODEL}"),
+    )
+    .unwrap();
+    if wing {
+        fact(
+            &dir,
+            "riders-lose-the-signal",
+            "Riders lose the signal",
+            "Orders",
+            "The carriage drops the network for minutes at a time.",
+        );
+        fact(
+            &dir,
+            "tunnels-run-long",
+            "Tunnels run long",
+            "Orders, Billing",
+            "A tunnel runs for minutes on the northern line.",
+        );
+        fact(
+            &dir,
+            "the-books-close-at-night",
+            "The books close at night",
+            "Billing.book",
+            "The clearing house stops taking entries at midnight.",
+        );
+        fact(
+            &dir,
+            "the-guard-walks-the-line",
+            "The guard walks the line",
+            "Island",
+            "A guard walks the length of the platform every hour.",
+        );
+    }
+    dir
+}
+
+/// The answer carries what conditions it
+/// (`the-read-envelope-carries-the-conditions`): the facts covering the
+/// elements the composed slice names, each once, under their own key.
+#[test]
+fn the_read_envelope_carries_the_conditions() {
+    let root = wing_project(true);
+
+    // The slice names `Orders`, `Billing` and the port `Billing.book`; the
+    // facts on those ride with it, in slug order. The fact on the island the
+    // slice never names stays behind, and so does the port it never draws.
+    let (code, out, _) = run(&root, &["query", "--carrier", "OrderId"], None);
+    assert_eq!(code, 0, "{out}");
+    let v = json(&out);
+    let facts = v["world"].as_array().expect("the covering facts");
+    let slugs: Vec<&str> = facts.iter().map(|f| f["slug"].as_str().unwrap()).collect();
+    assert_eq!(
+        slugs,
+        [
+            "riders-lose-the-signal",
+            "the-books-close-at-night",
+            "tunnels-run-long"
+        ],
+        "{out}"
+    );
+
+    // A fact covering two elements of one slice appears once.
+    assert_eq!(
+        slugs.iter().filter(|s| **s == "tunnels-run-long").count(),
+        1,
+        "{out}"
+    );
+
+    // Each fact carries its address, what it conditions, the statement and
+    // the scenarios it dictates.
+    let f = &facts[0];
+    assert_eq!(f["path"], "archi/world/riders-lose-the-signal.md");
+    assert_eq!(strings(&f["covers"]), ["Orders"]);
+    assert_eq!(
+        f["condition"],
+        "The carriage drops the network for minutes at a time."
+    );
+    assert_eq!(f["scenarios"][0]["name"], "riders-lose-the-signal holds");
+    assert_eq!(
+        strings(&f["scenarios"][0]["steps"]),
+        [
+            "Given the device has no network",
+            "When the user opens the app",
+            "Then the last synced view appears"
+        ]
+    );
+    assert_eq!(strings(&facts[2]["covers"]), ["Orders", "Billing"]);
+
+    // The envelope carries them under the same key, beside the results and
+    // never inside the nodes.
+    let (code, out, _) = run(
+        &root,
+        &["read", "-"],
+        Some(r#"{"statements":[{"stmt":"query","carriers":["OrderId"]},{"stmt":"check"}]}"#),
+    );
+    assert_eq!(code, 0, "{out}");
+    let v = json(&out);
+    assert_eq!(v["status"], "ok");
+    assert_eq!(v["results"][0]["result"], "graph");
+    assert_eq!(v["results"][1]["result"], "findings");
+    let slugs: Vec<&str> = v["world"]
+        .as_array()
+        .expect("the covering facts")
+        .iter()
+        .map(|f| f["slug"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        slugs,
+        [
+            "riders-lose-the-signal",
+            "the-books-close-at-night",
+            "tunnels-run-long"
+        ],
+        "{out}"
+    );
+    for node in v["results"][0]["nodes"].as_array().unwrap() {
+        assert!(node["world"].is_null(), "the facts ride the envelope: {out}");
+    }
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// A slice no fact covers carries the slice alone, and a tree with no wing
+/// answers exactly as it did before the wing existed — byte for byte, from
+/// `query` and from `read` both.
+#[test]
+fn a_slice_no_fact_covers_carries_the_slice_alone() {
+    let winged = wing_project(true);
+    let bare = wing_project(false);
+
+    // `Ledger`, `Vault` and `LedgerId`: three elements, no fact on any of
+    // them. The wing writes no key, and no byte separates the two trees.
+    let (code, with_wing, _) = run(&winged, &["query", "--carrier", "LedgerId"], None);
+    assert_eq!(code, 0, "{with_wing}");
+    assert_eq!(
+        node_ids(&json(&with_wing)),
+        ["Ledger", "LedgerId", "Vault"],
+        "{with_wing}"
+    );
+    assert!(json(&with_wing)["world"].is_null(), "{with_wing}");
+    let (_, no_wing, _) = run(&bare, &["query", "--carrier", "LedgerId"], None);
+    assert_eq!(with_wing, no_wing);
+
+    // The read envelope over the same slice, byte for byte.
+    let request = r#"{"statements":[{"stmt":"query","carriers":["LedgerId"]},{"stmt":"check"}]}"#;
+    let (code, with_wing, _) = run(&winged, &["read", "-"], Some(request));
+    assert_eq!(code, 0, "{with_wing}");
+    let (_, no_wing, _) = run(&bare, &["read", "-"], Some(request));
+    assert_eq!(with_wing, no_wing);
+
+    // A tree with no `archi/world/` says nothing new about any slice.
+    let (code, out, _) = run(&bare, &["query", "--carrier", "OrderId"], None);
+    assert_eq!(code, 0, "{out}");
+    assert!(json(&out)["world"].is_null(), "{out}");
+
+    fs::remove_dir_all(&winged).unwrap();
+    fs::remove_dir_all(&bare).unwrap();
 }
 
 #[test]

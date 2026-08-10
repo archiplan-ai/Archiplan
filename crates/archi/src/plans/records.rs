@@ -5,12 +5,21 @@
 //! Content is the files — there is no write command for prose. The charter
 //! `<name>.md` carries the envelope: problem prose, `## Stack` bullets
 //! with provenance, `## Architecture` bullets for summary lines and stack
-//! mappings. Each task is `t<N>-<node-slug>.md`: `node` and hand-curated
-//! `owns` in the frontmatter, description prose, then `## Spec`,
-//! `## Inputs`, `## Outputs`, `## Stack` bullets and `## Verifications`
-//! keyed by owned slug. `scenarios.md` is a bullet list. `state.json`
-//! alone moves through commands — the mint writes it, `save_state` rewrites
-//! it, and nothing else in the folder is machine-written past its mint.
+//! mappings. Each task is `t<N>-<node-slug>.md`: `node`, hand-curated
+//! `owns` and machine-resolved `facts` in the frontmatter, description
+//! prose, then `## Spec`, `## Inputs`, `## Outputs`, `## Stack` bullets
+//! and `## Verifications` keyed by owned slug. `state.json` alone moves
+//! through commands — the mint writes it, `save_state` rewrites it — and
+//! the one other machine write in the folder is [`write_facts`], which
+//! moves the `facts` line and nothing else: a covering fact is carried,
+//! never curated
+//! (`archi/requirements/world-facts/a-task-carries-the-facts-that-cover-its-node.md`).
+//!
+//! A `scenarios.md` a pre-wing plan was written with is read by nobody,
+//! written by nobody and deleted by nobody: the stories live in the world
+//! wing now and history is left exactly as it is
+//! (`archi/requirements/world-facts/a-plan-s-own-scenarios-block-retires.md`,
+//! `archi/decisions/the-old-plans-are-left-alone.md`).
 //!
 //! Parsing is tolerant on whitespace and strict on shape: an unknown
 //! section, a shapeless bullet, a verification under an unowned slug are
@@ -24,7 +33,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::{Plan, PlanState, StackMapping, SummaryLine, Task, TechChoice, plan_dir};
+use super::{
+    CoveringFact, Plan, PlanState, StackMapping, SummaryLine, Task, TechChoice, plan_dir,
+};
 use crate::docs::md::slugify;
 
 // ---- the folder --------------------------------------------------------------
@@ -37,10 +48,6 @@ pub(crate) fn is_record(root: &Path, name: &str) -> bool {
 
 pub(crate) fn charter_path(root: &Path, name: &str) -> PathBuf {
     plan_dir(root, name).join(format!("{name}.md"))
-}
-
-fn scenarios_path(root: &Path, name: &str) -> PathBuf {
-    plan_dir(root, name).join("scenarios.md")
 }
 
 fn state_path(root: &Path, name: &str) -> PathBuf {
@@ -101,6 +108,13 @@ struct StateFile {
     scenarios_displayed: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     scenarios_closed: bool,
+    // The mark of the wing: the mint stamps it, nothing else moves it, and
+    // a plan written before the wing carries no such field and parses as
+    // what it is — which is what decides whether an empty closing block may
+    // close the plan
+    // (`archi/requirements/world-facts/a-plan-s-own-scenarios-block-retires.md`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    minted_after_the_wing: bool,
 }
 
 /// Persist the lifecycle fields of a record plan — the only write any
@@ -115,6 +129,7 @@ pub(crate) fn write_state(root: &Path, plan: &Plan) -> Result<(), String> {
         cleanup_displayed: plan.cleanup_displayed,
         scenarios_displayed: plan.scenarios_displayed,
         scenarios_closed: plan.scenarios_closed,
+        minted_after_the_wing: plan.minted_after_the_wing,
     };
     let path = state_path(root, &plan.name);
     let mut text =
@@ -171,10 +186,23 @@ pub(crate) fn render_charter(plan: &Plan) -> String {
     out
 }
 
+/// The `facts` frontmatter line: the covering facts as `<slug>@<digest>`.
+/// It rides only when the wing reaches the node, so a project without one
+/// sees no new line in its task files.
+fn facts_line(facts: &[CoveringFact]) -> String {
+    let entries: Vec<String> = facts.iter().map(CoveringFact::render).collect();
+    format!("facts: [{}]", entries.join(", "))
+}
+
 /// One task file: frontmatter, description prose, the bullet sections.
 /// Empty sections keep their heading — the slots the author fills.
 pub(crate) fn render_task(task: &Task) -> String {
-    let mut out = format!("---\nnode: {}\nowns: [{}]\n---\n", task.node, task.owns.join(", "));
+    let mut out = format!("---\nnode: {}\nowns: [{}]\n", task.node, task.owns.join(", "));
+    if !task.facts.is_empty() {
+        out.push_str(&facts_line(&task.facts));
+        out.push('\n');
+    }
+    out.push_str("---\n");
     out.push_str(&format!("\n# {} — {}\n", task.id, task.node));
     if !task.description.is_empty() {
         out.push('\n');
@@ -214,18 +242,6 @@ pub(crate) fn render_task(task: &Task) -> String {
     for (slug, proofs) in &task.verifications {
         out.push_str(&format!("\n### {slug}\n"));
         bullets(&mut out, proofs);
-    }
-    out
-}
-
-/// `scenarios.md`: a heading and one bullet per scenario.
-pub(crate) fn render_scenarios(scenarios: &[String]) -> String {
-    let mut out = String::from("# Scenarios\n");
-    if !scenarios.is_empty() {
-        out.push('\n');
-        for s in scenarios {
-            out.push_str(&format!("- {s}\n"));
-        }
     }
     out
 }
@@ -350,6 +366,7 @@ fn parse_task(label: &str, id: &str, text: &str) -> Result<Task, String> {
     }
     let mut node: Option<String> = None;
     let mut owns: Vec<String> = Vec::new();
+    let mut facts: Vec<CoveringFact> = Vec::new();
     let mut body_at = None;
     for (i, raw) in lines.iter().enumerate().skip(1) {
         let line = i + 1;
@@ -375,11 +392,28 @@ fn parse_task(label: &str, id: &str, text: &str) -> Result<Task, String> {
                     .map(str::to_string)
                     .collect();
             }
+            "facts" => {
+                let inner = value
+                    .trim()
+                    .strip_prefix('[')
+                    .and_then(|v| v.strip_suffix(']'))
+                    .ok_or_else(|| {
+                        shape_err(label, line, "facts is an inline list: `[<slug>@<digest>]`")
+                    })?;
+                for entry in inner.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                    facts.push(
+                        CoveringFact::parse(entry).map_err(|m| shape_err(label, line, &m))?,
+                    );
+                }
+            }
             other => {
                 return Err(shape_err(
                     label,
                     line,
-                    &format!("unknown frontmatter key `{other}` — task files carry `node` and `owns`"),
+                    &format!(
+                        "unknown frontmatter key `{other}` — task files carry `node`, `owns` \
+                         and `facts`"
+                    ),
                 ));
             }
         }
@@ -397,6 +431,7 @@ fn parse_task(label: &str, id: &str, text: &str) -> Result<Task, String> {
         description: String::new(),
         spec_refs: Vec::new(),
         owns,
+        facts,
         stack_details: String::new(),
         inputs: BTreeMap::new(),
         outputs: Vec::new(),
@@ -494,28 +529,6 @@ fn parse_task(label: &str, id: &str, text: &str) -> Result<Task, String> {
     Ok(task)
 }
 
-/// `scenarios.md`: a heading, then bullets — nothing else.
-fn parse_scenarios(label: &str, text: &str) -> Result<Vec<String>, String> {
-    let mut out = Vec::new();
-    let mut seen_h1 = false;
-    for (i, raw) in text.lines().enumerate() {
-        let line = i + 1;
-        if raw.trim().is_empty() {
-            continue;
-        }
-        if !seen_h1 {
-            if raw.starts_with("# ") {
-                seen_h1 = true;
-                continue;
-            }
-            return Err(shape_err(label, line, "scenarios open with `# Scenarios`"));
-        }
-        let b = bullet(label, line, raw, "scenarios are `- <text>` bullets")?;
-        out.push(b.to_string());
-    }
-    Ok(out)
-}
-
 // ---- loading and minting -----------------------------------------------------
 
 /// Load a record folder into the one [`Plan`] every read already serves.
@@ -553,15 +566,6 @@ pub(crate) fn load(root: &Path, name: &str) -> Result<Plan, String> {
         by_ordinal.insert(ord, (file, task));
     }
 
-    let scenarios_file = scenarios_path(root, name);
-    let scenarios = if scenarios_file.exists() {
-        let text = fs::read_to_string(&scenarios_file)
-            .map_err(|e| format!("cannot read `{}`: {e}", scenarios_file.display()))?;
-        parse_scenarios(&scenarios_file.display().to_string(), &text)?
-    } else {
-        Vec::new()
-    };
-
     let state = load_state(root, name)?;
     Ok(Plan {
         name: name.to_string(),
@@ -574,16 +578,18 @@ pub(crate) fn load(root: &Path, name: &str) -> Result<Plan, String> {
         technology_stack,
         architecture_summary,
         stack_mapping,
-        scenarios,
+        scenarios: Vec::new(),
         cleanup_displayed: state.cleanup_displayed,
         scenarios_displayed: state.scenarios_displayed,
         scenarios_closed: state.scenarios_closed,
+        minted_after_the_wing: state.minted_after_the_wing,
         tasks: by_ordinal.into_values().map(|(_, t)| t).collect(),
     })
 }
 
-/// Mint a fresh record plan: the charter and scenarios skeletons plus the
-/// lifecycle file — every prose slot empty for the author to fill.
+/// Mint a fresh record plan: the charter skeleton plus the lifecycle file
+/// — every prose slot empty for the author to fill. No `scenarios.md`: the
+/// plan authors no stories, it collects them from the wing at its close.
 pub(crate) fn mint(
     root: &Path,
     name: &str,
@@ -606,15 +612,14 @@ pub(crate) fn mint(
         cleanup_displayed: false,
         scenarios_displayed: false,
         scenarios_closed: false,
+        minted_after_the_wing: true,
         tasks: Vec::new(),
     };
     let dir = plan_dir(root, name);
     fs::create_dir_all(&dir).map_err(|e| format!("cannot create `{}`: {e}", dir.display()))?;
-    let write = |path: PathBuf, text: String| {
-        fs::write(&path, text).map_err(|e| format!("cannot write `{}`: {e}", path.display()))
-    };
-    write(charter_path(root, name), render_charter(&plan))?;
-    write(scenarios_path(root, name), render_scenarios(&plan.scenarios))?;
+    let path = charter_path(root, name);
+    fs::write(&path, render_charter(&plan))
+        .map_err(|e| format!("cannot write `{}`: {e}", path.display()))?;
     write_state(root, &plan)?;
     Ok(plan)
 }
@@ -625,6 +630,46 @@ pub(crate) fn write_task(root: &Path, name: &str, task: &Task) -> Result<PathBuf
     fs::write(&path, render_task(task))
         .map_err(|e| format!("cannot write `{}`: {e}", path.display()))?;
     Ok(path)
+}
+
+/// Move one task file's `facts` line and nothing else — the re-resolution
+/// `plan repin` performs. The rest of the file is the author's and is left
+/// line for line; an unchanged list writes nothing at all.
+pub(crate) fn write_facts(
+    root: &Path,
+    name: &str,
+    id: &str,
+    facts: &[CoveringFact],
+) -> Result<(), String> {
+    let path =
+        task_path(root, name, id).ok_or_else(|| format!("no file carries `{id}`"))?;
+    let text =
+        fs::read_to_string(&path).map_err(|e| format!("cannot read `{}`: {e}", path.display()))?;
+    let mut out: Vec<String> = Vec::new();
+    let mut in_frontmatter = false;
+    for (i, raw) in text.lines().enumerate() {
+        if i == 0 {
+            in_frontmatter = raw.trim_end() == "---";
+        } else if in_frontmatter {
+            // The machine's line is rewritten, not edited around.
+            if raw.trim_start().starts_with("facts:") {
+                continue;
+            }
+            if raw.trim_end() == "---" {
+                if !facts.is_empty() {
+                    out.push(facts_line(facts));
+                }
+                in_frontmatter = false;
+            }
+        }
+        out.push(raw.to_string());
+    }
+    let mut fresh = out.join("\n");
+    fresh.push('\n');
+    if fresh == text {
+        return Ok(());
+    }
+    fs::write(&path, fresh).map_err(|e| format!("cannot write `{}`: {e}", path.display()))
 }
 
 #[cfg(test)]
@@ -651,6 +696,10 @@ mod tests {
             description: "guard the door\n\nand keep the log".into(),
             spec_refs: vec!["Auth.Gate".into(), "Gate.out wire Auth.inn".into()],
             owns: vec!["gate-throughput".into(), "service-hardening".into()],
+            facts: vec![CoveringFact {
+                fact: "riders-lose-the-signal".into(),
+                digest: "9f3ab1".into(),
+            }],
             stack_details: "axum 0.7\ntower layers".into(),
             inputs: [("t1".to_string(), "the store api".to_string())].into(),
             outputs: vec!["code/auth.rs".into()],
@@ -678,6 +727,7 @@ mod tests {
             cleanup_displayed: false,
             scenarios_displayed: false,
             scenarios_closed: false,
+            minted_after_the_wing: true,
             tasks: Vec::new(),
         }
     }
@@ -724,16 +774,19 @@ mod tests {
     fn a_task_file_round_trips() {
         let task = task();
         let text = render_task(&task);
+        assert!(text.contains("facts: [riders-lose-the-signal@9f3ab1]"), "{text}");
         let parsed = parse_task("t", "t2", &text).unwrap();
         assert_eq!(parsed, task);
 
-        // The skeleton: empty slots keep their headings, owns is `[]`.
+        // The skeleton: empty slots keep their headings, owns is `[]`, and
+        // a node no fact covers carries no `facts` line at all.
         let bare = Task {
             id: "t1".into(),
             node: "Store".into(),
             description: String::new(),
             spec_refs: vec!["Store".into()],
             owns: Vec::new(),
+            facts: Vec::new(),
             stack_details: String::new(),
             inputs: BTreeMap::new(),
             outputs: Vec::new(),
@@ -741,19 +794,55 @@ mod tests {
         };
         let text = render_task(&bare);
         assert!(text.contains("owns: []"), "{text}");
+        assert!(!text.contains("facts:"), "{text}");
         assert!(text.contains("\n## Verifications\n"), "{text}");
         assert_eq!(parse_task("t", "t1", &text).unwrap(), bare);
         assert_eq!(task_file_name(&task), "t2-auth-gate.md");
+
+        // A shapeless fact entry refuses with the shape.
+        let text = render_task(&task).replace("@9f3ab1", "");
+        let err = parse_task("t", "t2", &text).unwrap_err();
+        assert!(err.contains("`<fact-slug>@<digest>`"), "{err}");
     }
 
+    /// The `facts` line moves alone: the rest of an authored file is left
+    /// exactly as its author wrote it, and an unchanged list writes nothing.
     #[test]
-    fn scenarios_round_trip() {
-        let scenarios = vec!["a user logs in".to_string(), "a row survives a restart".to_string()];
-        let text = render_scenarios(&scenarios);
-        assert_eq!(parse_scenarios("s", &text).unwrap(), scenarios);
-        assert_eq!(parse_scenarios("s", &render_scenarios(&[])).unwrap(), Vec::<String>::new());
-        let err = parse_scenarios("s", "# Scenarios\n\nprose\n").unwrap_err();
-        assert!(err.contains("`- <text>` bullets"), "{err}");
+    fn write_facts_moves_the_line_and_nothing_else() {
+        let root = temp_dir();
+        mint(&root, "mvp", "v0001".into(), None, "now".into()).unwrap();
+        let mut task = task();
+        task.id = "t1".into();
+        let path = write_task(&root, "mvp", &task).unwrap();
+        let authored = fs::read_to_string(&path).unwrap() + "\nhand-written tail\n";
+        fs::write(&path, &authored).unwrap();
+
+        // A different list rewrites the one line.
+        let moved = vec![CoveringFact { fact: "tunnels-run-long".into(), digest: "abc123".into() }];
+        write_facts(&root, "mvp", "t1", &moved).unwrap();
+        let after = fs::read_to_string(&path).unwrap();
+        assert!(after.contains("facts: [tunnels-run-long@abc123]"), "{after}");
+        assert!(!after.contains("riders-lose-the-signal"), "{after}");
+        assert_eq!(
+            after.replace("tunnels-run-long@abc123", "riders-lose-the-signal@9f3ab1"),
+            authored,
+            "only the one line moved"
+        );
+
+        // The same list writes nothing; an empty one drops the line.
+        write_facts(&root, "mvp", "t1", &moved).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), after);
+        write_facts(&root, "mvp", "t1", &[]).unwrap();
+        let bare = fs::read_to_string(&path).unwrap();
+        assert!(!bare.contains("facts:"), "{bare}");
+        assert!(bare.contains("hand-written tail"), "{bare}");
+
+        // A file that carries no line yet gets one — the wing reaching a
+        // node it did not reach before.
+        write_facts(&root, "mvp", "t1", &moved).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), after);
+
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
@@ -774,6 +863,7 @@ mod tests {
         let text = render_task(&task()).replace("node:", "extra: x\nnode:");
         let err = parse_task("t", "t2", &text).unwrap_err();
         assert!(err.contains("unknown frontmatter key `extra`"), "{err}");
+        assert!(err.contains("`facts`"), "{err}");
         let err = parse_task("t", "t1", "---\nowns: []\n---\n\n# t1 — X\n").unwrap_err();
         assert!(err.contains("names no `node`"), "{err}");
         let err = parse_task("t", "t1", "# t1 — X\n").unwrap_err();
@@ -783,9 +873,11 @@ mod tests {
     #[test]
     fn state_json_refuses_drift() {
         // The latch-less shape an old binary wrote parses — the latches
-        // default unflipped; a flipped cleanup latch parses too.
+        // default unflipped; a flipped cleanup latch parses too. The wing
+        // mark defaults with them: a plan from before the wing is one.
         let ok = r#"{"state":"draft","closed_waves":0,"version":"v0001","created":"now"}"#;
         assert!(serde_json::from_str::<StateFile>(ok).is_ok());
+        assert!(!serde_json::from_str::<StateFile>(ok).unwrap().minted_after_the_wing);
         let latched = r#"{"state":"started","closed_waves":1,"version":"v0001","created":"now","cleanup_displayed":true}"#;
         assert!(serde_json::from_str::<StateFile>(latched).unwrap().cleanup_displayed);
         let unknown = r#"{"state":"draft","closed_waves":0,"version":"v0001","created":"now","extra":1}"#;
@@ -800,6 +892,10 @@ mod tests {
         let root = temp_dir();
         let plan = mint(&root, "mvp", "v0001".into(), None, "now".into()).unwrap();
         assert_eq!(load(&root, "mvp").unwrap(), plan);
+
+        // The mint stamps the wing and writes no story block of its own.
+        assert!(plan.minted_after_the_wing);
+        assert!(!plan_dir(&root, "mvp").join("scenarios.md").exists());
 
         let mut task = task();
         task.id = "t1".into();

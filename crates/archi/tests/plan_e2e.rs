@@ -144,6 +144,43 @@ const T1_STORE_CURATED: &str =
      ## Inputs\n\n## Outputs\n\n- code/store.rs\n\n## Stack\n\n## Verifications\n\n\
      ### store-encrypted\n\n- test — proves store-encrypted\n";
 
+/// One world fact under `archi/world/`, in the shape `world add` mints and
+/// a person fills: the three lists, the conditioning paragraph, the killer
+/// and a `Scenarios` block (`archi/requirements/world-facts/`).
+fn put_fact(root: &Path, slug: &str, title: &str, covers: &str, scenarios: &[&str]) {
+    let dir = root.join("archi/world");
+    fs::create_dir_all(&dir).unwrap();
+    let mut block = format!("Feature: {title}\n");
+    for s in scenarios {
+        block.push_str(&format!(
+            "  Scenario: {s}\n    Given the carriage leaves the platform\n    \
+             When the rider opens the door\n    Then the door holds\n"
+        ));
+    }
+    fs::write(
+        dir.join(format!("{slug}.md")),
+        format!(
+            "---\ncovers: [{covers}]\nsources: [https://example.org/thread/42]\nuses: []\n---\n\n\
+             # {title}\n\nThe carriage drops the network for minutes at a time.\n\n\
+             ## What kills this\n\nThe condition ends.\n\n## Scenarios\n\n{block}"
+        ),
+    )
+    .unwrap();
+}
+
+/// Curate a minted task file the way a person does: own one requirement,
+/// author its proof, name the file the task writes — and leave the
+/// machine-written frontmatter exactly as the mint left it, carried facts
+/// and all.
+fn curate(root: &Path, rel: &str, owns: &str, output: &str) {
+    let path = root.join(rel);
+    let text = fs::read_to_string(&path)
+        .unwrap()
+        .replace("owns: []", &format!("owns: [{owns}]"))
+        .replace("## Outputs\n", &format!("## Outputs\n\n- {output}\n"));
+    fs::write(&path, format!("{text}\n### {owns}\n\n- test — proves {owns}\n")).unwrap();
+}
+
 /// The `captured lNNNN …` ids of a `plan next` transcript.
 fn captured_ids(stdout: &str) -> Vec<String> {
     stdout
@@ -159,8 +196,9 @@ fn the_record_folder_authors_by_editing_files() {
     let root = temp_project();
     ok(&root, &["version", "save", "-m", "first"]);
 
-    // `use` mints the folder: charter and scenarios skeletons, lifecycle
-    // in state.json — no plan.json is ever born again.
+    // `use` mints the folder: the charter skeleton and the lifecycle in
+    // state.json — no plan.json is ever born again, and no `scenarios.md`:
+    // the plan authors no stories, it collects them from the wing.
     let out = ok(&root, &["plan", "use", "mvp"]);
     assert!(out.contains("created plan `mvp` @ v0001"), "{out}");
     let dir = root.join("archi/plans/mvp");
@@ -168,7 +206,7 @@ fn the_record_folder_authors_by_editing_files() {
         fs::read_to_string(dir.join("mvp.md")).unwrap(),
         "# mvp\n\n## Stack\n\n## Architecture\n"
     );
-    assert_eq!(fs::read_to_string(dir.join("scenarios.md")).unwrap(), "# Scenarios\n");
+    assert!(!dir.join("scenarios.md").exists());
     assert_eq!(state_json(&root, "mvp")["state"], "draft");
     assert!(!dir.join("plan.json").exists());
 
@@ -211,11 +249,6 @@ fn the_record_folder_authors_by_editing_files() {
          - `Store` realizes Rust\n\
          - `Auth` realizes Rust\n\
          - `Gate` realizes Rust\n",
-    );
-    write_record(
-        &root,
-        "archi/plans/mvp/scenarios.md",
-        "# Scenarios\n\n- a user stores a row\n",
     );
     write_record(
         &root,
@@ -281,7 +314,9 @@ fn the_record_folder_authors_by_editing_files() {
     assert!(show.contains("stack: Rust — user choice"), "{show}");
     assert!(show.contains("summary: Store — keeps the rows"), "{show}");
     assert!(show.contains("mapping: Rust realizes Gate"), "{show}");
-    assert!(ok(&root, &["plan", "scenarios", "list"]).contains("1. a user stores a row"));
+    // The plan's own block is retired: no fact covers its nodes, so the
+    // collected set is empty and the listing says so.
+    assert!(ok(&root, &["plan", "scenarios", "list"]).contains("no scenarios"));
     let brief = ok(&root, &["plan", "task", "show", "t1"]);
     assert!(brief.contains("t1 Store — persist rows"), "{brief}");
     assert!(brief.contains("sqlite via rusqlite"), "{brief}");
@@ -346,6 +381,13 @@ fn batch_runs_the_mint_verbs_and_stops_at_the_first_failure() {
 #[test]
 fn the_plan_loop_produces_the_links_its_gate_demands() {
     let root = temp_project();
+    put_fact(
+        &root,
+        "riders-lose-the-signal",
+        "Riders lose the signal",
+        "Auth",
+        &["a user logs in end to end"],
+    );
 
     // A plan pins a hardened spec: refuses before the first save.
     let (_, err) = fails(&root, &["plan", "use", "mvp"]);
@@ -361,12 +403,7 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     ok(&root, &["plan", "task", "add", "Auth"]);
 
     // Authoring is a text edit of the record files: outputs scope
-    // capture, inputs shape waves, a scenario rides the envelope.
-    write_record(
-        &root,
-        "archi/plans/mvp/scenarios.md",
-        "# Scenarios\n\n- a user logs in end to end\n",
-    );
+    // capture, inputs shape waves. The stories are the wing's.
     write_record(
         &root,
         "archi/plans/mvp/t1-store.md",
@@ -459,15 +496,32 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     assert!(!out.contains("a user logs in end to end"), "{out}");
     assert_eq!(state_json(&root, "mvp")["cleanup_displayed"], true);
 
-    // The next call brings the scenarios block exactly as before the
-    // cleanup stage existed.
+    // The next call brings the block, collected from the wing: the fact
+    // covering t2's node dictates the story this plan closes on.
     let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("all waves closed — scenarios:"), "{out}");
-    assert!(out.contains("a user logs in end to end"), "{out}");
+    assert!(
+        out.contains("riders-lose-the-signal#a user logs in end to end"),
+        "{out}"
+    );
     assert!(!out.contains("the cleanup wave"), "printed once: {out}");
 
-    // One more next closes the plan — in state.json; the content files
+    // The latch proves the block is attached to code: anchor the scenario,
+    // then one more next closes the plan — in state.json; the content files
     // never moved, and no plan.json ever appeared.
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains("no link"), "{err}");
+    ok(
+        &root,
+        &[
+            "link",
+            "add",
+            "riders-lose-the-signal#a user logs in end to end",
+            "code/auth.rs",
+            "--kind",
+            "indirect",
+        ],
+    );
     let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("DONE"), "{out}");
     assert_eq!(state_json(&root, "mvp")["state"], "completed");
@@ -597,16 +651,16 @@ fn a_legacy_state_json_never_regresses_into_the_cleanup_stage() {
     assert_eq!(state_json(&root, "mvp")["state"], "completed");
 
     // Waves closed but the scenarios never displayed: the cleanup stage
-    // appears, latches, then the scenarios, then done.
+    // appears, latches, then the close. The plan is one from before the
+    // wing — no fact covers its node, so it closes with no block, and the
+    // `scenarios.md` it was written with is read by nobody.
     write_record(&root, "archi/plans/mvp/state.json", &legacy_state(""));
     let out = ok(&root, &["plan", "next"]);
     assert_eq!(out.matches("the cleanup wave").count(), 1, "{out}");
     assert_eq!(state_json(&root, "mvp")["cleanup_displayed"], true);
     let out = ok(&root, &["plan", "next"]);
-    assert!(out.contains("all waves closed — scenarios:"), "{out}");
-    assert!(out.contains("a row survives a restart"), "{out}");
-    let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("DONE"), "{out}");
+    assert!(!out.contains("a row survives a restart"), "{out}");
 
     // Reset clears the cleanup latch like the others: unflipped latches
     // drop out of state.json entirely.
@@ -721,4 +775,355 @@ fn a_named_show_answers_from_an_unbound_checkout() {
 
     fs::remove_dir_all(&wt).unwrap();
     fs::remove_dir_all(&primary).unwrap();
+}
+
+/// A task carries the world facts covering its node — the slug and a
+/// fingerprint, never the story — and every read re-resolves them:
+/// `plan task show` lists them beside the requirements, `plan verify` names
+/// what moved, `plan repin` adopts the new picture
+/// (`archi/requirements/world-facts/a-task-carries-the-facts-that-cover-its-node.md`).
+#[test]
+fn a_task_carries_the_facts_that_cover_its_node() {
+    let root = temp_project();
+    put_fact(
+        &root,
+        "riders-lose-the-signal",
+        "Riders lose the signal",
+        "Store",
+        &["the app opens with no network"],
+    );
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
+    ok(&root, &["plan", "task", "add", "Auth", "--desc", "guard the door"]);
+
+    // The covered node's task carries the slug and the fingerprint; the
+    // uncovered node's task carries none, and neither holds a story.
+    let t1 = fs::read_to_string(root.join("archi/plans/mvp/t1-store.md")).unwrap();
+    assert!(t1.contains("facts: [riders-lose-the-signal@"), "{t1}");
+    assert!(
+        !t1.contains("the app opens with no network"),
+        "the record holds slugs, never scenario text: {t1}"
+    );
+    let t2 = fs::read_to_string(root.join("archi/plans/mvp/t2-auth.md")).unwrap();
+    assert!(!t2.contains("facts:"), "{t2}");
+
+    curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
+    curate(&root, "archi/plans/mvp/t2-auth.md", "service-hardening", "code/auth.rs");
+
+    // The brief a sub-agent reads names the fact beside the requirements.
+    let brief = ok(&root, &["plan", "task", "show", "t1"]);
+    assert!(
+        brief.contains("fact: riders-lose-the-signal — the app opens with no network"),
+        "{brief}"
+    );
+    assert!(!ok(&root, &["plan", "task", "show", "t2"]).contains("fact:"));
+
+    // A fact retired since the pin is drift, reported on demand — never an
+    // error, because the plan may finish against the picture it planned for.
+    fs::remove_file(root.join("archi/world/riders-lose-the-signal.md")).unwrap();
+    let out = ok(&root, &["plan", "verify"]);
+    assert!(
+        out.contains("drift: world fact `riders-lose-the-signal` retired"),
+        "{out}"
+    );
+    assert!(out.contains("t1"), "{out}");
+
+    // A fact that began covering the node after the pin is drift too.
+    put_fact(
+        &root,
+        "tunnels-run-long",
+        "Tunnels run long",
+        "Store",
+        &["the tunnel ends"],
+    );
+    let out = ok(&root, &["plan", "verify"]);
+    assert!(out.contains("`tunnels-run-long` now covers"), "{out}");
+
+    // `plan repin` re-resolves the covering facts against the new version:
+    // the record carries what covers the node now, and the drift is gone.
+    fs::write(root.join("archi/src/extra.arch"), "def node Ledger\n").unwrap();
+    ok(&root, &["version", "save", "-m", "second"]);
+    ok(&root, &["plan", "repin"]);
+    let t1 = fs::read_to_string(root.join("archi/plans/mvp/t1-store.md")).unwrap();
+    assert!(t1.contains("facts: [tunnels-run-long@"), "{t1}");
+    assert!(!t1.contains("riders-lose-the-signal"), "{t1}");
+    let out = ok(&root, &["plan", "verify"]);
+    assert!(!out.contains("drift:"), "{out}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The close collects the block from the wing as it stands: one entry per
+/// fact covering a node the plan holds a task for, the mark of what lies
+/// outside beside it, and the drift above it
+/// (`archi/requirements/world-facts/the-plan-closes-on-the-world-s-scenarios.md`,
+/// `archi/requirements/world-facts/the-block-marks-what-lies-outside-the-plan.md`,
+/// `archi/requirements/world-facts/the-close-re-reads-the-wing-and-says-what-moved.md`).
+#[test]
+fn the_close_collects_the_wing_and_marks_what_lies_outside() {
+    let root = temp_project();
+    fs::write(root.join("archi/src/extra.arch"), "def node Ledger\n").unwrap();
+    // One fact over both of the plan's nodes, and one reaching past the
+    // plan into nodes it never builds.
+    put_fact(
+        &root,
+        "riders-lose-the-signal",
+        "Riders lose the signal",
+        "Store, Auth",
+        &["the app opens with no network"],
+    );
+    put_fact(
+        &root,
+        "tunnels-run-long",
+        "Tunnels run long",
+        "Store, Gate, Ledger",
+        &["the tunnel ends"],
+    );
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
+    ok(&root, &["plan", "task", "add", "Auth", "--desc", "guard the door"]);
+    curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
+    curate(&root, "archi/plans/mvp/t2-auth.md", "service-hardening", "code/auth.rs");
+
+    ok(&root, &["plan", "start"]);
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("the cleanup wave"), "{out}");
+
+    // The wing moves under the plan between the pin and the close: the
+    // fingerprint the tasks carried no longer matches.
+    put_fact(
+        &root,
+        "riders-lose-the-signal",
+        "Riders lose the signal",
+        "Store, Auth",
+        &["the app opens with no network at all"],
+    );
+
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("all waves closed — scenarios:"), "{out}");
+    assert_eq!(
+        out.matches("riders-lose-the-signal#the app opens with no network at all")
+            .count(),
+        1,
+        "a fact covering two of the plan's nodes prints once: {out}"
+    );
+    assert!(out.contains("tunnels-run-long#the tunnel ends"), "{out}");
+    // The mark names the node paths the plan never built, and a fact whose
+    // covered nodes the plan all holds prints clean.
+    assert!(
+        out.contains("tunnels-run-long also covers Gate, Ledger — outside this plan"),
+        "{out}"
+    );
+    assert!(!out.contains("riders-lose-the-signal also covers"), "{out}");
+    // The drift rides above the block, naming what moved since authoring.
+    assert!(
+        out.contains("drift: world fact `riders-lose-the-signal` moved"),
+        "{out}"
+    );
+
+    // The read surface serves the same set the close collected.
+    let show = ok(&root, &["plan", "show"]);
+    assert!(
+        show.contains("scenario: riders-lose-the-signal#the app opens with no network at all"),
+        "{show}"
+    );
+    assert!(show.contains("scenario: tunnels-run-long#the tunnel ends"), "{show}");
+    // And so does the listing: the same block, numbered, in slug order.
+    let listed = ok(&root, &["plan", "scenarios", "list"]);
+    assert!(!listed.contains("no scenarios"), "{listed}");
+    assert_eq!(
+        listed,
+        "1. riders-lose-the-signal#the app opens with no network at all\n\
+         2. tunnels-run-long#the tunnel ends\n\
+         3. tunnels-run-long also covers Gate, Ledger — outside this plan\n"
+    );
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The final latch proves the block is attached to code: a scenario with no
+/// link refuses it by name, an anchored block latches, and `plan reset`
+/// clears the latch after a refusal
+/// (`archi/requirements/world-facts/the-close-gates-on-anchored-scenarios.md`).
+#[test]
+fn the_close_gates_on_anchored_scenarios() {
+    let root = temp_project();
+    put_fact(
+        &root,
+        "riders-lose-the-signal",
+        "Riders lose the signal",
+        "Store",
+        &["the app opens with no network"],
+    );
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
+    curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
+    ok(&root, &["plan", "start"]);
+    ok(&root, &["plan", "next"]);
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("riders-lose-the-signal#the app opens with no network"), "{out}");
+
+    // Unanchored: the latch refuses, names the scenario, and the plan
+    // stays open — the refusal exits like the plan's other gates.
+    let refused = Command::new(env!("CARGO_BIN_EXE_archi"))
+        .args(["plan", "next", "--project", root.to_str().unwrap()])
+        .output()
+        .expect("archi runs");
+    assert_eq!(refused.status.code(), Some(1));
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains("no link"), "{err}");
+    assert!(
+        err.contains("riders-lose-the-signal#the app opens with no network"),
+        "{err}"
+    );
+    assert_eq!(state_json(&root, "mvp")["state"], "started");
+    assert!(state_json(&root, "mvp").get("scenarios_closed").is_none());
+
+    // Reset clears the latch after the refusal, as it always did.
+    ok(&root, &["plan", "reset"]);
+    let state = state_json(&root, "mvp");
+    assert_eq!(state["state"], "draft");
+    assert!(state.get("scenarios_displayed").is_none(), "{state}");
+
+    // Anchor the scenario and run the ceremony again: the block latches.
+    ok(
+        &root,
+        &[
+            "link",
+            "add",
+            "riders-lose-the-signal#the app opens with no network",
+            "code/store.rs",
+            "--kind",
+            "indirect",
+        ],
+    );
+    ok(&root, &["plan", "start"]);
+    ok(&root, &["plan", "next"]);
+    ok(&root, &["plan", "next"]);
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("DONE"), "{out}");
+    assert_eq!(state_json(&root, "mvp")["state"], "completed");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// A plan minted after the wing cannot close on nothing: the empty block
+/// refuses the final latch and names the reason, and one covering fact
+/// closes the same plan
+/// (`archi/requirements/world-facts/a-plan-s-own-scenarios-block-retires.md`).
+#[test]
+fn a_post_wing_plan_refuses_an_empty_block_and_closes_on_a_covering_fact() {
+    let root = temp_project();
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+
+    // The mint writes no `scenarios.md`; a block a person leaves in the
+    // folder is read by nobody and deleted by nothing.
+    assert!(!root.join("archi/plans/mvp/scenarios.md").exists());
+    write_record(
+        &root,
+        "archi/plans/mvp/scenarios.md",
+        "# Scenarios\n\n- a user logs in end to end\n",
+    );
+    ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
+    curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
+    ok(&root, &["plan", "start"]);
+    ok(&root, &["plan", "next"]);
+
+    // No fact covers the node the plan holds a task for: the close refuses.
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains("no world fact covers any node"), "{err}");
+    assert_eq!(state_json(&root, "mvp")["state"], "started");
+
+    // The same plan closes once one covering fact stands — and the plan's
+    // own block never prints.
+    put_fact(
+        &root,
+        "riders-lose-the-signal",
+        "Riders lose the signal",
+        "Store",
+        &["the app opens with no network"],
+    );
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("riders-lose-the-signal#the app opens with no network"), "{out}");
+    assert!(!out.contains("a user logs in end to end"), "{out}");
+    ok(
+        &root,
+        &[
+            "link",
+            "add",
+            "riders-lose-the-signal#the app opens with no network",
+            "code/store.rs",
+            "--kind",
+            "indirect",
+        ],
+    );
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("DONE"), "{out}");
+
+    // The old block is on disk exactly as the person left it, and no
+    // finding names it.
+    assert_eq!(
+        fs::read_to_string(root.join("archi/plans/mvp/scenarios.md")).unwrap(),
+        "# Scenarios\n\n- a user logs in end to end\n"
+    );
+    let (_, out, _) = run(&root, &["check"]);
+    assert!(!out.contains("scenarios.md"), "{out}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// A plan from before the wing carries no mark, closes with no block, and
+/// keeps the `scenarios.md` it was written with — history is left exactly
+/// as it is (`archi/decisions/the-old-plans-are-left-alone.md`).
+#[test]
+fn a_pre_wing_plan_closes_with_no_block_and_keeps_its_old_one() {
+    let root = temp_project();
+    put_fact(
+        &root,
+        "riders-lose-the-signal",
+        "Riders lose the signal",
+        "Auth",
+        &["the app opens with no network"],
+    );
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "old"]);
+    ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
+    curate(&root, "archi/plans/old/t1-store.md", "store-encrypted", "code/store.rs");
+    write_record(
+        &root,
+        "archi/plans/old/scenarios.md",
+        "# Scenarios\n\n- a row survives a restart\n",
+    );
+
+    // The lifecycle file an older binary wrote: waves closed, no mark of
+    // the wing on it — the plan is what it was written as.
+    let created = state_json(&root, "old")["created"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    write_record(
+        &root,
+        "archi/plans/old/state.json",
+        &format!(
+            "{{\n  \"state\": \"started\",\n  \"closed_waves\": 1,\n  \
+             \"version\": \"v0001\",\n  \"created\": \"{created}\"\n}}\n"
+        ),
+    );
+
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("the cleanup wave"), "{out}");
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("DONE"), "{out}");
+    assert!(!out.contains("a row survives a restart"), "{out}");
+    assert_eq!(state_json(&root, "old")["state"], "completed");
+    assert_eq!(
+        fs::read_to_string(root.join("archi/plans/old/scenarios.md")).unwrap(),
+        "# Scenarios\n\n- a row survives a restart\n"
+    );
+
+    fs::remove_dir_all(&root).unwrap();
 }

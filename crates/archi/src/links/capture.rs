@@ -648,6 +648,7 @@ mod tests {
             description: String::new(),
             spec_refs: spec_refs.iter().map(|s| s.to_string()).collect(),
             owns: Vec::new(),
+            facts: Vec::new(),
             stack_details: String::new(),
             inputs: BTreeMap::new(),
             outputs: outputs.iter().map(|s| s.to_string()).collect(),

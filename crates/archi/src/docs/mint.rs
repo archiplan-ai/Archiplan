@@ -459,7 +459,8 @@ fn stranded_links(root: &Path, slug: &str) -> Result<Vec<Stranded>, String> {
 }
 
 /// The plans whose lifecycle is still open and whose tasks name the fact —
-/// the fact itself, or one of its scenarios. A completed plan is a record,
+/// the fact itself, or one of its scenarios, in `spec_refs`, or the fact
+/// carried in the task's resolved `facts`. A completed plan is a record,
 /// and a record holds nothing in place.
 fn holding_plans(root: &Path, slug: &str) -> Result<Vec<Holder>, String> {
     let mut out = Vec::new();
@@ -474,6 +475,7 @@ fn holding_plans(root: &Path, slug: &str) -> Result<Vec<Holder>, String> {
                 t.spec_refs
                     .iter()
                     .any(|r| r == slug || scenario_of(r, slug))
+                    || t.facts.iter().any(|f| f.fact == slug)
             })
             .map(|t| t.id.clone())
             .collect();
@@ -608,6 +610,28 @@ mod tests {
                  \"created\":\"2026-01-01T00:00:00Z\",\"state\":\"{state}\",\
                  \"tasks\":[{{\"id\":\"t1\",\"node\":\"DocMint\",\"spec_refs\":[{}]}}]}}\n",
                 refs.join(",")
+            ),
+        )
+        .unwrap();
+    }
+
+    /// A plan whose one task carries the fact the way the planner resolves
+    /// it now: in `facts`, named nowhere in `spec_refs`.
+    fn put_plan_carrying(root: &Path, name: &str, state: &str, facts: &[&str]) {
+        let dir = root.join("archi").join("plans").join(name);
+        fs::create_dir_all(&dir).unwrap();
+        let facts: Vec<String> = facts
+            .iter()
+            .map(|f| format!("{{\"fact\":\"{f}\",\"digest\":\"9f3ab1\"}}"))
+            .collect();
+        fs::write(
+            dir.join("plan.json"),
+            format!(
+                "{{\"name\":\"{name}\",\"version\":\"v0001\",\
+                 \"created\":\"2026-01-01T00:00:00Z\",\"state\":\"{state}\",\
+                 \"tasks\":[{{\"id\":\"t1\",\"node\":\"DocMint\",\"spec_refs\":[],\
+                 \"facts\":[{}]}}]}}\n",
+                facts.join(",")
             ),
         )
         .unwrap();
@@ -841,6 +865,27 @@ mod tests {
 
         // The same fact retires once that plan is completed.
         put_plan(&root, "offline-open", "completed", &[SCENARIO]);
+        world_rm(&root, SLUG).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The covering fact a planner resolves lands in the task's `facts`, not
+    /// in its `spec_refs`: the plan in flight holds the removal all the same
+    /// (`archi/requirements/world-facts/retirement-refuses-a-plan-in-flight.md`).
+    #[test]
+    fn a_carried_fact_holds_the_removal() {
+        let root = temp_root();
+        put_fact(&root, SLUG, &[]);
+        put_plan_carrying(&root, "offline-open", "started", &[SLUG]);
+
+        let e = world_rm(&root, SLUG).unwrap_err();
+        assert!(e.contains("offline-open"), "{e}");
+        assert!(e.contains("t1"), "{e}");
+        // Nothing was retired.
+        assert!(world_dir(&root).join(format!("{SLUG}.md")).is_file());
+
+        // The same fact retires once that plan is completed.
+        put_plan_carrying(&root, "offline-open", "completed", &[SLUG]);
         world_rm(&root, SLUG).unwrap();
         fs::remove_dir_all(&root).unwrap();
     }

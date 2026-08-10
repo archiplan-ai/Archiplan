@@ -24,7 +24,7 @@
 //! archi link ls [--spec <ref>] [--evidence] [--json]
 //! archi link verify [--spec <ref>] [--since <rev>] [--json]
 //! archi link confirm <id> | rm <id>... | rm --spec <ref> --yes
-//! archi link repin <id> [--to <file[#symbol]>]
+//! archi link repin <id> [--to <file[#symbol]>] [--spec <fact-slug>#<scenario name>]
 //! archi link capture --task <TASK> [--json]
 //! archi link audit [--scope <path>] [--since <rev>] [--prune] [--json]
 //! archi plan use <name> | repin | show [<name>] [--json] | verify [--json]
@@ -34,8 +34,9 @@
 //! archi query [--scope <path>]... [--type <path>]... [--kind <k>]... [--view <v>]...
 //!             [--carrier <path>]... [--edge-type <name>]... [--top] [--at <id>]
 //! archi viz   [<graph.json> | -] [--depth <n>] [--max-nodes <n>] [--details]
-//! archi search <phrase>... [--kind element|intent|requirement|stressor|session|decision]...
+//! archi search <phrase>... [--kind element|intent|requirement|stressor|session|decision|world]...
 //!             [--limit <n>] [--json]
+//! archi world add <title> | rm <slug> | ls [--covers <element>] [--json]
 //! archi --help | --version
 //! ```
 //!
@@ -70,8 +71,9 @@ use std::process::ExitCode;
 use modeling_lang::source::{Compiled, compile_project, find_project_root};
 use modeling_lang::{
     ExcludePattern, Finding, IncidenceConfig, Model, Neutrality, NkpConfig, NkpCorridor, NkpReport,
-    NkpScope, Severity, Statement, Workspace,
+    NkpScope, Outcome, Severity, Statement, Workspace,
 };
+use serde::Serialize;
 use serde_json::{Value, json};
 
 const USAGE: &str = "usage:
@@ -99,6 +101,9 @@ const USAGE: &str = "usage:
   archi session fold <loser> --into <winner> -m <note> [--project <dir>]
   archi req add <title> --intent <folder> --kind functional|non-functional --origin 'intent|stressor(<slug>)' [--deferred <reason>] [--project <dir>]
   archi req rm <slug> [--project <dir>]
+  archi world add <title> [--project <dir>]
+  archi world rm <slug> [--project <dir>]
+  archi world ls [--covers <element>] [--json] [--project <dir>]
   archi stress open <title> [--project <dir>]
   archi stress add <title> --affects <A,B,...> [--project <dir>]
   archi stress rm <slug> [--project <dir>]
@@ -106,7 +111,7 @@ const USAGE: &str = "usage:
   archi link ls [--spec <ref>] [--evidence] [--json] [--project <dir>]
   archi link verify [--spec <ref>] [--since [<member>=]<rev>] [--repo <member>] [--json] [--project <dir>]
   archi link confirm <id> | rm <id>... | rm --spec <ref> --yes [--project <dir>]
-  archi link repin <id> [--to <file[#symbol]>] [--project <dir>]
+  archi link repin <id> [--to <file[#symbol]>] [--spec <fact-slug>#<scenario name>] [--project <dir>]
   archi link capture --task <TASK> [--json] [--project <dir>]
   archi link audit [--scope <path>] [--since [<member>=]<rev>] [--repo <member>] [--prune] [--json] [--project <dir>]
   archi repo ls [--json] [--project <dir>]
@@ -127,7 +132,7 @@ const USAGE: &str = "usage:
   archi query [--scope <path>]... [--type <path>]... [--kind <k>]... [--view <v>]...
               [--carrier <path>]... [--edge-type <name>]... [--top] [--at <id>] [--project <dir>]
   archi viz   [<graph.json> | -] [--depth <n>] [--max-nodes <n>] [--details]
-  archi search <phrase>... [--kind element|intent|requirement|stressor|session|decision]...
+  archi search <phrase>... [--kind element|intent|requirement|stressor|session|decision|world]...
               [--limit <n>] [--json] [--project <dir>]
   archi tradeoffs [show] | set <favor,…> <spend,…> | auto <concern=high|low>... | clear
               [--project <dir>]
@@ -185,6 +190,7 @@ struct Args {
     scopes: Vec<String>,
     carriers: Vec<String>,
     edge_types: Vec<String>,
+    covers: Option<String>,
     evidence: bool,
     yes: bool,
     prune: bool,
@@ -256,6 +262,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         scopes: Vec::new(),
         carriers: Vec::new(),
         edge_types: Vec::new(),
+        covers: None,
         evidence: false,
         yes: false,
         prune: false,
@@ -310,6 +317,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--type" => args.types.push(value(&mut it, "--type")?),
             "--view" => args.views.push(value(&mut it, "--view")?),
             "--carrier" => args.carriers.push(value(&mut it, "--carrier")?),
+            "--covers" => args.covers = Some(value(&mut it, "--covers")?),
             "--edge-type" => args.edge_types.push(value(&mut it, "--edge-type")?),
             "--exclude" => args.exclude.push(value(&mut it, "--exclude")?),
             "--only" => args.only.push(value(&mut it, "--only")?),
@@ -373,6 +381,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
                     | "session"
                     | "req"
                     | "stress"
+                    | "world"
                     | "search"
                     | "init"
                     | "repo"
@@ -525,6 +534,14 @@ fn run_check(args: &Args) -> ExitCode {
             addressing::of_doc_finding(f).stamp(&mut v);
             v
         }));
+        // The wing's own advisory lines ride the same list, carrying their
+        // own kinds (archi/requirements/world-facts/).
+        all.extend(
+            doc.world
+                .findings
+                .iter()
+                .map(|f| serde_json::to_value(f).expect("serializes")),
+        );
         all.extend(plan_findings.iter().map(|f| {
             let mut v = serde_json::to_value(f).expect("serializes");
             addressing::of_plan_finding(f).stamp(&mut v);
@@ -549,6 +566,12 @@ fn run_check(args: &Args) -> ExitCode {
             envelope["status"] = json!("error");
             envelope["docs"] = serde_json::to_value(&doc.diagnostics).expect("serializes");
         }
+        // The wing in two numbers; a tree with no `archi/world/` carries no
+        // count and the key is not born
+        // (archi/requirements/world-facts/the-check-counts-the-wing.md).
+        if let Some(count) = &doc.world.count {
+            envelope["world"] = serde_json::to_value(count).expect("serializes");
+        }
         if let Some(report) = &nkp {
             // The report minus its N×N matrix and implementation notes —
             // the scoring and directions; `archi nkp` has the rest.
@@ -565,6 +588,7 @@ fn run_check(args: &Args) -> ExitCode {
     } else {
         if findings.is_empty()
             && doc.findings.is_empty()
+            && doc.world.findings.is_empty()
             && plan_findings.is_empty()
             && member_findings.is_empty()
         {
@@ -576,6 +600,9 @@ fn run_check(args: &Args) -> ExitCode {
             for f in &doc.findings {
                 println!("{f}  [{}]", addressing::of_doc_finding(f).id);
             }
+            for f in &doc.world.findings {
+                println!("{f}");
+            }
             for f in &plan_findings {
                 println!("{f}  [{}]", addressing::of_plan_finding(f).id);
             }
@@ -585,6 +612,11 @@ fn run_check(args: &Args) -> ExitCode {
         }
         if let Some(report) = &nkp {
             print!("{}", render_nkp_summary(report));
+        }
+        // The wing closes on its count, beside the landscape read; a tree
+        // with no wing closes on neither.
+        if let Some(count) = &doc.world.count {
+            println!("{count}");
         }
         for e in &archive_errors {
             eprintln!("archi/versions: E_ARCHIVE: {e}");
@@ -1646,13 +1678,22 @@ fn run_link(args: &Args) -> ExitCode {
             }
             Err(e) => fail(e),
         },
-        (Some("repin"), [id]) => match links::repin(&root, id, args.to.as_deref()) {
-            Ok(l) => {
-                println!("repinned {}", links::render_link(&l));
-                ExitCode::SUCCESS
+        // Two repins, one verb: `--to` moves the anchor, `--spec` moves the
+        // spec ref the link hangs on — a scenario that was renamed, or a
+        // link re-aimed at another fact's scenario.
+        (Some("repin"), [id]) => {
+            let done = match args.spec.as_deref() {
+                Some(spec) => links::repin_spec(&root, id, spec),
+                None => links::repin(&root, id, args.to.as_deref()),
+            };
+            match done {
+                Ok(l) => {
+                    println!("repinned {}", links::render_link(&l));
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
             }
-            Err(e) => fail(e),
-        },
+        }
         (Some("capture"), []) => {
             let Some(task) = args.task.as_deref() else {
                 return usage_err("`link capture` re-runs a task capture: --task <TASK>");
@@ -1704,8 +1745,9 @@ fn run_link(args: &Args) -> ExitCode {
         }
         _ => usage_err(
             "`link` takes: add <spec> <file[#symbol]> --kind <k> | ls | verify | confirm <id> | \
-             rm <id>... | rm --spec <ref> --yes | repin <id> [--to <ref>] | capture --task <t> | \
-             audit",
+             rm <id>... | rm --spec <ref> --yes | \
+             repin <id> [--to <ref>] [--spec <fact-slug>#<scenario name>] | \
+             capture --task <t> | audit",
         ),
     }
 }
@@ -1777,9 +1819,17 @@ fn run_read(args: &Args) -> ExitCode {
         Err(code) => return code,
     };
     let response = ws.handle(&request);
+    // The batch answered; now what conditions the answer. The facts ride the
+    // envelope, beside the results — never inside a node
+    // (`archi/requirements/world-facts/the-read-envelope-carries-the-conditions.md`).
+    let world = covering_facts(&root, response.results.as_deref().unwrap_or_default());
     println!(
         "{}",
-        serde_json::to_string_pretty(&response).expect("serializes")
+        serde_json::to_string_pretty(&WithWorld {
+            answer: &response,
+            world,
+        })
+        .expect("serializes")
     );
     match &response.error {
         None => ExitCode::SUCCESS,
@@ -1831,11 +1881,107 @@ fn run_query(args: &Args) -> ExitCode {
         return ExitCode::from(1);
     }
     let results = response.results.expect("an ok response carries results");
+    // One statement, one slice: the facts conditioning it ride the slice
+    // itself, which is what this spelling prints.
+    let world = covering_facts(&root, &results);
     println!(
         "{}",
-        serde_json::to_string_pretty(&results[0]).expect("serializes")
+        serde_json::to_string_pretty(&WithWorld {
+            answer: &results[0],
+            world,
+        })
+        .expect("serializes")
     );
     ExitCode::SUCCESS
+}
+
+/// An answer with the wing attached: the value the engine composed, and
+/// beside it — never inside it — the facts that condition what it names. An
+/// empty wing writes no key at all, so a tree without one answers byte for
+/// byte as it did before the wing existed.
+#[derive(Serialize)]
+struct WithWorld<'a, T: Serialize> {
+    #[serde(flatten)]
+    answer: &'a T,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    world: Vec<Value>,
+}
+
+/// The facts covering the elements a composed slice names, each once, in
+/// slug order (`archi/requirements/world-facts/the-read-envelope-carries-the-conditions.md`).
+/// The usual reader of this surface is an agent that did not know to ask, so
+/// the conditions arrive with the slice instead of waiting behind
+/// `archi world ls --covers` (`archi/decisions/the-wing-is-reached-by-traversal.md`).
+///
+/// Only the wing is read: the one question asked of it — which facts
+/// condition this element — needs no other doc primitive, and a tree with no
+/// `archi/world/` folder walks nothing. The facts are read live, as
+/// `world ls` reads them, and a malformed one is skipped here and reported
+/// by `check`, which is the command that diagnoses.
+fn covering_facts(root: &Path, results: &[Outcome]) -> Vec<Value> {
+    let named = slice_elements(results);
+    if named.is_empty() {
+        return Vec::new();
+    }
+    let tree = docs::Tree {
+        world: docs::world_check::discover(root, &mut Vec::new()),
+        ..docs::Tree::default()
+    };
+    let wing = docs::world_check::serve_world(&tree);
+    let mut by_slug: std::collections::BTreeMap<&str, &docs::world_check::WorldFact> =
+        std::collections::BTreeMap::new();
+    // A fact covering two elements of one slice lands on its slug twice and
+    // rides once.
+    for element in &named {
+        for fact in wing.covering(element) {
+            by_slug.insert(fact.doc.slug.as_str(), fact);
+        }
+    }
+    by_slug.values().map(|f| covering_fact(f)).collect()
+}
+
+/// Every element a composed slice names: the nodes of each graph result, and
+/// the ports they carry there. A port is an element a fact may cover, and a
+/// slice that draws one names it.
+fn slice_elements(results: &[Outcome]) -> std::collections::BTreeSet<String> {
+    let mut out = std::collections::BTreeSet::new();
+    for result in results {
+        if let Outcome::Graph { nodes, .. } = result {
+            for node in nodes {
+                for port in &node.ports {
+                    out.insert(format!("{}.{}", node.id, port.name));
+                }
+                out.insert(node.id.clone());
+            }
+        }
+    }
+    out
+}
+
+/// One covering fact as the read surface carries it: where it is written,
+/// what it conditions, the conditioning statement, and the scenarios it
+/// dictates, each step as its author wrote it.
+fn covering_fact(fact: &docs::world_check::WorldFact) -> Value {
+    let scenarios: Vec<Value> = fact
+        .scenarios
+        .iter()
+        .flat_map(|block| &block.scenarios)
+        .map(|s| {
+            let steps: Vec<String> = s
+                .steps
+                .iter()
+                .map(|step| format!("{} {}", step.keyword, step.text))
+                .collect();
+            json!({ "name": s.name, "steps": steps })
+        })
+        .collect();
+    json!({
+        "slug": fact.doc.slug,
+        "path": fact.doc.file,
+        "covers": world_list(&fact.doc.covers),
+        "condition": fact.doc.condition.as_ref().map_or("", |b| b.text.as_str()).trim(),
+        "scenarios": scenarios,
+    })
 }
 
 /// `archi viz`: draw a piped subgraph query as an ASCII diagram
@@ -1913,7 +2059,8 @@ fn run_search(args: &Args) -> ExitCode {
             Some(kind) => kinds.push(kind),
             None => {
                 return usage_err(&format!(
-                    "--kind is element, intent, requirement, stressor, session or decision; got `{k}`"
+                    "--kind is element, intent, requirement, stressor, session, decision or \
+                     world; got `{k}`"
                 ));
             }
         }
@@ -1937,13 +2084,32 @@ fn run_search(args: &Args) -> ExitCode {
         &kinds,
         limit,
     );
+    // An empty answer over the wing names the other retrieval path: a world
+    // fact is written without the nouns of the model, so a phrase about the
+    // architecture is the wrong door — the `covers` traversal is the right
+    // one (archi/decisions/the-wing-is-reached-by-traversal.md,
+    // archi/requirements/world-facts/each-retrieval-path-names-the-other.md).
+    let note = (report.hits.is_empty() && kinds.contains(&search::Kind::World)).then_some(
+        "a world fact is reached from the element it conditions: \
+         `archi world ls --covers <element>`",
+    );
     if args.json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&report).expect("serializes")
-        );
+        // The note is a field of the envelope, never inside the hits; with
+        // no note the report prints exactly as it always did.
+        let text = match note {
+            Some(n) => {
+                let mut v = serde_json::to_value(&report).expect("serializes");
+                v["note"] = json!(n);
+                serde_json::to_string_pretty(&v)
+            }
+            None => serde_json::to_string_pretty(&report),
+        };
+        println!("{}", text.expect("serializes"));
     } else {
         print!("{}", search::render_human(&report));
+        if let Some(n) = note {
+            println!("{n}");
+        }
     }
     ExitCode::SUCCESS
 }
@@ -2248,18 +2414,26 @@ fn run_plan(args: &Args) -> ExitCode {
                 Err(e) => fail(e),
             }
         }
-        (Some("scenarios"), [list]) if list == "list" => match plans::load_active(&root) {
-            Ok(p) => {
-                if p.scenarios.is_empty() {
-                    println!("no scenarios");
+        (Some("scenarios"), [list]) if list == "list" => {
+            // The block the close collects, not a stored list: a plan
+            // authors no scenarios of its own.
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            match plans::scenarios_list(&root, ws.model()) {
+                Ok(lines) => {
+                    if lines.is_empty() {
+                        println!("no scenarios");
+                    }
+                    for (i, line) in lines.iter().enumerate() {
+                        println!("{}. {line}", i + 1);
+                    }
+                    ExitCode::SUCCESS
                 }
-                for (i, s) in p.scenarios.iter().enumerate() {
-                    println!("{}. {s}", i + 1);
-                }
-                ExitCode::SUCCESS
+                Err(e) => fail(e),
             }
-            Err(e) => fail(e),
-        },
+        }
         (Some("list"), []) => match plans::all_plans(&root) {
             Ok(all) => {
                 if all.is_empty() {
@@ -2476,6 +2650,165 @@ fn run_stress(args: &Args) -> ExitCode {
             "usage: archi stress open <title> | add <title> --affects <A,B,...> | rm <slug>",
         ),
     }
+}
+
+/// `archi world add|rm|ls` — the wing's verb, beside `req` and `stress`.
+/// `add` and `rm` mint and retire the record, so they meet the seat rule at
+/// the router like every other mutation and refuse with its exit code;
+/// `ls` reads and answers anywhere
+/// (`archi/requirements/world-facts/the-world-verb-refuses-like-the-others.md`).
+fn run_world(args: &Args) -> ExitCode {
+    let fail = |e: String| -> ExitCode {
+        eprintln!("archi: {e}");
+        ExitCode::from(1)
+    };
+    let root = match locate_project(args) {
+        Ok(r) => r,
+        Err(e) => return usage_err(&e),
+    };
+    match (
+        args.positional.first().map(String::as_str),
+        args.positional.get(1..).unwrap_or_default(),
+    ) {
+        (Some("add"), [title]) => match docs::mint::world_add(&root, title) {
+            Ok(path) => {
+                println!(
+                    "minted {} — write the condition, what kills it and its scenarios; \
+                     `archi check` holds the empty slots",
+                    path.strip_prefix(&root).unwrap_or(&path).display()
+                );
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e),
+        },
+        (Some("rm"), [slug]) => match docs::mint::world_rm(&root, slug) {
+            Ok(path) => {
+                println!("removed {}", path.strip_prefix(&root).unwrap_or(&path).display());
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e),
+        },
+        (Some("ls"), []) => run_world_ls(args, &root),
+        _ => usage_err(
+            "usage: archi world add <title> | rm <slug> | ls [--covers <element>] [--json]",
+        ),
+    }
+}
+
+/// `archi world ls` — the traversal the wing is reached by: one block per
+/// standing fact, narrowed by `--covers <element>` to the facts that
+/// condition one node (`archi/decisions/the-wing-is-reached-by-traversal.md`,
+/// `archi/requirements/world-facts/one-verb-walks-the-bridge.md`). The
+/// listing reads the live tree and resolves nothing against a pin.
+fn run_world_ls(args: &Args, root: &Path) -> ExitCode {
+    let ws = match compile_or_report(root, args.json) {
+        Ok(c) => c.workspace,
+        Err(code) => return code,
+    };
+    let model = ws.model();
+    // A filter the model cannot answer is a refusal, never an empty list:
+    // the two look the same and mean opposite things.
+    if let Some(element) = args.covers.as_deref()
+        && model.resolve_element(element).is_none()
+    {
+        eprintln!(
+            "archi: `--covers {element}` names no element of the current model — \
+             `archi search {element} --kind element` finds its path, `archi world ls` \
+             lists every fact"
+        );
+        return ExitCode::from(1);
+    }
+    let (tree, _) = docs::load(root, model);
+    let wing = docs::world_check::serve_world(&tree);
+    let facts: Vec<&docs::world_check::WorldFact> = match args.covers.as_deref() {
+        Some(element) => wing.covering(element),
+        None => tree.world.iter().collect(),
+    };
+    // The other retrieval path, named exactly when this one came back empty
+    // (archi/requirements/world-facts/each-retrieval-path-names-the-other.md).
+    let note = args.covers.as_deref().filter(|_| facts.is_empty()).map(|e| {
+        format!(
+            "no fact covers `{e}` — a fact is also found by its own words: \
+             `archi search <phrase> --kind world`"
+        )
+    });
+    if args.json {
+        let items: Vec<Value> = facts
+            .iter()
+            .map(|f| {
+                json!({
+                    "slug": f.doc.slug,
+                    "path": f.doc.file,
+                    "covers": world_list(&f.doc.covers),
+                    "sources": world_sources(&f.doc),
+                    "uses": world_list(&f.doc.uses),
+                })
+            })
+            .collect();
+        let mut envelope = json!({ "status": "ok", "facts": items });
+        if let Some(element) = args.covers.as_deref() {
+            envelope["covers"] = json!(element);
+        }
+        // The note rides the envelope, never a fact.
+        if let Some(n) = &note {
+            envelope["note"] = json!(n);
+        }
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&envelope).expect("serializes")
+        );
+    } else {
+        for f in &facts {
+            print!("{}", render_world_fact(&f.doc));
+        }
+        if let Some(n) = &note {
+            println!("{n}");
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+/// One fact, as a person reads it: the address line, what it conditions,
+/// whether it rests on recorded material, and what it rests on among the
+/// other facts.
+fn render_world_fact(doc: &docs::world::WorldDoc) -> String {
+    let list = |v: &[String]| -> String {
+        if v.is_empty() {
+            "none".to_string()
+        } else {
+            v.join(", ")
+        }
+    };
+    let sources = world_sources(doc);
+    let mut out = format!("{}  {}\n", doc.slug, doc.file);
+    out.push_str(&format!("    covers: {}\n", list(world_list(&doc.covers))));
+    out.push_str(&match sources.len() {
+        0 => "    sources: none — ungrounded\n".to_string(),
+        n => format!("    sources: {n}\n"),
+    });
+    let uses = world_list(&doc.uses);
+    if !uses.is_empty() {
+        out.push_str(&format!("    uses: {}\n", list(uses)));
+    }
+    out
+}
+
+/// A frontmatter list the reader carried, or nothing — an unsound field is
+/// no claim of any entry.
+fn world_list(field: &Option<(Vec<String>, usize)>) -> &[String] {
+    field.as_ref().map_or(&[], |(v, _)| v.as_slice())
+}
+
+/// The `sources` entries as the record wrote them — both forms, verbatim.
+fn world_sources(doc: &docs::world::WorldDoc) -> Vec<String> {
+    doc.sources.as_ref().map_or(Vec::new(), |(v, _)| {
+        v.iter()
+            .map(|s| match s {
+                docs::world::Source::Path(p) => p.clone(),
+                docs::world::Source::Locator(l) => l.clone(),
+            })
+            .collect()
+    })
 }
 
 /// `archi sync-skills` — sync an initialized tree's briefing to this binary's
@@ -2957,6 +3290,8 @@ fn guarded_route(args: &Args) -> Option<PlanHint<'_>> {
         "repo" if sub(0) == Some("map") => Some(PlanHint::None),
         "req" if matches!(sub(0), Some("add" | "rm")) => Some(PlanHint::None),
         "stress" if matches!(sub(0), Some("open" | "add" | "rm")) => Some(PlanHint::None),
+        // Of `world`, the mint and the retirement mutate; `ls` reads.
+        "world" if matches!(sub(0), Some("add" | "rm")) => Some(PlanHint::None),
         "plan" => match sub(0) {
             Some("use") => Some(args.positional.get(1).map_or(PlanHint::None, |n| PlanHint::Named(n))),
             Some("repin" | "start" | "next" | "close" | "reset") => Some(PlanHint::Active),
@@ -3036,6 +3371,7 @@ fn main() -> ExitCode {
         "session" => run_session(&args),
         "req" => run_req(&args),
         "stress" => run_stress(&args),
+        "world" => run_world(&args),
         "link" => run_link(&args),
         "repo" => run_repo(&args),
         "worktree" => run_worktree(&args),
