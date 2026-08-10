@@ -32,6 +32,6 @@ plan that touches a covered node).
 
 - test — a plan whose tasks touch a covered node prints that fact's scenarios at close
 - test — the same fact covering two nodes prints once, not twice
-- test — a plan whose nodes no fact covers skips the step and closes directly
+- test — a plan whose nodes no fact covers refuses the final latch
 - test — the latch pair runs over the collected block as it ran over the free-text one
 - test — `plan scenarios list` and the close step read the same set

@@ -1,5 +1,5 @@
 ---
-links: [two-things-are-called-a-scenario, the-plan-closes-on-the-world-s-scenarios, scenarios-close-the-plan, Planner]
+links: [two-things-are-called-a-scenario, the-wing-replaced-something-that-worked, the-plan-closes-on-the-world-s-scenarios, scenarios-close-the-plan, Planner]
 prefer: [correctness]
 over: [simplicity]
 ---

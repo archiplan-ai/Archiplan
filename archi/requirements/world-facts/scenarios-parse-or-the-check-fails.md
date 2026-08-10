@@ -20,9 +20,9 @@ check, an end-to-end run, whatever decides the behavior — but its shape is not
 because the shape is what a later `archi link` anchors to running code. That link is the
 one edge from spec to code a run decides instead of a person, and it exists only while a
 scenario parses and carries a name — `the-scenario-is-the-address-not-the-step` holds the
-addressing. What the grammar accepts is the whole language
-and is owned by `the-grammar-takes-the-whole-language`; this claim owns the blocking
-and the location of the failure.
+addressing. What the grammar accepts is a named subset,
+owned by `the-grammar-is-a-named-subset`; this claim owns the blocking and the location
+of the failure.
 
 ## Satisfy
 
