@@ -1,7 +1,8 @@
 //! Code-links: spec ↔ code traceability (`archi/requirements/code-link/`).
 //!
-//! A link ties a **`SpecRef`** — a node path or a typed edge, at a version
-//! slot — to an **anchor** in the code tree: a file, optionally a symbol.
+//! A link ties a **`SpecRef`** — a node path or a typed edge at a version
+//! slot, or a scenario of a world fact — to an **anchor** in the code tree:
+//! a file, optionally a symbol.
 //! It carries two layers with opposite mutability: the immutable **birth
 //! record** (the spans that realized the spec element, content-pinned) and
 //! the **projection** (where that code lives now — anchor plus the
@@ -103,12 +104,15 @@ impl fmt::Display for Origin {
     }
 }
 
-/// A spec element reference: a node path (`AuthService.Storage`) or a typed
+/// A spec element reference: a node path (`AuthService.Storage`), a typed
 /// edge in its canonical surface form (`A.p link B.q`), optionally pinned
-/// to a version slot (`@v0003`; absent = Working, the live tree).
+/// to a version slot (`@v0003`; absent = Working, the live tree) — or a
+/// scenario of a world fact, `<fact-slug>#<scenario name>`
+/// (`archi/requirements/world-facts/the-scenario-is-the-address-not-the-step.md`).
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct SpecRef {
-    /// The element: a dot path, or canonical edge text (contains spaces).
+    /// The element: a dot path, canonical edge text (contains spaces), or a
+    /// fact slug and a scenario name joined by `#`.
     #[serde(rename = "ref")]
     pub path: String,
     /// Pinned version slot; `None` is Working.
@@ -117,12 +121,25 @@ pub struct SpecRef {
 }
 
 impl SpecRef {
-    /// Parse `<element>[@vNNNN]`. Names never contain `@`, so the split is
-    /// unambiguous.
+    /// Parse `<element>[@vNNNN]`, or the world form `<fact-slug>#<scenario
+    /// name>`. Names never contain `@`, so the slot split is unambiguous;
+    /// a `#` decides the world form before it, because a scenario name is
+    /// prose that may hold anything and is taken verbatim — a fact stands in
+    /// one slot, what the tree holds now.
     pub fn parse(text: &str) -> Result<SpecRef, String> {
         let text = text.trim();
         if text.is_empty() {
             return Err("the spec ref is empty".into());
+        }
+        if let Some((slug, name)) = text.split_once('#') {
+            let (slug, name) = (slug.trim(), normalize_ref(name));
+            if slug.is_empty() || name.is_empty() {
+                return Err(format!("`{text}` is not `<fact-slug>#<scenario name>`"));
+            }
+            return Ok(SpecRef {
+                path: format!("{slug}#{name}"),
+                version: None,
+            });
         }
         match text.rsplit_once('@') {
             None => Ok(SpecRef {
@@ -139,6 +156,12 @@ impl SpecRef {
                 })
             }
         }
+    }
+
+    /// The world form's parts — the fact's slug and the scenario name inside
+    /// it — or `None` for an element ref: element paths hold no `#`.
+    pub fn scenario(&self) -> Option<(&str, &str)> {
+        self.path.split_once('#')
     }
 }
 
@@ -322,6 +345,11 @@ enum Event {
         at: String,
         anchor: Anchor,
         pins: Pins,
+        /// The spec side, when the repin moved it onto a renamed scenario.
+        /// Absent in an anchor-only repin — and in every event written
+        /// before the world form, which replays unchanged.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        spec: Option<SpecRef>,
     },
     Retire {
         id: String,
@@ -447,11 +475,18 @@ fn fold(events: Vec<Event>) -> Result<Folded, String> {
                 None => return Err(corrupt(&id, "confirm")),
             },
             Event::Repin {
-                id, anchor, pins, ..
+                id,
+                anchor,
+                pins,
+                spec,
+                ..
             } => match live.iter_mut().find(|l| l.id == id) {
                 Some(l) => {
                     l.anchor = anchor;
                     l.pins = pins;
+                    if let Some(s) = spec {
+                        l.spec = s;
+                    }
                 }
                 None if retired.iter().any(|l| l.id == id) => {
                     absorbed.push(format!("`repin` on retired `{id}` — absorbed"));
@@ -582,6 +617,95 @@ impl<'a> Slots<'a> {
 /// (`archi/requirements/element-addressing/satisfaction-names-the-interface.md`).
 pub(crate) fn resolves_in(model: &Model, spec: &SpecRef) -> bool {
     model.resolve_element(&spec.path).is_some()
+}
+
+/// Whether a ref resolves against what stands now: a world ref against the
+/// facts in the tree, every other ref against the live model. A fact is prose
+/// a person edits and no version render holds a copy of it, so the world form
+/// knows one slot — this one.
+fn resolves_now(root: &Path, model: &Model, spec: &SpecRef) -> Result<bool, String> {
+    match spec.scenario() {
+        Some((slug, name)) => resolves_scenario(root, slug, name),
+        None => Ok(resolves_in(model, spec)),
+    }
+}
+
+/// Whether a fact holds exactly one scenario of that name. Two scenarios
+/// sharing one name inside one fact is a located error, because the name is
+/// the address and an ambiguous address names nothing
+/// (`archi/requirements/world-facts/the-scenario-is-the-address-not-the-step.md`).
+fn resolves_scenario(root: &Path, slug: &str, name: &str) -> Result<bool, String> {
+    let Some(scenarios) = fact_scenarios(root, slug) else {
+        return Ok(false);
+    };
+    let lines: Vec<usize> = scenarios
+        .iter()
+        .filter(|(n, _)| n == name)
+        .map(|(_, line)| *line)
+        .collect();
+    match lines.as_slice() {
+        [] => Ok(false),
+        [_] => Ok(true),
+        [first, second, ..] => Err(format!(
+            "{}:{second}: two scenarios are named `{name}` — the scenario name is the address, \
+             and one fact holds it once (the first is at line {first})",
+            fact_file(slug)
+        )),
+    }
+}
+
+/// Why a world ref resolved to nothing: the fact, or the name inside it.
+fn scenario_refusal(root: &Path, slug: &str, path: &str) -> String {
+    match fact_scenarios(root, slug) {
+        None => format!(
+            "`{slug}` names no world fact — `{}` is not in the tree (E_MODEL_REF)",
+            fact_file(slug)
+        ),
+        Some(_) => format!(
+            "`{path}` names no scenario of `{}` (E_MODEL_REF)",
+            fact_file(slug)
+        ),
+    }
+}
+
+/// A fact's project-relative file.
+fn fact_file(slug: &str) -> String {
+    format!("archi/world/{slug}.md")
+}
+
+/// The scenario names one world fact holds, each with the 1-based file line
+/// it sits on; `None` when the tree holds no such fact. The record is read
+/// through the docs pass — the same reader `check` runs — so a link and a
+/// check can never disagree about what a fact holds.
+fn fact_scenarios(root: &Path, slug: &str) -> Option<Vec<(String, usize)>> {
+    let file = fact_file(slug);
+    let text = fs::read_to_string(root.join(&file)).ok()?;
+    // A record the reader cannot parse holds no addressable scenario; its
+    // shape is `archi check`'s to report, never a link's.
+    Some(
+        docs::md::parse(&text)
+            .ok()
+            .and_then(|doc| docs::world::parse(&doc, &file, slug, root, &mut Vec::new()).scenarios)
+            .map(|block| scenario_names(&block))
+            .unwrap_or_default(),
+    )
+}
+
+/// The `Scenario:` lines of a `Scenarios` block and the names on them. The
+/// smallest reader an address needs: the grammar
+/// (`archi/requirements/world-facts/the-grammar-is-a-named-subset.md`) parses
+/// the block whole, and replaces this reader with its names.
+fn scenario_names(block: &docs::world::Block) -> Vec<(String, usize)> {
+    block
+        .text
+        .lines()
+        .enumerate()
+        .filter_map(|(i, line)| {
+            let name = line.trim().strip_prefix("Scenario:")?;
+            Some((normalize_ref(name), block.line + i))
+        })
+        .filter(|(name, _)| !name.is_empty())
+        .collect()
 }
 
 pub(crate) fn normalize_ref(text: &str) -> String {
@@ -804,15 +928,17 @@ pub fn add(
 ) -> Result<Link, String> {
     let spec = SpecRef::parse(spec_text)?;
     let resolves = match &spec.version {
-        None => resolves_in(model, &spec),
+        None => resolves_now(root, model, &spec)?,
         Some(_) => Slots::new(root).resolves_pinned(&spec)?,
     };
     if !resolves {
-        let slot = spec.version.as_deref().unwrap_or("the live model");
-        return Err(format!(
-            "`{}` names no element of {slot} (E_MODEL_REF)",
-            spec.path
-        ));
+        return Err(match spec.scenario() {
+            Some((slug, _)) => scenario_refusal(root, slug, &spec.path),
+            None => {
+                let slot = spec.version.as_deref().unwrap_or("the live model");
+                format!("`{}` names no element of {slot} (E_MODEL_REF)", spec.path)
+            }
+        });
     }
     let anchor = Anchor::parse(code_text)?;
     let roots = Roots::resolve(root)?;
@@ -935,11 +1061,49 @@ pub fn repin(root: &Path, id: &str, to: Option<&str>) -> Result<Link, String> {
             at: now(),
             anchor: anchor.clone(),
             pins: resolved.pins.clone(),
+            spec: None,
         }],
     )?;
     let mut repinned = link.clone();
     repinned.anchor = anchor;
     repinned.pins = resolved.pins;
+    Ok(repinned)
+}
+
+/// `archi link repin --spec`: move the link onto a renamed scenario. The
+/// projection is untouched — the name moved, the code did not — and so is
+/// the birth record. The spec side moves for this one reason: an element
+/// rename is located by the version chain instead, so this repair needs no
+/// model to resolve its target
+/// (`archi/requirements/world-facts/the-scenario-is-the-address-not-the-step.md`).
+pub fn repin_spec(root: &Path, id: &str, spec_text: &str) -> Result<Link, String> {
+    let folded = load(root)?;
+    let link = folded
+        .get(id)
+        .ok_or_else(|| format!("no live link `{id}`"))?;
+    let target = SpecRef::parse(spec_text)?;
+    let Some((slug, name)) = target.scenario() else {
+        return Err(format!(
+            "`{}` is not `<fact-slug>#<scenario name>` — `repin --spec` moves a link onto a \
+             renamed scenario; an element rename is located by the version chain",
+            target.path
+        ));
+    };
+    if !resolves_scenario(root, slug, name)? {
+        return Err(scenario_refusal(root, slug, &target.path));
+    }
+    append(
+        root,
+        &[Event::Repin {
+            id: id.to_string(),
+            at: now(),
+            anchor: link.anchor.clone(),
+            pins: link.pins.clone(),
+            spec: Some(target.clone()),
+        }],
+    )?;
+    let mut repinned = link.clone();
+    repinned.spec = target;
     Ok(repinned)
 }
 
@@ -1141,7 +1305,7 @@ fn check_link(
     // Spec side. A pinned ref resolves by construction — the archive is
     // sealed — so a pinned link reports Working drift as a note, not a
     // state; a Working-slot ref that stopped resolving is SpecDrifted.
-    let at_working = resolves_in(model, &link.spec);
+    let at_working = resolves_now(root, model, &link.spec)?;
     if link.spec.version.is_some() && !slots.resolves_pinned(&link.spec)? {
         let state = State::SpecDrifted;
         return Ok(Checked {
@@ -1159,11 +1323,20 @@ fn check_link(
         let state = State::SpecDrifted;
         return Ok(Checked {
             failing: link.standing == Standing::Asserted,
-            note: Some(
-                "the spec element is gone from the live model; the version chain locates the \
-                 rename or removal"
+            // A renamed scenario has no version chain to locate it — the
+            // repair is naming the new name.
+            note: Some(match link.spec.scenario() {
+                Some((slug, _)) => format!(
+                    "`{}` names no scenario of `{}`; `link repin {} --spec \
+                     <fact-slug>#<scenario name>` moves the link onto the new name",
+                    link.spec.path,
+                    fact_file(slug),
+                    link.id
+                ),
+                None => "the spec element is gone from the live model; the version chain locates \
+                         the rename or removal"
                     .to_string(),
-            ),
+            }),
             link,
             state,
         });
@@ -2048,6 +2221,43 @@ mod tests {
     const AUTH_RS: &str = "pub struct Vault {\n    salted: Vec<u8>,\n}\n\n\
                            impl Vault {\n    pub fn persist(&mut self, hash: &[u8]) {\n        self.salted.extend(hash);\n    }\n}\n";
 
+    /// One world fact, whole: the record the docs pass reads and the
+    /// `Scenarios` block a ref addresses into.
+    const FACT: &str = "\
+---
+covers: []
+sources: []
+uses: []
+---
+
+# Users open the app on a train
+
+The carriage drops the network for minutes at a time, so a call that must reach
+the server fails for a reason the user cannot fix.
+
+## What kills this
+
+Trackside coverage that never drops.
+
+## Scenarios
+
+Feature: Offline open
+  Scenario: the app opens with no network
+    Given the device has no network
+    When the user opens the app
+    Then the last synced view appears
+";
+
+    const FACT_SLUG: &str = "users-open-the-app-on-a-train";
+    const SCENARIO: &str = "the app opens with no network";
+
+    /// Write the fact into the tree — the live file the resolution reads.
+    fn write_fact(root: &Path, text: &str) {
+        let dir = root.join("archi").join("world");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(format!("{FACT_SLUG}.md")), text).unwrap();
+    }
+
     fn model_of(root: &Path) -> Workspace {
         modeling_lang::source::compile_project(root)
             .unwrap_or_else(|f| panic!("test model failed to compile:\n{}", f.render()))
@@ -2702,6 +2912,152 @@ mod tests {
         for bad in ["//src/api.rs", "backend//", "backend//src/api.rs#"] {
             assert!(Anchor::parse(bad).is_err(), "`{bad}` must refuse");
         }
+    }
+
+    #[test]
+    fn a_scenario_ref_resolves_and_its_steps_never_move_it() {
+        let root = temp_project();
+        let ws = model_of(&root);
+        write_fact(&root, FACT);
+
+        // The world form of a spec ref: a fact's slug, then a scenario name
+        // inside it — read out of the tree the docs pass reads, never out of
+        // a pinned render.
+        let l = add(
+            &root,
+            ws.model(),
+            &format!("{FACT_SLUG}#{SCENARIO}"),
+            "code/auth.rs#Vault::persist",
+            LinkKind::Literal,
+        )
+        .expect("a scenario the fact holds resolves");
+        assert_eq!(l.spec.path, format!("{FACT_SLUG}#{SCENARIO}"));
+        assert_eq!(l.spec.version, None, "a fact stands in one slot: now");
+        assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
+
+        // The step text was never the reference: rewording one moves nothing.
+        write_fact(
+            &root,
+            &FACT.replace(
+                "Then the last synced view appears",
+                "Then the view synced last is on screen",
+            ),
+        );
+        assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_renamed_scenario_unresolves_and_repin_moves_the_link() {
+        let root = temp_project();
+        let ws = model_of(&root);
+        write_fact(&root, FACT);
+        let l = add(
+            &root,
+            ws.model(),
+            &format!("{FACT_SLUG}#{SCENARIO}"),
+            "code/auth.rs#Vault::persist",
+            LinkKind::Literal,
+        )
+        .unwrap();
+
+        // The name is the address: renaming the scenario unresolves the link,
+        // and the note names the repair.
+        let renamed = "the app opens off the network";
+        write_fact(
+            &root,
+            &FACT.replace(
+                &format!("Scenario: {SCENARIO}"),
+                &format!("Scenario: {renamed}"),
+            ),
+        );
+        let report = verify(&root, ws.model(), &VerifyOptions::default()).unwrap();
+        let checked = report.checked.iter().find(|c| c.link.id == l.id).unwrap();
+        assert_eq!(checked.state, State::SpecDrifted);
+        assert!(checked.failing);
+        assert!(
+            checked.note.as_deref().is_some_and(|n| n.contains("repin")),
+            "{:?}",
+            checked.note
+        );
+
+        // `repin --spec` moves the link onto the new name; birth and
+        // projection stand — the name moved, the code did not.
+        let before = ls(&root, None, false).unwrap()[0].clone();
+        let moved = repin_spec(&root, &l.id, &format!("{FACT_SLUG}#{renamed}")).unwrap();
+        assert_eq!(moved.spec.path, format!("{FACT_SLUG}#{renamed}"));
+        assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
+        let after = ls(&root, None, false).unwrap()[0].clone();
+        assert_eq!(after.birth, before.birth);
+        assert_eq!(after.pins, before.pins);
+        assert_eq!(after.anchor, before.anchor);
+
+        // A name the fact does not hold refuses here as it refuses at add,
+        // and an element path is not what this move repairs.
+        let err = repin_spec(&root, &l.id, &format!("{FACT_SLUG}#no such walk")).unwrap_err();
+        assert!(err.contains("E_MODEL_REF"), "{err}");
+        let err = repin_spec(&root, &l.id, "Vault").unwrap_err();
+        assert!(err.contains("<fact-slug>#<scenario name>"), "{err}");
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn an_ambiguous_scenario_is_located_and_an_unheld_one_refuses() {
+        let root = temp_project();
+        let ws = model_of(&root);
+        write_fact(&root, FACT);
+
+        // A fact no file holds, and a name the fact does not hold: both
+        // refuse where every other unresolvable ref refuses.
+        let err = add(
+            &root,
+            ws.model(),
+            &format!("no-such-fact#{SCENARIO}"),
+            "code/auth.rs",
+            LinkKind::Indirect,
+        )
+        .unwrap_err();
+        assert!(err.contains("no world fact") && err.contains("E_MODEL_REF"), "{err}");
+        let err = add(
+            &root,
+            ws.model(),
+            &format!("{FACT_SLUG}#the train stops"),
+            "code/auth.rs",
+            LinkKind::Indirect,
+        )
+        .unwrap_err();
+        assert!(err.contains("E_MODEL_REF"), "{err}");
+
+        // Two scenarios of one name inside one fact: the address is
+        // ambiguous, and the error locates the second one.
+        let twin = format!(
+            "{FACT}\n  Scenario: {SCENARIO}\n    Given the device has no network\n    \
+             When the user opens the app\n    Then the last synced view appears\n"
+        );
+        write_fact(&root, &twin);
+        let err = add(
+            &root,
+            ws.model(),
+            &format!("{FACT_SLUG}#{SCENARIO}"),
+            "code/auth.rs",
+            LinkKind::Indirect,
+        )
+        .unwrap_err();
+        let second = twin
+            .lines()
+            .enumerate()
+            .filter(|(_, l)| l.trim() == format!("Scenario: {SCENARIO}"))
+            .map(|(i, _)| i + 1)
+            .nth(1)
+            .expect("two lines name the scenario");
+        assert!(
+            err.contains(&format!("archi/world/{FACT_SLUG}.md:{second}")),
+            "{err}"
+        );
+
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

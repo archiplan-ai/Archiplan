@@ -14,6 +14,7 @@
 //! *pinned* version of their session, reconstructed from the archive;
 //! `satisfied-by` and decision links validate against the live model.
 
+pub(crate) mod gherkin;
 pub(crate) mod md;
 pub mod mint;
 pub(crate) mod schema;

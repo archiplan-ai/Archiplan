@@ -1,6 +1,8 @@
 //! `archi search`: ranked lexical retrieval across every KB object —
 //! model elements with their identity prose, intents, requirements,
-//! stressors, sessions and decisions (`archi/requirements/agent-retrieval/`).
+//! stressors, sessions, decisions and the world facts
+//! (`archi/requirements/agent-retrieval/`,
+//! `archi/requirements/world-facts/search-reaches-the-new-wing.md`).
 //!
 //! The scan keeps no persisted derivative of the corpus: every query walks
 //! the live doc tree and the compiled model it was handed, so a text edit
@@ -16,7 +18,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use modeling_lang::{Definition, Model, Statement};
 use serde::Serialize;
@@ -24,6 +26,7 @@ use serde::Serialize;
 use crate::docs;
 use crate::docs::md;
 use crate::docs::schema::{Origin, Outcome};
+use crate::docs::world;
 
 /// The object kinds a card can be. The order is the ranking tie-break.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -40,6 +43,8 @@ pub enum Kind {
     Session,
     /// A decision — the priced record of one trade.
     Decision,
+    /// A world fact — one condition outside the system.
+    World,
 }
 
 impl Kind {
@@ -52,6 +57,7 @@ impl Kind {
             Kind::Stressor => "stressor",
             Kind::Session => "session",
             Kind::Decision => "decision",
+            Kind::World => "world",
         }
     }
 
@@ -64,6 +70,7 @@ impl Kind {
             "stressor" => Kind::Stressor,
             "session" => Kind::Session,
             "decision" => Kind::Decision,
+            "world" => Kind::World,
             _ => return None,
         })
     }
@@ -122,6 +129,12 @@ pub struct Refs {
     /// Session: the closing seal, or `open`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub closed: Option<String>,
+    /// World fact: the model elements it conditions.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub covers: Vec<String>,
+    /// World fact: the facts it holds only while they hold.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub uses: Vec<String>,
 }
 
 /// Field classes and their weights: a hit in a name outweighs the same hit
@@ -280,6 +293,61 @@ fn fill_doc_text(root: &Path, card: &mut Card) -> bool {
     true
 }
 
+/// The world wing, flat by construction: one file under `archi/world/` is one
+/// fact. A tree with no wing is an empty one — the scan neither needs the
+/// directory nor makes it (the-wing-arrives-without-noise).
+fn world_files(root: &Path) -> Vec<PathBuf> {
+    let Ok(rd) = fs::read_dir(root.join("archi").join("world")) else {
+        return Vec::new();
+    };
+    let mut paths: Vec<PathBuf> = rd
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "md"))
+        .collect();
+    paths.sort();
+    paths
+}
+
+/// One world fact's card: its name, its conditioning paragraph, its killer.
+/// The `Scenarios` block stays out and so do the header's lists — a step and a
+/// covered element are addressed by `covers`, never by phrase, so the reach is
+/// real and the yield is bounded (search-reaches-the-new-wing). The lists ride
+/// the refs, where the next command starts (cards-carry-the-next-hop).
+fn world_card(root: &Path, path: &Path) -> Card {
+    let file = rel(root, path);
+    let slug = path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+    let Some(doc) = fs::read_to_string(path)
+        .ok()
+        .and_then(|text| md::parse(&text).ok())
+    else {
+        return raw_card(root, file, Kind::World, slug);
+    };
+    // The record the checker reads, so retrieval and `check` can never
+    // disagree about what a file holds; its diagnostics are `check`'s to tell.
+    let fact = world::parse(&doc, &file, &slug, root, &mut Vec::new());
+    let mut c = Card::new(Kind::World, slug, Some(file), fact.line);
+    c.push(0, doc.name_line, doc.name.clone());
+    push_block(&mut c, 1, fact.condition.as_ref());
+    push_block(&mut c, 2, fact.killer.as_ref());
+    c.refs.covers = fact.covers.map(|(v, _)| v).unwrap_or_default();
+    c.refs.uses = fact.uses.map(|(v, _)| v).unwrap_or_default();
+    c
+}
+
+/// A parsed block onto one field, line by line — a world card addresses a
+/// line the way every other card does.
+fn push_block(card: &mut Card, field: usize, block: Option<&world::Block>) {
+    let Some(b) = block else { return };
+    for (i, text) in b.text.lines().enumerate() {
+        card.push(field, b.line + i, text);
+    }
+}
+
 /// A file the schema walk dropped (unreadable, unparseable or misplaced)
 /// still matches by its raw lines: a card with no schema fields
 /// (a-dark-corpus-stays-partial).
@@ -432,6 +500,12 @@ fn corpus(root: &Path, model: Option<&Model>) -> Vec<Card> {
             c.refs.over = entries.clone();
         }
         cards.push(c);
+    }
+
+    // The world wing rides the same scan: one card per fact, out of the same
+    // reader `check` uses (search-reaches-the-new-wing).
+    for path in world_files(root) {
+        cards.push(world_card(root, &path));
     }
 
     // Whatever the schema walk dropped — unreadable, unparseable, misplaced
@@ -801,6 +875,12 @@ pub(crate) fn render_refs(r: &Refs) -> String {
     if let Some(c) = &r.closed {
         parts.push(format!("closed: {c}"));
     }
+    if !r.covers.is_empty() {
+        parts.push(format!("covers: {}", cap(&r.covers)));
+    }
+    if !r.uses.is_empty() {
+        parts.push(format!("uses: {}", cap(&r.uses)));
+    }
     parts.join(" · ")
 }
 
@@ -875,6 +955,16 @@ mod tests {
             root,
             "archi/stress/auth-hardening/limiter-bypass.md",
             "---\naffects: [RateLimiter]\noutcome: pending\n---\n\n# Limiter bypass\n\nDistributed bots stay under the per-ip threshold.\n\n## Attractor\n\nThe limiter sees no single hot key.\n\n## Resolution\n",
+        );
+    }
+
+    /// One fact of the world wing: the condition, what would kill it, and the
+    /// scenarios it dictates — whose steps the card does not hold.
+    fn world_fact(root: &Path) {
+        put(
+            root,
+            "archi/world/trains-lose-the-signal-in-tunnels.md",
+            "---\ncovers: [AuthService]\nsources: []\nuses: [the-carriage-is-metal]\n---\n\n# Trains lose the signal in tunnels\n\nThe carriage keeps no reception for minutes at a time, so a call that must reach\nthe far end fails for a reason nobody aboard can fix.\n\n## What kills this\n\nTrackside repeaters that never drop.\n\n## Scenarios\n\nFeature: Offline open\n  Scenario: the rider opens the app underground\n    Given the device holds no dugong\n    When the rider opens the app\n    Then the last synced view appears\n",
         );
     }
 
@@ -1124,6 +1214,88 @@ mod tests {
         let r = run(&root, "okapi", &[], 10);
         assert_eq!(slugs_of(&r), ["broken"]);
         assert_eq!(r.hits[0].kind, "decision");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn search_reaches_the_new_wing() {
+        let root = temp_project();
+        full_kb(&root);
+        world_fact(&root);
+
+        // A phrase from the fact's name returns the fact, carrying the slug
+        // and the `file:line` every other card carries.
+        let r = run(&root, "tunnels", &[], 10);
+        let hit = r
+            .hits
+            .iter()
+            .find(|h| h.kind == "world")
+            .expect("the world card");
+        assert_eq!(hit.slug, "trains-lose-the-signal-in-tunnels");
+        assert_eq!(
+            hit.file.as_deref(),
+            Some("archi/world/trains-lose-the-signal-in-tunnels.md")
+        );
+        assert!(hit.line.is_some());
+
+        // The narrowing flag holds the new kind like any other: the phrase
+        // spans kinds unfiltered and returns world facts alone once narrowed.
+        assert!(matches!(Kind::parse("world"), Some(Kind::World)));
+        let spanning = run(&root, "trackside limiting", &[], 20);
+        assert!(kinds_of(&spanning).len() > 1, "{:?}", slugs_of(&spanning));
+        let narrowed = run(&root, "trackside limiting", &[Kind::World], 20);
+        assert_eq!(kinds_of(&narrowed), ["world"].into());
+
+        // The envelope carries the kind by its label.
+        let json = serde_json::to_string(&run(&root, "tunnels", &[Kind::World], 10)).unwrap();
+        assert!(json.contains("\"kind\":\"world\""), "{json}");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn the_card_is_the_fact_and_not_its_scenarios() {
+        let root = temp_project();
+        full_kb(&root);
+        world_fact(&root);
+
+        // A phrase living only inside a scenario step reaches nothing: a step
+        // is addressed by `covers`, never by phrase.
+        assert!(run(&root, "dugong", &[], 10).hits.is_empty());
+        // The header is no body either — a fact is found by the words of the
+        // fact, and the way from an element to what conditions it is the
+        // `covers` traversal.
+        let r = run(&root, "AuthService", &[], 10);
+        assert!(
+            !slugs_of(&r).contains(&"trains-lose-the-signal-in-tunnels"),
+            "{:?}",
+            slugs_of(&r)
+        );
+        // The next hop rides the card all the same.
+        let hit = &run(&root, "tunnels", &[Kind::World], 10).hits[0];
+        assert_eq!(hit.refs.covers, ["AuthService"]);
+        assert_eq!(hit.refs.uses, ["the-carriage-is-metal"]);
+
+        // An unparseable fact degrades to raw text, kind intact.
+        put(
+            &root,
+            "archi/world/broken.md",
+            "---\nnever closed\n\n# Broken\n\nA numbat hides in the raw text.\n",
+        );
+        let r = run(&root, "numbat", &[], 10);
+        assert_eq!(slugs_of(&r), ["broken"]);
+        assert_eq!(r.hits[0].kind, "world");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_tree_with_no_wing_answers_as_it_did() {
+        let root = temp_project();
+        full_kb(&root);
+        let r = run(&root, "rate limiting", &[], 20);
+        assert!(!kinds_of(&r).contains("world"));
+        assert!(run(&root, "trackside", &[Kind::World], 10).hits.is_empty());
+        // The scan neither needs the directory nor makes it.
+        assert!(!root.join("archi/world").exists());
         fs::remove_dir_all(&root).unwrap();
     }
 
