@@ -206,6 +206,7 @@ DocMint.emit persist(RequirementDoc) SourceTree.store in harden_flow
 DocMint.emit persist(StressDoc) SourceTree.store in harden_flow
 DocMint.emit persist(WorldDoc) SourceTree.store in harden_flow
 DocMint.read_links recall(LinkEvent) Links.serve_links in harden_flow
+DocMint.read_tree recall(PlanFile) SourceTree.serve in harden_flow
 
 // search: one scan over the docs and the model it was handed, ranked cards out
 Cli.drive consult(->ModelGraph, <-SearchReport) Search.find in read_flow
