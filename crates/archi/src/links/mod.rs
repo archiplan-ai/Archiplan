@@ -707,8 +707,9 @@ fn fact_scenarios(root: &Path, slug: &str) -> Option<Vec<(String, usize)>> {
 
 /// The `### ` headings of a `Scenarios` block and the names on them. The
 /// smallest reader an address needs: the heading text is the scenario's name,
-/// and the name is the address. `### ` is the whole opener, exactly as the
-/// grammar reads it, so a deeper heading opens no scenario here either.
+/// and the name is the address. What opens a heading is the grammar's own rule
+/// ([`docs::gherkin::heading`]), read from there and not written again, so a
+/// deeper heading opens no scenario here either.
 ///
 /// [`docs::gherkin::parse`] reads the same block whole, and it does not
 /// replace this reader: the grammar reports form, and a link resolves an
@@ -730,7 +731,7 @@ fn scenario_names(block: &docs::world::Block) -> Vec<(String, usize)> {
         .lines()
         .enumerate()
         .filter_map(|(i, line)| {
-            let name = line.trim().strip_prefix("###")?.strip_prefix(' ')?;
+            let name = docs::gherkin::heading(line)?;
             Some((normalize_ref(name), block.line + i))
         })
         .filter(|(name, _)| !name.is_empty())

@@ -229,7 +229,12 @@ fn replaced(line: &str) -> Option<&'static str> {
 
 /// The name a level-three heading carries; `None` when the line is no such
 /// heading. A deeper heading is not one: `### ` is the whole opener.
-fn heading(line: &str) -> Option<&str> {
+///
+/// It is the one opener rule. A link resolves an address over the same block
+/// ([`crate::links`]) and reads its headings through this function, so the two
+/// readers can never part on what opens a scenario, however far their answers
+/// stand apart after that.
+pub(crate) fn heading(line: &str) -> Option<&str> {
     let rest = line.trim().strip_prefix("###")?;
     let name = rest
         .strip_prefix(' ')

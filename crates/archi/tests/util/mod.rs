@@ -126,7 +126,8 @@ pub struct Fact<'a> {
     pub condition: &'a str,
     /// What would make the fact false, under `## What kills this`.
     pub killer: &'a str,
-    /// The `Scenarios` block, its `Feature` line and all.
+    /// The `Scenarios` block: a `### ` heading per scenario, and its step
+    /// lines under it.
     pub scenarios: &'a str,
 }
 
