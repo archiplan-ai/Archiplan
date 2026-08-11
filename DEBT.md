@@ -87,6 +87,29 @@ not attributed to this unit: the setup predates it.
 What a round would have to decide: nothing yet. Somebody has to see it a second time and
 capture the stderr before there is anything to press.
 
+## An anchored test body cannot be tidied without moving the anchor
+
+`crates/archi/src/docs/world_check.rs`, lines 1398, 1423, 1448, 1919, 1961 and 2002. The
+same expression stands inline six times:
+
+    .map(|d| (d.code, d.file.as_str(), d.line)).collect::<Vec<_>>()
+
+A named helper for it now exists at line 1785, written by a later wave and used by that
+wave's two tests alone. Folding the other six is the obvious tidy, and it compiles. It was
+not done, because each of the six sits **inside** a test body that a code-link anchors, and
+the duplication is inline rather than callable — so the fold *is* a body move. A single-site
+probe added seven `body moved; the watched interface holds` rows to `link verify`. The house
+rule set in commit `997b120` is that a fold keeps anchored bodies still, using thin wrappers
+where it must; there is no wrapper shape available here.
+
+So the rule and the tidy are in direct conflict, and the rule wins by default every time,
+which means this duplication is not going to be removed by any ordinary sweep. That is the
+part worth pressing: whether an anchored body is genuinely frozen, or whether a repin is the
+cheap answer and the sweeps have been avoiding it for no reason.
+
+What a round would have to decide: what a code-link is anchoring to — a body that must not
+move, or an interface that a repin is allowed to follow.
+
 ---
 
 Related: `archi/world/notes/the-words-in-the-code-are-not-the-words-in-the-design.md` — why
