@@ -1,0 +1,73 @@
+# Debt
+
+Weaknesses seen during work and not yet pressed. Each entry names where it lives, what it
+costs, and what a stress round would have to decide. Nothing here is a decision. An entry
+leaves this file when a stressor carries it, and the stressor's resolution says so.
+
+Seen 2026-08-11, during the unit `the-workaround-is-the-record`.
+
+---
+
+## One lexical test decides both what is proposed and what is demanded
+
+`crates/archi/src/links/capture.rs:426-434`. For every changed file-symbol, every task that
+claims the file, and every spec ref of that task, one boolean decides two separate things:
+
+- whether a candidate link is minted, and
+- whether the ref enters `pressed`, which is what the wave gate demands coverage for.
+
+The boolean is `ref_terms(spec_ref)` and `item_terms(file, content)` sharing at least one
+word. `crates/archi/src/plans/mod.rs:1549` reads `pressed` for the gate, and the test at
+`crates/archi/src/plans/mod.rs:2644` states the consequence as intended behavior:
+`unpressed refs never gap`.
+
+The two directions do not cost the same.
+
+- A word matches by accident. A wrong candidate is minted. The reviewer sees it at the gate
+  and retires it; anything missed decays to confidence 0.00 and the audit asks for it again.
+  Loud, and guarded twice.
+- A word does not match although the code does realize the edge. No candidate is minted,
+  **and the ref never enters the gate**. The wave closes reporting complete coverage,
+  having never asked. Silent, and guarded by nothing.
+
+Measured on this unit: nine candidates offered for the two refs the gate held, of which
+seven were anchored at a file that realizes neither. 48 of the 229 decayed rows now standing
+in the journal are anchored at one file this effort wrote. That is the loud direction, and
+its size says how coarse the test is.
+
+What a round would have to decide: whether one signal can carry both jobs, or whether
+proposing a candidate and demanding coverage need separate tests with separate thresholds.
+
+## The no-signal list is a count, and the count is the whole surface
+
+`crates/archi/src/links/capture.rs:609-611`. Pairs with no shared word are reported as
+`suppressed <n> no-signal pair(s) — whole under --json`. This is the only place a
+false negative can be seen, and this unit's wave printed `128`. A number that large is read
+as noise and not opened, so the one surface over the silent failure is closed by its own
+size.
+
+What a round would have to decide: whether the list needs narrowing to be worth printing —
+by ref, by task, by whether the ref is otherwise uncovered — or whether the gate should
+speak for itself instead of relying on a reader.
+
+## Refusals that do not name the continuation
+
+`refusals-name-the-continuation` is a standing requirement. Two refusals break it.
+
+- `archi link confirm l2748` answers ``no live link `l2748` `` while the row stands and is
+  listed. The address needs the digest: `l2748-c8acee`. The refusal does not say a suffix is
+  missing and does not show the shape of a correct address.
+- `archi plan task req remove` does not exist as a verb, and a refusal elsewhere names it as
+  the way forward. Seen earlier in this effort; the way around it was to hand-edit `owns:`.
+
+Both leave the reader without the next command, which is the whole of what that requirement
+asks for.
+
+What a round would have to decide: nothing about design — these are defects against a
+requirement already standing. They need a task, not a verdict.
+
+---
+
+Related: `archi/world/notes/the-words-in-the-code-are-not-the-words-in-the-design.md` — why
+the silent direction is expected to be worse on any project that is not a tool modeling
+itself.
