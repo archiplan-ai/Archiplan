@@ -1008,13 +1008,22 @@ fn the_close_gates_on_anchored_scenarios() {
     fs::remove_dir_all(&root).unwrap();
 }
 
-/// A plan minted after the wing cannot close on nothing: the empty block
-/// refuses the final latch and names the reason, and one covering fact
-/// closes the same plan
+/// On a tree that holds a wing, a plan minted after it cannot close on
+/// nothing: the empty block refuses the final latch and names the reason, and
+/// one fact covering a node the plan holds a task for closes the same plan
 /// (`archi/requirements/world-facts/a-plan-s-own-scenarios-block-retires.md`).
 #[test]
-fn a_post_wing_plan_refuses_an_empty_block_and_closes_on_a_covering_fact() {
+fn a_post_wing_plan_on_a_tree_with_a_wing_refuses_until_a_fact_covers_a_node() {
     let root = temp_project();
+    // The tree opted into the wing — one fact stands, over a node this plan
+    // holds no task for. There is a wing to be behind on.
+    put_fact(
+        &root,
+        "tunnels-run-long",
+        "Tunnels run long",
+        "Auth",
+        &["the tunnel ends"],
+    );
     ok(&root, &["version", "save", "-m", "first"]);
     ok(&root, &["plan", "use", "mvp"]);
 
@@ -1070,6 +1079,38 @@ fn a_post_wing_plan_refuses_an_empty_block_and_closes_on_a_covering_fact() {
     );
     let (_, out, _) = run(&root, &["check"]);
     assert!(!out.contains("scenarios.md"), "{out}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// A tree that holds no world fact at all has not opted into the wing, and a
+/// plan on it is not behind on one: the refusal needs a wing to refuse
+/// against, so the empty block closes exactly as a pre-wing plan's does
+/// (`archi/requirements/world-facts/a-plan-s-own-scenarios-block-retires.md`,
+/// `archi/requirements/world-facts/the-wing-arrives-without-noise.md`).
+#[test]
+fn a_post_wing_plan_on_a_tree_with_no_wing_closes_without_a_refusal() {
+    let root = temp_project();
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+
+    // The plan carries the mark of the wing; the tree carries no wing —
+    // `archi/world/` was never created, and no verb creates it here.
+    assert_eq!(state_json(&root, "mvp")["minted_after_the_wing"], true);
+    assert!(!root.join("archi/world").exists());
+
+    ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
+    curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
+    ok(&root, &["plan", "start"]);
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("the cleanup wave"), "{out}");
+
+    // Nothing to be behind on: the close asks the wing nothing and latches.
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("DONE"), "{out}");
+    assert!(!out.contains("no world fact covers any node"), "{out}");
+    assert_eq!(state_json(&root, "mvp")["state"], "completed");
+    assert!(!root.join("archi/world").exists());
 
     fs::remove_dir_all(&root).unwrap();
 }
