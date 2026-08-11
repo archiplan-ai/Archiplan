@@ -44,6 +44,150 @@ fn cleanup(fixture: &Path) {
     let _ = fs::remove_dir_all(fixture);
 }
 
+/// The slug of the requirement the fixtures address.
+const REQ: &str = "a-login-is-refused-without-a-name";
+
+/// One requirement where the discovery walks for it: the intent folder, its
+/// anchor, and the requirement beside it.
+fn write_requirement(root: &Path, slug: &str) {
+    let dir = root.join("archi/requirements/access");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("access.md"), "# Access\n\nWho gets in, and on what.\n").unwrap();
+    fs::write(
+        dir.join(format!("{slug}.md")),
+        "---\nkind: functional\nsatisfied-by: [Auth]\ndeferred:\n---\n\n\
+         # A login is refused without a name\n\nAn empty name is refused.\n",
+    )
+    .unwrap();
+}
+
+/// The producing-rule column of a rendered row.
+fn rule_word(line: &str) -> Option<&str> {
+    line.split_whitespace().nth(4)
+}
+
+/// A writer asks what answers a written requirement and the record answers
+/// with an address of its own — the requirement, not the element that stands
+/// near it — and answers from the rows a person stood behind
+/// (`archi/requirements/code-link/a-requirement-is-addressable-in-the-journal.md`,
+/// `archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`).
+#[test]
+fn a_requirement_is_addressed_and_the_reverse_view_answers_from_it() {
+    let (fixture, root) = bound("requirement");
+    write_requirement(&root, REQ);
+    let spec = format!("req:{REQ}");
+
+    ok(&root, &[
+        "link", "add", &spec, "code/auth.rs#login", "--kind", "indirect",
+    ]);
+    let out = ok(&root, &["link", "ls", "--spec", &spec]);
+    assert!(out.contains(&format!("{spec} ← code/auth.rs#login")), "{out}");
+    assert_eq!(out.lines().count(), 1, "{out}");
+    assert_eq!(rule_word(out.lines().next().unwrap()), Some("authored"), "{out}");
+
+    // A `req:` naming no requirement is refused, and the refusal names the
+    // slug rather than the tree it searched.
+    let (success, _, err) = util::run(&root, &[
+        "link", "add", "req:no-such-claim", "code/auth.rs#login", "--kind", "indirect",
+    ]);
+    assert!(!success, "a slug nothing holds is refused");
+    assert!(err.contains("no-such-claim"), "{err}");
+
+    // A requirement carries no version pin.
+    let (success, _, err) = util::run(&root, &[
+        "link", "add", &format!("{spec}@v0001"), "code/auth.rs#login", "--kind", "indirect",
+    ]);
+    assert!(!success, "a requirement takes no slot");
+    assert!(err.contains("carries no version pin"), "{err}");
+
+    // The audit's tally names the three rules.
+    let out = ok(&root, &["link", "audit"]);
+    let head = out.lines().next().unwrap();
+    for word in ["declared", "inferred", "authored"] {
+        assert!(head.contains(word), "{out}");
+    }
+
+    // No verb retires rows in bulk by their producing rule.
+    let (success, _, err) = util::run(&root, &["link", "rm", "--rule", "inferred", "--yes"]);
+    assert!(!success, "there is no such selector");
+    assert!(err.contains("--rule"), "{err}");
+    assert_eq!(ok(&root, &["link", "ls"]).lines().count(), 1, "nothing retired");
+
+    cleanup(&fixture);
+}
+
+/// The journal this project already carries was written before a row said
+/// which rule produced it. It loads, grades and prints as it always did, and
+/// each of those rows reads the rule its origin already recorded: what
+/// capture minted under the shared-term rule reads inferred, and what `link
+/// add` minted reads authored. No migration was run, and none is needed
+/// (`archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`).
+#[test]
+fn the_standing_journal_takes_its_rule_from_its_origin_with_no_migration() {
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("the project this crate lives in");
+    let text = fs::read_to_string(repo.join("archi/links/journal.jsonl"))
+        .expect("the standing journal");
+
+    // The rows written before the field existed: an add that names no rule.
+    // Each one is sorted by the provenance it does name.
+    let mut captured: Vec<&str> = Vec::new();
+    let mut authored: Vec<&str> = Vec::new();
+    for line in text
+        .lines()
+        .filter(|l| l.contains("\"event\":\"add\"") && !l.contains("\"rule\":"))
+    {
+        let Some(id) = line
+            .split("\"id\":\"")
+            .nth(1)
+            .and_then(|rest| rest.split('"').next())
+        else {
+            continue;
+        };
+        if line.contains("\"origin\":{\"kind\":\"captured\"") {
+            captured.push(id);
+        } else if line.contains("\"origin\":{\"kind\":\"authored\"") {
+            authored.push(id);
+        }
+    }
+    assert!(
+        captured.len() > 2000 && authored.len() > 100,
+        "the standing journal holds both kinds of row this test is about: \
+         {} captured, {} authored",
+        captured.len(),
+        authored.len()
+    );
+
+    let out = ok(&repo, &["link", "ls"]);
+    let (mut guesses, mut claims) = (0, 0);
+    for line in out.lines() {
+        let id = line.split_whitespace().next().unwrap_or_default();
+        if captured.contains(&id) {
+            assert_eq!(rule_word(line), Some("inferred"), "{line}");
+            guesses += 1;
+        } else if authored.contains(&id) {
+            assert_eq!(rule_word(line), Some("authored"), "{line}");
+            claims += 1;
+        }
+    }
+    assert!(guesses > 2000, "every standing guess printed: {guesses}");
+    assert!(claims > 100, "every standing claim printed: {claims}");
+
+    // The rows a person reviewed hardest — a link onto a scenario of a world
+    // fact, the only spec side that holds a `#` — were all minted by hand,
+    // and they stay claims.
+    let scenarios: Vec<&str> = out
+        .lines()
+        .filter(|l| l.split(" ← ").next().is_some_and(|left| left.contains('#')))
+        .collect();
+    for line in &scenarios {
+        assert_eq!(rule_word(line), Some("authored"), "{line}");
+    }
+    assert!(!scenarios.is_empty(), "the world links are in the journal");
+}
+
 /// A claim the model makes and no code answers is named — promised and
 /// unbuilt — when somebody asks what is unaccounted for; code recorded
 /// against it lifts the finding, and the claim still waiting keeps its line

@@ -108,11 +108,60 @@ impl fmt::Display for Origin {
     }
 }
 
+/// Which rule produced a row
+/// (`archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`).
+///
+/// The journal is append-only, so a rule that stops governing does not retire
+/// the rows it made: they are marked, they keep standing and they keep
+/// grading. Marking is the whole answer — a record that can be rewritten when
+/// it becomes inconvenient is not a record.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Rule {
+    /// Matched from terms the ref and the code share — the tool's guess.
+    Inferred,
+    /// Minted from a declaration a writer wrote.
+    Declared,
+    /// Minted by hand through `archi link add`.
+    Authored,
+}
+
+impl Rule {
+    /// The rule a row records when it names none — every row journaled
+    /// before the field existed. The provenance already says it: a row
+    /// `link add` minted is a claim a person made by hand, and a row capture
+    /// minted under the shared-term rule is the tool's guess. Reading it
+    /// from the origin keeps those rows exactly what they were, and no
+    /// migration rewrites append-only truth to say so.
+    fn of(origin: &Origin) -> Rule {
+        match origin {
+            Origin::Authored => Rule::Authored,
+            Origin::Captured { .. } => Rule::Inferred,
+        }
+    }
+
+    fn describe(self) -> &'static str {
+        match self {
+            Rule::Inferred => "inferred",
+            Rule::Declared => "declared",
+            Rule::Authored => "authored",
+        }
+    }
+}
+
+impl fmt::Display for Rule {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.describe())
+    }
+}
+
 /// A spec element reference: a node path (`AuthService.Storage`), a typed
 /// edge in its canonical surface form (`A.p link B.q`), optionally pinned
-/// to a version slot (`@v0003`; absent = Working, the live tree) — or a
+/// to a version slot (`@v0003`; absent = Working, the live tree) — a
 /// scenario of a world fact, `<fact-slug>#<scenario name>`
-/// (`archi/requirements/world-facts/the-scenario-is-the-address-not-the-step.md`).
+/// (`archi/requirements/world-facts/the-scenario-is-the-address-not-the-step.md`)
+/// — or a requirement, `req:<slug>`
+/// (`archi/requirements/code-link/a-requirement-is-addressable-in-the-journal.md`).
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct SpecRef {
     /// The element: a dot path, canonical edge text (contains spaces), or a
@@ -124,9 +173,18 @@ pub struct SpecRef {
     pub version: Option<String>,
 }
 
+/// The prefix that addresses a requirement. An addressing scheme that says
+/// what it is can be joined later by another that says what it is, where a
+/// bare slug could not
+/// (`archi/requirements/code-link/a-requirement-is-addressable-in-the-journal.md`).
+pub const REQ: &str = "req:";
+
 impl SpecRef {
-    /// Parse `<element>[@vNNNN]`, or the world form `<fact-slug>#<scenario
-    /// name>`. Names never contain `@`, so the slot split is unambiguous;
+    /// Parse `<element>[@vNNNN]`, the world form `<fact-slug>#<scenario
+    /// name>`, or the requirement form `req:<slug>`. The prefix is read
+    /// first, before either split: a requirement slug holds no `#` and no
+    /// `@`, so it would fall to the element branch and resolve against no
+    /// element. Names never contain `@`, so the slot split is unambiguous;
     /// a `#` decides the world form before it, because a scenario name is
     /// prose that may hold anything and is taken verbatim — a fact stands in
     /// one slot, what the tree holds now.
@@ -134,6 +192,24 @@ impl SpecRef {
         let text = text.trim();
         if text.is_empty() {
             return Err("the spec ref is empty".into());
+        }
+        if let Some(slug) = text.strip_prefix(REQ) {
+            let slug = slug.trim();
+            if slug.is_empty() {
+                return Err(format!("`{text}` names no requirement — `{REQ}<slug>` addresses one"));
+            }
+            // A requirement slug is stable across versions, by the rule that
+            // already governs plan ownership, so it takes no slot at all.
+            if slug.contains('@') {
+                return Err(format!(
+                    "`{text}`: a requirement carries no version pin — its slug is stable across \
+                     versions, as plan ownership already reads it"
+                ));
+            }
+            return Ok(SpecRef {
+                path: format!("{REQ}{}", normalize_ref(slug)),
+                version: None,
+            });
         }
         if let Some((slug, name)) = text.split_once('#') {
             let (slug, name) = (slug.trim(), normalize_ref(name));
@@ -163,9 +239,20 @@ impl SpecRef {
     }
 
     /// The world form's parts — the fact's slug and the scenario name inside
-    /// it — or `None` for an element ref: element paths hold no `#`.
+    /// it — or `None` for an element ref: element paths hold no `#`. The
+    /// requirement form answers `None` too: its prefix is read first, and
+    /// whatever a slug holds is part of the slug.
     pub fn scenario(&self) -> Option<(&str, &str)> {
+        if self.requirement().is_some() {
+            return None;
+        }
         self.path.split_once('#')
+    }
+
+    /// The requirement form's slug, or `None` for every other shape:
+    /// element paths and fact slugs carry no `req:` prefix.
+    pub fn requirement(&self) -> Option<&str> {
+        self.path.strip_prefix(REQ)
     }
 }
 
@@ -308,7 +395,13 @@ pub struct Pins {
 }
 
 /// One code-link, as journaled and as folded.
+///
+/// Reading goes through [`Row`], because one field of a row written before
+/// this shape existed is read from another: a row that names no producing
+/// rule takes it from its provenance
+/// (`archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`).
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(from = "Row")]
 pub struct Link {
     /// Readable sequence plus a content suffix, `l0042-9f3ab1`. The suffix
     /// hashes the link's content and mint moment, so two branches minting
@@ -326,6 +419,12 @@ pub struct Link {
     pub standing: Standing,
     /// Where the link came from.
     pub origin: Origin,
+    /// Which rule produced the row. Every row minted from here on says it;
+    /// a row journaled before the field existed names none, and [`Rule::of`]
+    /// reads it from the origin, so those rows keep saying exactly what they
+    /// always were and no migration runs
+    /// (`archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`).
+    pub rule: Rule,
     /// The immutable birth record.
     pub birth: Birth,
     /// The projection's hashes.
@@ -338,6 +437,48 @@ pub struct Link {
     /// the spec_ref — confidence decays. Folded from `decay` events.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub decays: Vec<String>,
+}
+
+/// A journaled row as it is read: [`Link`]'s shape, with the producing rule
+/// optional. It is the whole of the backward compatibility — a row written
+/// before the field existed names no rule, and the conversion reads one from
+/// the origin rather than defaulting every such row to one word. Nothing
+/// else in the shape moved, so every other field replays exactly as before.
+#[derive(Deserialize)]
+struct Row {
+    id: String,
+    #[serde(rename = "spec")]
+    spec: SpecRef,
+    anchor: Anchor,
+    kind: LinkKind,
+    standing: Standing,
+    origin: Origin,
+    #[serde(default)]
+    rule: Option<Rule>,
+    birth: Birth,
+    pins: Pins,
+    #[serde(default)]
+    touches: Vec<String>,
+    #[serde(default)]
+    decays: Vec<String>,
+}
+
+impl From<Row> for Link {
+    fn from(r: Row) -> Link {
+        Link {
+            rule: r.rule.unwrap_or_else(|| Rule::of(&r.origin)),
+            id: r.id,
+            spec: r.spec,
+            anchor: r.anchor,
+            kind: r.kind,
+            standing: r.standing,
+            origin: r.origin,
+            birth: r.birth,
+            pins: r.pins,
+            touches: r.touches,
+            decays: r.decays,
+        }
+    }
 }
 
 // ---- the journal -----------------------------------------------------------
@@ -586,12 +727,15 @@ fn now() -> String {
 
 // ---- spec-side resolution --------------------------------------------------
 
-/// Compiled pinned versions, opened lazily: most verifies never touch the
-/// archive.
+/// What a command's spec-side resolution reads more than once, opened
+/// lazily: the compiled pinned versions — most verifies never touch the
+/// archive — and the requirement set, one walk of the doc tree however many
+/// rows address a requirement.
 struct Slots<'a> {
     root: &'a Path,
     archive: Option<Option<Archive>>,
     compiled: BTreeMap<String, Workspace>,
+    requirements: Option<BTreeSet<String>>,
 }
 
 impl<'a> Slots<'a> {
@@ -600,7 +744,24 @@ impl<'a> Slots<'a> {
             root,
             archive: None,
             compiled: BTreeMap::new(),
+            requirements: None,
         }
+    }
+
+    /// Whether the tree holds a requirement of that slug. The set is the doc
+    /// tree's own, read through the discovery pass `plan verify` reads for
+    /// `owns:`, so a link and a plan can never disagree about what a
+    /// requirement is.
+    fn resolves_requirement(&mut self, slug: &str) -> bool {
+        self.requirements
+            .get_or_insert_with(|| {
+                docs::discover_tree(self.root)
+                    .requirements
+                    .into_iter()
+                    .map(|r| r.slug)
+                    .collect()
+            })
+            .contains(slug)
     }
 
     /// Whether the ref resolves in the model of its pinned slot.
@@ -634,14 +795,31 @@ pub(crate) fn resolves_in(model: &Model, spec: &SpecRef) -> bool {
 }
 
 /// Whether a ref resolves against what stands now: a world ref against the
-/// facts in the tree, every other ref against the live model. A fact is prose
-/// a person edits and no version render holds a copy of it, so the world form
-/// knows one slot — this one.
-fn resolves_now(root: &Path, model: &Model, spec: &SpecRef) -> Result<bool, String> {
+/// facts in the tree, a requirement ref against the requirement set, every
+/// other ref against the live model. A fact is prose a person edits and no
+/// version render holds a copy of it, so the world form knows one slot —
+/// this one; a requirement slug is stable across versions and knows the same.
+fn resolves_now(
+    root: &Path,
+    model: &Model,
+    slots: &mut Slots,
+    spec: &SpecRef,
+) -> Result<bool, String> {
+    if let Some(slug) = spec.requirement() {
+        return Ok(slots.resolves_requirement(slug));
+    }
     match spec.scenario() {
         Some((slug, name)) => resolves_scenario(root, slug, name),
         None => Ok(resolves_in(model, spec)),
     }
+}
+
+/// Why a requirement ref resolved to nothing: the slug names no file the
+/// requirement discovery found.
+fn requirement_refusal(slug: &str) -> String {
+    format!(
+        "`{slug}` names no requirement — no file under `archi/requirements/` holds it (E_MODEL_REF)"
+    )
 }
 
 /// Whether a fact holds exactly one scenario of that name. Two scenarios
@@ -1014,15 +1192,47 @@ pub fn add(
     code_text: &str,
     kind: LinkKind,
 ) -> Result<Link, String> {
+    mint(
+        root,
+        model,
+        spec_text,
+        code_text,
+        kind,
+        Rule::Authored,
+        Origin::Authored,
+        Standing::Asserted,
+    )
+}
+
+/// Mint one row: resolve the spec side at its slot, resolve and pin the
+/// anchor, journal the add. The producing rule, the provenance and the
+/// standing are the caller's — `link add` stamps a hand-authored claim, and
+/// the reader of a writer's declaration stamps `declared` through this same
+/// path, so a declared row is minted exactly as an authored one and differs
+/// only in what it says of itself
+/// (`archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn mint(
+    root: &Path,
+    model: &Model,
+    spec_text: &str,
+    code_text: &str,
+    kind: LinkKind,
+    rule: Rule,
+    origin: Origin,
+    standing: Standing,
+) -> Result<Link, String> {
     let spec = SpecRef::parse(spec_text)?;
+    let mut slots = Slots::new(root);
     let resolves = match &spec.version {
-        None => resolves_now(root, model, &spec)?,
-        Some(_) => Slots::new(root).resolves_pinned(&spec)?,
+        None => resolves_now(root, model, &mut slots, &spec)?,
+        Some(_) => slots.resolves_pinned(&spec)?,
     };
     if !resolves {
-        return Err(match spec.scenario() {
-            Some((slug, _)) => scenario_refusal(root, slug, &spec.path),
-            None => {
+        return Err(match (spec.requirement(), spec.scenario()) {
+            (Some(slug), _) => requirement_refusal(slug),
+            (None, Some((slug, _))) => scenario_refusal(root, slug, &spec.path),
+            (None, None) => {
                 let slot = spec.version.as_deref().unwrap_or("the live model");
                 format!("`{}` names no element of {slot} (E_MODEL_REF)", spec.path)
             }
@@ -1042,8 +1252,9 @@ pub fn add(
         spec,
         anchor,
         kind,
-        standing: Standing::Asserted,
-        origin: Origin::Authored,
+        standing,
+        origin,
+        rule,
         birth: Birth {
             created: now(),
             commit: versions::provenance(root),
@@ -1057,7 +1268,27 @@ pub fn add(
     Ok(link)
 }
 
+/// The live rows a spec ref names: the path exactly, and the slot when the
+/// filter pins one. The one place `ls` and a bulk retire agree on what a ref
+/// covers.
+fn on_ref(live: Vec<Link>, filter: Option<&SpecRef>) -> Vec<Link> {
+    live.into_iter()
+        .filter(|l| {
+            filter.is_none_or(|f| {
+                l.spec.path == f.path
+                    && (f.version.is_none() || l.spec.version == f.version)
+            })
+        })
+        .collect()
+}
+
 /// `archi link ls`: the live links, optionally filtered.
+///
+/// `--spec req:<slug>` is the reverse view — what answers this requirement —
+/// and it answers from the rows a person stood behind: declared and
+/// authored. The inferred rows keep standing and keep grading; they are
+/// simply not evidence that anybody claimed this code answers this
+/// requirement (`archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`).
 pub fn ls(
     root: &Path,
     spec: Option<&str>,
@@ -1065,15 +1296,10 @@ pub fn ls(
 ) -> Result<Vec<Link>, String> {
     let folded = load(root)?;
     let filter = spec.map(SpecRef::parse).transpose()?;
-    Ok(folded
-        .live
+    let reverse = filter.as_ref().is_some_and(|f| f.requirement().is_some());
+    Ok(on_ref(folded.live, filter.as_ref())
         .into_iter()
-        .filter(|l| {
-            filter.as_ref().is_none_or(|f| {
-                l.spec.path == f.path
-                    && (f.version.is_none() || l.spec.version == f.version)
-            })
-        })
+        .filter(|l| !reverse || l.rule != Rule::Inferred)
         .filter(|l| !evidence_only || l.standing == Standing::Evidence)
         .collect())
 }
@@ -1120,8 +1346,13 @@ pub fn retire(root: &Path, ids: &[String]) -> Result<(), String> {
 }
 
 /// `archi link rm --spec … --yes`: retire every live link on a spec ref.
+/// The selector is the ref and only the ref — a retire never reads the
+/// producing rule, because no verb retires rows in bulk by the rule that
+/// made them (`archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`).
 pub fn retire_spec(root: &Path, spec: &str) -> Result<Vec<String>, String> {
-    let ids: Vec<String> = ls(root, Some(spec), false)?
+    let folded = load(root)?;
+    let filter = SpecRef::parse(spec)?;
+    let ids: Vec<String> = on_ref(folded.live, Some(&filter))
         .into_iter()
         .map(|l| l.id)
         .collect();
@@ -1419,7 +1650,7 @@ fn check_link(
     // Spec side. A pinned ref resolves by construction — the archive is
     // sealed — so a pinned link reports Working drift as a note, not a
     // state; a Working-slot ref that stopped resolving is SpecDrifted.
-    let at_working = resolves_now(root, model, &link.spec)?;
+    let at_working = resolves_now(root, model, slots, &link.spec)?;
     if link.spec.version.is_some() && !slots.resolves_pinned(&link.spec)? {
         let state = State::SpecDrifted;
         return Ok(Checked {
@@ -1438,17 +1669,23 @@ fn check_link(
         return Ok(Checked {
             failing: link.standing == Standing::Asserted,
             // A renamed scenario has no version chain to locate it — the
-            // repair is naming the new name.
-            note: Some(match link.spec.scenario() {
-                Some((slug, _)) => format!(
+            // repair is naming the new name. A retired requirement has none
+            // either: the slug is the identity, and it went.
+            note: Some(match (link.spec.requirement(), link.spec.scenario()) {
+                (Some(slug), _) => format!(
+                    "`{slug}` names no requirement of the tree — the requirement retired or was \
+                     renamed; restore the file, or `link rm {}`",
+                    link.id
+                ),
+                (None, Some((slug, _))) => format!(
                     "`{}` names no scenario of `{}`; `link repin {} --spec \
                      <fact-slug>#<scenario name>` moves the link onto the new name",
                     link.spec.path,
                     fact_file(slug),
                     link.id
                 ),
-                None => "the spec element is gone from the live model; the version chain locates \
-                         the rename or removal"
+                (None, None) => "the spec element is gone from the live model; the version chain \
+                                 locates the rename or removal"
                     .to_string(),
             }),
             link,
@@ -1919,6 +2156,9 @@ pub enum AuditFinding {
         anchor: String,
         /// The derived confidence, below [`CONFIDENCE_FLOOR`].
         confidence: f64,
+        /// Which rule produced the row — the reader decides what a decayed
+        /// guess is worth against a decayed claim.
+        rule: Rule,
     },
 }
 
@@ -1945,11 +2185,12 @@ impl fmt::Display for AuditFinding {
                 spec,
                 anchor,
                 confidence,
+                rule,
             } => {
                 write!(
                     f,
-                    "decayed evidence: {id} ({spec} ← {anchor}) — confidence {confidence:.2} \
-                     is below the floor; confirm or retire"
+                    "decayed evidence: {id} {rule} ({spec} ← {anchor}) — confidence \
+                     {confidence:.2} is below the floor; confirm or retire"
                 )
             }
         }
@@ -1980,6 +2221,12 @@ pub struct AuditReport {
     pub asserted: usize,
     /// Of them, evidence.
     pub evidence: usize,
+    /// Of them, produced by inference from shared terms.
+    pub inferred: usize,
+    /// Of them, produced from a writer's declaration.
+    pub declared: usize,
+    /// Of them, produced by hand.
+    pub authored: usize,
     /// Advisory findings — visible until lifted, never blocking.
     pub findings: Vec<AuditFinding>,
     /// What the audit could not cover, and why.
@@ -2003,6 +2250,9 @@ pub fn audit(root: &Path, model: &Model, opts: &AuditOptions) -> Result<AuditRep
             .iter()
             .filter(|l| l.standing == Standing::Evidence)
             .count(),
+        inferred: folded.live.iter().filter(|l| l.rule == Rule::Inferred).count(),
+        declared: folded.live.iter().filter(|l| l.rule == Rule::Declared).count(),
+        authored: folded.live.iter().filter(|l| l.rule == Rule::Authored).count(),
         findings: Vec::new(),
         notes: folded
             .absorbed
@@ -2158,6 +2408,7 @@ pub fn audit(root: &Path, model: &Model, opts: &AuditOptions) -> Result<AuditRep
                 spec: link.spec.to_string(),
                 anchor: link.anchor.to_string(),
                 confidence,
+                rule: link.rule,
             });
         }
     }
@@ -2314,14 +2565,16 @@ fn unaccounted(
 
 // ---- rendering -------------------------------------------------------------
 
-/// One link as a human line: id, kind/standing, spec ← anchor.
+/// One link as a human line: id, kind/standing, the rule that made it,
+/// spec ← anchor.
 pub fn render_link(l: &Link) -> String {
     format!(
-        "{}  {:8} {:8} {:10} {} ← {}",
+        "{}  {:8} {:8} {:10} {:8} {} ← {}",
         l.id,
         l.kind.describe(),
         l.standing.describe(),
         l.origin.to_string(),
+        l.rule.describe(),
         l.spec,
         l.anchor
     )
@@ -2364,8 +2617,13 @@ pub fn render_verify(report: &VerifyReport) -> String {
 /// The audit report as human lines.
 pub fn render_audit(report: &AuditReport) -> String {
     let mut out = format!(
-        "links: {} live ({} asserted, {} evidence)\n",
-        report.live, report.asserted, report.evidence
+        "links: {} live ({} asserted, {} evidence; {} declared, {} inferred, {} authored)\n",
+        report.live,
+        report.asserted,
+        report.evidence,
+        report.declared,
+        report.inferred,
+        report.authored
     );
     if report.findings.is_empty() {
         out.push_str("no findings\n");
@@ -2676,6 +2934,7 @@ Then the view arrives late
                     kind: LinkKind::Indirect,
                     standing: Standing::Evidence,
                     origin: Origin::Captured { task: "t1".into() },
+                    rule: Rule::Inferred,
                     birth: Birth {
                         created: now(),
                         commit: None,
@@ -2715,6 +2974,7 @@ Then the view arrives late
                     kind: LinkKind::Indirect,
                     standing: Standing::Evidence,
                     origin: Origin::Captured { task: "t1".into() },
+                    rule: Rule::Inferred,
                     birth: Birth {
                         created: now(),
                         commit: None,
@@ -2767,6 +3027,7 @@ Then the view arrives late
                     kind: LinkKind::Indirect,
                     standing: Standing::Evidence,
                     origin: Origin::Captured { task: "t1".into() },
+                    rule: Rule::Inferred,
                     birth: Birth {
                         created: now(),
                         commit: None,
@@ -2887,6 +3148,7 @@ Then the view arrives late
                     kind: LinkKind::Indirect,
                     standing: Standing::Evidence,
                     origin: Origin::Captured { task: "t1".into() },
+                    rule: Rule::Inferred,
                     birth: Birth {
                         created: now(),
                         commit: None,
@@ -3754,5 +4016,354 @@ Then the view arrives late
         assert!(!excluded_in(None, "vendor/dep.rs", &patterns));
         // The member prefix never leaks into the path test.
         assert!(!excluded_in(Some("backend"), "src/vendor.rs", &patterns));
+    }
+
+    // ---- a requirement as an address ---------------------------------------
+
+    const REQ_SLUG: &str = "the-vault-salts-what-it-stores";
+    const REQ_INTENT: &str = "storage";
+
+    /// One requirement where the discovery walks for it: an intent folder
+    /// anchored by its own file, and the requirement beside it. The slug is
+    /// the file stem, exactly as `plan verify` reads it for `owns:`.
+    fn write_requirement(root: &Path, slug: &str) {
+        let dir = root.join("archi/requirements").join(REQ_INTENT);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join(format!("{REQ_INTENT}.md")),
+            "# Storage\n\nWhat the vault keeps and how.\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.join(format!("{slug}.md")),
+            "---\nkind: functional\nsatisfied-by: [Vault]\ndeferred:\n---\n\n\
+             # The vault salts what it stores\n\nEvery stored byte is salted first.\n",
+        )
+        .unwrap();
+    }
+
+    fn req_ref(slug: &str) -> String {
+        format!("req:{slug}")
+    }
+
+    /// The column `ls` prints the producing rule in.
+    fn rule_word(l: &Link) -> String {
+        render_link(l)
+            .split_whitespace()
+            .nth(4)
+            .expect("the rendered row has a rule column")
+            .to_string()
+    }
+
+    /// The third shape resolves against the requirement set, and the two
+    /// standing shapes are untouched — a bare slug still falls to the element
+    /// branch and is refused in today's words
+    /// (`archi/requirements/code-link/a-requirement-is-addressable-in-the-journal.md`).
+    #[test]
+    fn a_requirement_is_an_address_and_the_element_branch_is_untouched() {
+        let root = temp_project();
+        write_requirement(&root, REQ_SLUG);
+        let ws = model_of(&root);
+
+        let l = add(
+            &root,
+            ws.model(),
+            &req_ref(REQ_SLUG),
+            "code/auth.rs#Vault::persist",
+            LinkKind::Indirect,
+        )
+        .expect("the requirement set holds the slug");
+        assert_eq!(l.spec.to_string(), req_ref(REQ_SLUG));
+        assert_eq!(l.spec.requirement(), Some(REQ_SLUG));
+        assert_eq!(l.spec.scenario(), None, "a requirement is not a scenario");
+        assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
+
+        // A `req:` naming no requirement is refused, and the refusal names
+        // the slug it could not find.
+        let err = add(
+            &root,
+            ws.model(),
+            "req:no-such-claim",
+            "code/auth.rs#Vault::persist",
+            LinkKind::Indirect,
+        )
+        .unwrap_err();
+        assert!(err.contains("no-such-claim"), "{err}");
+        assert!(err.contains("names no requirement"), "{err}");
+
+        // A bare slug holds no prefix: it is an element ref, and its refusal
+        // is today's, byte for byte.
+        let err = add(
+            &root,
+            ws.model(),
+            REQ_SLUG,
+            "code/auth.rs#Vault::persist",
+            LinkKind::Indirect,
+        )
+        .unwrap_err();
+        assert_eq!(
+            err,
+            format!("`{REQ_SLUG}` names no element of the live model (E_MODEL_REF)")
+        );
+
+        // A requirement slug is stable across versions, so it takes no slot.
+        let err = SpecRef::parse(&format!("req:{REQ_SLUG}@v0025")).unwrap_err();
+        assert!(err.contains("carries no version pin"), "{err}");
+        assert!(err.contains(REQ_SLUG), "{err}");
+        // The element shape keeps its `@` handling.
+        assert_eq!(
+            SpecRef::parse("Vault@v0025").unwrap().version.as_deref(),
+            Some("v0025")
+        );
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The code side moving fails a `req:` link exactly as it fails an
+    /// element link, and `repin` binds it again
+    /// (`archi/requirements/code-link/a-requirement-is-addressable-in-the-journal.md`).
+    #[test]
+    fn a_requirement_link_fails_and_repins_as_an_element_link_does() {
+        let root = temp_project();
+        write_requirement(&root, REQ_SLUG);
+        let ws = model_of(&root);
+        let req = add(
+            &root,
+            ws.model(),
+            &req_ref(REQ_SLUG),
+            "code/auth.rs#Vault::persist",
+            LinkKind::Literal,
+        )
+        .unwrap();
+        let elem = add(
+            &root,
+            ws.model(),
+            "Vault",
+            "code/auth.rs#Vault::persist",
+            LinkKind::Literal,
+        )
+        .unwrap();
+
+        // The code moves out from under both rows at once, under a name the
+        // candidate scan cannot follow.
+        fs::write(
+            root.join("code/vault.rs"),
+            AUTH_RS.replace("persist", "store"),
+        )
+        .unwrap();
+        fs::write(root.join("code/auth.rs"), "pub fn unrelated() {}\n").unwrap();
+        let graded = state_of(&root, &ws, &req.id);
+        assert_eq!(graded, state_of(&root, &ws, &elem.id), "one grader, one answer");
+        assert_eq!(
+            graded,
+            (State::Missing, true),
+            "the requirement link fails like the element one"
+        );
+
+        repin(&root, &req.id, Some("code/vault.rs#Vault::store")).unwrap();
+        assert_eq!(state_of(&root, &ws, &req.id), (State::Clean, false));
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Retiring the requirement makes the link unresolvable — a state of its
+    /// own, upstream of the code side being gone
+    /// (`archi/requirements/code-link/a-requirement-is-addressable-in-the-journal.md`).
+    #[test]
+    fn a_retired_requirement_unresolves_and_that_is_not_missing() {
+        let root = temp_project();
+        write_requirement(&root, REQ_SLUG);
+        let ws = model_of(&root);
+        let req = add(
+            &root,
+            ws.model(),
+            &req_ref(REQ_SLUG),
+            "code/auth.rs#Vault::persist",
+            LinkKind::Literal,
+        )
+        .unwrap();
+        let elem = add(
+            &root,
+            ws.model(),
+            "Vault",
+            "code/auth.rs#Vault::persist",
+            LinkKind::Literal,
+        )
+        .unwrap();
+
+        fs::remove_file(
+            root.join("archi/requirements")
+                .join(REQ_INTENT)
+                .join(format!("{REQ_SLUG}.md")),
+        )
+        .unwrap();
+        let (state, failing) = state_of(&root, &ws, &req.id);
+        assert_eq!(state, State::SpecDrifted);
+        assert!(failing);
+        assert_ne!(state, State::Missing, "unresolvable is not missing");
+
+        // The code side leaving is the other state, and it still reads as it
+        // always did.
+        fs::remove_file(root.join("code/auth.rs")).unwrap();
+        assert_eq!(state_of(&root, &ws, &elem.id), (State::Missing, true));
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Every row says which rule produced it, a row written before the field
+    /// existed takes it from its origin with no migration, and the reverse
+    /// view answers from declared and authored rows alone
+    /// (`archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`).
+    #[test]
+    fn a_row_says_which_rule_made_it_and_an_unstamped_row_takes_it_from_its_origin() {
+        let root = temp_project();
+        write_requirement(&root, REQ_SLUG);
+        let ws = model_of(&root);
+
+        // By hand.
+        let hand = add(
+            &root,
+            ws.model(),
+            &req_ref(REQ_SLUG),
+            "code/auth.rs#Vault::persist",
+            LinkKind::Indirect,
+        )
+        .unwrap();
+        assert_eq!(hand.rule, Rule::Authored);
+        assert_eq!(rule_word(&hand), "authored");
+
+        // From a declaration: the same mint, stamped with the rule that
+        // produced it — the path capture reads a declaration through.
+        let declared = mint(
+            &root,
+            ws.model(),
+            &req_ref(REQ_SLUG),
+            "code/auth.rs#Vault",
+            LinkKind::Indirect,
+            Rule::Declared,
+            Origin::Captured { task: "t9".into() },
+            Standing::Asserted,
+        )
+        .unwrap();
+        assert_eq!(declared.rule, Rule::Declared);
+        assert_eq!(rule_word(&declared), "declared");
+
+        // A row journaled before the field existed carries no rule, and it
+        // takes one from its origin — nothing was migrated. What capture
+        // minted under the shared-term rule is the tool's guess; what `link
+        // add` minted is a claim a person made by hand, and it stays one.
+        let old = r#"{"event":"add","link":{"id":"__ID__","spec":{"ref":"__REQ__"},"anchor":{"file":"code/auth.rs","symbol":"Vault::persist"},"kind":"indirect","standing":"__STANDING__","origin":__ORIGIN__,"birth":{"created":"2020-01-01T00:00:00Z","spans":[]},"pins":{"canonicalizer":"rust-tok-v1","interface":"sha256:a","body":"sha256:b"}}}"#;
+        let path = journal_path(&root);
+        let mut text = fs::read_to_string(&path).unwrap();
+        for (id, standing, origin) in [
+            ("l0900-aaaaaa", "evidence", r#"{"kind":"captured","task":"t1"}"#),
+            ("l0901-bbbbbb", "asserted", r#"{"kind":"authored"}"#),
+        ] {
+            text.push_str(
+                &old.replace("__ID__", id)
+                    .replace("__REQ__", &req_ref(REQ_SLUG))
+                    .replace("__STANDING__", standing)
+                    .replace("__ORIGIN__", origin),
+            );
+            text.push('\n');
+        }
+        fs::write(&path, text).unwrap();
+
+        let rows = ls(&root, None, false).unwrap();
+        let row = |id: &str| {
+            rows.iter()
+                .find(|l| l.id == id)
+                .unwrap_or_else(|| panic!("the replayed row `{id}` folds"))
+        };
+        assert_eq!(row("l0900-aaaaaa").rule, Rule::Inferred);
+        assert_eq!(rule_word(row("l0900-aaaaaa")), "inferred");
+        assert_eq!(row("l0901-bbbbbb").rule, Rule::Authored);
+        assert_eq!(rule_word(row("l0901-bbbbbb")), "authored");
+
+        // The reverse view: what a person stood behind, and not the guesses.
+        // A row `link add` minted before the field existed is still what a
+        // person stood behind, so it answers here too.
+        let view: Vec<&str> = ls(&root, Some(&req_ref(REQ_SLUG)), false)
+            .unwrap()
+            .iter()
+            .map(|l| l.id.as_str())
+            .map(|id| {
+                if id == hand.id {
+                    "hand"
+                } else if id == declared.id {
+                    "declared"
+                } else if id == "l0901-bbbbbb" {
+                    "old hand"
+                } else {
+                    "guess"
+                }
+            })
+            .collect();
+        assert_eq!(
+            view,
+            vec!["hand", "declared", "old hand"],
+            "the inferred row is the only one left out"
+        );
+
+        // An element ref is not the reverse view: it lists what it always did.
+        let all = ls(&root, Some("Vault"), false).unwrap();
+        assert!(all.is_empty(), "no row hangs on `Vault` here");
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The audit carries the word on every line that names a row: the tally
+    /// it opens with, and each finding that names a link
+    /// (`archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`).
+    #[test]
+    fn the_audit_carries_the_producing_rule() {
+        let root = temp_project();
+        write_requirement(&root, REQ_SLUG);
+        let ws = model_of(&root);
+        add(
+            &root,
+            ws.model(),
+            &req_ref(REQ_SLUG),
+            "code/auth.rs#Vault::persist",
+            LinkKind::Indirect,
+        )
+        .unwrap();
+        mint(
+            &root,
+            ws.model(),
+            &req_ref(REQ_SLUG),
+            "code/auth.rs#Vault",
+            LinkKind::Indirect,
+            Rule::Declared,
+            Origin::Captured { task: "t9".into() },
+            Standing::Asserted,
+        )
+        .unwrap();
+
+        let report = audit(&root, ws.model(), &AuditOptions::default()).unwrap();
+        assert_eq!(report.declared, 1);
+        assert_eq!(report.authored, 1);
+        assert_eq!(report.inferred, 0);
+        let head = render_audit(&report)
+            .lines()
+            .next()
+            .expect("the audit opens with its tally")
+            .to_string();
+        for word in ["declared", "inferred", "authored"] {
+            assert!(head.contains(word), "{head}");
+        }
+
+        // A finding that names a row says which rule made it.
+        let line = AuditFinding::DecayedEvidence {
+            id: "l0007-abcdef".into(),
+            spec: req_ref(REQ_SLUG),
+            anchor: "code/auth.rs#Vault::persist".into(),
+            confidence: 0.1,
+            rule: Rule::Inferred,
+        }
+        .to_string();
+        assert!(line.contains("inferred"), "{line}");
+
+        fs::remove_dir_all(&root).unwrap();
     }
 }

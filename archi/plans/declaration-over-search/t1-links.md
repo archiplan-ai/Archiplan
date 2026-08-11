@@ -50,7 +50,8 @@ a requirement gets an address and every row says which rule made it
 ### the-journal-says-which-rule-made-a-row
 
 - test — a row minted from a declaration reads as declared in `link ls`
-- test — a row minted by inference reads as inferred, and every row written before this change reads as inferred with no migration run
+- test — a row carrying no rule takes it from its origin: captured reads inferred, authored reads authored, and no migration runs
+- test — the standing journal's captured rows read inferred and its `link add` rows read authored, proven against the real journal
 - test — a row from `link add` reads as authored
 - test — `link audit` carries the word on every line it prints
 - test — `link ls --spec req:<slug>` lists declared and authored rows and omits inferred ones

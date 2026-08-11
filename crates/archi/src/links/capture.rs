@@ -35,7 +35,7 @@ use modeling_lang::Model;
 use serde::{Deserialize, Serialize};
 
 use super::code;
-use super::{Anchor, Birth, Event, Link, LinkKind, Origin, SpecRef, Standing};
+use super::{Anchor, Birth, Event, Link, LinkKind, Origin, Rule, SpecRef, Standing};
 use crate::plans::{self, Task};
 use crate::versions;
 
@@ -492,6 +492,10 @@ pub(crate) fn capture_wave(
                     origin: Origin::Captured {
                         task: task.id.clone(),
                     },
+                    // The shared term between the ref and the item is what
+                    // made this row: it is the tool's guess, and it says so
+                    // (`archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`).
+                    rule: Rule::Inferred,
                     birth: Birth {
                         created: super::now(),
                         commit: commit.clone(),
