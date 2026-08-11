@@ -190,27 +190,12 @@ fn put_fact_with_steps(
     .write(root, slug, title);
 }
 
-/// The nodes of [`MODEL`] a test's own fact never reaches, declared internal
-/// so the save mints
-/// (`archi/requirements/world-facts/the-save-refuses-an-unconditioned-element.md`).
-///
-/// A test of this family writes the one fact its point needs — the fact that
-/// covers the node its task sits on — and the gate on `version save` asks
-/// about the whole model. The nodes left over are named here with the reason
-/// this fixture holds, which is the gate's second exit; nothing about the plan
-/// loop under test moves, because `covers` is still exactly what each test
-/// wrote.
+/// This family's declaration of what no fact of it reaches: the shared one
+/// ([`util::declare_internal`]). A test here writes the one fact that covers
+/// the node its task sits on, and the gate on `version save` asks about the
+/// whole model; the nodes left over go through this.
 fn declare_internal(root: &Path, nodes: &[&str]) {
-    let dir = root.join("archi/world");
-    fs::create_dir_all(&dir).unwrap();
-    let mut text = String::new();
-    for n in nodes {
-        text.push_str(&format!(
-            "{n} — the fixture's own plumbing: this family conditions the node its task \
-             sits on, and nothing outside the tool reaches this one\n"
-        ));
-    }
-    fs::write(dir.join(".worldignore"), text).unwrap();
+    util::declare_internal(root, nodes);
 }
 
 /// This family's shim: the shared one ([`util::shim`]) under this family's

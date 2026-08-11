@@ -140,26 +140,22 @@ fn changed_save_still_mints_and_closes_at_the_minted_id() {
 const WITH_ISLAND: &str = "def node Island\n";
 
 /// One world fact under `archi/world/facts/`, covering what the caller
-/// names. Its schema is the wing's; the gate reads its `covers` alone.
+/// names — the shared skeleton ([`util::Fact`]) with this family's words in
+/// it. Its schema is the wing's; the gate reads its `covers` alone.
 fn world_fact(root: &Path, covers: &str) {
-    let dir = root.join("archi/world/facts");
-    fs::create_dir_all(&dir).unwrap();
-    fs::write(
-        dir.join("riders-lose-the-signal.md"),
-        format!(
-            "---\ncovers: [{covers}]\nsources: []\nuses: []\n---\n\n\
-             # Riders lose the signal\n\n\
-             The carriage drops the network for minutes at a time.\n\n\
-             ## What people do instead\n\n\
-             Riders screenshot the timetable before they go down, and the shot goes stale.\n\n\
-             ## Scenarios\n\n\
-             ### the app opens with no network\n\n\
-             Given the device has no network\n\
-             When the user opens the app\n\
-             Then the last synced view appears\n"
-        ),
-    )
-    .unwrap();
+    util::Fact {
+        covers,
+        sources: "",
+        uses: "",
+        condition: "The carriage drops the network for minutes at a time.",
+        workaround: "Riders screenshot the timetable before they go down, and the shot goes \
+                     stale.",
+        scenarios: "### the app opens with no network\n\n\
+                    Given the device has no network\n\
+                    When the user opens the app\n\
+                    Then the last synced view appears\n",
+    }
+    .write(root, "riders-lose-the-signal", "Riders lose the signal");
 }
 
 /// A project holding the island, one fact covering `Gate`, and one saved

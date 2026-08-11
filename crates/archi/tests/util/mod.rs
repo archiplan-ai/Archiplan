@@ -156,6 +156,29 @@ impl Fact<'_> {
     }
 }
 
+/// The nodes of a fixture's model that no fact of it reaches, declared
+/// internal beside the wing so `version save` mints
+/// (`archi/requirements/world-facts/the-save-refuses-an-unconditioned-element.md`).
+///
+/// A test writes the one fact its point needs, and the gate on the save asks
+/// about the whole model. The nodes left over are named here with the reason
+/// the gate wants, which is its second exit; nothing under test moves, because
+/// `covers` is still exactly what the test wrote. A test that is about the gate
+/// itself writes its own file, so the declaration it exercises is the one a
+/// person would write.
+pub fn declare_internal(root: &Path, nodes: &[&str]) {
+    let dir = root.join("archi/world");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut text = String::new();
+    for n in nodes {
+        text.push_str(&format!(
+            "{n} — the fixture's own plumbing: this family conditions the node its test is \
+             about, and nothing outside the tool reaches this one\n"
+        ));
+    }
+    std::fs::write(dir.join(".worldignore"), text).unwrap();
+}
+
 /// Turn a scaffolded directory into a committed repo and mint its worktree;
 /// returns the worktree the test mutates from. The primary checkout
 /// stays on `main`, unbound and untouched.

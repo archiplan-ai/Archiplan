@@ -69,20 +69,11 @@ fn fact(root: &Path, slug: &str, title: &str, covers: &str, sources: &str, uses:
     .write(root, slug, title);
 }
 
-/// The nodes of [`MODEL`] the facts of a test never reach, declared internal
-/// so `version save` mints instead of naming them
-/// (`archi/requirements/world-facts/the-save-refuses-an-unconditioned-element.md`).
-/// A test that is about the save's own gate writes its own file; this one is
-/// for the tests that only need a version to exist.
+/// The nodes of [`MODEL`] the facts of a test never reach: the shared
+/// declaration ([`util::declare_internal`]), for the tests here that only need
+/// a version to exist.
 fn declare_internal(root: &Path, nodes: &[&str]) {
-    let mut text = String::new();
-    for n in nodes {
-        text.push_str(&format!(
-            "{n} — the model draws it apart from the line: no edge arrives at it and no \
-             condition outside the carriage reaches it\n"
-        ));
-    }
-    put(root, "archi/world/.worldignore", &text);
+    util::declare_internal(root, nodes);
 }
 
 /// The note every grounded fact here rests on, in the layer a source lives in
