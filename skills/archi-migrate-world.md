@@ -76,43 +76,50 @@ yourself. For one candidate, in this order:
 2. **The workaround.** Ask what people do today instead of this. Wait
    for a concrete answer: what they do, how long it takes, what it
    costs them.
-3. **The killer.** What would you have to see to call the condition
-   over?
-4. **The behavior.** Which scenarios does the condition dictate? One is
+3. **The behavior.** Which scenarios does the condition dictate? One is
    enough to start.
-5. **The reach.** Which parts of the model does the story touch?
+4. **The reach.** Which parts of the model does the story touch?
 
-**The gate is question 2.** When the operator cannot name a workaround,
-there is no condition — only a wish — and this skill writes nothing for
-that candidate. It goes in the brief with the sentence it came from, and
-you move to the next one. Do not soften the question, do not answer it
-from the prose, and do not mint a skeleton "to fill in later". An empty
-wing is an honest state. A fact nobody observed is not.
+**The gate is question 2.** A condition nobody can name a workaround
+for is a wish, and only a wish: it belongs in no file. When the operator
+cannot name one, this skill writes nothing for that candidate. It goes
+in the brief with the sentence it came from, and you move to the next
+one. Do not soften the question, do not answer it from the prose, and
+do not mint a skeleton "to fill in later". An empty wing is an honest
+state. A fact nobody observed is not.
+
+The same answer is what can end the fact later, so nobody is asked to
+predict the end. A person who writes a fact has already decided to
+build, and a guess about the future made there is made at the worst
+moment for guessing. The workaround is an observable instead: watch
+whether people still do it, and the day they stop, the fact is dead.
 
 **Ask by options, never by a bare open question.** Every question above
 has shapes, so put the shapes on the table. Ask through the poll tool
 (AskUserQuestion) with two or three concrete candidate answers — the
 condition as the prose states it, the same condition one degree
 stronger, the same one degree weaker — and let the operator choose. An
-open question in the abstract stalls: "what would you have to see to
-call this over?" reads as a riddle, and what comes back is "I do not
+open question in the abstract stalls: "what do people do instead?",
+asked cold, reads as a riddle, and what comes back is "I do not
 understand the question". The same question with three answers beside it
-is answered in seconds. Say plainly what the options are: scaffolding
-for the operator's own thinking, not a menu. The best answer of a run is
+— a manual step, a second tool, a habit that costs an hour a week — is
+answered in seconds. Say plainly what the options are: scaffolding for
+the operator's own thinking, not a menu. The best answer of a run is
 often the fourth one, the one the operator writes after seeing that none
 of the three fits.
 
-**Ask again after an apparent axiom.** The first
-"nothing would make this false" is not a verdict: a claim that looks
-like an axiom is far more often a claim stated badly. Ask the killer a
-second time with shapes — name two observations that would end the
-condition and one that would only dent it, and ask which of them the
-operator would call. Two outcomes follow and both are right. The second
-ask names a real killer, the candidate becomes a fact, and the wing
-gains a condition somebody can watch. Or it confirms a premise that
-truly cannot fail here — and a premise is not a world fact: it stays in
-the intent that already holds it, and the brief says so. Neither outcome
-is the mistake. The mistake is stopping at the first answer.
+**Ask again after an apparent axiom.** The first "people just live with
+it" is not a verdict, and neither is "nothing would make this false": a
+claim that looks like an axiom is far more often a claim stated badly.
+Ask for the workaround a second time with shapes — name two things
+people could be doing instead and one that would only dent the trouble,
+and ask which of them the operator sees. Two outcomes follow and both
+are right. The second ask names a real workaround, the candidate becomes
+a fact, and the wing gains a condition somebody can watch. Or it
+confirms a premise that truly cannot fail here — and a premise is not a
+world fact: it stays in the intent that already holds it, and the brief
+says so. Neither outcome is the mistake. The mistake is stopping at the
+first answer.
 
 ## 3. Write the fact
 
@@ -129,7 +136,9 @@ it is the only one this skill writes into. You write the prose:
 - **The name** is the fact in one line, as the operator said it.
 - **The paragraph under it** states what condition this is and why the
   behavior follows from it.
-- **`## What kills this`** is the observation that would end the fact.
+- **`## What people do instead`** is the answer to question 2, written
+  down: what people do today because the condition holds, how long it
+  takes them, and what it costs them.
 - **`## Scenarios`** holds the behavior the condition dictates. A
   `### <name>` heading opens one scenario, and `Given`, `When`, `Then`
   and `And` open its step lines; those four are the whole vocabulary.
@@ -148,9 +157,11 @@ scenario under it:
 The carriage drops the network for minutes at a time, so a reader on the
 move works from what the device already holds.
 
-## What kills this
+## What people do instead
 
-Trackside coverage that never drops.
+Readers load what they mean to read before they board, and the ones who
+forget re-read whatever is still open. It costs them the ten minutes
+before the train and the article they wanted.
 
 ## Scenarios
 
@@ -165,6 +176,15 @@ Write the fact **without the nouns of the model**. The condition is
 about the world, so the world's words are the right ones, and `check`
 reports `world_speaks_the_model(<element>)` when a model name leaks into
 the name or the paragraph.
+
+The fact also names no person and quotes nobody. A migration reads
+sentences somebody wrote and hears answers somebody gave, and the fact
+carries neither: it says how the world is, as a reader who was not in
+the room would say it — not that somebody disliked a thing, not what
+somebody said, and never in their words. Who saw it is `sources`, and
+words the operator hands over become a file under
+`archi/world/resources/` that `sources` then names. No check holds this
+half.
 
 The header points three ways:
 
@@ -221,7 +241,7 @@ operator it is there. It holds:
   gate, each with its sentence and the file it sits in. Name the reason
   in the operator's terms, not as a verdict.
 - **What is thin** — facts with one scenario, facts with an empty
-  `covers`, and conditions the operator named but could not date.
+  `covers`, and workarounds the operator named but could not cost.
 - **Where the prose still stands** — the intents, the `scenarios.md`
   files and the suites this run read and left untouched.
 

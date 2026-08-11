@@ -45,7 +45,7 @@ const DATA: &str = "Data";
 /// (`archi/requirements/world-facts/an-internal-element-says-so.md`).
 const IGNORE: &str = ".worldignore";
 
-/// The layer of the strict record: the condition, its killer, its scenarios
+/// The layer of the strict record: the condition, its workaround, its scenarios
 /// and the three lists (`archi/requirements/world-facts/the-world-holds-four-layers.md`).
 const FACTS: &str = "facts";
 
@@ -70,7 +70,7 @@ const REASON: char = '—';
 /// One world fact as the wing holds it: the record the reader parsed and the
 /// scenarios the grammar accepted.
 pub(crate) struct WorldFact {
-    /// The record — the three lists, the paragraph, the killer.
+    /// The record — the three lists, the paragraph, the workaround.
     pub(crate) doc: WorldDoc,
     /// The scenarios that parsed; `None` when none was sound.
     pub(crate) scenarios: Option<ScenarioBlock>,
@@ -213,7 +213,7 @@ pub(crate) fn discover(root: &Path, diags: &mut Vec<DocDiagnostic>) -> Vec<World
         ));
     }
     // The loose layers carry a name and their prose and nothing else: no
-    // killer, no scenarios, no lists to keep true.
+    // workaround, no scenarios, no lists to keep true.
     for layer in [HYPOTHESES, NOTES] {
         for path in layer_files(&base, layer) {
             loose(root, &path, diags);
@@ -308,7 +308,11 @@ pub(crate) fn check(
     let mut findings = Vec::new();
     per_fact(model, facts, &mut findings);
     graph(facts, &mut findings, diags);
-    coverage(root, model, tree, &mut findings, diags);
+    findings.extend(
+        unreached(root, model, tree, diags)
+            .into_iter()
+            .map(|element| WorldFinding::Unreached { element }),
+    );
     WorldReport {
         findings,
         count: Some(WorldCount {
@@ -391,7 +395,7 @@ fn per_fact(model: &Model, facts: &[WorldFact], findings: &mut Vec<WorldFinding>
 /// The element the fact's own vocabulary borrowed from the model, the
 /// fullest name first; `None` when it borrowed none. The name and the
 /// conditioning paragraph are the whole search: the `Scenarios` block and the
-/// killer are exempt, because Gherkin describes the system's surface and
+/// workaround are exempt, because Gherkin describes the system's surface and
 /// naming it there is the point
 /// (`archi/requirements/world-facts/the-fact-speaks-the-world-and-check-says-when-it-does-not.md`).
 fn speaks_the_model(fact: &WorldFact, names: &BTreeSet<String>) -> Option<String> {
@@ -564,13 +568,18 @@ fn chain_under<'a>(
 /// as [`DATA`], which the question does not apply to, and what a person
 /// declared internal in [`IGNORE`]
 /// (`archi/requirements/world-facts/an-internal-element-says-so.md`).
-fn coverage(
+///
+/// This is the one computation, and it has two readers: `check` renders each
+/// element as an advisory finding, and `archi version save` refuses on the
+/// whole set ([`unreached_at`]). One function, so the report and the refusal
+/// can never disagree about an element
+/// (`archi/requirements/world-facts/the-save-refuses-an-unconditioned-element.md`).
+fn unreached(
     root: &Path,
     model: &Model,
     tree: &Tree,
-    findings: &mut Vec<WorldFinding>,
     diags: &mut Vec<DocDiagnostic>,
-) {
+) -> Vec<String> {
     let carried = data_elements(model);
     let declared = internal(root, model, &carried, diags);
     let dump = model.dump();
@@ -632,13 +641,34 @@ fn coverage(
         let inside = format!("{node}.");
         frontier.extend(nodes.iter().filter(|p| p.starts_with(&inside)).copied());
     }
-    for node in &nodes {
-        if !covered.contains(node) && !carried.contains(*node) && !declared.contains(*node) {
-            findings.push(WorldFinding::Unreached {
-                element: (*node).to_string(),
-            });
-        }
+    nodes
+        .iter()
+        .filter(|n| !covered.contains(*n) && !carried.contains(**n) && !declared.contains(**n))
+        .map(|n| (*n).to_string())
+        .collect()
+}
+
+/// The same set, off a tree the caller has not loaded — what
+/// `archi version save` refuses on
+/// (`archi/requirements/world-facts/the-save-refuses-an-unconditioned-element.md`).
+///
+/// It reads the `facts/` layer alone, because the wing's threshold is a fact:
+/// a project that has written none saves exactly as it did before the gate
+/// existed (`archi/requirements/world-facts/the-wing-arrives-without-noise.md`).
+/// What the read locates on the way — a loose file, a broken declaration — is
+/// `check`'s to report and is dropped here: the save says one thing, and the
+/// operator who wants the rest runs `archi check`.
+pub(crate) fn unreached_at(root: &Path, model: &Model) -> Vec<String> {
+    let mut diags = Vec::new();
+    let facts = discover(root, &mut diags);
+    if facts.is_empty() {
+        return Vec::new();
     }
+    let tree = Tree {
+        world: facts,
+        ..Tree::default()
+    };
+    unreached(root, model, &tree, &mut diags)
 }
 
 /// Every element the model classifies as [`DATA`] — by its type, not by a
@@ -901,7 +931,8 @@ Then the view arrives late
             &format!("archi/world/facts/{slug}.md"),
             &format!(
                 "---\n{lists}---\n\n# {title}\n\n{condition}\n\n\
-                 ## What kills this\n\nThe condition ends.\n\n## Scenarios\n\n{scenarios}"
+                 ## What people do instead\n\nThey work around it by hand.\n\n\
+                 ## Scenarios\n\n{scenarios}"
             ),
         );
     }
@@ -1376,6 +1407,71 @@ Then the view arrives late
         fs::remove_dir_all(&root).unwrap();
     }
 
+    /// The set the save reads, off a tree the caller has not loaded.
+    fn save_set(root: &Path) -> Vec<String> {
+        let ws = modeling_lang::source::compile_project(root)
+            .unwrap_or_else(|f| panic!("test model failed to compile:\n{}", f.render()))
+            .workspace;
+        super::unreached_at(root, ws.model())
+    }
+
+    /// The `Data` classification leaves the coverage question, and the save
+    /// asks the same question `check` does — so a payload never stands
+    /// between an operator and a version
+    /// (`the-save-refuses-an-unconditioned-element`).
+    #[test]
+    fn a_data_element_never_enters_the_set_the_save_reads() {
+        let root = temp_project();
+        healthy(&root, "riders-lose-the-signal", "Riders lose the signal");
+        // `Payload` is `Data type_of`; the island is the whole set.
+        assert_eq!(save_set(&root), ["Island"]);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// `check`'s finding and the save's refusal are one computation read
+    /// twice: the finding renders what [`unreached`] returns and the save
+    /// refuses on it, so the two can never disagree about an element — on a
+    /// bare wing, under a cover, and under a declaration
+    /// (`the-save-refuses-an-unconditioned-element`).
+    #[test]
+    fn the_finding_and_the_refusal_read_one_set() {
+        let root = temp_project();
+        healthy(&root, "riders-lose-the-signal", "Riders lose the signal");
+        assert_eq!(unreached(&check_at(&root)), save_set(&root));
+        assert_eq!(save_set(&root), ["Island"]);
+
+        // The island covered: both go empty.
+        fact(
+            &root,
+            "riders-lose-the-signal",
+            &lists("Gate, Island", SOURCE, ""),
+            "Riders lose the signal",
+            "The carriage drops the network for minutes at a time.",
+            SCENARIOS,
+        );
+        assert_eq!(unreached(&check_at(&root)), save_set(&root));
+        assert_eq!(save_set(&root), Vec::<String>::new());
+
+        // The island declared internal instead: both go empty again.
+        healthy(&root, "riders-lose-the-signal", "Riders lose the signal");
+        ignore(&root, "Island — a fixture; nothing outside arrives at it\n");
+        assert_eq!(unreached(&check_at(&root)), save_set(&root));
+        assert_eq!(save_set(&root), Vec::<String>::new());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A tree with no fact reaches nothing and refuses nothing: the wing's
+    /// threshold, at the save (`the-wing-arrives-without-noise`).
+    #[test]
+    fn a_tree_with_no_fact_hands_the_save_nothing() {
+        let root = temp_project();
+        assert_eq!(save_set(&root), Vec::<String>::new());
+        // A wing folder with only a note in it is still no fact.
+        note(&root);
+        assert_eq!(save_set(&root), Vec::<String>::new());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
     /// The fingerprint the plan's drift line reads: six hex digits over the
     /// whole parsed block, moving with a step and standing still under the
     /// prose around it. Naming no scenario is that grain
@@ -1527,13 +1623,13 @@ Then the view arrives late
     /// The strict record is the `facts/` layer's alone, and it holds every
     /// slot the schema names (`the-world-holds-four-layers`).
     #[test]
-    fn a_fact_missing_its_killer_or_its_scenarios_is_a_located_error() {
+    fn a_fact_missing_its_workaround_or_its_scenarios_is_a_located_error() {
         let root = temp_project();
         let file = "archi/world/facts/riders-lose-the-signal.md";
         let head = "---\ncovers: []\nsources: []\nuses: []\n---\n\n\
                     # Riders lose the signal\n\n\
                     The carriage drops the network for minutes at a time.\n";
-        // No killer.
+        // No workaround.
         put(
             &root,
             file,
@@ -1549,7 +1645,7 @@ Then the view arrives late
             [("E_DOC", file)]
         );
         assert!(
-            report.diagnostics[0].message.contains("What kills this"),
+            report.diagnostics[0].message.contains("What people do instead"),
             "{}",
             report.diagnostics[0]
         );
@@ -1558,7 +1654,7 @@ Then the view arrives late
         put(
             &root,
             file,
-            &format!("{head}\n## What kills this\n\nThe condition ends.\n"),
+            &format!("{head}\n## What people do instead\n\nThey work around it by hand.\n"),
         );
         let report = check_at(&root);
         assert_eq!(
@@ -1578,7 +1674,7 @@ Then the view arrives late
     }
 
     /// What was seen and not yet shaped needs a name and its prose and
-    /// nothing else — no killer, no scenarios, no lists
+    /// nothing else — no workaround, no scenarios, no lists
     /// (`the-world-holds-four-layers`).
     #[test]
     fn a_note_needs_only_a_name_and_its_prose() {

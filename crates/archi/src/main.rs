@@ -2673,8 +2673,8 @@ fn run_world(args: &Args) -> ExitCode {
         (Some("add"), [title]) => match docs::mint::world_add(&root, title) {
             Ok(path) => {
                 println!(
-                    "minted {} — write the condition, what kills it and its scenarios; \
-                     `archi check` holds the empty slots",
+                    "minted {} — write the condition, what people do instead and its \
+                     scenarios; `archi check` holds the empty slots",
                     path.strip_prefix(&root).unwrap_or(&path).display()
                 );
                 ExitCode::SUCCESS

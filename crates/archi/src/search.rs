@@ -309,7 +309,8 @@ fn world_files(root: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-/// One world fact's card: its name, its conditioning paragraph, its killer.
+/// One world fact's card: its name, its conditioning paragraph, the
+/// workaround under it.
 /// The `Scenarios` block stays out and so do the header's lists — a step and a
 /// covered element are addressed by `covers`, never by phrase, so the reach is
 /// real and the yield is bounded (search-reaches-the-new-wing). The lists ride
@@ -333,7 +334,7 @@ fn world_card(root: &Path, path: &Path) -> Card {
     let mut c = Card::new(Kind::World, slug, Some(file), fact.line);
     c.push(0, doc.name_line, doc.name.clone());
     push_block(&mut c, 1, fact.condition.as_ref());
-    push_block(&mut c, 2, fact.killer.as_ref());
+    push_block(&mut c, 2, fact.workaround.as_ref());
     c.refs.covers = fact.covers.map(|(v, _)| v).unwrap_or_default();
     c.refs.uses = fact.uses.map(|(v, _)| v).unwrap_or_default();
     c
@@ -960,13 +961,15 @@ mod tests {
 
     /// One fact of the world wing, in the layer the strict record lives in
     /// (`archi/requirements/world-facts/the-world-holds-four-layers.md`): the
-    /// condition, what would kill it, and the scenarios it dictates — whose
-    /// steps the card does not hold.
+    /// condition, what people do instead, and the scenarios it dictates —
+    /// whose steps the card does not hold. `trackside` stands in the
+    /// workaround block and nowhere else, so a search for it proves the card
+    /// carries that block.
     fn world_fact(root: &Path) {
         put(
             root,
             "archi/world/facts/trains-lose-the-signal-in-tunnels.md",
-            "---\ncovers: [AuthService]\nsources: []\nuses: [the-carriage-is-metal]\n---\n\n# Trains lose the signal in tunnels\n\nThe carriage keeps no reception for minutes at a time, so a call that must reach\nthe far end fails for a reason nobody aboard can fix.\n\n## What kills this\n\nTrackside repeaters that never drop.\n\n## Scenarios\n\nFeature: Offline open\n  Scenario: the rider opens the app underground\n    Given the device holds no dugong\n    When the rider opens the app\n    Then the last synced view appears\n",
+            "---\ncovers: [AuthService]\nsources: []\nuses: [the-carriage-is-metal]\n---\n\n# Trains lose the signal in tunnels\n\nThe carriage keeps no reception for minutes at a time, so a call that must reach\nthe far end fails for a reason nobody aboard can fix.\n\n## What people do instead\n\nRiders load what they need while the train still stands at a trackside\nplatform, and redo the trip's work when they forget.\n\n## Scenarios\n\nFeature: Offline open\n  Scenario: the rider opens the app underground\n    Given the device holds no dugong\n    When the rider opens the app\n    Then the last synced view appears\n",
         );
     }
 

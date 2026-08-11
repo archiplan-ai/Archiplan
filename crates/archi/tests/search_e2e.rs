@@ -79,7 +79,8 @@ fn wing(root: &Path) {
         uses: "",
         condition: "Stolen pairs arrive from one bot farm in bursts of thousands, \
                     minutes apart.",
-        killer: "The farm goes quiet for a year.",
+        workaround: "The on-call engineer blocks the range by hand, and the honest sign-ins \
+                     behind it fail until somebody lifts the block.",
         scenarios: "Feature: The burst\n  \
                     Scenario: the burst arrives\n    \
                     Given a burst of stolen pairs\n    When the pairs arrive at once\n    \

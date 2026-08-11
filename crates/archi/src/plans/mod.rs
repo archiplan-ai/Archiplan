@@ -2097,7 +2097,7 @@ mod tests {
 
     /// One world fact under `archi/world/facts/`, the layer of the strict
     /// record (`archi/requirements/world-facts/the-world-holds-four-layers.md`):
-    /// the three lists, the conditioning paragraph, the killer and a
+    /// the three lists, the conditioning paragraph, the workaround and a
     /// `Scenarios` block. A scenario is a `### ` heading and its steps — the
     /// fact's own title is the feature, so the block names none
     /// (`archi/requirements/world-facts/the-grammar-is-a-named-subset.md`).
@@ -2118,7 +2118,8 @@ mod tests {
             &format!(
                 "---\ncovers: [{covers}]\nsources: [{NOTE}]\nuses: []\n\
                  ---\n\n# {title}\n\nThe carriage drops the network for minutes at a time.\n\n\
-                 ## What kills this\n\nThe condition ends.\n\n## Scenarios\n\n{block}"
+                 ## What people do instead\n\nRiders load the page at the platform.\n\n\
+                 ## Scenarios\n\n{block}"
             ),
         );
     }
@@ -2576,7 +2577,8 @@ mod tests {
                 "---\ncovers: [Gate]\nsources: [{NOTE}]\nuses: []\n---\n\n\
              # Riders lose the signal\n\n\
              The carriage drops the network for minutes at a time.\n\n\
-             ## What kills this\n\nThe condition ends.\n\n## Scenarios\n\n\
+             ## What people do instead\n\nRiders load the page at the platform.\n\n\
+             ## Scenarios\n\n\
              ### the app opens with no network\n\n\
              Given the device has no network\nWhen the user opens the app\n\
              Then the last synced view appears\n"

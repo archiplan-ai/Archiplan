@@ -53,19 +53,27 @@ fn put(root: &Path, rel_path: &str, text: &str) {
 }
 
 /// One whole world fact: the three lists as given, the conditioning
-/// paragraph, the killer and one scenario.
+/// paragraph, the workaround and one scenario.
 fn fact(root: &Path, slug: &str, title: &str, covers: &str, sources: &str, uses: &str) {
     util::Fact {
         covers,
         sources,
         uses,
         condition: "The carriage drops the network for minutes at a time.",
-        killer: "Trackside coverage that never drops.",
+        workaround: "Riders load the page at the platform and redo the trip's work when they \
+                     forget.",
         scenarios: "### the app opens with no network\n\n\
                     Given the device has no network\nWhen the user opens the app\n\
                     Then the last synced view appears\n",
     }
     .write(root, slug, title);
+}
+
+/// The nodes of [`MODEL`] the facts of a test never reach: the shared
+/// declaration ([`util::declare_internal`]), for the tests here that only need
+/// a version to exist.
+fn declare_internal(root: &Path, nodes: &[&str]) {
+    util::declare_internal(root, nodes);
 }
 
 /// The note every grounded fact here rests on, in the layer a source lives in
@@ -182,7 +190,7 @@ fn the_check_holds_the_minted_fact_until_it_is_whole() {
         "{err}"
     );
     assert!(err.contains("a world fact needs a summary paragraph"), "{err}");
-    assert!(err.contains("`What kills this` holds nothing"), "{err}");
+    assert!(err.contains("`What people do instead` holds nothing"), "{err}");
     assert!(err.contains("`Scenarios` holds nothing"), "{err}");
 
     // The prose lands, but the three lists point at nothing: an element no
@@ -268,6 +276,10 @@ fn the_held_removal_hands_back_the_commands_that_clear_it() {
         ],
     );
     // And a plan in flight carries it: the task on the node the fact covers.
+    // The save now gates on the wing's reach, and `Island` is the node these
+    // two facts never touch — it is declared internal so the gate lets this
+    // test get to the plan it is about.
+    declare_internal(&wt, &["Island"]);
     ok(&wt, &["version", "save", "-m", "first"]);
     ok(&wt, &["plan", "use", "offline-open"]);
     ok(&wt, &["plan", "task", "add", "AuthService", "--desc", "hold the door"]);
@@ -353,6 +365,53 @@ fn the_world_verb_refuses_like_the_others() {
     assert_eq!(ok(&primary, &["world", "ls"]), "");
 }
 
+/// The mint writes the shape the reader accepts: a person who fills the
+/// skeleton's empty slots and touches no heading lands a fact the check lets
+/// go (`archi/requirements/world-facts/one-verb-mints-the-world-fact.md`,
+/// `archi/requirements/world-facts/a-world-fact-carries-its-scenarios.md`).
+///
+/// The mint is the one place the tool authors a heading, so a heading the
+/// reader refuses would make `archi world add` write a file no amount of
+/// prose can rescue — the operator would have to know to rename a section the
+/// tool had just handed them. Nothing else in the fixture is edited: what is
+/// written is prose under the headings the mint chose.
+#[test]
+fn the_minted_skeleton_takes_prose_and_passes_the_check() {
+    let (_primary, wt) = temp_project();
+    let out = ok(&wt, &["world", "add", "Trains lose the signal"]);
+    // The line the mint prints names the slots, and the workaround is one.
+    assert!(out.contains("what people do instead"), "{out}");
+
+    let path = wt.join("archi/world/facts/trains-lose-the-signal.md");
+    let minted = fs::read_to_string(&path).unwrap();
+    // No heading of the minted file is touched: prose goes under each of
+    // them, and the covers list takes the node it conditions.
+    let filled = minted
+        .replace("covers: []", "covers: [AuthService]")
+        .replace(
+            "# Trains lose the signal\n",
+            "# Trains lose the signal\n\nThe carriage drops the network for minutes at a time.\n",
+        )
+        .replace(
+            "## What people do instead\n",
+            "## What people do instead\n\nRiders load the page at the platform and redo the \
+             trip's work when they forget.\n",
+        )
+        .replace(
+            "## Scenarios\n",
+            "## Scenarios\n\n### the app opens with no network\n\n\
+             Given the device has no network\nWhen the user opens the app\n\
+             Then the last synced view appears\n",
+        );
+    assert_ne!(filled, minted);
+    fs::write(&path, &filled).unwrap();
+
+    let (code, out, err) = run(&wt, &["check"]);
+    assert_eq!(code, Some(0), "{out}{err}");
+    assert!(!err.contains("archi/world/facts/"), "{err}");
+    assert!(out.contains("world — 1 facts"), "{out}");
+}
+
 /// The mint and the removal ride the same dispatch as the other doc verbs:
 /// the skeleton, the refusals, the exit codes. The skeleton lands in the
 /// layer of the strict record and nowhere else
@@ -370,7 +429,7 @@ fn the_verb_mints_and_retires_from_the_bound_seat() {
     assert_eq!(
         fs::read_to_string(&path).unwrap(),
         "---\ncovers: []\nsources: []\nuses: []\n---\n\n\
-         # Trains lose the signal\n\n## What kills this\n\n## Scenarios\n"
+         # Trains lose the signal\n\n## What people do instead\n\n## Scenarios\n"
     );
     assert!(ok(&wt, &["world", "ls"]).contains("trains-lose-the-signal"));
 

@@ -1,0 +1,19 @@
+# The elements no condition outside will ever reach.
+# One line is `<element> — why nothing outside reaches it`. Every entry
+# resolves against the compiled model, and the reason is a claim a reader can
+# argue with (`archi/requirements/world-facts/an-internal-element-says-so.md`).
+
+# The two ends of the verb path. Nothing arrives at either: the operator is
+# where every recorded behavior starts, and the router only passes it on.
+Agent — the operator, and the model draws it outside the tool: every recorded behavior starts here and no edge arrives, so it carries the conditions instead of receiving them
+Cli — the router: it holds no behavior of its own; it reads one verb and hands it to the subsystem that does the work, and the condition reaches that subsystem
+
+# Machinery: each one takes the tool's own artifacts and returns a derivation
+# of them, so its answers move when the model or the tree moves, never when
+# the world does.
+Engine — the in-memory model store: a lowered batch in, the model out; nothing but the compiler's output arrives at it
+Query — reads the compiled model and returns a slice of it; the model is its whole input and its whole answer
+Nkp — counts the compiled graph: its numbers move when the model moves, never when the world does
+Incidence — crosses the stress records the tree holds with the models they pin; both inputs are the tool's own files
+Search — one ranked scan over the text the tree already holds; it keeps no second store and reaches nothing outside the tree
+Addressing — stamps the id of an element onto a line the tool already emits: a rendering pass over the tool's own output

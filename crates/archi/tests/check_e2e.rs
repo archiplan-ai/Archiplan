@@ -102,7 +102,8 @@ fn fact(root: &Path, slug: &str, title: &str, covers: &str, condition: &str, sce
         sources: NOTE,
         uses: "",
         condition,
-        killer: "Trackside coverage that never drops.",
+        workaround: "Riders load the page at the platform and redo the trip's work when they \
+                     forget.",
         scenarios,
     }
     .write(root, slug, title);
@@ -395,22 +396,47 @@ fn the_four_layers_stand_and_the_count_reads_the_facts_alone() {
     fs::remove_dir_all(&root).unwrap();
 }
 
-/// This tree's own wing: four facts, and every one of them ungrounded. The
-/// migration wrote the intent each was lifted from into `sources`, the world
-/// may no longer reach the spec, and the empty field says the true thing —
-/// nobody has grounded these yet
+/// This repository, read by the binary the tests build.
+fn this_tree() -> PathBuf {
+    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+}
+
+/// The slugs of the facts standing in this tree — the files under
+/// `archi/world/facts/`, which is where the count the check prints comes from.
+fn standing_facts() -> Vec<String> {
+    let mut out: Vec<String> = fs::read_dir(this_tree().join("archi/world/facts"))
+        .expect("the wing stands")
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("md"))
+        .map(|p| p.file_stem().unwrap().to_string_lossy().into_owned())
+        .collect();
+    out.sort();
+    out
+}
+
+/// This tree's own wing: every fact it holds is ungrounded. The migration
+/// wrote the intent each was lifted from into `sources`, the world may no
+/// longer reach the spec, and the empty field says the true thing — nobody
+/// has grounded these yet
 /// (`archi/requirements/world-facts/a-source-is-reachable-and-lives-in-the-world.md`).
+///
+/// The count is read off the tree rather than written here: the wing grows
+/// as the project records more conditions, and a number in this file would
+/// fail on the next fact instead of on a grounded one. The named slugs stay
+/// as the floor — each was migrated ungrounded and must still say so.
 #[test]
 fn this_tree_s_facts_carry_no_source_and_each_reports_ungrounded() {
-    let root = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
+    let root = this_tree();
     let json = ok(&root, &["check", "--json"]);
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
 
+    let standing = standing_facts();
     assert_eq!(v["status"], "ok", "{json}");
-    assert_eq!(v["world"]["facts"], 4, "{json}");
-    assert_eq!(v["world"]["ungrounded"], 4, "{json}");
+    assert_eq!(v["world"]["facts"], standing.len(), "{json}");
+    assert_eq!(v["world"]["ungrounded"], standing.len(), "{json}");
 
-    let ungrounded: Vec<&str> = v["findings"]
+    let mut ungrounded: Vec<&str> = v["findings"]
         .as_array()
         .unwrap()
         .iter()
@@ -422,14 +448,98 @@ fn this_tree_s_facts_carry_no_source_and_each_reports_ungrounded() {
         })
         .map(|f| f["fact"].as_str().unwrap())
         .collect();
+    ungrounded.sort();
+    // Every standing fact reports the state, not just the migrated ones.
+    assert_eq!(ungrounded, standing, "{json}");
     for slug in [
         "a-design-written-apart-from-the-code-falls-behind-it",
         "an-assistant-guesses-which-files-answer-a-written-obligation",
+        "what-the-work-is-really-like-lives-in-the-head-of-whoever-does-it",
         "why-a-design-was-chosen-lives-in-one-person-s-memory",
         "work-runs-in-several-directions-at-once-and-more-than-one-person-joins-it",
     ] {
         assert!(ungrounded.contains(&slug), "`{slug}` is not ungrounded:\n{json}");
     }
+}
+
+/// The rewritten facts read clean in the shape the reader now holds: `check`
+/// on this repository exits zero and locates nothing in a fact file
+/// (`archi/requirements/world-facts/a-world-fact-carries-its-scenarios.md`).
+/// The retired heading is a located error, so a fact left in the old shape —
+/// or a mint that writes it — lands here as a diagnostic under
+/// `archi/world/facts/`.
+#[test]
+fn the_rewritten_facts_parse_clean_and_the_check_exits_zero() {
+    let root = this_tree();
+    // `ok` is the exit code: a diagnostic anywhere would make the check fail.
+    let json = ok(&root, &["check", "--json"]);
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["status"], "ok", "{json}");
+
+    let located: Vec<&str> = v["docs"]
+        .as_array()
+        .map(|ds| {
+            ds.iter()
+                .filter_map(|d| d["file"].as_str())
+                .filter(|f| f.starts_with("archi/world/facts/"))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert_eq!(located, Vec::<&str>::new(), "{json}");
+    assert!(!standing_facts().is_empty(), "the wing stands");
+}
+
+/// The scenarios this tree anchored in code survive the rewrite: every link
+/// whose spec side is a `<fact-slug>#<scenario>` ref verifies clean, and the
+/// journal as a whole reports nothing failing
+/// (`archi/requirements/world-facts/a-scenario-runs-where-its-link-points.md`).
+/// A scenario renamed by the rewrite would move its digest and the row would
+/// stop being clean.
+#[test]
+fn the_six_scenario_links_stay_clean() {
+    let root = this_tree();
+    let out = ok(&root, &["link", "verify"]);
+
+    // The rows the wing owns: the spec side opens with a standing fact's slug
+    // and a `#`. Every one of them is clean.
+    let slugs = standing_facts();
+    let scenario_rows: Vec<&str> = out
+        .lines()
+        .filter(|l| slugs.iter().any(|s| l.contains(&format!("{s}#"))))
+        .collect();
+    let unclean: Vec<&&str> = scenario_rows
+        .iter()
+        .filter(|l| !l.starts_with("clean"))
+        .collect();
+    assert_eq!(unclean, Vec::<&&str>::new(), "{out}");
+
+    // The six this tree anchored, each by name — a link dropped from the
+    // journal would leave the filter above with nothing to object to.
+    for spec in [
+        "a-design-written-apart-from-the-code-falls-behind-it#The code moves and nobody updates \
+         the writing",
+        "a-design-written-apart-from-the-code-falls-behind-it#A claim is written that no code \
+         answers",
+        "an-assistant-guesses-which-files-answer-a-written-obligation#Work arrives over an \
+         obligation the assistant did not write",
+        "an-assistant-guesses-which-files-answer-a-written-obligation#The thread is recovered \
+         after its author has gone",
+        "why-a-design-was-chosen-lives-in-one-person-s-memory#Somebody asks why months after the \
+         choice",
+        "why-a-design-was-chosen-lives-in-one-person-s-memory#The person who made the choice has \
+         forgotten",
+    ] {
+        let row = scenario_rows
+            .iter()
+            .find(|l| l.contains(spec))
+            .unwrap_or_else(|| panic!("no link on `{spec}`:\n{out}"));
+        assert!(row.starts_with("clean"), "{row}");
+    }
+    assert_eq!(scenario_rows.len(), 6, "{scenario_rows:#?}");
+
+    // And the journal as a whole holds: the count the verify closes on.
+    let tail = out.lines().last().expect("a closing line");
+    assert!(tail.contains("0 failing"), "{tail}");
 }
 
 #[test]

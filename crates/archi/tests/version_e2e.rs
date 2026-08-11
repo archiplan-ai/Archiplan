@@ -3,6 +3,12 @@
 //! closed, firing the incidence report — finishes whether or not a
 //! version minted; the bare no-op is a success and genuine failures stay
 //! loud (`archi/requirements/self-hosting/unchanged-saves-close-rounds.md`).
+//!
+//! The save is also the gate on the world wing: a tree that holds a fact and
+//! still carries an element no fact reaches saves nothing, and the refusal
+//! names every element and both exits
+//! (`archi/requirements/world-facts/the-save-refuses-an-unconditioned-element.md`).
+//! A tree with no fact saves exactly as it always did.
 
 mod util;
 
@@ -127,6 +133,133 @@ fn changed_save_still_mints_and_closes_at_the_minted_id() {
     let session = fs::read_to_string(root.join("archi/stress/round-one/round-one.md")).unwrap();
     assert!(session.contains("closed: v0002"), "{session}");
     assert_eq!(version_count(&root), 2);
+}
+
+/// The model with one node nothing reaches — the element the wing has
+/// something to say about.
+const WITH_ISLAND: &str = "def node Island\n";
+
+/// One world fact under `archi/world/facts/`, covering what the caller
+/// names — the shared skeleton ([`util::Fact`]) with this family's words in
+/// it. Its schema is the wing's; the gate reads its `covers` alone.
+fn world_fact(root: &Path, covers: &str) {
+    util::Fact {
+        covers,
+        sources: "",
+        uses: "",
+        condition: "The carriage drops the network for minutes at a time.",
+        workaround: "Riders screenshot the timetable before they go down, and the shot goes \
+                     stale.",
+        scenarios: "### the app opens with no network\n\n\
+                    Given the device has no network\n\
+                    When the user opens the app\n\
+                    Then the last synced view appears\n",
+    }
+    .write(root, "riders-lose-the-signal", "Riders lose the signal");
+}
+
+/// A project holding the island, one fact covering `Gate`, and one saved
+/// version behind it — the state the gate refuses from.
+fn island_and_one_fact() -> PathBuf {
+    let root = temp_project();
+    ok(&root, &["version", "save", "-m", "first"]);
+    world_fact(&root, "Gate");
+    fs::write(
+        root.join("archi/src/model.arch"),
+        format!("{MODEL}{WITH_ISLAND}"),
+    )
+    .unwrap();
+    root
+}
+
+/// The gate: a tree that holds a fact and still carries an element no fact
+/// reaches saves nothing, and the refusal names the element
+/// (`the-save-refuses-an-unconditioned-element`).
+#[test]
+fn an_unreached_element_refuses_the_save() {
+    let root = island_and_one_fact();
+    let (success, _, stderr) = run(&root, &["version", "save", "-m", "grew"]);
+    assert!(!success, "an unreached element must fail the save");
+    assert!(stderr.contains("`Island`"), "{stderr}");
+    assert_eq!(version_count(&root), 1, "the refusal mints nothing");
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The refusal names both exits — cover it with a fact, or declare it
+/// internal — because a gate with one exit is a wall
+/// (`the-save-refuses-an-unconditioned-element`).
+#[test]
+fn the_refusal_names_both_exits() {
+    let root = island_and_one_fact();
+    let (_, _, stderr) = run(&root, &["version", "save", "-m", "grew"]);
+    assert!(stderr.contains("archi world add"), "{stderr}");
+    assert!(stderr.contains("covers"), "{stderr}");
+    assert!(stderr.contains("archi/world/.worldignore"), "{stderr}");
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The first exit: a fact reaches the element, and the save proceeds
+/// (`the-save-refuses-an-unconditioned-element`).
+#[test]
+fn covering_the_element_clears_the_refusal() {
+    let root = island_and_one_fact();
+    world_fact(&root, "Gate, Island");
+    let out = ok(&root, &["version", "save", "-m", "grew"]);
+    assert!(out.contains("saved v0002"), "{out}");
+    assert_eq!(version_count(&root), 2);
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The second exit: the element is declared internal, with the reason a
+/// reader can argue with (`the-save-refuses-an-unconditioned-element`).
+#[test]
+fn declaring_the_element_internal_clears_the_refusal() {
+    let root = island_and_one_fact();
+    fs::write(
+        root.join("archi/world/.worldignore"),
+        "Island — a scratch fixture; no behavior from outside arrives at it\n",
+    )
+    .unwrap();
+    let out = ok(&root, &["version", "save", "-m", "grew"]);
+    assert!(out.contains("saved v0002"), "{out}");
+    assert_eq!(version_count(&root), 2);
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The threshold: a project that has written no fact is not behind on the
+/// wing, and its archive is byte for byte what it was before the gate
+/// existed (`the-wing-arrives-without-noise`).
+#[test]
+fn a_tree_with_no_world_facts_saves_byte_identically() {
+    let bare = temp_project();
+    let winged = temp_project();
+    for root in [&bare, &winged] {
+        fs::write(
+            root.join("archi/src/model.arch"),
+            format!("{MODEL}{WITH_ISLAND}"),
+        )
+        .unwrap();
+    }
+    // A wing folder with no fact in it is still no fact.
+    let notes = winged.join("archi/world/notes");
+    fs::create_dir_all(&notes).unwrap();
+    fs::write(
+        notes.join("the-guard-walked-the-platform.md"),
+        "# The guard walked the platform\n\nHe timed the tunnel once at four minutes.\n",
+    )
+    .unwrap();
+
+    for root in [&bare, &winged] {
+        let out = ok(root, &["version", "save", "-m", "first"]);
+        assert!(out.contains("saved v0001"), "{out}");
+    }
+    assert_eq!(
+        fs::read(bare.join("archi/versions/v0001.arch")).unwrap(),
+        fs::read(winged.join("archi/versions/v0001.arch")).unwrap(),
+        "the wing changes no archived byte"
+    );
+    fs::remove_dir_all(&bare).unwrap();
+    fs::remove_dir_all(&winged).unwrap();
 }
 
 #[test]

@@ -1,5 +1,5 @@
 ---
-covers: [Seats, Seats.Registry, Seats.Mint, Seats.Guard, Seats.Landing]
+covers: [Seats, Seats.Registry, Seats.Mint, Seats.Guard, Seats.Landing, Sessions]
 sources: []
 uses: []
 ---
@@ -8,19 +8,20 @@ uses: []
 
 A person holds three pieces of work at the same time and wants to move all three. That is
 only possible when each one has a copy of the design to itself: without separate copies
-the three collapse into one queue. Before the copies existed the operator lived that way —
-one piece of work at a time, from the first step of the ritual to the last — and a second
-person could not join at all, because putting two sets of edits back together by hand was
-the worst job in the day. So the tool was for one player, and its throughput was one. The
-behavior follows from the queue: what a person cannot do in parallel they do in sequence,
-and a design that assumes one writer makes the sequence mandatory rather than chosen.
+the three collapse into one queue. A second person cannot join that queue at all, because
+putting two sets of edits back together by hand is the worst job in the day. The behavior
+follows from the queue: what a person cannot do in parallel they do in sequence, and a
+design that assumes one writer makes the sequence mandatory rather than chosen.
 
-## What kills this
+## What people do instead
 
-The operator ends up alone and sequential — one piece of work at a time, by preference,
-with nobody else touching the same design for a year. Then a copy per piece of work buys
-nothing that a single tree does not already give, and every ceremony around the copies is
-overhead.
+The work is done one piece at a time. A second idea waits in a note until the first piece
+lands, and the note goes stale; an urgent change jumps the queue and the half-finished
+piece is unpicked and set aside, then picked up days later by somebody who has to work
+out where it stood. A second person either waits for the first to land or works from a
+copy and merges by hand at the end — an evening spent reading two sets of edits and
+deciding which one was meant, with the mistakes found later. Both are paid in
+wall-clock time: the throughput of the whole is the throughput of one.
 
 ## Scenarios
 

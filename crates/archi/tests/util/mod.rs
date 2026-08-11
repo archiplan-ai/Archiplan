@@ -111,9 +111,9 @@ pub fn git(dir: &Path, args: &[&str]) {
 
 /// One world fact on disk, in the shape `archi world add` mints and a person
 /// fills (`archi/requirements/world-facts/`): the three frontmatter lists, the
-/// name, the conditioning paragraph, what would make the fact false, and the
-/// `Scenarios` block. Every e2e family fills the same skeleton with its own
-/// words, so the skeleton lives here once.
+/// name, the conditioning paragraph, what people do instead while the condition
+/// holds, and the `Scenarios` block. Every e2e family fills the same skeleton
+/// with its own words, so the skeleton lives here once.
 pub struct Fact<'a> {
     /// The `covers:` entries, already comma-joined.
     pub covers: &'a str,
@@ -124,8 +124,8 @@ pub struct Fact<'a> {
     pub uses: &'a str,
     /// The conditioning paragraph, under the name.
     pub condition: &'a str,
-    /// What would make the fact false, under `## What kills this`.
-    pub killer: &'a str,
+    /// The workaround and what it costs, under `## What people do instead`.
+    pub workaround: &'a str,
     /// The `Scenarios` block: a `### ` heading per scenario, and its step
     /// lines under it.
     pub scenarios: &'a str,
@@ -143,12 +143,40 @@ impl Fact<'_> {
             dir.join(format!("{slug}.md")),
             format!(
                 "---\ncovers: [{}]\nsources: [{}]\nuses: [{}]\n---\n\n\
-                 # {title}\n\n{}\n\n## What kills this\n\n{}\n\n## Scenarios\n\n{}",
-                self.covers, self.sources, self.uses, self.condition, self.killer, self.scenarios
+                 # {title}\n\n{}\n\n## What people do instead\n\n{}\n\n## Scenarios\n\n{}",
+                self.covers,
+                self.sources,
+                self.uses,
+                self.condition,
+                self.workaround,
+                self.scenarios
             ),
         )
         .unwrap();
     }
+}
+
+/// The nodes of a fixture's model that no fact of it reaches, declared
+/// internal beside the wing so `version save` mints
+/// (`archi/requirements/world-facts/the-save-refuses-an-unconditioned-element.md`).
+///
+/// A test writes the one fact its point needs, and the gate on the save asks
+/// about the whole model. The nodes left over are named here with the reason
+/// the gate wants, which is its second exit; nothing under test moves, because
+/// `covers` is still exactly what the test wrote. A test that is about the gate
+/// itself writes its own file, so the declaration it exercises is the one a
+/// person would write.
+pub fn declare_internal(root: &Path, nodes: &[&str]) {
+    let dir = root.join("archi/world");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut text = String::new();
+    for n in nodes {
+        text.push_str(&format!(
+            "{n} — the fixture's own plumbing: this family conditions the node its test is \
+             about, and nothing outside the tool reaches this one\n"
+        ));
+    }
+    std::fs::write(dir.join(".worldignore"), text).unwrap();
 }
 
 /// Turn a scaffolded directory into a committed repo and mint its worktree;
