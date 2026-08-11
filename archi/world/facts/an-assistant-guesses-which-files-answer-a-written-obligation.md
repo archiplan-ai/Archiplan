@@ -1,6 +1,6 @@
 ---
 covers: [Links, Links.Grader, Links.Capture]
-sources: [archi/requirements/code-link/code-link.md]
+sources: []
 uses: []
 ---
 

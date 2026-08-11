@@ -30,8 +30,8 @@ use sha2::{Digest, Sha256};
 
 use super::gherkin::{self, ScenarioBlock};
 use super::md::slugify;
-use super::world::{self, WorldDoc};
-use super::{DocDiagnostic, Tree, is_md, read_doc, sorted_entries, stem};
+use super::world::{self, WORLD, WorldDoc};
+use super::{DocDiagnostic, Tree, file_name, is_md, read_doc, rel, sorted_entries, stem};
 
 /// A `uses` chain of this many facts still reads; one deeper holds a theory
 /// of the world instead of a record of it.
@@ -44,6 +44,23 @@ const DATA: &str = "Data";
 /// The declaration of what is internal, beside the wing it quiets
 /// (`archi/requirements/world-facts/an-internal-element-says-so.md`).
 const IGNORE: &str = ".worldignore";
+
+/// The layer of the strict record: the condition, its killer, its scenarios
+/// and the three lists (`archi/requirements/world-facts/the-world-holds-four-layers.md`).
+const FACTS: &str = "facts";
+
+/// The layer of a claim somebody means to settle and has not.
+const HYPOTHESES: &str = "hypotheses";
+
+/// The layer of what was seen or heard and not yet shaped into either.
+const NOTES: &str = "notes";
+
+/// The layer of raw material. Never parsed — listed so a `sources` entry can
+/// resolve against it, and opened by nothing else.
+const RESOURCES: &str = "resources";
+
+/// The four layers, in the order a reader meets them.
+const LAYERS: [&str; 4] = [FACTS, HYPOTHESES, NOTES, RESOURCES];
 
 /// What one `.worldignore` line writes between the element and the reason it
 /// is internal — `Element — why nothing outside reaches it`. No element path
@@ -160,22 +177,79 @@ pub struct WorldReport {
     pub count: Option<WorldCount>,
 }
 
-/// Walk `archi/world/` — a flat folder, one file per fact — and read each
-/// file the way every doc primitive is read: structure, then schema, then
-/// the grammar over the `Scenarios` block. Nothing here creates the folder.
+/// Walk `archi/world/` — four folders, and the folder decides what a file is
+/// (`archi/requirements/world-facts/the-world-holds-four-layers.md`).
+/// [`FACTS`] holds the strict record and is read the way every doc primitive
+/// is read: structure, then schema, then the grammar over the `Scenarios`
+/// block. [`HYPOTHESES`] and [`NOTES`] hold a name and their prose and are
+/// read for exactly that. [`RESOURCES`] is opened by nothing.
+///
+/// Nothing here creates a folder, and a tree holding none of the four says
+/// nothing at all — a project that has not opted into a layer is not behind
+/// on it (`archi/requirements/world-facts/the-wing-arrives-without-noise.md`).
 pub(crate) fn discover(root: &Path, diags: &mut Vec<DocDiagnostic>) -> Vec<WorldFact> {
-    let base = root.join("archi").join("world");
-    let files: Vec<_> = sorted_entries(&base)
-        .into_iter()
-        .filter(|p| is_md(p))
-        .collect();
-    if files.is_empty() {
+    let base = root.join(WORLD);
+    if !base.is_dir() {
         return Vec::new();
     }
-    files
+    // A file directly under the wing sits in no layer, and the layer is what
+    // says how the file is read. `.worldignore` is no document and is read
+    // beside the facts, not among them.
+    for path in sorted_entries(&base).into_iter().filter(|p| is_md(p)) {
+        diags.push(DocDiagnostic::new(
+            "E_PLACEMENT",
+            format!(
+                "`{}` sits in no layer of the world — a file lives under one of `{}`, and the \
+                 folder is what says how it is read",
+                file_name(&path),
+                LAYERS
+                    .iter()
+                    .map(|l| format!("{WORLD}{l}/"))
+                    .collect::<Vec<_>>()
+                    .join("`, `")
+            ),
+            &rel(root, &path),
+            1,
+        ));
+    }
+    // The loose layers carry a name and their prose and nothing else: no
+    // killer, no scenarios, no lists to keep true.
+    for layer in [HYPOTHESES, NOTES] {
+        for path in layer_files(&base, layer) {
+            loose(root, &path, diags);
+        }
+    }
+    layer_files(&base, FACTS)
         .into_iter()
         .filter_map(|path| read_fact(root, &path, diags))
         .collect()
+}
+
+/// The documents of one layer, in path order.
+fn layer_files(base: &Path, layer: &str) -> Vec<std::path::PathBuf> {
+    sorted_entries(&base.join(layer))
+        .into_iter()
+        .filter(|p| is_md(p))
+        .collect()
+}
+
+/// One file of a loose layer. It needs a name and its prose, and the reader
+/// already locates a file that carries no name; this locates one that carries
+/// no prose under it. Nothing else is asked of it, and nothing is kept: the
+/// wing reads these layers so a fact's `sources` has something to resolve
+/// against (`archi/requirements/world-facts/the-world-holds-four-layers.md`).
+fn loose(root: &Path, path: &Path, diags: &mut Vec<DocDiagnostic>) {
+    let Some((file, doc)) = read_doc(root, path, diags) else {
+        return;
+    };
+    if doc.summary.is_empty() {
+        diags.push(DocDiagnostic::new(
+            "E_DOC",
+            "a note or a hypothesis is a name and the prose under it",
+            &file,
+            doc.name_line,
+        ));
+    }
 }
 
 /// One fact, read from one file: structure, then schema, then the grammar
@@ -779,8 +853,10 @@ Then the view arrives late
     /// The scenario the narrow grain is read on, as a ref addresses it.
     const NAMED: &str = "the app opens with no network";
 
-    /// A `sources` entry that never touches the filesystem.
-    const SOURCE: &str = "https://example.org/thread/42";
+    /// The material every grounded fact here rests on: a note of the world,
+    /// named as a `sources` entry names it — a path from the project root
+    /// into `archi/world/`.
+    const SOURCE: &str = "archi/world/notes/the-guard-walked-the-platform.md";
 
     fn temp_project() -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -804,12 +880,25 @@ Then the view arrives late
         fs::write(path, text).unwrap();
     }
 
-    /// One world fact under `archi/world/`: its three lists, its name, its
-    /// conditioning paragraph and its `Scenarios` block.
-    fn fact(root: &Path, slug: &str, lists: &str, title: &str, condition: &str, scenarios: &str) {
+    /// The note [`SOURCE`] names: a name and its prose, which is the whole
+    /// schema of a loose layer.
+    fn note(root: &Path) {
         put(
             root,
-            &format!("archi/world/{slug}.md"),
+            SOURCE,
+            "# The guard walked the platform\n\nHe timed the tunnel once at four minutes.\n",
+        );
+    }
+
+    /// One world fact under `archi/world/facts/`: its three lists, its name,
+    /// its conditioning paragraph and its `Scenarios` block. The note it may
+    /// name arrives with it, so a grounded fact is grounded wherever it is
+    /// written.
+    fn fact(root: &Path, slug: &str, lists: &str, title: &str, condition: &str, scenarios: &str) {
+        note(root);
+        put(
+            root,
+            &format!("archi/world/facts/{slug}.md"),
             &format!(
                 "---\n{lists}---\n\n# {title}\n\n{condition}\n\n\
                  ## What kills this\n\nThe condition ends.\n\n## Scenarios\n\n{scenarios}"
@@ -956,7 +1045,10 @@ Then the view arrives late
     }
 
     /// An empty `sources` says so, whatever else the fact carries; any entry
-    /// clears it (`an-ungrounded-fact-says-so`).
+    /// clears it (`an-ungrounded-fact-says-so`,
+    /// `a-source-is-reachable-and-lives-in-the-world`). Emptiness is a legal
+    /// state and never an error: nobody has grounded the fact yet, and the
+    /// line says exactly that.
     #[test]
     fn an_empty_sources_says_so_and_one_entry_clears_it() {
         let root = temp_project();
@@ -969,6 +1061,7 @@ Then the view arrives late
             SCENARIOS,
         );
         let report = check_at(&root);
+        assert_eq!(rendered(&report.diagnostics), Vec::<String>::new());
         assert_eq!(
             states(&report),
             ["world fact `riders-lose-the-signal`: world_ungrounded"]
@@ -1069,7 +1162,7 @@ Then the view arrives late
         assert!(all.contains("tunnels-run-long"), "{all}");
 
         // A fact resting on itself is the same ring, one link long.
-        fs::remove_dir_all(root.join("archi/world")).unwrap();
+        fs::remove_dir_all(root.join("archi/world/facts")).unwrap();
         fact(
             &root,
             "tunnels-run-long",
@@ -1427,6 +1520,291 @@ Then the view arrives late
             }
         }
         out
+    }
+
+    // ---- the four layers ---------------------------------------------------
+
+    /// The strict record is the `facts/` layer's alone, and it holds every
+    /// slot the schema names (`the-world-holds-four-layers`).
+    #[test]
+    fn a_fact_missing_its_killer_or_its_scenarios_is_a_located_error() {
+        let root = temp_project();
+        let file = "archi/world/facts/riders-lose-the-signal.md";
+        let head = "---\ncovers: []\nsources: []\nuses: []\n---\n\n\
+                    # Riders lose the signal\n\n\
+                    The carriage drops the network for minutes at a time.\n";
+        // No killer.
+        put(
+            &root,
+            file,
+            &format!("{head}\n## Scenarios\n\n{SCENARIOS}"),
+        );
+        let report = check_at(&root);
+        assert_eq!(
+            report
+                .diagnostics
+                .iter()
+                .map(|d| (d.code, d.file.as_str()))
+                .collect::<Vec<_>>(),
+            [("E_DOC", file)]
+        );
+        assert!(
+            report.diagnostics[0].message.contains("What kills this"),
+            "{}",
+            report.diagnostics[0]
+        );
+
+        // No scenarios.
+        put(
+            &root,
+            file,
+            &format!("{head}\n## What kills this\n\nThe condition ends.\n"),
+        );
+        let report = check_at(&root);
+        assert_eq!(
+            report
+                .diagnostics
+                .iter()
+                .map(|d| (d.code, d.file.as_str()))
+                .collect::<Vec<_>>(),
+            [("E_DOC", file)]
+        );
+        assert!(
+            report.diagnostics[0].message.contains("Scenarios"),
+            "{}",
+            report.diagnostics[0]
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// What was seen and not yet shaped needs a name and its prose and
+    /// nothing else — no killer, no scenarios, no lists
+    /// (`the-world-holds-four-layers`).
+    #[test]
+    fn a_note_needs_only_a_name_and_its_prose() {
+        let root = temp_project();
+        put(
+            &root,
+            "archi/world/notes/the-guard-walked-the-platform.md",
+            "# The guard walked the platform\n\nHe timed the tunnel once at four minutes.\n",
+        );
+        let report = check_at(&root);
+        assert_eq!(rendered(&report.diagnostics), Vec::<String>::new());
+        assert!(report.world.findings.is_empty());
+        // A note is no fact, so the count has nothing to close on.
+        assert!(report.world.count.is_none());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A claim somebody means to settle wears the same looseness
+    /// (`the-world-holds-four-layers`).
+    #[test]
+    fn a_hypothesis_needs_only_a_name_and_its_prose() {
+        let root = temp_project();
+        put(
+            &root,
+            "archi/world/hypotheses/the-tunnel-is-the-cause.md",
+            "# The tunnel is the cause\n\nNobody has measured the dead zone against it.\n",
+        );
+        let report = check_at(&root);
+        assert_eq!(rendered(&report.diagnostics), Vec::<String>::new());
+        assert!(report.world.findings.is_empty());
+        assert!(report.world.count.is_none());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Raw material is listed so a source can resolve against it, and opened
+    /// by nothing: whatever it holds, the wing says nothing about it
+    /// (`the-world-holds-four-layers`).
+    #[test]
+    fn a_resource_is_never_parsed_and_never_reported() {
+        let root = temp_project();
+        // Nothing a reader could make sense of: no name, a half-written
+        // header, and the markers a merge leaves behind.
+        put(
+            &root,
+            "archi/world/resources/the-support-thread.md",
+            "---\nkind: ???\n\n<<<<<<< ours\nnot a document at all\n>>>>>>> theirs\n",
+        );
+        put(
+            &root,
+            "archi/world/resources/the-recording.txt",
+            "00:14 the guard says the tunnel takes four minutes\n",
+        );
+        let report = check_at(&root);
+        assert_eq!(rendered(&report.diagnostics), Vec::<String>::new());
+        assert!(report.world.findings.is_empty());
+        assert!(report.world.count.is_none());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A wing folder holding none of the four layers behaves exactly as a
+    /// tree with no wing does: nothing reported, nothing created
+    /// (`the-world-holds-four-layers`, `the-wing-arrives-without-noise`).
+    #[test]
+    fn a_tree_with_none_of_the_four_folders_reports_nothing() {
+        let root = temp_project();
+        fs::create_dir_all(root.join("archi/world")).unwrap();
+        let report = check_at(&root);
+        assert_eq!(rendered(&report.diagnostics), Vec::<String>::new());
+        assert!(report.world.findings.is_empty());
+        assert!(report.world.count.is_none());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    // ---- a source lives inside the world ------------------------------------
+
+    /// A source names a file of the world — a note, a hypothesis or a
+    /// resource — and it resolves
+    /// (`a-source-is-reachable-and-lives-in-the-world`).
+    #[test]
+    fn a_source_names_a_file_of_the_world_and_resolves() {
+        let root = temp_project();
+        put(
+            &root,
+            "archi/world/hypotheses/the-tunnel-is-the-cause.md",
+            "# The tunnel is the cause\n\nNobody has measured the dead zone against it.\n",
+        );
+        put(
+            &root,
+            "archi/world/resources/the-recording.txt",
+            "00:14 the guard says the tunnel takes four minutes\n",
+        );
+        fact(
+            &root,
+            "riders-lose-the-signal",
+            &lists(
+                "Gate",
+                &format!(
+                    "{SOURCE}, archi/world/hypotheses/the-tunnel-is-the-cause.md, \
+                     archi/world/resources/the-recording.txt"
+                ),
+                "",
+            ),
+            "Riders lose the signal",
+            "The carriage drops the network for minutes at a time.",
+            SCENARIOS,
+        );
+        let report = check_at(&root);
+        assert_eq!(rendered(&report.diagnostics), Vec::<String>::new());
+        assert_eq!(states(&report), Vec::<String>::new());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A source that reaches nothing is no source
+    /// (`a-source-is-reachable-and-lives-in-the-world`).
+    #[test]
+    fn a_source_that_resolves_to_nothing_is_a_located_error() {
+        let root = temp_project();
+        fact(
+            &root,
+            "riders-lose-the-signal",
+            &lists("Gate", "archi/world/notes/nobody-wrote-this.md", ""),
+            "Riders lose the signal",
+            "The carriage drops the network for minutes at a time.",
+            SCENARIOS,
+        );
+        let report = check_at(&root);
+        let all = rendered(&report.diagnostics).join("\n");
+        assert_eq!(
+            report
+                .diagnostics
+                .iter()
+                .map(|d| (d.code, d.file.as_str(), d.line))
+                .collect::<Vec<_>>(),
+            [("E_DOC", "archi/world/facts/riders-lose-the-signal.md", 3)],
+            "{all}"
+        );
+        assert!(all.contains("`archi/world/notes/nobody-wrote-this.md`"), "{all}");
+        assert!(all.contains("a source that cannot be read is no source"), "{all}");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A source pointing into the spec is a located error whose text says
+    /// why: the spec is what the world conditions, so a fact grounded in a
+    /// requirement grounds itself in what it explains
+    /// (`a-source-is-reachable-and-lives-in-the-world`).
+    #[test]
+    fn a_source_outside_the_world_is_a_located_error_that_says_why() {
+        let root = temp_project();
+        // A file of the spec that really is there: existing is not the
+        // question the rule asks.
+        put(
+            &root,
+            "archi/requirements/an-intent/an-intent.md",
+            "# An intent\n\nA problem worth modeling.\n",
+        );
+        for entry in [
+            "archi/requirements/an-intent/an-intent.md",
+            "archi/world/../requirements/an-intent/an-intent.md",
+        ] {
+            fact(
+                &root,
+                "riders-lose-the-signal",
+                &lists("Gate", entry, ""),
+                "Riders lose the signal",
+                "The carriage drops the network for minutes at a time.",
+                SCENARIOS,
+            );
+            let report = check_at(&root);
+            let all = rendered(&report.diagnostics).join("\n");
+            assert_eq!(
+                report
+                    .diagnostics
+                    .iter()
+                    .map(|d| (d.code, d.file.as_str(), d.line))
+                    .collect::<Vec<_>>(),
+                [("E_DOC", "archi/world/facts/riders-lose-the-signal.md", 3)],
+                "on `{entry}`: {all}"
+            );
+            assert!(all.contains(&format!("`{entry}`")), "{all}");
+            assert!(
+                all.contains("a path into the spec grounds the fact in what the fact explains"),
+                "{all}"
+            );
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The external-locator form is retired: a source nobody here can open is
+    /// a claim about evidence rather than evidence, and it earns the error a
+    /// path outside the world earns
+    /// (`a-source-is-reachable-and-lives-in-the-world`,
+    /// `the-source-lives-outside-the-tree`).
+    #[test]
+    fn a_source_carrying_a_uri_scheme_is_the_same_error() {
+        let root = temp_project();
+        for entry in [
+            "https://example.org/thread/42",
+            "mailto:guard@rail.example",
+            "jira:RAIL-77",
+        ] {
+            fact(
+                &root,
+                "riders-lose-the-signal",
+                &lists("Gate", entry, ""),
+                "Riders lose the signal",
+                "The carriage drops the network for minutes at a time.",
+                SCENARIOS,
+            );
+            let report = check_at(&root);
+            let all = rendered(&report.diagnostics).join("\n");
+            assert_eq!(
+                report
+                    .diagnostics
+                    .iter()
+                    .map(|d| (d.code, d.file.as_str(), d.line))
+                    .collect::<Vec<_>>(),
+                [("E_DOC", "archi/world/facts/riders-lose-the-signal.md", 3)],
+                "on `{entry}`: {all}"
+            );
+            assert!(all.contains(&format!("`{entry}`")), "{all}");
+            assert!(
+                all.contains("a path into the spec grounds the fact in what the fact explains"),
+                "{all}"
+            );
+        }
+        fs::remove_dir_all(&root).unwrap();
     }
 
     /// A project that has not opted into the wing is not behind on it: no

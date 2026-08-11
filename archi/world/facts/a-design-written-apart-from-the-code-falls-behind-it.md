@@ -1,6 +1,6 @@
 ---
 covers: [Links, Links.Grader, DocsCompiler]
-sources: [archi/requirements/modeling-language/modeling-language.md]
+sources: []
 uses: [why-a-design-was-chosen-lives-in-one-person-s-memory]
 ---
 

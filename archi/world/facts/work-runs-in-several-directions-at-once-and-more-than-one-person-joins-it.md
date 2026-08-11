@@ -1,6 +1,6 @@
 ---
 covers: [Seats, Seats.Registry, Seats.Mint, Seats.Guard, Seats.Landing]
-sources: [archi/requirements/worktree-parallelism/worktree-parallelism.md]
+sources: []
 uses: []
 ---
 

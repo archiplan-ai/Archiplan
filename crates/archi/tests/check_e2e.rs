@@ -76,21 +76,53 @@ fn ok(root: &Path, args: &[&str]) -> String {
     stdout
 }
 
+/// The note every fact here rests on, and the `sources` entry that names it:
+/// a source names a file of the world and resolves against it
+/// (`archi/requirements/world-facts/a-source-is-reachable-and-lives-in-the-world.md`).
+const NOTE: &str = "archi/world/notes/the-guard-walked-the-platform.md";
+
+fn put(root: &Path, rel_path: &str, text: &str) {
+    let path = root.join(rel_path);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, text).unwrap();
+}
+
+/// One strict record, in the layer the strict record lives in
+/// (`archi/requirements/world-facts/the-world-holds-four-layers.md`), with the
+/// note it is grounded in beside it. The shared skeleton still writes into the
+/// wing's root, which is no layer at all, so this family writes its own.
+fn fact(root: &Path, slug: &str, title: &str, covers: &str, condition: &str, scenarios: &str) {
+    put(
+        root,
+        NOTE,
+        "# The guard walked the platform\n\nHe timed the tunnel once at four minutes.\n",
+    );
+    put(
+        root,
+        &format!("archi/world/facts/{slug}.md"),
+        &format!(
+            "---\ncovers: [{covers}]\nsources: [{NOTE}]\nuses: []\n---\n\n\
+             # {title}\n\n{condition}\n\n\
+             ## What kills this\n\nTrackside coverage that never drops.\n\n\
+             ## Scenarios\n\n{scenarios}"
+        ),
+    );
+}
+
 /// The one standing fact of the coverage tests: it conditions the gate, and
 /// nothing else, so every other element on [`CARRIED`] answers the coverage
 /// question for its own reason.
 fn gate_fact(root: &Path) {
-    util::Fact {
-        covers: "Gate",
-        sources: "https://example.org/thread/42",
-        uses: "",
-        condition: "The carriage drops the network for minutes at a time.",
-        killer: "Trackside coverage that never drops.",
-        scenarios: "### the app opens with no network\n\n\
-                    Given the device has no network\nWhen the user opens the app\n\
-                    Then the last synced view appears\n",
-    }
-    .write(root, "trains-lose-the-signal", "Trains lose the signal");
+    fact(
+        root,
+        "trains-lose-the-signal",
+        "Trains lose the signal",
+        "Gate",
+        "The carriage drops the network for minutes at a time.",
+        "### the app opens with no network\n\n\
+         Given the device has no network\nWhen the user opens the app\n\
+         Then the last synced view appears\n",
+    );
 }
 
 #[test]
@@ -194,28 +226,26 @@ fn findings_stay_advisory_and_do_not_withhold_the_read() {
 fn the_wing_names_what_it_never_reaches_and_the_tree_stands() {
     let root = temp_project(COUPLED);
     // One fact on the hotspot, and one recorded before the model reached it.
-    util::Fact {
-        covers: "X",
-        sources: "https://example.org/thread/42",
-        uses: "",
-        condition: "The carriage drops the network for minutes at a time.",
-        killer: "Trackside coverage that never drops.",
-        scenarios: "### the app opens with no network\n\n\
-                    Given the device has no network\nWhen the user opens the app\n\
-                    Then the last synced view appears\n",
-    }
-    .write(&root, "trains-lose-the-signal", "Trains lose the signal");
-    util::Fact {
-        covers: "",
-        sources: "https://example.org/thread/77",
-        uses: "",
-        condition: "The guard walks the length of the platform every hour.",
-        killer: "The walk stops.",
-        scenarios: "### the guard reaches the last door\n\n\
-                    Given the guard leaves the first door\nWhen the walk ends\n\
-                    Then every door was tried\n",
-    }
-    .write(&root, "the-guard-walks-the-line", "The guard walks the line");
+    fact(
+        &root,
+        "trains-lose-the-signal",
+        "Trains lose the signal",
+        "X",
+        "The carriage drops the network for minutes at a time.",
+        "### the app opens with no network\n\n\
+         Given the device has no network\nWhen the user opens the app\n\
+         Then the last synced view appears\n",
+    );
+    fact(
+        &root,
+        "the-guard-walks-the-line",
+        "The guard walks the line",
+        "",
+        "The guard walks the length of the platform every hour.",
+        "### the guard reaches the last door\n\n\
+         Given the guard leaves the first door\nWhen the walk ends\n\
+         Then every door was tried\n",
+    );
 
     let out = ok(&root, &["check"]);
 
@@ -321,6 +351,86 @@ fn a_declared_element_empties_the_coverage_list() {
     );
 
     fs::remove_dir_all(&root).unwrap();
+}
+
+/// The wing in four layers: the strict record under `facts/`, a claim and an
+/// observation the schema never touches, and raw material nothing opens. The
+/// tree stands, and the closing line counts the facts alone
+/// (`archi/requirements/world-facts/the-world-holds-four-layers.md`).
+#[test]
+fn the_four_layers_stand_and_the_count_reads_the_facts_alone() {
+    let root = temp_project(CARRIED);
+    gate_fact(&root);
+    put(
+        &root,
+        "archi/world/hypotheses/the-tunnel-is-the-cause.md",
+        "# The tunnel is the cause\n\nNobody has measured the dead zone against it.\n",
+    );
+    put(
+        &root,
+        "archi/world/notes/a-rider-said-the-app-froze.md",
+        "# A rider said the app froze\n\nOn the northern line, twice in one week.\n",
+    );
+    // Raw material: no name, a half-written header, the markers a merge
+    // leaves behind. Nothing opens it, so nothing has an opinion about it.
+    put(
+        &root,
+        "archi/world/resources/the-support-thread.md",
+        "---\nkind: ???\n\n<<<<<<< ours\nnot a document at all\n>>>>>>> theirs\n",
+    );
+    put(
+        &root,
+        "archi/world/resources/the-recording.txt",
+        "00:14 the guard says the tunnel takes four minutes\n",
+    );
+
+    let out = ok(&root, &["check"]);
+    assert!(out.contains("world — 1 facts · 0 ungrounded"), "{out}");
+
+    let json = ok(&root, &["check", "--json"]);
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["status"], "ok", "{json}");
+    assert_eq!(v["world"]["facts"], 1, "{json}");
+    assert_eq!(v["world"]["ungrounded"], 0, "{json}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// This tree's own wing: four facts, and every one of them ungrounded. The
+/// migration wrote the intent each was lifted from into `sources`, the world
+/// may no longer reach the spec, and the empty field says the true thing —
+/// nobody has grounded these yet
+/// (`archi/requirements/world-facts/a-source-is-reachable-and-lives-in-the-world.md`).
+#[test]
+fn this_tree_s_facts_carry_no_source_and_each_reports_ungrounded() {
+    let root = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
+    let json = ok(&root, &["check", "--json"]);
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+    assert_eq!(v["status"], "ok", "{json}");
+    assert_eq!(v["world"]["facts"], 4, "{json}");
+    assert_eq!(v["world"]["ungrounded"], 4, "{json}");
+
+    let ungrounded: Vec<&str> = v["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["kind"] == "world_state")
+        .filter(|f| {
+            f["states"]
+                .as_array()
+                .is_some_and(|s| s.iter().any(|s| s == "world_ungrounded"))
+        })
+        .map(|f| f["fact"].as_str().unwrap())
+        .collect();
+    for slug in [
+        "a-design-written-apart-from-the-code-falls-behind-it",
+        "an-assistant-guesses-which-files-answer-a-written-obligation",
+        "why-a-design-was-chosen-lives-in-one-person-s-memory",
+        "work-runs-in-several-directions-at-once-and-more-than-one-person-joins-it",
+    ] {
+        assert!(ungrounded.contains(&slug), "`{slug}` is not ungrounded:\n{json}");
+    }
 }
 
 #[test]

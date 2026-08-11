@@ -1,6 +1,6 @@
 ---
 covers: [DocsCompiler, DocMint]
-sources: [archi/requirements/modeling-language/modeling-language.md]
+sources: []
 uses: []
 ---
 

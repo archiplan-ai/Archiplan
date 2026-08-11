@@ -2740,7 +2740,7 @@ fn run_world_ls(args: &Args, root: &Path) -> ExitCode {
                     "slug": f.doc.slug,
                     "path": f.doc.file,
                     "covers": world_list(&f.doc.covers),
-                    "sources": world_sources(&f.doc),
+                    "sources": world_list(&f.doc.sources),
                     "uses": world_list(&f.doc.uses),
                 })
             })
@@ -2779,7 +2779,7 @@ fn render_world_fact(doc: &docs::world::WorldDoc) -> String {
             v.join(", ")
         }
     };
-    let sources = world_sources(doc);
+    let sources = world_list(&doc.sources);
     let mut out = format!("{}  {}\n", doc.slug, doc.file);
     out.push_str(&format!("    covers: {}\n", list(world_list(&doc.covers))));
     out.push_str(&match sources.len() {
@@ -2797,18 +2797,6 @@ fn render_world_fact(doc: &docs::world::WorldDoc) -> String {
 /// no claim of any entry.
 fn world_list(field: &Option<(Vec<String>, usize)>) -> &[String] {
     field.as_ref().map_or(&[], |(v, _)| v.as_slice())
-}
-
-/// The `sources` entries as the record wrote them — both forms, verbatim.
-fn world_sources(doc: &docs::world::WorldDoc) -> Vec<String> {
-    doc.sources.as_ref().map_or(Vec::new(), |(v, _)| {
-        v.iter()
-            .map(|s| match s {
-                docs::world::Source::Path(p) => p.clone(),
-                docs::world::Source::Locator(l) => l.clone(),
-            })
-            .collect()
-    })
 }
 
 /// `archi sync-skills` — sync an initialized tree's briefing to this binary's

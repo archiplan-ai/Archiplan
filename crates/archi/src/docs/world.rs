@@ -1,16 +1,17 @@
 //! The world-fact record (`archi/requirements/world-facts/a-world-fact-carries-its-scenarios.md`,
 //! `archi/requirements/world-facts/the-header-points-three-ways.md`,
-//! `archi/requirements/world-facts/a-source-may-lie-outside-the-tree.md`):
-//! one file under `archi/world/` holds one condition outside the system, what
-//! would make that condition false, and the scenarios it dictates. Parsing is
-//! best-effort as it is in [`super::schema`] — every deviation lands in the
-//! diagnostics and the record keeps what was sound.
+//! `archi/requirements/world-facts/a-source-is-reachable-and-lives-in-the-world.md`):
+//! one file under `archi/world/facts/` holds one condition outside the system,
+//! what would make that condition false, and the scenarios it dictates.
+//! Parsing is best-effort as it is in [`super::schema`] — every deviation
+//! lands in the diagnostics and the record keeps what was sound.
 //!
 //! The three frontmatter lists are the whole header. `sources` resolves here,
-//! because its two entry forms are the record's own rule; `covers` and `uses`
-//! are carried with the line they sit on and resolve against the model and the
-//! other facts in the compiler. The `Scenarios` block is carried as text and
-//! an offset — the grammar parses it, not this reader.
+//! because its one entry form is the record's own rule: a path from the
+//! project root to a file under [`WORLD`], and nowhere else. `covers` and
+//! `uses` are carried with the line they sit on and resolve against the model
+//! and the other facts in the compiler. The `Scenarios` block is carried as
+//! text and an offset — the grammar parses it, not this reader.
 //!
 //! A section is what stands under its heading, and that includes the deeper
 //! headings [`super::md`] lifted out of it. `Scenarios` is written as `### `
@@ -35,17 +36,11 @@ pub struct Block {
     pub line: usize,
 }
 
-/// One `sources` entry — the two forms
-/// (`archi/requirements/world-facts/a-source-may-lie-outside-the-tree.md`).
-pub enum Source {
-    /// No scheme: a path from the project root, resolved on disk.
-    Path(String),
-    /// A `scheme:` prefix: an external locator, kept verbatim and never
-    /// touched on the filesystem.
-    Locator(String),
-}
+/// The folder every `sources` entry names a file inside of
+/// (`archi/requirements/world-facts/a-source-is-reachable-and-lives-in-the-world.md`).
+pub const WORLD: &str = "archi/world/";
 
-/// One world fact — the file under `archi/world/`.
+/// One world fact — the file under `archi/world/facts/`.
 pub struct WorldDoc {
     /// The slug (= filename).
     pub slug: String,
@@ -56,9 +51,10 @@ pub struct WorldDoc {
     /// Model elements the fact conditions, with the field's line; `None` when
     /// invalid. Resolution against the model is the compiler's.
     pub covers: Option<(Vec<String>, usize)>,
-    /// The material the fact rests on, with the field's line; `None` when
-    /// invalid.
-    pub sources: Option<(Vec<Source>, usize)>,
+    /// The material the fact rests on — each entry a path from the project
+    /// root to a file under [`WORLD`], with the field's line; `None` when
+    /// invalid. An entry the rule refuses is reported and not carried.
+    pub sources: Option<(Vec<String>, usize)>,
     /// World facts this one holds only while they hold, with the field's
     /// line; `None` when invalid. Resolution is the compiler's.
     pub uses: Option<(Vec<String>, usize)>,
@@ -233,45 +229,46 @@ fn required(
     prose
 }
 
-/// The `sources` entries in their two forms. A schemeless entry resolves on
-/// disk; a schemed one is kept verbatim and the filesystem never sees it; an
-/// entry that is neither is reported and carried by neither.
+/// The `sources` entries. Every one names a file under [`WORLD`], and every
+/// one resolves on disk. An entry that points outside the world is reported
+/// and the message says why; an entry that reaches nothing is reported. A
+/// refused entry is carried by nothing — the field holds what stood up.
 fn sources_of(
     entries: &[String],
     root: &Path,
     file: &str,
     line: usize,
     diags: &mut Vec<DocDiagnostic>,
-) -> Vec<Source> {
+) -> Vec<String> {
     let mut out = Vec::new();
     for entry in entries {
-        match source_entry(entry) {
-            None => diags.push(DocDiagnostic::new(
+        if !inside_the_world(entry) {
+            diags.push(DocDiagnostic::new(
                 "E_DOC",
                 format!(
-                    "`{entry}` is neither `sources` form — an entry with no scheme is a path \
-                     from the project root, and a schemed one is `<scheme>:<target>`, the \
-                     scheme letter-first and the target present"
+                    "`{entry}` lies outside `{WORLD}` — a `sources` entry is a path from the \
+                     project root to a file under `{WORLD}`: an external locator is a claim \
+                     about evidence and not evidence, and a path into the spec grounds the \
+                     fact in what the fact explains"
                 ),
                 file,
                 line,
-            )),
-            Some(Source::Path(p)) => {
-                if !root.join(&p).exists() {
-                    diags.push(DocDiagnostic::new(
-                        "E_DOC",
-                        format!(
-                            "`sources` names no `{p}` in the tree — an entry with no scheme is \
-                             a path from the project root; an external locator carries a scheme"
-                        ),
-                        file,
-                        line,
-                    ));
-                }
-                out.push(Source::Path(p));
-            }
-            Some(locator) => out.push(locator),
+            ));
+            continue;
         }
+        if !root.join(entry).is_file() {
+            diags.push(DocDiagnostic::new(
+                "E_DOC",
+                format!(
+                    "`sources` names no file `{entry}` — a source that cannot be read is no \
+                     source: the material comes into `{WORLD}` or the field stays empty"
+                ),
+                file,
+                line,
+            ));
+            continue;
+        }
+        out.push(entry.clone());
     }
     out
 }
@@ -294,18 +291,12 @@ fn block(content: &[(usize, String)]) -> Option<Block> {
     Some(Block { text, line: first })
 }
 
-/// How one `sources` entry reads; `None` when it is neither form.
-fn source_entry(entry: &str) -> Option<Source> {
-    let Some((scheme, target)) = entry.split_once(':') else {
-        return Some(Source::Path(entry.to_string()));
-    };
-    let well_formed = !target.is_empty()
-        && !target.contains(char::is_whitespace)
-        && scheme.starts_with(|c: char| c.is_ascii_alphabetic())
-        && scheme
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'));
-    well_formed.then(|| Source::Locator(entry.to_string()))
+/// Whether the entry names a place inside the world: a relative path that
+/// opens with [`WORLD`] and walks no step back out of it. A URI carries a
+/// scheme where the folder should stand, so it fails the first test and needs
+/// no test of its own.
+fn inside_the_world(entry: &str) -> bool {
+    entry.starts_with(WORLD) && !entry.split('/').any(|part| part == "..")
 }
 
 #[cfg(test)]
@@ -362,9 +353,32 @@ Then the write reaches the server
         dir
     }
 
+    /// The project root the standing facts live in — the repository itself,
+    /// read from where this crate stands.
+    fn project_root() -> PathBuf {
+        PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+    }
+
+    /// The `.md` files that stand directly in `dir`.
+    fn md_files(dir: &Path) -> Vec<PathBuf> {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return Vec::new();
+        };
+        entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_file() && p.extension().and_then(|e| e.to_str()) == Some("md"))
+            .collect()
+    }
+
+    /// The standing facts of this repository — the files under `facts/`.
+    fn standing_facts() -> Vec<PathBuf> {
+        md_files(&project_root().join("archi/world/facts"))
+    }
+
     /// Read one fact the way discovery does: structure first, then schema.
     fn read(root: &Path, text: &str) -> (Option<WorldDoc>, Vec<DocDiagnostic>) {
-        let file = format!("archi/world/{SLUG}.md");
+        let file = format!("archi/world/facts/{SLUG}.md");
         let mut diags = Vec::new();
         match md::parse(text) {
             Ok(doc) => {
@@ -407,17 +421,9 @@ Then the write reaches the server
         }
     }
 
-    fn forms(w: &WorldDoc) -> Vec<String> {
-        w.sources
-            .as_ref()
-            .expect("sources parsed")
-            .0
-            .iter()
-            .map(|s| match s {
-                Source::Path(p) => format!("path {p}"),
-                Source::Locator(l) => format!("locator {l}"),
-            })
-            .collect()
+    /// The entries the record carried — the ones that survived the rule.
+    fn carried(w: &WorldDoc) -> Vec<String> {
+        w.sources.as_ref().expect("sources parsed").0.clone()
     }
 
     #[test]
@@ -428,7 +434,7 @@ Then the write reaches the server
         assert_eq!(rendered(&diags), Vec::<String>::new());
         let w = w.unwrap();
         assert_eq!(w.slug, SLUG);
-        assert_eq!(w.file, format!("archi/world/{SLUG}.md"));
+        assert_eq!(w.file, format!("archi/world/facts/{SLUG}.md"));
         assert_eq!(w.line, line_of(&text, "# Users open the app"));
         assert_eq!(w.covers.as_ref().unwrap().0, Vec::<String>::new());
         assert_eq!(w.uses.as_ref().unwrap().0, Vec::<String>::new());
@@ -531,16 +537,11 @@ Then the write reaches the server
 
     /// The shape the standing facts are written in: the `### ` heading is the
     /// scenario and the fact's own title is the feature, so no `Feature:` and
-    /// no `Scenario:` line is left under `archi/world/`.
+    /// no `Scenario:` line is left under `archi/world/facts/`.
     #[test]
     fn no_fact_under_archi_world_holds_a_feature_or_a_scenario_line() {
-        let dir = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../archi/world"));
         let mut left: Vec<String> = Vec::new();
-        for entry in fs::read_dir(&dir).unwrap().flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("md") {
-                continue;
-            }
+        for path in standing_facts() {
             for (i, line) in fs::read_to_string(&path).unwrap().lines().enumerate() {
                 let line = line.trim_start();
                 if line.starts_with("Feature:") || line.starts_with("Scenario:") {
@@ -549,6 +550,65 @@ Then the write reaches the server
             }
         }
         assert_eq!(left, Vec::<String>::new());
+    }
+
+    /// The folder decides what a file is
+    /// (`archi/requirements/world-facts/the-world-holds-four-layers.md`), so a
+    /// record standing directly in `archi/world/` has no kind at all. The four
+    /// standing facts live under `facts/` and nothing is left beside them.
+    #[test]
+    fn no_record_stands_directly_under_archi_world() {
+        let loose = md_files(&project_root().join("archi/world"));
+        assert_eq!(loose, Vec::<PathBuf>::new());
+        assert_eq!(standing_facts().len(), 4, "{:?}", standing_facts());
+    }
+
+    /// Every `sources` entry the tree holds names a file inside the world
+    /// (`archi/requirements/world-facts/a-source-is-reachable-and-lives-in-the-world.md`).
+    /// The migration wrote the intent each fact was lifted from into this
+    /// field; the field is empty now, and nothing outside `archi/world/` may
+    /// go back into it.
+    #[test]
+    fn no_sources_entry_in_the_tree_names_a_path_outside_the_world() {
+        let mut outside: Vec<String> = Vec::new();
+        for path in standing_facts() {
+            let text = fs::read_to_string(&path).unwrap();
+            // The frontmatter: past the opening fence, up to the closing one.
+            for line in text.lines().skip(1).take_while(|l| l.trim() != "---") {
+                let Some(rest) = line.strip_prefix("sources:") else {
+                    continue;
+                };
+                let inner = rest.trim().trim_start_matches('[').trim_end_matches(']');
+                for item in inner.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                    if !item.starts_with(WORLD) {
+                        outside.push(format!("{}: {item}", path.display()));
+                    }
+                }
+            }
+        }
+        assert_eq!(outside, Vec::<String>::new());
+    }
+
+    /// The four standing facts rest on nothing anybody recorded, and each one
+    /// says so — the state the wing counts
+    /// (`archi/requirements/world-facts/an-ungrounded-fact-says-so.md`).
+    #[test]
+    fn the_four_standing_facts_carry_no_source_and_report_ungrounded() {
+        let root = project_root();
+        let mut grounded: Vec<String> = Vec::new();
+        for path in standing_facts() {
+            let stem = path.file_stem().unwrap().to_str().unwrap().to_string();
+            let text = fs::read_to_string(&path).unwrap();
+            let doc = md::parse(&text).unwrap_or_else(|e| panic!("{stem}: {}", e.message));
+            let mut diags = Vec::new();
+            let file = format!("archi/world/facts/{stem}.md");
+            let w = parse(&doc, &file, &stem, &root, &mut diags);
+            assert_eq!(rendered(&diags), Vec::<String>::new(), "on `{stem}`");
+            if !w.ungrounded() {
+                grounded.push(stem);
+            }
+        }
+        assert_eq!(grounded, Vec::<String>::new());
     }
 
     /// The member a scenario runs in, read off the anchor its link carries —
@@ -725,98 +785,135 @@ Then the write reaches the server
         fs::remove_dir_all(&root).unwrap();
     }
 
+    /// A world that holds one file in each of the three loose folders.
+    fn world_with_material() -> PathBuf {
+        let root = temp_root();
+        for (folder, name, text) in [
+            ("notes", "train.md", "the ride, written down\n"),
+            ("hypotheses", "repeaters.md", "somebody means to measure it\n"),
+            ("resources", "guard.txt", "the transcript, raw\n"),
+        ] {
+            let dir = root.join("archi/world").join(folder);
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join(name), text).unwrap();
+        }
+        root
+    }
+
+    /// The header the fact wears when it names one source.
+    fn with_source(entry: &str) -> String {
+        format!("covers: []\nsources: [{entry}]\nuses: []\n")
+    }
+
     #[test]
     fn an_empty_sources_parses_and_reads_as_ungrounded() {
-        let root = temp_root();
+        let root = world_with_material();
         let (w, diags) = read(&root, &fact(HEADER, BODY));
         assert_eq!(rendered(&diags), Vec::<String>::new());
         assert!(w.unwrap().ungrounded());
 
         let (w, diags) = read(
             &root,
-            &fact("covers: []\nsources: [https://example.org/thread/42]\nuses: []\n", BODY),
+            &fact(&with_source("archi/world/notes/train.md"), BODY),
         );
         assert_eq!(rendered(&diags), Vec::<String>::new());
         assert!(!w.unwrap().ungrounded());
         fs::remove_dir_all(&root).unwrap();
     }
 
+    /// A source is material this project holds, so the entry names a file in
+    /// one of the world's loose folders and the reader resolves it
+    /// (`archi/requirements/world-facts/a-source-is-reachable-and-lives-in-the-world.md`).
     #[test]
-    fn a_tree_path_resolves_and_a_miss_is_located() {
-        let root = temp_root();
-        fs::create_dir_all(root.join("notes")).unwrap();
-        fs::write(root.join("notes/train.md"), "the ride, written down\n").unwrap();
-        let text = fact("covers: []\nsources: [notes/train.md]\nuses: []\n", BODY);
+    fn a_source_under_the_world_s_loose_folders_resolves() {
+        let root = world_with_material();
+        let entries = [
+            "archi/world/notes/train.md",
+            "archi/world/hypotheses/repeaters.md",
+            "archi/world/resources/guard.txt",
+        ];
+        let text = fact(&with_source(&entries.join(", ")), BODY);
         let (w, diags) = read(&root, &text);
         assert_eq!(rendered(&diags), Vec::<String>::new());
-        assert_eq!(forms(&w.unwrap()), ["path notes/train.md"]);
-
-        let text = fact("covers: []\nsources: [notes/ghost.md]\nuses: []\n", BODY);
-        let (_, diags) = read(&root, &text);
-        assert_eq!(only(&diags), ("E_DOC", line_of(&text, "sources:")));
-        assert!(diags[0].message.contains("notes/ghost.md"));
+        let w = w.unwrap();
+        assert_eq!(carried(&w), entries);
+        assert!(!w.ungrounded());
         fs::remove_dir_all(&root).unwrap();
     }
 
+    /// An entry that reaches nothing is not a source: the material comes into
+    /// the world or the field stays empty.
     #[test]
-    fn a_schemed_entry_never_touches_the_filesystem() {
-        // A root that does not exist: a resolved entry could not survive it.
-        let root = Path::new("/nowhere/archi-world-test");
-        let text = fact(
-            "covers: []\n\
-             sources: [https://example.org/thread/42, mailto:guard@rail.example, jira:RAIL-77]\n\
-             uses: []\n",
-            BODY,
-        );
-        let (w, diags) = read(root, &text);
-        assert_eq!(rendered(&diags), Vec::<String>::new());
-        assert_eq!(
-            forms(&w.unwrap()),
-            [
-                "locator https://example.org/thread/42",
-                "locator mailto:guard@rail.example",
-                "locator jira:RAIL-77",
-            ]
-        );
-    }
-
-    #[test]
-    fn a_malformed_schemed_entry_is_a_located_error() {
-        let root = temp_root();
-        for entry in ["mailto:", "1jira:RAIL-77", "://example.org", "https:a b"] {
-            let text = fact(
-                &format!("covers: []\nsources: [{entry}]\nuses: []\n"),
-                BODY,
-            );
+    fn a_source_that_reaches_nothing_is_a_located_error() {
+        let root = world_with_material();
+        for entry in [
+            "archi/world/notes/ghost.md",
+            // A folder is not a file, and neither is the world itself.
+            "archi/world/notes",
+        ] {
+            let text = fact(&with_source(entry), BODY);
             let (w, diags) = read(&root, &text);
             assert_eq!(
                 only(&diags),
                 ("E_DOC", line_of(&text, "sources:")),
                 "on `{entry}`"
             );
-            // Neither form: the entry is reported, never carried.
-            assert_eq!(forms(&w.unwrap()), Vec::<String>::new(), "on `{entry}`");
+            assert!(diags[0].message.contains(entry), "{}", diags[0].message);
+            assert_eq!(carried(&w.unwrap()), Vec::<String>::new(), "on `{entry}`");
         }
         fs::remove_dir_all(&root).unwrap();
     }
 
+    /// A path into the spec grounds the fact in what the fact explains, so it
+    /// is refused and the message says that. The migration wrote exactly this
+    /// entry into all four standing facts.
     #[test]
-    fn a_record_mixing_both_forms_parses() {
-        let root = temp_root();
-        fs::create_dir_all(root.join("notes")).unwrap();
-        fs::write(root.join("notes/train.md"), "the ride, written down\n").unwrap();
-        let text = fact(
-            "covers: []\nsources: [notes/train.md, https://example.org/thread/42]\nuses: []\n",
-            BODY,
-        );
-        let (w, diags) = read(&root, &text);
-        assert_eq!(rendered(&diags), Vec::<String>::new());
-        let w = w.unwrap();
-        assert_eq!(
-            forms(&w),
-            ["path notes/train.md", "locator https://example.org/thread/42"]
-        );
-        assert!(!w.ungrounded());
+    fn a_source_outside_the_world_is_a_located_error_that_says_why() {
+        let root = world_with_material();
+        for entry in [
+            "archi/requirements/modeling-language/modeling-language.md",
+            "notes/train.md",
+            "archi/world/../notes/train.md",
+            "/etc/hosts",
+        ] {
+            let text = fact(&with_source(entry), BODY);
+            let (w, diags) = read(&root, &text);
+            assert_eq!(
+                only(&diags),
+                ("E_DOC", line_of(&text, "sources:")),
+                "on `{entry}`"
+            );
+            let message = &diags[0].message;
+            assert!(message.contains(entry), "{message}");
+            assert!(message.contains("archi/world/"), "{message}");
+            assert!(message.contains("lies outside"), "{message}");
+            assert_eq!(carried(&w.unwrap()), Vec::<String>::new(), "on `{entry}`");
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// An external locator is a claim about evidence and not evidence, so it
+    /// is refused by the one rule, with the one message.
+    #[test]
+    fn a_source_carrying_a_uri_scheme_raises_the_same_error() {
+        let root = world_with_material();
+        for entry in [
+            "https://example.org/thread/42",
+            "mailto:guard@rail.example",
+            "jira:RAIL-77",
+        ] {
+            let text = fact(&with_source(entry), BODY);
+            let (w, diags) = read(&root, &text);
+            assert_eq!(
+                only(&diags),
+                ("E_DOC", line_of(&text, "sources:")),
+                "on `{entry}`"
+            );
+            let message = &diags[0].message;
+            assert!(message.contains(entry), "{message}");
+            assert!(message.contains("lies outside"), "{message}");
+            assert_eq!(carried(&w.unwrap()), Vec::<String>::new(), "on `{entry}`");
+        }
         fs::remove_dir_all(&root).unwrap();
     }
 }

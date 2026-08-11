@@ -227,8 +227,9 @@ pub struct DocReport {
     /// Advisory findings.
     pub findings: Vec<DocFinding>,
     /// The world wing's own advisory findings and its count line — they
-    /// carry their own kinds, and a tree with no `archi/world/` carries
-    /// neither (`archi/requirements/world-facts/`).
+    /// carry their own kinds, they count the `facts/` layer alone, and a tree
+    /// with no `archi/world/` carries neither
+    /// (`archi/requirements/world-facts/`).
     pub world: world_check::WorldReport,
 }
 
@@ -505,8 +506,16 @@ fn discover(root: &Path, diags: &mut Vec<DocDiagnostic>) -> Tree {
         }
     }
 
-    // The world wing is a flat area too, and an optional one: a tree without
-    // `archi/world/` holds no fact and never grows the folder here
+    // The world wing is four areas, and the folder a file sits in is what
+    // says how the file is read: the strict record under `facts/`, a claim
+    // and an observation under `hypotheses/` and `notes/` with a name and
+    // their prose, raw material under `resources/` that nothing opens
+    // (`archi/requirements/world-facts/the-world-holds-four-layers.md`). Only
+    // the facts reach the tree — the loose layers are read where they stand,
+    // and a `sources` entry resolves against them
+    // (`archi/requirements/world-facts/a-source-is-reachable-and-lives-in-the-world.md`).
+    // The whole wing is optional: a tree without `archi/world/` holds no fact
+    // and never grows the folder here
     // (`archi/requirements/world-facts/the-wing-arrives-without-noise.md`).
     tree.world = world_check::discover(root, diags);
 

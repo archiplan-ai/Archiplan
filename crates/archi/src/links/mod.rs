@@ -682,9 +682,11 @@ fn scenario_refusal(root: &Path, slug: &str, path: &str) -> String {
     }
 }
 
-/// A fact's project-relative file.
+/// A fact's project-relative file. The folder decides what a file is, and a
+/// fact is what stands under `facts/`
+/// (`archi/requirements/world-facts/the-world-holds-four-layers.md`).
 fn fact_file(slug: &str) -> String {
-    format!("archi/world/{slug}.md")
+    format!("{}facts/{slug}.md", docs::world::WORLD)
 }
 
 /// The scenario names one world fact holds, each with the 1-based file line
@@ -2452,9 +2454,9 @@ Then the view arrives late
 
     /// Write the fact into the tree — the live file the resolution reads.
     fn write_fact(root: &Path, text: &str) {
-        let dir = root.join("archi").join("world");
-        fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join(format!("{FACT_SLUG}.md")), text).unwrap();
+        let path = root.join(fact_file(FACT_SLUG));
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
     }
 
     fn model_of(root: &Path) -> Workspace {
@@ -3194,7 +3196,7 @@ Then the view arrives late
             c.note.as_deref(),
             Some(
                 format!(
-                    "the scenario side moved: `archi/world/{FACT_SLUG}.md` no longer matches the \
+                    "the scenario side moved: `archi/world/facts/{FACT_SLUG}.md` no longer matches the \
                      digest this link recorded; the code side holds — {repair}"
                 )
                 .as_str()
@@ -3240,7 +3242,7 @@ Then the view arrives late
             c.note.as_deref(),
             Some(
                 format!(
-                    "both sides moved: `archi/world/{FACT_SLUG}.md` and \
+                    "both sides moved: `archi/world/facts/{FACT_SLUG}.md` and \
                      `code/auth.rs#Vault::persist` — {repair}"
                 )
                 .as_str()
@@ -3328,7 +3330,7 @@ Then the view arrives late
             c.note.as_deref(),
             Some(
                 format!(
-                    "the scenario side moved: `archi/world/{FACT_SLUG}.md` no longer matches the \
+                    "the scenario side moved: `archi/world/facts/{FACT_SLUG}.md` no longer matches the \
                      digest this link recorded; the code side holds — `link repin {}` binds the \
                      pair again",
                     l.id
@@ -3670,7 +3672,7 @@ Then the view arrives late
             .nth(1)
             .expect("two lines name the scenario");
         assert!(
-            err.contains(&format!("archi/world/{FACT_SLUG}.md:{second}")),
+            err.contains(&format!("archi/world/facts/{FACT_SLUG}.md:{second}")),
             "{err}"
         );
 

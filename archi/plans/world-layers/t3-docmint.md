@@ -23,11 +23,15 @@ world add mints into facts
 
 - crates/archi/src/docs/mint.rs
 - crates/archi/tests/world_e2e.rs
+- crates/archi/src/search.rs
+- crates/archi/src/plans/mod.rs
+- crates/archi/tests/util/mod.rs
 
 ## Stack
 
 - the skeleton path becomes `archi/world/facts/<slug>.md`, created with its parents
 - the removal's three pre-flights are unchanged; only the path moves
+- the path to a fact was written in four places and the plan named one: the mint, the ranked corpus, the plan's own fixture and the shared test builder all join `archi/world/` flat. All four move together, or the tool disagrees with itself about what a fact is
 
 ## Verifications
 
@@ -41,3 +45,5 @@ world add mints into facts
 
 - test — world_e2e: `world add` on a tree with no `archi/world/` creates `facts/` and its parent
 - test — check_e2e: a tree with no `archi/world/` passes check with no world finding
+- test — search_e2e: a phrase from a fact's name returns it, so search and check agree on where a fact lives
+- test — the whole suite is green: no code and no fixture joins `archi/world/` flat
