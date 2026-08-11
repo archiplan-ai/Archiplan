@@ -1,6 +1,6 @@
 ---
 node: Gherkin
-owns: [the-grammar-is-a-named-subset, scenarios-parse-or-the-check-fails, a-scenario-names-where-it-runs]
+owns: [the-grammar-is-a-named-subset, scenarios-parse-or-the-check-fails]
 ---
 
 # t2 — Gherkin
@@ -44,8 +44,3 @@ the scenario grammar: parse, then hold the named subset
 - test — a `Scenarios` heading holding prose instead of Gherkin raises E_DOC
 - test — an empty `Scenarios` block raises E_DOC
 
-### a-scenario-names-where-it-runs
-
-- test — a `@runs:backend` tag parses and resolves against the declared members
-- test — a member name no declaration carries raises a located error
-- test — a scenario with no tag resolves to the project's own repository
