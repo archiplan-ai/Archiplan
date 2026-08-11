@@ -496,7 +496,7 @@ fn the_rewritten_facts_parse_clean_and_the_check_exits_zero() {
 /// A scenario renamed by the rewrite would move its digest and the row would
 /// stop being clean.
 #[test]
-fn the_six_scenario_links_stay_clean() {
+fn the_scenario_links_stay_clean() {
     let root = this_tree();
     let out = ok(&root, &["link", "verify"]);
 
@@ -513,8 +513,9 @@ fn the_six_scenario_links_stay_clean() {
         .collect();
     assert_eq!(unclean, Vec::<&&str>::new(), "{out}");
 
-    // The six this tree anchored, each by name — a link dropped from the
-    // journal would leave the filter above with nothing to object to.
+    // The floor, each by name — a link dropped from the journal would leave
+    // the filter above with nothing to object to. It is a floor and not the
+    // whole: anchoring one more scenario must not turn this red.
     for spec in [
         "a-design-written-apart-from-the-code-falls-behind-it#The code moves and nobody updates \
          the writing",
@@ -535,7 +536,6 @@ fn the_six_scenario_links_stay_clean() {
             .unwrap_or_else(|| panic!("no link on `{spec}`:\n{out}"));
         assert!(row.starts_with("clean"), "{row}");
     }
-    assert_eq!(scenario_rows.len(), 6, "{scenario_rows:#?}");
 
     // And the journal as a whole holds: the count the verify closes on.
     let tail = out.lines().last().expect("a closing line");
