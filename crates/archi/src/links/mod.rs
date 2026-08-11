@@ -425,6 +425,15 @@ pub struct Link {
     /// always were and no migration runs
     /// (`archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`).
     pub rule: Rule,
+    /// The test that proves the pair, where a declaration named one. The
+    /// reader who doubts a claim has one place to go, and it is recorded
+    /// beside the claim rather than beside the writer
+    /// (`archi/requirements/code-link/a-declaration-names-the-test-that-proves-it.md`).
+    /// Absent on every row no declaration minted, and on every row journaled
+    /// before the field existed — absence means nothing was named, never that
+    /// a test was lost.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proves: Option<Anchor>,
     /// The immutable birth record.
     pub birth: Birth,
     /// The projection's hashes.
@@ -455,6 +464,8 @@ struct Row {
     origin: Origin,
     #[serde(default)]
     rule: Option<Rule>,
+    #[serde(default)]
+    proves: Option<Anchor>,
     birth: Birth,
     pins: Pins,
     #[serde(default)]
@@ -473,6 +484,7 @@ impl From<Row> for Link {
             kind: r.kind,
             standing: r.standing,
             origin: r.origin,
+            proves: r.proves,
             birth: r.birth,
             pins: r.pins,
             touches: r.touches,
@@ -525,9 +537,6 @@ enum Event {
 /// The folded journal: live links in add order, plus mint bookkeeping.
 struct Folded {
     live: Vec<Link>,
-    /// Retired links, folded state at retirement — capture's dedup memory:
-    /// a subtracted candidate must stay subtracted across re-runs.
-    retired: Vec<Link>,
     /// Adds ever journaled — the id sequence counts past retirements.
     adds: usize,
     /// Events the fold absorbed instead of applying — identical replayed
@@ -683,7 +692,6 @@ fn fold(events: Vec<Event>) -> Result<Folded, String> {
     }
     Ok(Folded {
         live,
-        retired,
         adds,
         absorbed,
     })
@@ -1201,6 +1209,7 @@ pub fn add(
         Rule::Authored,
         Origin::Authored,
         Standing::Asserted,
+        None,
     )
 }
 
@@ -1211,6 +1220,11 @@ pub fn add(
 /// path, so a declared row is minted exactly as an authored one and differs
 /// only in what it says of itself
 /// (`archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`).
+///
+/// `proves` is the test the row carries, already parsed and already resolved
+/// by the caller: whether a named test reaches a symbol is the declaration
+/// reader's refusal to raise, because only that reader knows the line the
+/// name was written on. `link add` names none.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn mint(
     root: &Path,
@@ -1221,6 +1235,7 @@ pub(crate) fn mint(
     rule: Rule,
     origin: Origin,
     standing: Standing,
+    proves: Option<Anchor>,
 ) -> Result<Link, String> {
     let spec = SpecRef::parse(spec_text)?;
     let mut slots = Slots::new(root);
@@ -1255,6 +1270,7 @@ pub(crate) fn mint(
         standing,
         origin,
         rule,
+        proves,
         birth: Birth {
             created: now(),
             commit: versions::provenance(root),
@@ -2566,9 +2582,11 @@ fn unaccounted(
 // ---- rendering -------------------------------------------------------------
 
 /// One link as a human line: id, kind/standing, the rule that made it,
-/// spec ← anchor.
+/// spec ← anchor — and the test the row carries, where a declaration named
+/// one. A row that names no test prints exactly as it always did
+/// (`archi/requirements/code-link/a-declaration-names-the-test-that-proves-it.md`).
 pub fn render_link(l: &Link) -> String {
-    format!(
+    let line = format!(
         "{}  {:8} {:8} {:10} {:8} {} ← {}",
         l.id,
         l.kind.describe(),
@@ -2577,7 +2595,11 @@ pub fn render_link(l: &Link) -> String {
         l.rule.describe(),
         l.spec,
         l.anchor
-    )
+    );
+    match &l.proves {
+        None => line,
+        Some(test) => format!("{line}  proved by {test}"),
+    }
 }
 
 /// The verify report as human lines: one per link, then the tally.
@@ -2935,6 +2957,7 @@ Then the view arrives late
                     standing: Standing::Evidence,
                     origin: Origin::Captured { task: "t1".into() },
                     rule: Rule::Inferred,
+                    proves: None,
                     birth: Birth {
                         created: now(),
                         commit: None,
@@ -2975,6 +2998,7 @@ Then the view arrives late
                     standing: Standing::Evidence,
                     origin: Origin::Captured { task: "t1".into() },
                     rule: Rule::Inferred,
+                    proves: None,
                     birth: Birth {
                         created: now(),
                         commit: None,
@@ -3028,6 +3052,7 @@ Then the view arrives late
                     standing: Standing::Evidence,
                     origin: Origin::Captured { task: "t1".into() },
                     rule: Rule::Inferred,
+                    proves: None,
                     birth: Birth {
                         created: now(),
                         commit: None,
@@ -3149,6 +3174,7 @@ Then the view arrives late
                     standing: Standing::Evidence,
                     origin: Origin::Captured { task: "t1".into() },
                     rule: Rule::Inferred,
+                    proves: None,
                     birth: Birth {
                         created: now(),
                         commit: None,
@@ -4243,6 +4269,7 @@ Then the view arrives late
             Rule::Declared,
             Origin::Captured { task: "t9".into() },
             Standing::Asserted,
+            None,
         )
         .unwrap();
         assert_eq!(declared.rule, Rule::Declared);
@@ -4337,6 +4364,7 @@ Then the view arrives late
             Rule::Declared,
             Origin::Captured { task: "t9".into() },
             Standing::Asserted,
+            None,
         )
         .unwrap();
 

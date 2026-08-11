@@ -1723,7 +1723,7 @@ pub fn next(root: &Path, model: &Model) -> Result<NextOutcome, String> {
         .iter()
         .filter(|t| waves[wave - 1].contains(&t.id))
         .collect();
-    let capture = links::capture::capture_wave(root, &plan.name, wave, &in_flight, None)?;
+    let capture = links::capture::capture_wave(root, model, &plan.name, wave, &in_flight, None)?;
     let checklist = match gate_coverage(root, &in_flight, &capture.pressed) {
         Ok(suggested) => suggested,
         Err(gaps) => {
@@ -2379,6 +2379,13 @@ mod tests {
             "pub struct Store;\nimpl Store {\n    pub fn put(&mut self) {}\n}\n",
         );
         put(&root, "code/auth.rs", "pub fn login() -> bool { true }\n");
+        // The test a declaration names. It is in the tree before the wave
+        // opens, so it is never a change of its own.
+        put(
+            &root,
+            "code/store_test.rs",
+            "pub fn a_row_is_persisted() {\n    assert!(true);\n}\n",
+        );
         put_fact(
             &root,
             "riders-lose-the-signal",
@@ -2410,8 +2417,9 @@ mod tests {
         assert!(plan_dir(&root, "mvp").join("waves/w01.index.json").exists());
         assert!(start(&root, ws.model()).is_err(), "already started");
 
-        // Closing wave 1: the claimed delta becomes candidates — 2 refs ×
-        // 1 changed symbol — and the coverage gate blocks until asserted.
+        // Closing wave 1: the claimed delta presses both of t1's refs, and
+        // the coverage gate blocks. The task declared nothing, so nothing was
+        // minted — the delta proves a symbol changed, never what it answers.
         put(
             &root,
             "code/store.rs",
@@ -2423,20 +2431,38 @@ mod tests {
         };
         assert!(why.contains("t1"), "{why}");
         let capture = outcome.capture.expect("capture ran");
-        assert_eq!(
-            capture.minted.len(),
-            2,
+        assert!(
+            capture.minted.is_empty(),
             "{}",
             links::capture::render_capture(&capture)
         );
 
-        // The loop the spec promises: confirm, re-run — idempotent capture,
-        // gate passes, wave 2 opens.
-        for l in &capture.minted {
-            links::confirm(&root, &l.id).unwrap();
-        }
+        // The loop the spec promises: the writer declares what its symbol
+        // answers and the test that proves it, and the declaration mints the
+        // pair asserted. The ref that is an edge is not a declaration's to
+        // name — an edge is a caller — so it is hand-authored.
+        put(
+            &root,
+            "archi/plans/mvp/waves/w01.t1.declares.toml",
+            "[[declares]]\n\
+             symbol = \"code/store.rs#Store::put\"\n\
+             answers = \"Store\"\n\
+             proved_by = \"code/store_test.rs#a_row_is_persisted\"\n",
+        );
+        links::add(
+            &root,
+            ws.model(),
+            "Auth.creds wire Store.inn",
+            "code/store.rs#Store::put",
+            links::LinkKind::Indirect,
+        )
+        .unwrap();
         let outcome = next(&root, ws.model()).unwrap();
-        assert!(outcome.capture.as_ref().is_some_and(|c| c.minted.is_empty()));
+        let declared = outcome.capture.as_ref().expect("capture ran");
+        assert_eq!(declared.minted.len(), 1, "{:?}", declared.minted);
+        assert_eq!(declared.minted[0].spec.path, "Store");
+        assert_eq!(declared.minted[0].standing, links::Standing::Asserted);
+        assert_eq!(declared.minted[0].rule, links::Rule::Declared);
         let Step::Wave { closed, next_tasks } = &outcome.step else {
             panic!("the gate should pass now");
         };
@@ -2645,14 +2671,22 @@ mod tests {
         assert!(why.contains("hand-author"), "{why}");
         assert!(why.contains("archi link add \"Auth\""), "{why}");
         let capture = outcome.capture.expect("capture ran");
-        let minted: Vec<&str> = capture.minted.iter().map(|l| l.spec.path.as_str()).collect();
-        assert_eq!(minted, vec!["Gate.out wire Auth.inn"], "{minted:?}");
+        assert!(capture.minted.is_empty(), "{:?}", capture.minted);
         assert_eq!(capture.suppressed.len(), 3, "{:?}", capture.suppressed);
 
-        // Confirm the pressed candidate: the wave closes into the cleanup
-        // wave and the same suggestions ride the passing step as the
-        // voluntary checklist; one more next completes (no scenarios).
-        links::confirm(&root, &capture.minted[0].id).unwrap();
+        // The pressed ref is an edge, and an edge is never a declaration's to
+        // name: the one exit is the hand-authored link the message printed.
+        // The wave then closes into the cleanup wave and the same suggestions
+        // ride the passing step as the voluntary checklist; one more next
+        // completes (no scenarios).
+        links::add(
+            &root,
+            ws.model(),
+            "Gate.out wire Auth.inn",
+            "code/auth.rs#inn_wire_probe",
+            links::LinkKind::Indirect,
+        )
+        .unwrap();
         let outcome = next(&root, ws.model()).unwrap();
         assert!(matches!(outcome.step, Step::Cleanup));
         assert_eq!(outcome.checklist.len(), 3, "{:?}", outcome.checklist);

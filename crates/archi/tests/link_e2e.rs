@@ -11,6 +11,8 @@ mod util;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use serde_json::Value;
+
 use util::ok;
 
 const MODEL: &str = "def conn wire := * -> *\n\
@@ -320,5 +322,377 @@ fn the_record_answers_with_no_history_to_walk() {
     assert_eq!(out, answered);
 
     let _ = fs::remove_dir_all(&heir);
+    cleanup(&fixture);
+}
+
+// ---- the writer's declaration ------------------------------------------------
+//
+// The writer holds the answer, so the writer writes it down: one file beside
+// the wave index, naming for each symbol the port or requirement it answers
+// and the test that proves it. Capture reads that file and mints from it; the
+// shared-term rule mints nothing at all
+// (`archi/requirements/code-link/the-writer-declares-what-the-code-answers.md`,
+// `archi/requirements/code-link/a-declaration-names-the-test-that-proves-it.md`,
+// `archi/requirements/planning/the-declaration-refusal-repairs-without-guessing.md`).
+
+/// The test the declarations name. It is written before the wave opens, so it
+/// sits in the wave-open index and is never a change of its own — and it sits
+/// outside `code/auth.rs`, the one file the task's outputs claim.
+const AUTH_TEST_RS: &str =
+    "pub fn a_login_without_a_name_is_refused() {\n    assert!(true);\n}\n";
+
+/// The declaration file of task `t1` in wave 1, where the wave already writes
+/// its index.
+const DECLARES: &str = "archi/plans/mvp/waves/w01.t1.declares.toml";
+
+/// The test symbol every well-formed declaration below names.
+const PROOF: &str = "code/auth_test.rs#a_login_without_a_name_is_refused";
+
+/// A started plan with one task claiming `code/auth.rs`: the wave-open index
+/// is written, so an edit under that output is the delta a capture reads.
+fn started_plan(root: &Path) {
+    write_requirement(root, REQ);
+    fs::write(root.join("code/auth_test.rs"), AUTH_TEST_RS).unwrap();
+    ok(root, &["version", "save", "-m", "first"]);
+    ok(root, &["plan", "use", "mvp"]);
+    ok(root, &["plan", "task", "add", "Auth"]);
+    fs::write(
+        root.join("archi/plans/mvp/t1-auth.md"),
+        format!(
+            "---\nnode: Auth\nowns: [{REQ}]\n---\n\n# t1 — Auth\n\nrealize the node\n\n\
+             ## Spec\n\n- `Auth`\n- `Gate.out wire Auth.inn`\n\n\
+             ## Inputs\n\n## Outputs\n\n- code/auth.rs\n\n## Stack\n\n## Verifications\n\n\
+             ### {REQ}\n\n- test — proves the refusal\n"
+        ),
+    )
+    .unwrap();
+    ok(root, &["plan", "start"]);
+}
+
+/// The wave's delta: the symbol a declaration names moves, and a second one
+/// moves beside it that no declaration names — and whose terms the old
+/// shared-term rule matched against both of the task's refs.
+fn change_auth(root: &Path) {
+    fs::write(
+        root.join("code/auth.rs"),
+        "pub fn login(user: &str) -> bool {\n    !user.trim().is_empty()\n}\n\n\
+         pub fn auth_gate() -> bool {\n    true\n}\n",
+    )
+    .unwrap();
+}
+
+/// Write `t1`'s declaration file, as its sub-agent does before it returns.
+fn declare(root: &Path, text: &str) {
+    fs::write(root.join(DECLARES), text).unwrap();
+}
+
+/// One `[[declares]]` table, spelled out field by field so a test can leave
+/// one out or add one of its own.
+fn entry(fields: &[(&str, &str)]) -> String {
+    let mut out = String::from("[[declares]]\n");
+    for (key, value) in fields {
+        out.push_str(&format!("{key} = \"{value}\"\n"));
+    }
+    out
+}
+
+/// The whole declaration a well-formed file holds: the changed symbol, the
+/// port it answers, and the test that proves it.
+fn sound_entry() -> String {
+    entry(&[
+        ("symbol", "code/auth.rs#login"),
+        ("answers", "Auth.inn"),
+        ("proved_by", PROOF),
+    ])
+}
+
+/// Run the wave's capture for `t1`, expecting the declaration to be refused;
+/// hands back the refusal.
+fn refused(root: &Path) -> String {
+    let (success, out, err) = util::run(root, &["link", "capture", "--task", "t1"]);
+    assert!(!success, "the declaration is refused:\n{out}");
+    err
+}
+
+/// Every refusal a declaration raises is located: it names the file, the task
+/// that owes it and the line it is about, and it quotes what stood on that
+/// line. No refusal is a restatement of the grammar alone — each one names
+/// the thing in *this* file that is wrong
+/// (`archi/requirements/planning/the-declaration-refusal-repairs-without-guessing.md`).
+fn located(err: &str, line: usize, quoted: &str) {
+    assert!(err.contains(DECLARES), "names the file:\n{err}");
+    assert!(err.contains("task `t1`"), "names the task:\n{err}");
+    assert!(err.contains(&format!(":{line},")), "names line {line}:\n{err}");
+    assert!(
+        err.contains(&format!("{line} | {quoted}")),
+        "quotes what stood on line {line}:\n{err}"
+    );
+}
+
+/// The writer names the port and the requirement its symbol answers, and the
+/// test that proves each; both land as asserted links on that symbol, both
+/// read as declared, and the reverse view of the requirement hands back the
+/// test beside the code. The symbol nobody named draws nothing — the terms it
+/// shares with the task's refs are still counted and still reported, and they
+/// mint nothing at all
+/// (`archi/requirements/code-link/the-writer-declares-what-the-code-answers.md`,
+/// `archi/requirements/code-link/a-declaration-names-the-test-that-proves-it.md`).
+#[test]
+fn a_declaration_mints_the_pair_asserted_and_the_reverse_view_names_the_test() {
+    let (fixture, root) = bound("declares");
+    started_plan(&root);
+    change_auth(&root);
+    declare(
+        &root,
+        &format!(
+            "{}\n{}",
+            sound_entry(),
+            entry(&[
+                ("symbol", "code/auth.rs#login"),
+                ("answers", &format!("req:{REQ}")),
+                ("proved_by", PROOF),
+            ])
+        ),
+    );
+
+    // A file with every field present and no unknown key is accepted with no
+    // warning: capture says nothing about it beyond the rows it minted.
+    let out = ok(&root, &["link", "capture", "--task", "t1"]);
+    assert_eq!(out.matches("captured ").count(), 2, "{out}");
+    assert!(!out.contains("declares.toml"), "{out}");
+    assert!(!out.contains("note:"), "{out}");
+
+    // What the file named is an asserted link on the symbol that named it, it
+    // says a writer declared it, and it carries the test.
+    let rows = ok(&root, &["link", "ls"]);
+    assert_eq!(rows.lines().count(), 2, "{rows}");
+    for line in rows.lines() {
+        assert!(line.contains("asserted"), "{line}");
+        assert_eq!(rule_word(line), Some("declared"), "{line}");
+        assert!(line.contains("captured(t1)"), "{line}");
+        assert!(line.contains("← code/auth.rs#login"), "{line}");
+        assert!(line.contains(&format!("proved by {PROOF}")), "{line}");
+    }
+    assert!(rows.contains("Auth.inn ← code/auth.rs#login"), "{rows}");
+
+    // The reader who doubts a pair has one place to go: the reverse view of
+    // the requirement prints the test beside the code.
+    let out = ok(&root, &["link", "ls", "--spec", &format!("req:{REQ}")]);
+    assert_eq!(out.lines().count(), 1, "{out}");
+    assert!(out.contains(&format!("proved by {PROOF}")), "{out}");
+
+    // Nothing was minted for the symbol no declaration names, though the
+    // delta presses both of the task's refs through it: the shared-term rule
+    // mints nothing at all.
+    assert!(!rows.contains("auth_gate"), "{rows}");
+    let json: Value =
+        serde_json::from_str(&ok(&root, &["link", "capture", "--task", "t1", "--json"])).unwrap();
+    let pressed: Vec<&str> = json["pressed"]["t1"]
+        .as_array()
+        .expect("the delta presses refs")
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(pressed, vec!["Auth", "Gate.out wire Auth.inn"], "{json}");
+    // And the re-run is idempotent: a declaration already minted is not
+    // minted twice.
+    assert!(json["minted"].as_array().unwrap().is_empty(), "{json}");
+
+    cleanup(&fixture);
+}
+
+/// A declared name that resolves against neither the model nor the
+/// requirement set is refused where it stands, and the refusal names the name
+/// (`archi/requirements/code-link/the-writer-declares-what-the-code-answers.md`).
+#[test]
+fn a_declared_name_that_resolves_to_nothing_refuses_at_its_line() {
+    let (fixture, root) = bound("unresolved");
+    started_plan(&root);
+    change_auth(&root);
+
+    declare(
+        &root,
+        &entry(&[
+            ("symbol", "code/auth.rs#login"),
+            ("answers", "NoSuchNode"),
+            ("proved_by", PROOF),
+        ]),
+    );
+    let err = refused(&root);
+    assert!(err.contains("`NoSuchNode`"), "names the name:\n{err}");
+    located(&err, 3, "answers = \"NoSuchNode\"");
+
+    // The requirement form refuses the same way, on the slug the file wrote.
+    declare(
+        &root,
+        &entry(&[
+            ("symbol", "code/auth.rs#login"),
+            ("answers", "req:no-such-claim"),
+            ("proved_by", PROOF),
+        ]),
+    );
+    let err = refused(&root);
+    assert!(err.contains("no-such-claim"), "names the slug:\n{err}");
+    located(&err, 3, "answers = \"req:no-such-claim\"");
+
+    // A symbol the tree does not hold is refused on its own line.
+    declare(
+        &root,
+        &entry(&[
+            ("symbol", "code/auth.rs#no_such_item"),
+            ("answers", "Auth.inn"),
+            ("proved_by", PROOF),
+        ]),
+    );
+    let err = refused(&root);
+    assert!(err.contains("no_such_item"), "names the symbol:\n{err}");
+    located(&err, 2, "symbol = \"code/auth.rs#no_such_item\"");
+
+    assert_eq!(ok(&root, &["link", "ls"]), "no links\n", "nothing was minted");
+
+    cleanup(&fixture);
+}
+
+/// An edge in `answers` is refused, and the refusal names the ports behind it:
+/// an edge is a caller, and the code behind a port does not know its callers
+/// (`archi/requirements/code-link/the-writer-declares-what-the-code-answers.md`).
+#[test]
+fn an_edge_in_answers_is_refused_and_the_refusal_names_its_ports() {
+    let (fixture, root) = bound("edge");
+    started_plan(&root);
+    change_auth(&root);
+
+    declare(
+        &root,
+        &entry(&[
+            ("symbol", "code/auth.rs#login"),
+            ("answers", "Gate.out wire Auth.inn"),
+            ("proved_by", PROOF),
+        ]),
+    );
+    let err = refused(&root);
+    assert!(err.contains("`Gate.out`"), "names the source port:\n{err}");
+    assert!(err.contains("`Auth.inn`"), "names the target port:\n{err}");
+    located(&err, 3, "answers = \"Gate.out wire Auth.inn\"");
+    assert_eq!(ok(&root, &["link", "ls"]), "no links\n", "nothing was minted");
+
+    cleanup(&fixture);
+}
+
+/// The third name is checked like the other two: a test that resolves to
+/// nothing refuses and the refusal names it, and a `proved_by` that stops at a
+/// file names no test at all
+/// (`archi/requirements/code-link/a-declaration-names-the-test-that-proves-it.md`).
+#[test]
+fn a_test_that_resolves_to_nothing_refuses_and_names_the_test() {
+    let (fixture, root) = bound("proof");
+    started_plan(&root);
+    change_auth(&root);
+
+    declare(
+        &root,
+        &entry(&[
+            ("symbol", "code/auth.rs#login"),
+            ("answers", "Auth.inn"),
+            ("proved_by", "code/auth_test.rs#no_such_test"),
+        ]),
+    );
+    let err = refused(&root);
+    assert!(
+        err.contains("code/auth_test.rs#no_such_test"),
+        "names the test:\n{err}"
+    );
+    located(&err, 4, "proved_by = \"code/auth_test.rs#no_such_test\"");
+
+    // A file is not a test: the name has to reach a symbol.
+    declare(
+        &root,
+        &entry(&[
+            ("symbol", "code/auth.rs#login"),
+            ("answers", "Auth.inn"),
+            ("proved_by", "code/auth_test.rs"),
+        ]),
+    );
+    let err = refused(&root);
+    assert!(err.contains("code/auth_test.rs"), "names the test:\n{err}");
+    located(&err, 4, "proved_by = \"code/auth_test.rs\"");
+
+    assert_eq!(ok(&root, &["link", "ls"]), "no links\n", "nothing was minted");
+
+    cleanup(&fixture);
+}
+
+/// A malformed file is refused with the line, what was expected there and what
+/// stood there — never with a restatement of the grammar alone, and never by
+/// ignoring what it did not understand
+/// (`archi/requirements/planning/the-declaration-refusal-repairs-without-guessing.md`).
+#[test]
+fn a_malformed_declaration_repairs_in_one_read() {
+    let (fixture, root) = bound("malformed");
+    started_plan(&root);
+    change_auth(&root);
+
+    // A missing field: the refusal says which field was expected and quotes
+    // the entry that stood there without it.
+    declare(
+        &root,
+        &entry(&[
+            ("symbol", "code/auth.rs#login"),
+            ("answers", "Auth.inn"),
+        ]),
+    );
+    let err = refused(&root);
+    assert!(err.contains("missing field `proved_by`"), "{err}");
+    located(&err, 1, "[[declares]]");
+    assert!(err.contains("2 | symbol = \"code/auth.rs#login\""), "{err}");
+    assert!(err.contains("3 | answers = \"Auth.inn\""), "{err}");
+
+    // An unknown key is refused rather than ignored, and the refusal names
+    // the key and the keys that were expected.
+    declare(
+        &root,
+        &format!("{}proves = \"code/auth_test.rs#gone\"\n", sound_entry()),
+    );
+    let err = refused(&root);
+    assert!(err.contains("unknown field `proves`"), "{err}");
+    assert!(err.contains("`symbol`"), "{err}");
+    assert!(err.contains("`answers`"), "{err}");
+    assert!(err.contains("`proved_by`"), "{err}");
+    located(&err, 5, "proves = \"code/auth_test.rs#gone\"");
+
+    // A misspelled table is an unknown key too — no entry is silently read as
+    // no declaration.
+    declare(&root, &sound_entry().replace("[[declares]]", "[[declare]]"));
+    let err = refused(&root);
+    assert!(err.contains("unknown field `declare`"), "{err}");
+    located(&err, 1, "[[declare]]");
+
+    // A value of the wrong type is located at the value, not at the table.
+    declare(&root, &sound_entry().replace("\"Auth.inn\"", "3"));
+    let err = refused(&root);
+    assert!(err.contains("expected a string"), "{err}");
+    located(&err, 3, "answers = 3");
+
+    assert_eq!(ok(&root, &["link", "ls"]), "no links\n", "nothing was minted");
+
+    cleanup(&fixture);
+}
+
+/// A wave whose task wrote no declaration file does not crash and does not
+/// refuse: it mints nothing for that task, and it says so. The refusal on an
+/// absent file is the wave gate's, and the wave gate is not this
+/// (`archi/requirements/code-link/the-writer-declares-what-the-code-answers.md`).
+#[test]
+fn an_absent_declaration_file_mints_nothing_and_says_so() {
+    let (fixture, root) = bound("absent");
+    started_plan(&root);
+    change_auth(&root);
+
+    let out = ok(&root, &["link", "capture", "--task", "t1"]);
+    assert!(!out.contains("captured "), "{out}");
+    assert!(out.contains("note: `t1` declares nothing"), "{out}");
+    assert!(out.contains(DECLARES), "{out}");
+    assert_eq!(ok(&root, &["link", "ls"]), "no links\n", "{out}");
+
     cleanup(&fixture);
 }

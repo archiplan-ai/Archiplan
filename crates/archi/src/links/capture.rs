@@ -6,38 +6,43 @@
 //! file → symbol → body hash, by the canonicalizer of [`super::code`] — so
 //! a closing task's delta is read off by hash comparison: symbol-granular,
 //! cheap to store (no file contents), and git-free by construction, so
-//! squashes and shallow clones cannot break it. The task's `spec_refs` ×
-//! its changed symbols become candidate links — evidence, `indirect`,
-//! `captured(task)` — which the closing agent reviews and selectively
-//! asserts. Changed items in files no task claims are **leftovers**,
-//! reported rather than guessed at.
+//! squashes and shallow clones cannot break it. The delta says which symbols
+//! moved and the task outputs say who claims them; changed items in files no
+//! task claims are **leftovers**, reported rather than guessed at.
 //!
-//! Capture is idempotent: a candidate that already lives (or was retired
-//! at identical pins — a subtraction that must stick) is not re-minted.
-//! Re-encounters and unreconfirmed rewrites journal as `touch` and `decay`
-//! events instead, once per task — the observations confidence is derived
-//! from.
+//! Capture is idempotent: a pair the journal already holds is not minted
+//! twice. Re-encounters and unreconfirmed rewrites of the evidence rows the
+//! journal already carries journal as `touch` and `decay` events, once per
+//! task — the observations confidence is derived from.
 //!
-//! Minting carries a **signal test**: a (changed item, spec_ref) pair
-//! becomes a candidate only when the ref's surface terms overlap the
-//! item's symbol path or canonical body tokens. No-signal pairs are
-//! suppressed — counted in the render, listed whole under `--json`, never
-//! journaled and never subtracted, so a hand `link add` mints any of them
-//! asserted at any time. The refs each task's delta *does* carry signal
-//! for come back as `pressed` — the set the wave-close coverage gate
-//! demands links for.
+//! The mint comes from the writer, not from the words: each in-flight task
+//! writes one **declaration file** beside the index, naming for every symbol
+//! it changed the port or requirement that symbol answers and the test that
+//! proves it. What the file names becomes an asserted link; what it does not
+//! name becomes nothing
+//! (`archi/requirements/code-link/the-writer-declares-what-the-code-answers.md`).
+//!
+//! The **signal test** stays, and it no longer mints: a (changed item,
+//! spec_ref) pair carries signal when the ref's surface terms overlap the
+//! item's symbol path or canonical body tokens. The refs each task's delta
+//! carries signal for come back as `pressed` — the set the wave-close
+//! coverage gate demands links for — and the no-signal pairs come back as
+//! `suppressed`, counted in the render and listed whole under `--json`.
+//! Neither is journaled and neither is subtracted, so a hand `link add`
+//! mints any of them asserted at any time.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 
-use modeling_lang::Model;
+use modeling_lang::{Model, Statement};
 use serde::{Deserialize, Serialize};
+use toml::Spanned;
 
 use super::code;
-use super::{Anchor, Birth, Event, Link, LinkKind, Origin, Rule, SpecRef, Standing};
+use super::{Anchor, Event, Link, LinkKind, Origin, Rule, SpecRef, Standing};
 use crate::plans::{self, Task};
-use crate::versions;
 
 // ---- the wave-open index ----------------------------------------------------
 
@@ -280,11 +285,246 @@ fn item_terms(change: &Changed, canonical: &code::Canonical) -> BTreeSet<String>
     out
 }
 
+// ---- the writer's declaration -------------------------------------------------
+
+/// One task's declaration file, project-relative: beside the index the wave
+/// already writes, and named for the wave and the task, so two tasks of one
+/// wave never write over each other.
+fn declares_rel(plan: &str, wave: usize, task: &str) -> String {
+    format!("archi/plans/{plan}/waves/w{wave:02}.{task}.declares.toml")
+}
+
+/// The file's shape: one array of tables, each naming the changed symbol,
+/// what it answers and the test that proves it. Every field is required and
+/// no unknown key is tolerated — an optional field is the beginning of a file
+/// that always parses
+/// (`archi/requirements/planning/the-declaration-refusal-repairs-without-guessing.md`).
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Declarations {
+    declares: Vec<Declared>,
+}
+
+/// One declaration. Each field is read spanned, so a name that parses and
+/// then resolves to nothing is refused on the line it was written on and not
+/// on the table above it.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Declared {
+    /// The changed code, as `link add` takes it:
+    /// `[<member>//]<file>[#<symbol>]`.
+    symbol: Spanned<String>,
+    /// The port or requirement that code answers.
+    answers: Spanned<String>,
+    /// The test that proves it answers.
+    proved_by: Spanned<String>,
+}
+
+/// A task's declaration file as it was read: its path and its bytes, kept so
+/// every refusal can quote the line it is about, and the declarations in it.
+struct DeclarationFile {
+    path: String,
+    text: String,
+    declares: Vec<Declared>,
+}
+
+impl DeclarationFile {
+    /// One located refusal: the file, the task that owes it, the line, what
+    /// is wrong there, and the lines that stood there. The reader of this
+    /// refusal did not write the file and cannot ask its writer, so the
+    /// refusal costs one read to fix and never restates the grammar alone
+    /// (`archi/requirements/planning/the-declaration-refusal-repairs-without-guessing.md`).
+    fn refuse(&self, task: &str, span: Option<Range<usize>>, what: &str) -> String {
+        let Some(span) = span else {
+            return format!("`{}`, task `{task}`: {what}", self.path);
+        };
+        let first = line_at(&self.text, span.start);
+        let last = line_at(&self.text, span.end);
+        let mut out = format!("`{}`:{first}, task `{task}`: {what}", self.path);
+        for (i, line) in self
+            .text
+            .lines()
+            .enumerate()
+            .take(last)
+            .skip(first.saturating_sub(1))
+        {
+            out.push_str(&format!("\n  {} | {line}", i + 1));
+        }
+        out
+    }
+}
+
+/// The 1-based line a byte offset sits on.
+fn line_at(text: &str, offset: usize) -> usize {
+    text[..offset.min(text.len())].matches('\n').count() + 1
+}
+
+/// One task's declarations, parsed. `Ok(None)` when the file is absent: an
+/// absent file is the wave gate's refusal to raise
+/// (`archi/requirements/planning/an-undeclared-change-refuses-the-wave.md`),
+/// and until that gate stands, a task that declared nothing mints nothing and
+/// capture says so.
+fn read_declarations(
+    root: &Path,
+    plan: &str,
+    wave: usize,
+    task: &str,
+) -> Result<Option<DeclarationFile>, String> {
+    let rel = declares_rel(plan, wave, task);
+    let path = root.join(&rel);
+    let text = match fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("cannot read `{rel}`: {e}")),
+    };
+    let mut file = DeclarationFile {
+        path: rel,
+        text,
+        declares: Vec::new(),
+    };
+    match toml::from_str::<Declarations>(&file.text) {
+        Ok(parsed) => {
+            file.declares = parsed.declares;
+            Ok(Some(file))
+        }
+        Err(e) => Err(file.refuse(task, e.span(), e.message())),
+    }
+}
+
+/// The canonical surface text of every edge of the model, to the two ends it
+/// joins. A declaration's `answers` is matched against this before it is
+/// resolved, so a writer who named an edge is told which ends stand behind it
+/// instead of being told the name resolves to something it must not name
+/// (`archi/requirements/code-link/the-writer-declares-what-the-code-answers.md`).
+fn edge_ends(model: &Model) -> BTreeMap<String, (String, String)> {
+    model
+        .dump()
+        .into_iter()
+        .filter_map(|s| {
+            let text = super::edge_pseudo(&s)?;
+            let ends = match &s {
+                Statement::RelEdge { source, target, .. } => (source.clone(), target.clone()),
+                Statement::ConnEdge { source, target, .. } => (
+                    format!("{}.{}", source.node, source.port),
+                    format!("{}.{}", target.node, target.port),
+                ),
+                _ => return None,
+            };
+            Some((text, ends))
+        })
+        .collect()
+}
+
+/// Mint one task's declarations: what the file names becomes an asserted
+/// link on the symbol that named it, stamped `declared` and carrying the
+/// test. A pair the journal already holds is not minted twice, so a wave that
+/// re-runs its capture is a no-op
+/// (`archi/requirements/code-link/the-writer-declares-what-the-code-answers.md`,
+/// `archi/requirements/code-link/a-declaration-names-the-test-that-proves-it.md`).
+fn mint_declarations(
+    root: &Path,
+    model: &Model,
+    file: &DeclarationFile,
+    task: &str,
+    live: &[Link],
+) -> Result<Vec<Link>, String> {
+    if file.declares.is_empty() {
+        return Ok(Vec::new());
+    }
+    let roots = super::Roots::resolve(root)?;
+    let edges = edge_ends(model);
+    let mut minted = Vec::new();
+    for d in &file.declares {
+        let answers = d.answers.get_ref();
+        let symbol = d.symbol.get_ref();
+        let proved_by = d.proved_by.get_ref();
+
+        // What it answers: a port or a requirement, never an edge.
+        let spec = SpecRef::parse(answers)
+            .map_err(|e| file.refuse(task, Some(d.answers.span()), &e))?;
+        if let Some((source, target)) = edges.get(&spec.path) {
+            return Err(file.refuse(
+                task,
+                Some(d.answers.span()),
+                &format!(
+                    "`{}` is an edge — an edge is a caller, and the code behind a port does not \
+                     know its callers; name the end this symbol answers: `{source}` or `{target}`",
+                    spec.path
+                ),
+            ));
+        }
+
+        // Where the code is. It is resolved here, before the mint, so a
+        // symbol the tree does not hold is refused on the line that named it.
+        let anchor = Anchor::parse(symbol)
+            .map_err(|e| file.refuse(task, Some(d.symbol.span()), &e))?;
+        let symbol_root = roots
+            .require(&anchor.repo)
+            .map_err(|e| file.refuse(task, Some(d.symbol.span()), &e))?;
+        super::resolve_anchor(&symbol_root, &anchor)
+            .map_err(|e| file.refuse(task, Some(d.symbol.span()), &e))?;
+
+        // The test that proves it. Archi runs nothing: the test's existence
+        // is checked, its passing is the suite's business.
+        let test = Anchor::parse(proved_by)
+            .map_err(|e| file.refuse(task, Some(d.proved_by.span()), &e))?;
+        if test.symbol.is_none() {
+            return Err(file.refuse(
+                task,
+                Some(d.proved_by.span()),
+                &format!(
+                    "the test `{test}` names a file and no symbol — `proved_by` names the test \
+                     itself, as `<file>#<test fn>`"
+                ),
+            ));
+        }
+        let test_root = roots
+            .require(&test.repo)
+            .map_err(|e| file.refuse(task, Some(d.proved_by.span()), &e))?;
+        super::resolve_anchor(&test_root, &test).map_err(|e| {
+            file.refuse(
+                task,
+                Some(d.proved_by.span()),
+                &format!("the test `{test}` does not resolve: {e}"),
+            )
+        })?;
+
+        // A pair the journal already holds is the same claim, not a second
+        // one: the wave's capture re-runs, and the writer's file does not
+        // change what it said.
+        let held = live
+            .iter()
+            .chain(&minted)
+            .any(|l| l.spec.version.is_none() && l.spec.path == spec.path && l.anchor == anchor);
+        if held {
+            continue;
+        }
+        // The spec side is the mint's own resolution; what is left of its
+        // refusals is the name this line wrote.
+        let link = super::mint(
+            root,
+            model,
+            answers,
+            symbol,
+            LinkKind::Indirect,
+            Rule::Declared,
+            Origin::Captured {
+                task: task.to_string(),
+            },
+            Standing::Asserted,
+            Some(test),
+        )
+        .map_err(|e| file.refuse(task, Some(d.answers.span()), &e))?;
+        minted.push(link);
+    }
+    Ok(minted)
+}
+
 // ---- capture -----------------------------------------------------------------
 
-/// One suppressed pair: a candidate the cross-product would have minted
-/// but the signal test found no shared term for. Reporting, not state —
-/// nothing is journaled, and a hand `link add` mints the pair asserted.
+/// One suppressed pair: a (spec_ref, changed item) pair the signal test
+/// found no shared term for. Reporting, not state — nothing is journaled,
+/// and a hand `link add` mints the pair asserted.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize)]
 pub struct Suppressed {
     /// The claiming task.
@@ -298,7 +538,8 @@ pub struct Suppressed {
 /// One capture's outcome.
 #[derive(Default, Serialize)]
 pub struct CaptureOutcome {
-    /// Freshly minted candidate links — evidence, awaiting review.
+    /// Freshly minted links — what the in-flight tasks' declarations named,
+    /// asserted and stamped `declared`.
     pub minted: Vec<Link>,
     /// `(link id, task)`: a live evidence link re-encountered by another
     /// task carrying the same spec_ref — confidence accrues.
@@ -309,7 +550,7 @@ pub struct CaptureOutcome {
     /// Changed items no in-flight task claims — code motion the plan does
     /// not account for.
     pub leftovers: Vec<Changed>,
-    /// Pairs the signal test kept out of the mint.
+    /// Pairs the signal test found no shared term for.
     pub suppressed: Vec<Suppressed>,
     /// Task id → the spec_refs at least one of its claimed changed items
     /// carries signal for: what this delta presses, read by the gate.
@@ -329,12 +570,14 @@ fn claims_file(task: &Task, file: &str) -> bool {
         }))
 }
 
-/// Capture a wave: diff the wave-open index against the current tree and
-/// mint the in-flight tasks' candidate links; journal touches and decays.
-/// `only` restricts minting to one task (`link capture --task`) while the
-/// claim map still spans the whole wave.
+/// Capture a wave: mint the in-flight tasks' declarations, then diff the
+/// wave-open index against the current tree to say what the delta presses and
+/// what it leaves over; journal touches and decays. `only` restricts the mint
+/// and the press to one task (`link capture --task`) while the claim map
+/// still spans the whole wave.
 pub(crate) fn capture_wave(
     root: &Path,
+    model: &Model,
     plan_name: &str,
     wave: usize,
     in_flight: &[&Task],
@@ -367,17 +610,38 @@ pub(crate) fn capture_wave(
     let current = TreeIndex::scan(root, &rescanned);
     let changes = delta(&opened, &current);
     let folded = super::load(root)?;
-    let commit = versions::provenance(root);
 
     let mut shared: BTreeSet<&str> = BTreeSet::new();
     let mut events: Vec<Event> = Vec::new();
     // The working link set: the fold plus this batch's mints, so the decay
     // pass sees same-run mints from overlapping tasks symmetrically.
     let mut live: Vec<Link> = folded.live.clone();
-    let mut adds = folded.adds;
     let mut ref_term_cache: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
 
-    // Mint and touch, per change, per claiming task.
+    // The mint: the declarations the in-flight tasks wrote. A task that wrote
+    // none mints nothing and says so — refusing an absent file is the wave
+    // gate's, not this reader's.
+    for task in in_flight
+        .iter()
+        .filter(|t| only.is_none_or(|o| o == t.id))
+    {
+        match read_declarations(root, plan_name, wave, &task.id)? {
+            None => out.notes.push(format!(
+                "`{}` declares nothing: `{}` is absent — no link is minted for its delta",
+                task.id,
+                declares_rel(plan_name, wave, &task.id)
+            )),
+            Some(file) => {
+                for link in mint_declarations(root, model, &file, &task.id, &live)? {
+                    out.minted.push(link.clone());
+                    live.push(link);
+                }
+            }
+        }
+    }
+
+    // Touch and press, per change, per claiming task. The claim map and the
+    // term test are what they were; what they no longer do is mint.
     for change in &changes {
         let claimants: Vec<&Task> = in_flight
             .iter()
@@ -402,13 +666,10 @@ pub(crate) fn capture_wave(
             out.notes.push(format!("skipped `{anchor}`: its member is unreachable"));
             continue;
         };
-        let resolved = match super::resolve_anchor(&member_root, &anchor) {
-            Ok(r) => r,
-            Err(e) => {
-                out.notes.push(format!("skipped `{anchor}`: {e}"));
-                continue;
-            }
-        };
+        if let Err(e) = super::resolve_anchor(&member_root, &anchor) {
+            out.notes.push(format!("skipped `{anchor}`: {e}"));
+            continue;
+        }
         // Terms come from the bare path and body: the member qualifier is
         // identity, never signal.
         let content = fs::read_to_string(member_root.join(bare)).unwrap_or_default();
@@ -457,57 +718,15 @@ pub(crate) fn capture_wave(
                     continue;
                 }
                 // No shared term between ref surface and item content: the
-                // pair is reported, not minted — and not subtracted, so a
-                // hand `link add` stays free to claim it.
+                // pair is reported — and not subtracted, so a hand `link add`
+                // stays free to claim it.
                 if !signal {
                     out.suppressed.push(Suppressed {
                         task: task.id.clone(),
                         spec_ref: spec_ref.clone(),
                         item: change.to_string(),
                     });
-                    continue;
                 }
-                // A candidate retired at identical pins stays subtracted;
-                // new content is new evidence.
-                let subtracted = folded.retired.iter().any(|l| {
-                    l.spec.version.is_none()
-                        && l.spec.path == *spec_ref
-                        && l.anchor == anchor
-                        && l.pins == resolved.pins
-                        && matches!(&l.origin, Origin::Captured { task: t } if *t == task.id)
-                });
-                if subtracted {
-                    continue;
-                }
-                adds += 1;
-                let link = Link {
-                    id: super::mint_id(adds, &format!("{spec_ref}{}", anchor.file)),
-                    spec: SpecRef {
-                        path: spec_ref.clone(),
-                        version: None,
-                    },
-                    anchor: anchor.clone(),
-                    kind: LinkKind::Indirect,
-                    standing: Standing::Evidence,
-                    origin: Origin::Captured {
-                        task: task.id.clone(),
-                    },
-                    // The shared term between the ref and the item is what
-                    // made this row: it is the tool's guess, and it says so
-                    // (`archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`).
-                    rule: Rule::Inferred,
-                    birth: Birth {
-                        created: super::now(),
-                        commit: commit.clone(),
-                        spans: vec![resolved.span.clone()],
-                    },
-                    pins: resolved.pins.clone(),
-                    touches: Vec::new(),
-                    decays: Vec::new(),
-                };
-                events.push(Event::Add { link: link.clone() });
-                out.minted.push(link.clone());
-                live.push(link);
             }
         }
     }
@@ -592,7 +811,7 @@ pub fn run_manual(root: &Path, model: &Model, task_id: &str) -> Result<CaptureOu
             ids.join(", ")
         ));
     }
-    capture_wave(root, &plan.name, wave, &in_flight, Some(task_id))
+    capture_wave(root, model, &plan.name, wave, &in_flight, Some(task_id))
 }
 
 /// The capture outcome as human lines.
@@ -627,10 +846,19 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use modeling_lang::Workspace;
+
+    use super::super::{append, load, now, resolve_anchor, Birth};
+
     static NEXT: AtomicUsize = AtomicUsize::new(0);
 
     const STORE_RS: &str = "pub struct Store {\n    rows: Vec<u8>,\n}\n\n\
                             impl Store {\n    pub fn put(&mut self, row: u8) {\n        self.rows.push(row);\n    }\n}\n";
+
+    /// The smallest model that compiles. Nothing here mints, so nothing here
+    /// resolves a name against it; what a declaration resolves to is the
+    /// binary's own question, and `tests/link_e2e.rs` asks it.
+    const MODEL: &str = "def node Store\n";
 
     fn temp_project() -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -639,10 +867,55 @@ mod tests {
             NEXT.fetch_add(1, Ordering::SeqCst)
         ));
         fs::create_dir_all(dir.join("code")).unwrap();
-        fs::write(dir.join("archi.toml"), "[project]\nname = \"t\"\n").unwrap();
+        fs::create_dir_all(dir.join("archi/src")).unwrap();
+        fs::write(
+            dir.join("archi.toml"),
+            "[project]\nname = \"t\"\npreset = \"default\"\n",
+        )
+        .unwrap();
+        fs::write(dir.join("archi/src/model.arch"), MODEL).unwrap();
         fs::write(dir.join("code/store.rs"), STORE_RS).unwrap();
         fs::write(dir.join("code/schema.sql"), "CREATE TABLE t (id INT);\n").unwrap();
         dir
+    }
+
+    fn compiled(root: &Path) -> Workspace {
+        modeling_lang::source::compile_project(root)
+            .unwrap_or_else(|f| panic!("the fixture model compiles:\n{}", f.render()))
+            .workspace
+    }
+
+    /// A standing evidence row, journaled as capture minted them while the
+    /// shared-term rule ruled. Thousands of them stand in this project's own
+    /// journal, and a wave that re-encounters or rewrites one still touches
+    /// or decays it — which is what these tests are about. Nothing mints
+    /// evidence anymore, so a test that needs one writes it.
+    fn seed_evidence(root: &Path, spec: &str, code: &str, task: &str) -> String {
+        let anchor = Anchor::parse(code).unwrap();
+        let resolved = resolve_anchor(root, &anchor).unwrap();
+        let link = Link {
+            id: load(root).unwrap().next_id(spec),
+            spec: SpecRef::parse(spec).unwrap(),
+            anchor,
+            kind: LinkKind::Indirect,
+            standing: Standing::Evidence,
+            origin: Origin::Captured {
+                task: task.to_string(),
+            },
+            rule: Rule::Inferred,
+            proves: None,
+            birth: Birth {
+                created: now(),
+                commit: None,
+                spans: vec![resolved.span],
+            },
+            pins: resolved.pins,
+            touches: Vec::new(),
+            decays: Vec::new(),
+        };
+        let id = link.id.clone();
+        append(root, &[Event::Add { link }]).unwrap();
+        id
     }
 
     fn task(id: &str, spec_refs: &[&str], outputs: &[&str]) -> Task {
@@ -709,9 +982,15 @@ mod tests {
         fs::remove_dir_all(&root).unwrap();
     }
 
+    /// The diff and the claim map are what they were — a changed symbol under
+    /// a task's outputs is that task's, and a changed file nobody claims is a
+    /// leftover. What no longer happens is the mint: a task that declared
+    /// nothing gets nothing, however many words its refs share with its code
+    /// (`archi/requirements/code-link/the-writer-declares-what-the-code-answers.md`).
     #[test]
-    fn capture_mints_claimed_deltas_and_reports_leftovers() {
+    fn an_undeclared_delta_mints_nothing_and_still_reports_its_leftovers() {
         let root = temp_project();
+        let ws = compiled(&root);
         fs::create_dir_all(plans::plan_dir(&root, "p")).unwrap();
         write_index(&root, "p", 1).unwrap();
 
@@ -724,86 +1003,91 @@ mod tests {
         .unwrap();
         fs::write(root.join("code/schema.sql"), "CREATE TABLE t (id BIGINT);\n").unwrap();
 
-        let out = capture_wave(&root, "p", 1, &[&t1], None).unwrap();
-        // spec_refs × changed symbols: 2 × 1.
-        assert_eq!(out.minted.len(), 2, "{}", render_capture(&out));
-        let l = &out.minted[0];
-        assert_eq!(l.standing, Standing::Evidence);
-        assert_eq!(l.kind, LinkKind::Indirect);
-        assert_eq!(l.origin, Origin::Captured { task: "t1".into() });
-        assert_eq!(l.anchor.to_string(), "code/store.rs#Store::put");
-        assert_eq!(l.birth.spans[0].file, "code/store.rs");
+        let out = capture_wave(&root, ws.model(), "p", 1, &[&t1], None).unwrap();
+        // Both refs share terms with the changed symbol, and neither mints.
+        assert_eq!(out.pressed["t1"].len(), 2, "{}", render_capture(&out));
+        assert!(out.minted.is_empty(), "{}", render_capture(&out));
+        assert!(ls(&root).is_empty(), "{}", render_capture(&out));
+        // The task is told where the file it did not write belongs.
+        assert!(
+            out.notes
+                .iter()
+                .any(|n| n.contains("w01.t1.declares.toml") && n.contains("declares nothing")),
+            "{:?}",
+            out.notes
+        );
         assert_eq!(out.leftovers.len(), 1);
         assert_eq!(out.leftovers[0].to_string(), "code/schema.sql");
 
-        // Idempotent: the re-run mints nothing and touches nothing — the
-        // links are this task's own.
-        let again = capture_wave(&root, "p", 1, &[&t1], None).unwrap();
-        assert!(again.minted.is_empty() && again.touched.is_empty(), "{}", render_capture(&again));
-        assert_eq!(ls(&root).len(), 2);
-
-        // A retired candidate stays subtracted while the code stands
-        // still, and re-mints when the symbol moves again.
-        let id = ls(&root)[0].id.clone();
-        super::super::retire(&root, &[id]).unwrap();
-        let after = capture_wave(&root, "p", 1, &[&t1], None).unwrap();
-        assert!(after.minted.is_empty(), "{}", render_capture(&after));
-        fs::write(
-            root.join("code/store.rs"),
-            STORE_RS.replace("self.rows.push(row);", "self.rows.push(row ^ 1);"),
-        )
-        .unwrap();
-        let moved = capture_wave(&root, "p", 1, &[&t1], None).unwrap();
-        assert_eq!(moved.minted.len(), 1, "{}", render_capture(&moved));
+        // The re-run says the same and still mints nothing.
+        let again = capture_wave(&root, ws.model(), "p", 1, &[&t1], None).unwrap();
+        assert!(
+            again.minted.is_empty() && again.touched.is_empty(),
+            "{}",
+            render_capture(&again)
+        );
 
         fs::remove_dir_all(&root).unwrap();
     }
 
+    /// The observations confidence is derived from still run over the
+    /// evidence rows the journal already holds: a task that rewrites the item
+    /// an evidence link is anchored at, without carrying its ref, decays it;
+    /// another task carrying it touches it; and each of those is journaled
+    /// once per task (`archi/requirements/self-hosting/capture-at-the-join.md`).
     #[test]
     fn touches_and_decays_journal_once_per_task() {
         let root = temp_project();
+        let ws = compiled(&root);
         fs::create_dir_all(plans::plan_dir(&root, "p")).unwrap();
         write_index(&root, "p", 1).unwrap();
 
-        // Two tasks claim the same file; one carries `Store`, the other a
-        // ref whose signal is in the item's body only.
+        // Two tasks claim the same file, and one standing evidence row per
+        // task is anchored at the symbol they both rewrite.
         let t1 = task("t1", &["Store"], &["code/"]);
         let t2 = task("t2", &["Rows"], &["code/"]);
+        let store_id = seed_evidence(&root, "Store", "code/store.rs#Store::put", "t1");
+        let rows_id = seed_evidence(&root, "Rows", "code/store.rs#Store::put", "t2");
         fs::write(
             root.join("code/store.rs"),
             STORE_RS.replace("self.rows.push(row);", "self.rows.insert(0, row);"),
         )
         .unwrap();
 
-        let out = capture_wave(&root, "p", 1, &[&t1, &t2], None).unwrap();
-        // Each task mints its own candidate on the shared symbol, and each
-        // presses on the other's: split confidence.
-        assert_eq!(out.minted.len(), 2, "{}", render_capture(&out));
+        let out = capture_wave(&root, ws.model(), "p", 1, &[&t1, &t2], None).unwrap();
+        // Each task presses on the other's row: split confidence.
+        assert!(out.minted.is_empty(), "{}", render_capture(&out));
         assert_eq!(out.decayed.len(), 2, "{}", render_capture(&out));
         assert!(out.notes.iter().any(|n| n.contains("claimed by several")), "{:?}", out.notes);
         let live = ls(&root);
-        let store_link = live.iter().find(|l| l.spec.path == "Store").unwrap();
-        let rows_link = live.iter().find(|l| l.spec.path == "Rows").unwrap();
+        let store_link = live.iter().find(|l| l.id == store_id).unwrap();
+        let rows_link = live.iter().find(|l| l.id == rows_id).unwrap();
         assert_eq!(store_link.decays, vec!["t2".to_string()]);
         assert_eq!(rows_link.decays, vec!["t1".to_string()]);
 
         // Re-runs never double-journal; a third task carrying `Store`
-        // touches the standing evidence instead of re-minting, and decays
-        // the `Rows` link it does not carry.
-        let again = capture_wave(&root, "p", 1, &[&t1, &t2], None).unwrap();
+        // touches the standing evidence, and decays the `Rows` link it does
+        // not carry.
+        let again = capture_wave(&root, ws.model(), "p", 1, &[&t1, &t2], None).unwrap();
         assert!(again.minted.is_empty() && again.decayed.is_empty() && again.touched.is_empty());
         let t3 = task("t3", &["Store"], &["code/"]);
-        let third = capture_wave(&root, "p", 1, &[&t1, &t2, &t3], None).unwrap();
+        let third = capture_wave(&root, ws.model(), "p", 1, &[&t1, &t2, &t3], None).unwrap();
         assert!(third.minted.is_empty(), "{}", render_capture(&third));
-        assert!(third.touched.iter().any(|(id, task)| id == &store_link.id && task == "t3"));
-        assert!(third.decayed.iter().any(|(id, task)| id == &rows_link.id && task == "t3"));
+        assert!(third.touched.iter().any(|(id, task)| id == &store_id && task == "t3"));
+        assert!(third.decayed.iter().any(|(id, task)| id == &rows_id && task == "t3"));
 
         fs::remove_dir_all(&root).unwrap();
     }
 
+    /// The signal test still splits the product and still reports both
+    /// halves — what this delta presses, and what shares no word with it —
+    /// and it mints neither half. Nothing it says is state: no pair is
+    /// journaled and no pair is subtracted, so a hand `link add` stays free
+    /// to claim any of them (`archi/requirements/code-link/candidates-carry-signal.md`).
     #[test]
     fn no_signal_pairs_suppress_but_never_subtract_or_eat_leftovers() {
         let root = temp_project();
+        let ws = compiled(&root);
         fs::create_dir_all(plans::plan_dir(&root, "p")).unwrap();
         write_index(&root, "p", 1).unwrap();
 
@@ -817,12 +1101,11 @@ mod tests {
         .unwrap();
         fs::write(root.join("code/schema.sql"), "CREATE TABLE t (id BIGINT);\n").unwrap();
 
-        let out = capture_wave(&root, "p", 1, &[&t1], None).unwrap();
-        // The signal test splits the product: `Store` shares terms with
-        // the item, the gate edge shares none — suppressed, not minted,
-        // and pressed carries exactly the signal-bearing ref.
-        assert_eq!(out.minted.len(), 1, "{}", render_capture(&out));
-        assert_eq!(out.minted[0].spec.path, "Store");
+        let out = capture_wave(&root, ws.model(), "p", 1, &[&t1], None).unwrap();
+        // `Store` shares terms with the item, the gate edge shares none:
+        // pressed carries the first, suppressed reports the second, and the
+        // journal takes neither.
+        assert!(out.minted.is_empty(), "{}", render_capture(&out));
         assert_eq!(
             out.suppressed,
             vec![Suppressed {
@@ -832,25 +1115,22 @@ mod tests {
             }]
         );
         assert_eq!(out.pressed["t1"], BTreeSet::from(["Store".to_string()]));
-        // The unclaimed change stays a leftover whatever its terms, and
-        // the journal holds only the minted pair.
+        // The unclaimed change stays a leftover whatever its terms.
         assert_eq!(out.leftovers.len(), 1);
         assert_eq!(out.leftovers[0].to_string(), "code/schema.sql");
-        assert_eq!(ls(&root).len(), 1);
+        assert!(ls(&root).is_empty());
         assert!(render_capture(&out).contains("suppressed 1 no-signal pair"), "{}", render_capture(&out));
 
         // Suppression is reporting, not state: the re-run reports the same
-        // pair and still mints nothing.
-        let again = capture_wave(&root, "p", 1, &[&t1], None).unwrap();
-        assert!(again.minted.is_empty(), "{}", render_capture(&again));
+        // pair.
+        let again = capture_wave(&root, ws.model(), "p", 1, &[&t1], None).unwrap();
         assert_eq!(again.suppressed.len(), 1);
 
         // A file-level item compares through its path terms too: `Schema`
         // meets `code/schema.sql`, `Store` does not.
         let t2 = task("t2", &["Schema", "Store"], &["code/schema.sql"]);
-        let filed = capture_wave(&root, "p", 1, &[&t1, &t2], None).unwrap();
-        let minted: Vec<&str> = filed.minted.iter().map(|l| l.spec.path.as_str()).collect();
-        assert_eq!(minted, vec!["Schema"], "{}", render_capture(&filed));
+        let filed = capture_wave(&root, ws.model(), "p", 1, &[&t1, &t2], None).unwrap();
+        assert_eq!(filed.pressed["t2"], BTreeSet::from(["Schema".to_string()]));
         assert!(filed
             .suppressed
             .iter()

@@ -499,14 +499,21 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
          ### service-hardening\n\n- test — proves service-hardening\n",
     );
 
+    // The test a declaration names, in the tree before the wave opens so it
+    // is never a change of its own.
+    fs::write(
+        root.join("code/store_test.rs"),
+        "pub fn a_row_is_persisted() {\n    assert!(true);\n}\n",
+    )
+    .unwrap();
     let out = ok(&root, &["plan", "start"]);
     assert!(out.contains("wave 1 in flight: t1"), "{out}");
     let out = ok(&root, &["plan", "current-wave"]);
     assert!(out.contains("t1 Store — persist rows"), "{out}");
 
-    // Close wave 1: the edit under t1's output becomes candidates, and
-    // the gate blocks until they are asserted — the step that demands
-    // links is the step that produces them.
+    // Close wave 1: the edit under t1's output presses both of its refs and
+    // the gate blocks. Nothing was captured — the diff proves a symbol moved,
+    // it never proves what that symbol answers.
     fs::write(
         root.join("code/store.rs"),
         "pub struct Store;\nimpl Store {\n    pub fn put(&mut self, n: u8) { let _ = n; }\n}\n",
@@ -514,8 +521,8 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     .unwrap();
     let (stdout, stderr) = fails(&root, &["plan", "next"]);
     assert!(stderr.contains("coverage of the refs this delta presses is incomplete"), "{stderr}");
-    let ids = captured_ids(&stdout);
-    assert_eq!(ids.len(), 2, "{stdout}");
+    assert!(captured_ids(&stdout).is_empty(), "{stdout}");
+    assert!(stdout.contains("w01.t1.declares.toml"), "{stdout}");
 
     // A manual re-run is idempotent, and `--json` carries the full
     // product: what was pressed, what was suppressed.
@@ -526,12 +533,33 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     assert_eq!(json["pressed"]["t1"].as_array().unwrap().len(), 2, "{json}");
     assert!(json["suppressed"].as_array().unwrap().is_empty(), "{json}");
 
-    // Review and assert, then re-run the gate.
-    for id in &ids {
-        ok(&root, &["link", "confirm", id]);
-    }
+    // The writer declares what its symbol answers and the test that proves
+    // it: the pair lands asserted, with no review step between the claim and
+    // the record. The other pressed ref is an edge, and an edge is never a
+    // declaration's to name, so it is hand-authored — which is what the
+    // refusal printed.
+    write_record(
+        &root,
+        "archi/plans/mvp/waves/w01.t1.declares.toml",
+        "[[declares]]\n\
+         symbol = \"code/store.rs#Store::put\"\n\
+         answers = \"Store\"\n\
+         proved_by = \"code/store_test.rs#a_row_is_persisted\"\n",
+    );
+    ok(&root, &[
+        "link", "add", "Auth.creds wire Store.inn", "code/store.rs#Store::put",
+        "--kind", "indirect",
+    ]);
     let out = ok(&root, &["plan", "next"]);
+    assert_eq!(captured_ids(&out).len(), 1, "{out}");
     assert!(out.contains("wave 1 closed — in flight: t2"), "{out}");
+    let declared = ok(&root, &["link", "ls", "--spec", "Store"]);
+    assert!(declared.contains("asserted"), "{declared}");
+    assert!(declared.contains("declared"), "{declared}");
+    assert!(
+        declared.contains("proved by code/store_test.rs#a_row_is_persisted"),
+        "{declared}"
+    );
 
     // Wave 2's delta shares no term with any of t2's refs: nothing is
     // pressed, so nothing gates — the last wave closes into the cleanup
