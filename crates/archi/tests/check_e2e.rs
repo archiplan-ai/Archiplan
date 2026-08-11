@@ -76,6 +76,24 @@ fn ok(root: &Path, args: &[&str]) -> String {
     stdout
 }
 
+/// The one standing fact of the coverage tests: it conditions the gate, and
+/// nothing else, so every other element on [`CARRIED`] answers the coverage
+/// question for its own reason.
+fn gate_fact(root: &Path) {
+    util::Fact {
+        covers: "Gate",
+        sources: "https://example.org/thread/42",
+        uses: "",
+        condition: "The carriage drops the network for minutes at a time.",
+        killer: "Trackside coverage that never drops.",
+        scenarios: "Feature: Offline open\n  \
+                    Scenario: the app opens with no network\n    \
+                    Given the device has no network\n    When the user opens the app\n    \
+                    Then the last synced view appears\n",
+    }
+    .write(root, "trains-lose-the-signal", "Trains lose the signal");
+}
+
 #[test]
 fn a_passing_check_closes_on_the_landscape_read() {
     let root = temp_project(COUPLED);
@@ -249,18 +267,7 @@ fn the_wing_names_what_it_never_reaches_and_the_tree_stands() {
 #[test]
 fn the_coverage_list_names_no_data_element() {
     let root = temp_project(CARRIED);
-    util::Fact {
-        covers: "Gate",
-        sources: "https://example.org/thread/42",
-        uses: "",
-        condition: "The carriage drops the network for minutes at a time.",
-        killer: "Trackside coverage that never drops.",
-        scenarios: "Feature: Offline open\n  \
-                    Scenario: the app opens with no network\n    \
-                    Given the device has no network\n    When the user opens the app\n    \
-                    Then the last synced view appears\n",
-    }
-    .write(&root, "trains-lose-the-signal", "Trains lose the signal");
+    gate_fact(&root);
 
     let out = ok(&root, &["check"]);
     assert!(
@@ -292,18 +299,7 @@ fn the_coverage_list_names_no_data_element() {
 #[test]
 fn a_declared_element_empties_the_coverage_list() {
     let root = temp_project(CARRIED);
-    util::Fact {
-        covers: "Gate",
-        sources: "https://example.org/thread/42",
-        uses: "",
-        condition: "The carriage drops the network for minutes at a time.",
-        killer: "Trackside coverage that never drops.",
-        scenarios: "Feature: Offline open\n  \
-                    Scenario: the app opens with no network\n    \
-                    Given the device has no network\n    When the user opens the app\n    \
-                    Then the last synced view appears\n",
-    }
-    .write(&root, "trains-lose-the-signal", "Trains lose the signal");
+    gate_fact(&root);
     fs::write(
         root.join("archi/world/.worldignore"),
         "# what no condition outside will ever reach\n\n\

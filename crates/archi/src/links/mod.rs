@@ -739,26 +739,21 @@ fn scenario_names(block: &docs::world::Block) -> Vec<(String, usize)> {
 /// link both read, so a plan and a link can never disagree about whether the
 /// story moved. `None` when no file holds the fact.
 ///
-/// The digest is of the fact, not of the one scenario a ref addresses: a link
-/// into a fact witnesses the whole story that fact tells. A block the grammar
-/// refuses digests as an empty story, and `archi check` reports that form
-/// error where form errors belong.
+/// The file is read through [`docs::world_check::read_fact`], the reader the
+/// wing walks its own folder with, so a link and a check hold one fact one
+/// way. The digest is of the fact, not of the one scenario a ref addresses: a
+/// link into a fact witnesses the whole story that fact tells. A block the
+/// grammar refuses digests as an empty story, and `archi check` reports that
+/// form error where form errors belong.
 fn fact_digest(root: &Path, members: &crate::members::MemberSet, slug: &str) -> Option<String> {
-    let file = fact_file(slug);
-    let text = fs::read_to_string(root.join(&file)).ok()?;
-    let doc = docs::md::parse(&text).ok()?;
-    let mut diags = Vec::new();
-    let record = docs::world::parse(&doc, &file, slug, root, &mut diags);
-    let scenarios = record
-        .scenarios
-        .as_ref()
-        .and_then(|b| docs::gherkin::parse(b, &file, members, &mut diags));
-    Some(docs::world_check::scenario_digest(
-        &docs::world_check::WorldFact {
-            doc: record,
-            scenarios,
-        },
-    ))
+    let fact = docs::world_check::read_fact(
+        root,
+        &root.join(fact_file(slug)),
+        members,
+        // The form of a fact is `archi check`'s to report, never a link's.
+        &mut Vec::new(),
+    )?;
+    Some(docs::world_check::scenario_digest(&fact))
 }
 
 /// The spec side of a link as it stands now: the fact's fingerprint for a

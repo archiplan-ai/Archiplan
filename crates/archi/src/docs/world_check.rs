@@ -186,22 +186,35 @@ pub(crate) fn discover(root: &Path, diags: &mut Vec<DocDiagnostic>) -> Vec<World
             root: Some(root.to_path_buf()),
         }],
     });
-    let mut out = Vec::new();
-    for path in files {
-        let Some((file, doc)) = read_doc(root, &path, diags) else {
-            continue;
-        };
-        let record = world::parse(&doc, &file, &stem(&path), root, diags);
-        let scenarios = record
-            .scenarios
-            .as_ref()
-            .and_then(|b| gherkin::parse(b, &file, &members, diags));
-        out.push(WorldFact {
-            doc: record,
-            scenarios,
-        });
-    }
-    out
+    files
+        .into_iter()
+        .filter_map(|path| read_fact(root, &path, &members, diags))
+        .collect()
+}
+
+/// One fact, read from one file: structure, then schema, then the grammar
+/// over the `Scenarios` block. `None` when nothing readable stands there —
+/// [`discover`] skips such a file, and a reader after one fact has none.
+///
+/// It is the one reader: the wing walks the folder through it and a link
+/// reads a single slug through it, so the two can never read one file into
+/// two different stories.
+pub(crate) fn read_fact(
+    root: &Path,
+    path: &Path,
+    members: &MemberSet,
+    diags: &mut Vec<DocDiagnostic>,
+) -> Option<WorldFact> {
+    let (file, doc) = read_doc(root, path, diags)?;
+    let record = world::parse(&doc, &file, &stem(path), root, diags);
+    let scenarios = record
+        .scenarios
+        .as_ref()
+        .and_then(|b| gherkin::parse(b, &file, members, diags));
+    Some(WorldFact {
+        doc: record,
+        scenarios,
+    })
 }
 
 /// The wing of a loaded tree, keyed by what its facts cover.
