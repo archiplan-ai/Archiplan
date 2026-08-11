@@ -1,6 +1,7 @@
 ---
 version: v0025
-closed:
+closed: v0025
+version-hash: sha256:ddf9f797cd43c5ee71d3450aad37a8d4988eb38da4a73bc114ee5d1dc15c43e3
 ---
 
 # the writer declares and the diff checks
