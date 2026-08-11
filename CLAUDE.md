@@ -19,12 +19,19 @@ or `closed:` stamps.
   under `archi/` (paths, not payloads): a finding that is not a file on
   disk does not exist, and every fan-out is gated by `archi check` plus
   a count of the files it claims to have written.
+- The conditions outside the system are their own records under
+  `archi/world/`: `archi world add "<title>"` mints one,
+  `archi world rm <slug>` retires it, and `archi world ls` with
+  `--covers <element>` goes from a node to the conditions that rule it.
+  A world fact is stated without the nouns of the model — a fact that
+  speaks the model is a requirement in costume.
 - The spec workflow (model, stress, version) is the `archi` skill in
   `.claude/skills/archi/`; authoring a plan is `archi-plan`; executing
   it in waves is `archi-implement`; closing a worktree is
   `archi-finish-worktree`; merging parallel spec work is `archi-merge`,
-  and moving a project off the old fractal client is
-  `archi-migrate-fractal`.
+  moving a project off the old fractal client is
+  `archi-migrate-fractal`, and giving a standing project its world facts
+  is `archi-migrate-world`.
 
 No silent assumptions: state what you assume, surface the tradeoffs.
 Minimal design that solves the problem — no speculative features.
