@@ -651,6 +651,123 @@ fn each_retrieval_path_names_the_other() {
     assert!(v["note"].is_null(), "{v}");
 }
 
+/// The four layer paths, as the placement refusal names them
+/// (`archi/requirements/world-facts/the-world-holds-four-layers.md`).
+const LAYERS: [&str; 4] = [
+    "archi/world/facts/",
+    "archi/world/hypotheses/",
+    "archi/world/notes/",
+    "archi/world/resources/",
+];
+
+/// A document somebody parked where no layer holds it.
+const PARKED: &str = "# Thing\n\nSomething somebody left here on the way past.\n";
+
+/// The one placement refusal a `check` raises: its message alone, having
+/// asserted the check refused, located the file at `path` and named the four
+/// layers. The location prefix is stripped so two refusals can be read
+/// against each other by the file each one names.
+fn placement(root: &Path, path: &str) -> String {
+    let (code, out, err) = run(root, &["check"]);
+    assert_eq!(code, Some(1), "{out}{err}");
+    assert_eq!(err.matches("E_PLACEMENT").count(), 1, "{err}");
+    let head = format!("{path}:1:1: E_PLACEMENT: ");
+    let message = err
+        .lines()
+        .find_map(|l| l.strip_prefix(&head))
+        .unwrap_or_else(|| panic!("no refusal located at {path}:\n{err}"))
+        .to_string();
+    for layer in LAYERS {
+        assert!(message.contains(layer), "{message}");
+    }
+    message
+}
+
+/// A folder the four do not name is a fifth folder, and every document under
+/// it is refused by path — one level down and further, because a folder made
+/// in a hurry took files, kept them out of every reading and reported
+/// nothing. The refusal is the one the loose file at the top already raises,
+/// differing only in the file it names, so the two can never disagree about
+/// what the layers are
+/// (`archi/requirements/world-facts/the-world-holds-four-layers.md`).
+#[test]
+fn a_document_under_a_fifth_folder_is_refused_by_path() {
+    let (_primary, wt) = temp_project();
+
+    // The loose file at the top: the refusal this rule already raised.
+    put(&wt, "archi/world/stray.md", PARKED);
+    let loose = placement(&wt, "archi/world/stray.md");
+    fs::remove_file(wt.join("archi/world/stray.md")).unwrap();
+
+    // One level down, and one deeper: the same refusal, at the file's path.
+    for (path, named) in [
+        ("archi/world/attic/thing.md", "attic/thing.md"),
+        ("archi/world/attic/deep/thing.md", "attic/deep/thing.md"),
+    ] {
+        put(&wt, path, PARKED);
+        assert_eq!(
+            placement(&wt, path),
+            loose.replace("`stray.md`", &format!("`{named}`")),
+            "the two arms read one message"
+        );
+        fs::remove_file(wt.join(path)).unwrap();
+    }
+}
+
+/// The walk that refuses the fifth folder leaves the four untouched: the
+/// strict record, the two loose layers, and raw material still opened by
+/// nothing. A folder outside the four that holds no document says nothing —
+/// the rule locates a file, and there is no file to locate — and a tree with
+/// no wing at all is as silent as it always was
+/// (`archi/requirements/world-facts/the-world-holds-four-layers.md`,
+/// `archi/requirements/world-facts/the-wing-arrives-without-noise.md`).
+#[test]
+fn the_four_layers_pass_and_a_folder_with_no_document_says_nothing() {
+    let (_primary, wt) = temp_project();
+
+    // No `archi/world/` at all: the walk has nothing to walk.
+    assert!(!wt.join("archi/world").exists(), "the tree opens with no wing");
+    let (code, out, err) = run(&wt, &["check"]);
+    assert_eq!(code, Some(0), "{out}{err}");
+    assert!(!err.contains("archi/world"), "{err}");
+    assert!(!out.contains("world —"), "{out}");
+
+    // All four layers, each filled as it is read.
+    note(&wt);
+    fact(
+        &wt,
+        "trains-lose-the-signal",
+        "Trains lose the signal",
+        "AuthService",
+        NOTE,
+        "",
+    );
+    put(
+        &wt,
+        "archi/world/hypotheses/the-tunnel-is-the-cause.md",
+        "# The tunnel is the cause\n\nNobody has measured the dead zone against it.\n",
+    );
+    put(
+        &wt,
+        "archi/world/resources/the-recording.txt",
+        "00:14 the guard says the tunnel takes four minutes\n",
+    );
+    // A folder outside the four, empty, and one under it holding a file that
+    // is no document.
+    fs::create_dir_all(wt.join("archi/world/attic/deep")).unwrap();
+    put(&wt, "archi/world/attic/the-second-recording.txt", "00:20 four\n");
+
+    let (code, out, err) = run(&wt, &["check"]);
+    assert_eq!(code, Some(0), "{out}{err}");
+    assert!(!err.contains("E_PLACEMENT"), "{err}");
+    assert!(!err.contains("attic"), "{err}");
+    for name in ["the-recording.txt", "the-second-recording.txt"] {
+        assert!(!err.contains(name), "{err}");
+        assert!(!out.contains(name), "{out}");
+    }
+    assert!(out.contains("world — 1 facts"), "{out}");
+}
+
 /// The check prints what the wing's pass computed: its advisory lines and
 /// its closing count (`the-check-counts-the-wing`).
 #[test]

@@ -22,7 +22,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use modeling_lang::{Definition, Layer, Model, Statement};
 use serde::Serialize;
@@ -31,7 +31,7 @@ use sha2::{Digest, Sha256};
 use super::gherkin::{self, ScenarioBlock};
 use super::md::slugify;
 use super::world::{self, WORLD, WorldDoc};
-use super::{DocDiagnostic, Tree, file_name, is_md, read_doc, rel, sorted_entries, stem};
+use super::{DocDiagnostic, Tree, is_md, read_doc, rel, sorted_entries, stem};
 
 /// A `uses` chain of this many facts still reads; one deeper holds a theory
 /// of the world instead of a record of it.
@@ -182,7 +182,9 @@ pub struct WorldReport {
 /// [`FACTS`] holds the strict record and is read the way every doc primitive
 /// is read: structure, then schema, then the grammar over the `Scenarios`
 /// block. [`HYPOTHESES`] and [`NOTES`] hold a name and their prose and are
-/// read for exactly that. [`RESOURCES`] is opened by nothing.
+/// read for exactly that. [`RESOURCES`] is opened by nothing. Four is the
+/// whole count, so a document the four do not hold is refused by path before
+/// any of them is read ([`outside_the_layers`]).
 ///
 /// Nothing here creates a folder, and a tree holding none of the four says
 /// nothing at all — a project that has not opted into a layer is not behind
@@ -192,25 +194,10 @@ pub(crate) fn discover(root: &Path, diags: &mut Vec<DocDiagnostic>) -> Vec<World
     if !base.is_dir() {
         return Vec::new();
     }
-    // A file directly under the wing sits in no layer, and the layer is what
-    // says how the file is read. `.worldignore` is no document and is read
-    // beside the facts, not among them.
-    for path in sorted_entries(&base).into_iter().filter(|p| is_md(p)) {
-        diags.push(DocDiagnostic::new(
-            "E_PLACEMENT",
-            format!(
-                "`{}` sits in no layer of the world — a file lives under one of `{}`, and the \
-                 folder is what says how it is read",
-                file_name(&path),
-                LAYERS
-                    .iter()
-                    .map(|l| format!("{WORLD}{l}/"))
-                    .collect::<Vec<_>>()
-                    .join("`, `")
-            ),
-            &rel(root, &path),
-            1,
-        ));
+    // A document no layer holds sits in no layer, and the layer is what says
+    // how a file is read.
+    for path in outside_the_layers(&base) {
+        diags.push(no_layer(root, &base, &path));
     }
     // The loose layers carry a name and their prose and nothing else: no
     // workaround, no scenarios, no lists to keep true.
@@ -226,11 +213,71 @@ pub(crate) fn discover(root: &Path, diags: &mut Vec<DocDiagnostic>) -> Vec<World
 }
 
 /// The documents of one layer, in path order.
-fn layer_files(base: &Path, layer: &str) -> Vec<std::path::PathBuf> {
+fn layer_files(base: &Path, layer: &str) -> Vec<PathBuf> {
     sorted_entries(&base.join(layer))
         .into_iter()
         .filter(|p| is_md(p))
         .collect()
+}
+
+/// Every document under the wing that no layer holds: a file loose at the
+/// top, and every `.md` under a folder that is not one of [`LAYERS`], at any
+/// depth. The fifth folder is why the walk descends — a rule that reads the
+/// four by name and steps past the rest holds four layers and a remainder no
+/// rule describes, and a folder somebody made in a hurry takes files, keeps
+/// them out of every reading and reports nothing
+/// (`archi/requirements/world-facts/the-world-holds-four-layers.md`).
+///
+/// A document is a `.md`, so [`IGNORE`] is no document and stays out of the
+/// walk, and so does raw material of any other extension. A folder holding
+/// none says nothing: the rule locates a file, and there is no file to
+/// locate.
+fn outside_the_layers(base: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for entry in sorted_entries(base) {
+        if entry.is_dir() {
+            if !LAYERS.iter().any(|l| entry.ends_with(l)) {
+                documents_under(&entry, &mut out);
+            }
+        } else if is_md(&entry) {
+            out.push(entry);
+        }
+    }
+    out
+}
+
+/// Every `.md` under `dir`, at any depth, in path order.
+fn documents_under(dir: &Path, out: &mut Vec<PathBuf>) {
+    for entry in sorted_entries(dir) {
+        if entry.is_dir() {
+            documents_under(&entry, out);
+        } else if is_md(&entry) {
+            out.push(entry);
+        }
+    }
+}
+
+/// The refusal the placement rule raises, wherever the walk found the file:
+/// the four layers by path, and the document by the path it sits at under
+/// the wing. It is built in one place, so the loose file at the top and the
+/// document in a fifth folder can never name different layers
+/// (`archi/requirements/world-facts/the-world-holds-four-layers.md`).
+fn no_layer(root: &Path, base: &Path, path: &Path) -> DocDiagnostic {
+    DocDiagnostic::new(
+        "E_PLACEMENT",
+        format!(
+            "`{}` sits in no layer of the world — a file lives under one of `{}`, and the \
+             folder is what says how it is read",
+            rel(base, path),
+            LAYERS
+                .iter()
+                .map(|l| format!("{WORLD}{l}/"))
+                .collect::<Vec<_>>()
+                .join("`, `")
+        ),
+        &rel(root, path),
+        1,
+    )
 }
 
 /// One file of a loose layer. It needs a name and its prose, and the reader
@@ -1725,6 +1772,69 @@ Then the view arrives late
         put(
             &root,
             "archi/world/resources/the-recording.txt",
+            "00:14 the guard says the tunnel takes four minutes\n",
+        );
+        let report = check_at(&root);
+        assert_eq!(rendered(&report.diagnostics), Vec::<String>::new());
+        assert!(report.world.findings.is_empty());
+        assert!(report.world.count.is_none());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The located codes and paths of a report, in order.
+    fn located(report: &DocReport) -> Vec<(&str, &str, usize)> {
+        report
+            .diagnostics
+            .iter()
+            .map(|d| (d.code, d.file.as_str(), d.line))
+            .collect()
+    }
+
+    /// A folder the four do not name takes files and keeps them out of every
+    /// reading, so the walk descends into it and locates each document it
+    /// holds. The refusal is the loose file's own, differing only in the file
+    /// it names: one construction, two arms, and they can never disagree
+    /// about what the layers are (`the-world-holds-four-layers`).
+    #[test]
+    fn a_document_under_a_fifth_folder_is_a_located_error_at_any_depth() {
+        let root = temp_project();
+        let parked = "# Thing\n\nSomething somebody left here on the way past.\n";
+
+        put(&root, "archi/world/stray.md", parked);
+        let report = check_at(&root);
+        assert_eq!(located(&report), [("E_PLACEMENT", "archi/world/stray.md", 1)]);
+        let loose = report.diagnostics[0].message.clone();
+        for layer in LAYERS {
+            assert!(loose.contains(&format!("{WORLD}{layer}/")), "{loose}");
+        }
+        fs::remove_file(root.join("archi/world/stray.md")).unwrap();
+
+        for (path, named) in [
+            ("archi/world/attic/thing.md", "attic/thing.md"),
+            ("archi/world/attic/deep/thing.md", "attic/deep/thing.md"),
+        ] {
+            put(&root, path, parked);
+            let report = check_at(&root);
+            assert_eq!(located(&report), [("E_PLACEMENT", path, 1)]);
+            assert_eq!(
+                report.diagnostics[0].message,
+                loose.replace("`stray.md`", &format!("`{named}`"))
+            );
+            fs::remove_file(root.join(path)).unwrap();
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A folder outside the four that holds no document says nothing: the
+    /// rule locates a file, and a file that is not a document is not one to
+    /// locate (`the-world-holds-four-layers`).
+    #[test]
+    fn a_folder_outside_the_four_holding_no_document_says_nothing() {
+        let root = temp_project();
+        fs::create_dir_all(root.join("archi/world/attic/deep")).unwrap();
+        put(
+            &root,
+            "archi/world/attic/the-recording.txt",
             "00:14 the guard says the tunnel takes four minutes\n",
         );
         let report = check_at(&root);
