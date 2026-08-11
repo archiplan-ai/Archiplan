@@ -866,6 +866,15 @@ fn link_add(spec: &str) -> String {
     )
 }
 
+/// Whether one link anchors what it names: asserted, in the Working slot.
+/// Evidence is a candidate nobody stood behind, and a link pinned to a
+/// version is history — neither one anchors. Both gates read this one
+/// predicate, so the coverage gate and the closing block can never disagree
+/// about what an anchor is.
+fn anchors(link: &links::Link) -> bool {
+    link.standing == links::Standing::Asserted && link.spec.version.is_none()
+}
+
 /// Every collected scenario with the state of its link — the one read the
 /// closing step, the final latch and `plan verify` all answer from. The
 /// grade comes from [`links::verify`] over the folded link set the gate
@@ -889,13 +898,8 @@ fn grade_block(
             )?;
             // The gate's own predicate: an asserted link at Working anchors
             // a scenario, and nothing else does.
-            let anchored: Vec<&links::Checked> = report
-                .checked
-                .iter()
-                .filter(|c| {
-                    c.link.standing == links::Standing::Asserted && c.link.spec.version.is_none()
-                })
-                .collect();
+            let anchored: Vec<&links::Checked> =
+                report.checked.iter().filter(|c| anchors(&c.link)).collect();
             // The news is what moved: where two links reach one scenario,
             // the one that is not clean is the one worth printing.
             let graded = anchored
@@ -1526,13 +1530,7 @@ fn gate_coverage(
     pressed: &BTreeMap<String, BTreeSet<String>>,
 ) -> Result<Vec<String>, String> {
     let live = links::ls(root, None, false)?;
-    let covered = |r: &str| {
-        live.iter().any(|l| {
-            l.standing == links::Standing::Asserted
-                && l.spec.version.is_none()
-                && l.spec.path == r
-        })
-    };
+    let covered = |r: &str| live.iter().any(|l| anchors(l) && l.spec.path == r);
     let mut gaps = Vec::new();
     let mut suggested = Vec::new();
     for t in in_flight {

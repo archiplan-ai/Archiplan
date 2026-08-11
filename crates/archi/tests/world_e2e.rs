@@ -8,7 +8,6 @@
 mod util;
 
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -131,46 +130,15 @@ fn parsed(text: &str) -> Value {
     serde_json::from_str(text).unwrap_or_else(|e| panic!("json: {e}\n{text}"))
 }
 
-/// A directory whose `archi` is the built binary bound to `root`. A printed
-/// continuation is a line a person pastes into a shell, so the test pastes
-/// it into one: the quoting, the `&&` and the trailing comment all meet a
-/// real `sh`, not a parser written to agree with them.
+/// This family's shim: the shared one ([`util::shim`]) under this family's
+/// own scratch name.
 fn shim(root: &Path) -> PathBuf {
-    let dir = util::scratch("archi-world-e2e", "bin");
-    let path = dir.join("archi");
-    fs::write(
-        &path,
-        format!(
-            "#!/bin/sh\nexec \"{}\" \"$@\" --project \"{}\"\n",
-            env!("CARGO_BIN_EXE_archi"),
-            root.display()
-        ),
-    )
-    .unwrap();
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
-    dir
+    util::shim(root, "archi-world-e2e")
 }
 
-/// Run one line through `sh`, exactly as it was printed.
+/// Run one line through `sh`, exactly as it was printed ([`util::shell`]).
 fn shell(bin: &Path, line: &str) -> (Option<i32>, String, String) {
-    let out = Command::new("sh")
-        .arg("-c")
-        .arg(line)
-        .env(
-            "PATH",
-            format!(
-                "{}:{}",
-                bin.display(),
-                std::env::var("PATH").unwrap_or_default()
-            ),
-        )
-        .output()
-        .expect("sh runs");
-    (
-        out.status.code(),
-        String::from_utf8_lossy(&out.stdout).into_owned(),
-        String::from_utf8_lossy(&out.stderr).into_owned(),
-    )
+    util::shell(bin, line)
 }
 
 /// The command lines of a refusal — every line the head line does not carry.

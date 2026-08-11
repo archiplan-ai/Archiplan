@@ -9,7 +9,6 @@
 mod util;
 
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -149,23 +148,16 @@ const T1_STORE_CURATED: &str =
 /// a person fills: the three lists, the conditioning paragraph, the killer
 /// and a `Scenarios` block (`archi/requirements/world-facts/`).
 fn put_fact(root: &Path, slug: &str, title: &str, covers: &str, scenarios: &[&str]) {
-    let mut block = format!("Feature: {title}\n");
-    for s in scenarios {
-        block.push_str(&format!(
-            "  Scenario: {s}\n    Given the carriage leaves the platform\n    \
-             When the rider opens the door\n    Then the door holds\n"
-        ));
-    }
-    util::Fact {
-        covers,
-        sources: "https://example.org/thread/42",
-        uses: "",
-        condition: "The carriage drops the network for minutes at a time.",
-        killer: "The condition ends.",
-        scenarios: &block,
-    }
-    .write(root, slug, title);
+    let with_steps: Vec<(&str, &[&str])> = scenarios.iter().map(|s| (*s, STEPS)).collect();
+    put_fact_with_steps(root, slug, title, covers, &with_steps);
 }
+
+/// The three steps every scenario carries unless the test spells its own out.
+const STEPS: &[&str] = &[
+    "Given the carriage leaves the platform",
+    "When the rider opens the door",
+    "Then the door holds",
+];
 
 /// The same fixture with the steps spelled out, so a test can reword one
 /// step and watch the witness part — `put_fact`'s block with its Gherkin
@@ -195,46 +187,15 @@ fn put_fact_with_steps(
     .write(root, slug, title);
 }
 
-/// A directory whose `archi` is the built binary bound to `root`. A printed
-/// command is a line a person pastes into a shell, so the test pastes it
-/// into one: the quoting meets a real `sh`, not a splitter written to agree
-/// with it.
+/// This family's shim: the shared one ([`util::shim`]) under this family's
+/// own scratch name.
 fn shim(root: &Path) -> PathBuf {
-    let dir = util::scratch("archi-plan-e2e", "bin");
-    let path = dir.join("archi");
-    fs::write(
-        &path,
-        format!(
-            "#!/bin/sh\nexec \"{}\" \"$@\" --project \"{}\"\n",
-            env!("CARGO_BIN_EXE_archi"),
-            root.display()
-        ),
-    )
-    .unwrap();
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
-    dir
+    util::shim(root, "archi-plan-e2e")
 }
 
-/// Run one line through `sh`, exactly as it was printed.
+/// Run one line through `sh`, exactly as it was printed ([`util::shell`]).
 fn shell(bin: &Path, line: &str) -> (Option<i32>, String, String) {
-    let out = Command::new("sh")
-        .arg("-c")
-        .arg(line)
-        .env(
-            "PATH",
-            format!(
-                "{}:{}",
-                bin.display(),
-                std::env::var("PATH").unwrap_or_default()
-            ),
-        )
-        .output()
-        .expect("sh runs");
-    (
-        out.status.code(),
-        String::from_utf8_lossy(&out.stdout).into_owned(),
-        String::from_utf8_lossy(&out.stderr).into_owned(),
-    )
+    util::shell(bin, line)
 }
 
 /// The one `archi link add` line a transcript printed, trimmed of the

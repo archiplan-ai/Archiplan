@@ -9,6 +9,7 @@
 // slice of it — an unused helper here is sharing, not rot.
 #![allow(dead_code)]
 
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -47,6 +48,50 @@ pub fn ok(root: &Path, args: &[&str]) -> String {
     let (success, stdout, stderr) = run(root, args);
     assert!(success, "archi {args:?} failed:\n{stdout}\n{stderr}");
     stdout
+}
+
+/// A directory whose `archi` is the built binary bound to `root`. A printed
+/// continuation is a line a person pastes into a shell, so a test pastes it
+/// into one: the quoting, the `&&` and the trailing comment all meet a real
+/// `sh`, not a parser written to agree with them. `prefix` names the e2e
+/// family, as [`scratch`] takes it.
+pub fn shim(root: &Path, prefix: &str) -> PathBuf {
+    let dir = scratch(prefix, "bin");
+    let path = dir.join("archi");
+    std::fs::write(
+        &path,
+        format!(
+            "#!/bin/sh\nexec \"{}\" \"$@\" --project \"{}\"\n",
+            env!("CARGO_BIN_EXE_archi"),
+            root.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    dir
+}
+
+/// Run one line through `sh`, exactly as it was printed, with [`shim`]'s
+/// directory ahead of the real `PATH`.
+pub fn shell(bin: &Path, line: &str) -> (Option<i32>, String, String) {
+    let out = Command::new("sh")
+        .arg("-c")
+        .arg(line)
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                bin.display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .output()
+        .expect("sh runs");
+    (
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
 }
 
 pub fn git(dir: &Path, args: &[&str]) {
