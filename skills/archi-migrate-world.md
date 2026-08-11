@@ -122,8 +122,9 @@ One candidate that passed the gate is one file:
 archi world add "<the fact in one line>"
 ```
 
-The verb mints `archi/world/<slug>.md` with the three lists empty and
-the headings in place. You write the prose:
+The verb mints `archi/world/facts/<slug>.md` with the three lists empty
+and the headings in place. `facts/` is the strict layer of the wing, and
+it is the only one this skill writes into. You write the prose:
 
 - **The name** is the fact in one line, as the operator said it.
 - **The paragraph under it** states what condition this is and why the
@@ -171,14 +172,20 @@ The header points three ways:
   Leave it empty when the model has not reached the fact. `check`
   reports `world_uncovered` for that, and it is early work, not a
   defect.
-- **`sources`** names the file the claim came from — the intent, or the
-  plan whose story carried it — as a path from the project root. The
-  entry resolves, so the fact is grounded and a migrated project reports
-  nothing. Say plainly what this records: provenance, not observation.
-  The ground under a migrated fact is prose in this tree, and the reader
-  sees that at a glance. When the operator names material outside the
-  tree — a ticket, an interview, a measurement — add its locator beside
-  the file.
+- **`sources`** is empty on a migration run unless the operator hands
+  material over, because a claim lifted from prose carries no source
+  until somebody goes and looks. Each entry is a path from the project
+  root to a file under `archi/world/` — a note, a hypothesis or a
+  resource — and nothing else resolves. The intent the sentence came
+  from is not a source: the spec is what the world conditions, so a
+  fact grounded in a requirement grounds itself in what it explains,
+  and `check` refuses the path. A ticket id, a drive link or a
+  recording nobody here can open is refused for the other half of the
+  same reason: it is a claim about evidence, not evidence. Material the
+  operator hands over is carried into `archi/world/resources/` first,
+  and the entry then names that file. Otherwise leave the field empty.
+  `check` reports `world_ungrounded`, which is the true state of the
+  fact, and the file the claim came from is recorded in the brief.
 - **`uses`** names another fact this one holds only while that one
   holds. Empty is the normal case.
 
@@ -191,12 +198,14 @@ price.
 
 Run `archi check` and report what it said, verbatim in substance:
 
-- Errors block. An unresolved `covers` entry, an unresolved `sources`
-  path or a scenario outside the grammar is a fact that is not finished.
-  Fix it now.
+- Errors block. An unresolved `covers` entry, a `sources` entry that
+  reaches no file or points outside `archi/world/`, or a scenario
+  outside the grammar is a fact that is not finished. Fix it now.
 - The closing line counts the wing: `world — <n> facts · <m>
-  ungrounded`. A migration leaves `m` at what it was, because every fact
-  it wrote names its origin file.
+  ungrounded`. A migration raises `m` by one for every fact it writes,
+  because prose is not an observation. That number is the measure of
+  how much of the wing still waits for somebody to look, and it is a
+  worklist, not a defect to hide.
 - Findings are the worklist, never a reason to stop.
 
 Read the wing back the way a reader will: `archi world ls`, and `archi
@@ -206,7 +215,8 @@ Then write `world-migration-brief.md` at the project root and tell the
 operator it is there. It holds:
 
 - **What landed** — one line per fact: the slug, the file it came from,
-  and the workaround the operator named.
+  and the workaround the operator named. The header holds no origin, so
+  this line is the only record of where the claim was read.
 - **What did not map, and why** — every candidate that stopped at the
   gate, each with its sentence and the file it sits in. Name the reason
   in the operator's terms, not as a verdict.

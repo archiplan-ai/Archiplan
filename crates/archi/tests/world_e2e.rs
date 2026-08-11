@@ -68,16 +68,26 @@ fn fact(root: &Path, slug: &str, title: &str, covers: &str, sources: &str, uses:
     .write(root, slug, title);
 }
 
+/// The note every grounded fact here rests on, in the layer a source lives in
+/// (`archi/requirements/world-facts/a-source-is-reachable-and-lives-in-the-world.md`).
+const NOTE: &str = "archi/world/notes/line.md";
+
+/// The note [`NOTE`] names: a name and the prose under it, which is the whole
+/// schema of a loose layer.
+fn note(root: &Path) {
+    put(root, NOTE, "# The line\n\nThe ride, written down.\n");
+}
+
 /// Three standing facts: one on the gate, one on both, one on the limiter —
 /// and one of them ungrounded.
 fn three_facts(root: &Path) {
-    put(root, "notes/line.md", "the ride, written down\n");
+    note(root);
     fact(
         root,
         "trains-lose-the-signal",
         "Trains lose the signal",
         "AuthService",
-        "https://example.org/thread/42",
+        NOTE,
         "",
     );
     fact(
@@ -93,7 +103,7 @@ fn three_facts(root: &Path) {
         "the-guard-walks-the-line",
         "The guard walks the line",
         "RateLimiter",
-        "notes/line.md",
+        NOTE,
         "",
     );
 }
@@ -166,7 +176,7 @@ fn the_check_holds_the_minted_fact_until_it_is_whole() {
     let (code, _out, err) = run(&wt, &["check"]);
     assert_eq!(code, Some(1), "{err}");
     assert_eq!(
-        err.matches("archi/world/trains-lose-the-signal.md")
+        err.matches("archi/world/facts/trains-lose-the-signal.md")
             .count(),
         3,
         "{err}"
@@ -176,19 +186,23 @@ fn the_check_holds_the_minted_fact_until_it_is_whole() {
     assert!(err.contains("`Scenarios` holds nothing"), "{err}");
 
     // The prose lands, but the three lists point at nothing: an element no
-    // model declares, a file no tree holds, a fact no wing holds.
+    // model declares, a file no layer of the world holds, a fact no wing
+    // holds.
     fact(
         &wt,
         "trains-lose-the-signal",
         "Trains lose the signal",
         "Gate",
-        "notes/ghost.md",
+        "archi/world/notes/ghost.md",
         "tunnels-run-long",
     );
     let (code, _out, err) = run(&wt, &["check"]);
     assert_eq!(code, Some(1), "{err}");
     assert!(err.contains("covers names no element `Gate`"), "{err}");
-    assert!(err.contains("`sources` names no `notes/ghost.md`"), "{err}");
+    assert!(
+        err.contains("`sources` names no file `archi/world/notes/ghost.md`"),
+        "{err}"
+    );
     assert!(
         err.contains("uses names no world fact `tunnels-run-long`"),
         "{err}"
@@ -196,15 +210,15 @@ fn the_check_holds_the_minted_fact_until_it_is_whole() {
     // The slots are written now, and nothing says otherwise.
     assert!(!err.contains("holds nothing"), "{err}");
 
-    // Every reference resolves: the element the model declares, a file that
-    // stands in the tree, and no dependency at all.
-    put(&wt, "notes/line.md", "the ride, written down\n");
+    // Every reference resolves: the element the model declares, a note that
+    // stands in the world, and no dependency at all.
+    note(&wt);
     fact(
         &wt,
         "trains-lose-the-signal",
         "Trains lose the signal",
         "AuthService",
-        "notes/line.md",
+        NOTE,
         "",
     );
     let (code, out, err) = run(&wt, &["check"]);
@@ -222,14 +236,14 @@ fn the_check_holds_the_minted_fact_until_it_is_whole() {
 #[test]
 fn the_held_removal_hands_back_the_commands_that_clear_it() {
     let (_primary, wt) = temp_project();
-    put(&wt, "notes/line.md", "the ride, written down\n");
+    note(&wt);
     put(&wt, "code/app.rs", "pub fn open() -> bool { true }\n");
     fact(
         &wt,
         "trains-lose-the-signal",
         "Trains lose the signal",
         "AuthService",
-        "notes/line.md",
+        NOTE,
         "",
     );
     // A second fact rests on it.
@@ -238,7 +252,7 @@ fn the_held_removal_hands_back_the_commands_that_clear_it() {
         "tunnels-run-long",
         "Tunnels run long",
         "RateLimiter",
-        "notes/line.md",
+        NOTE,
         "trains-lose-the-signal",
     );
     // A link anchors one of its scenarios in code.
@@ -283,8 +297,8 @@ fn the_held_removal_hands_back_the_commands_that_clear_it() {
     );
     assert!(lines[2].starts_with("archi world rm tunnels-run-long"), "{err}");
     assert!(err.contains("code/app.rs"), "the line names the code it strands: {err}");
-    assert!(wt.join("archi/world/trains-lose-the-signal.md").is_file());
-    assert!(wt.join("archi/world/tunnels-run-long.md").is_file());
+    assert!(wt.join("archi/world/facts/trains-lose-the-signal.md").is_file());
+    assert!(wt.join("archi/world/facts/tunnels-run-long.md").is_file());
 
     // Paste them into a shell in the printed order: each clears its own hold
     // and the removal is still held until the last one runs.
@@ -298,7 +312,7 @@ fn the_held_removal_hands_back_the_commands_that_clear_it() {
         }
     }
     ok(&wt, &["world", "rm", "trains-lose-the-signal"]);
-    assert!(!wt.join("archi/world/trains-lose-the-signal.md").exists());
+    assert!(!wt.join("archi/world/facts/trains-lose-the-signal.md").exists());
     // Nothing cascaded: the dependant retired by its own printed line, and
     // the wing is what those lines left behind.
     assert_eq!(ok(&wt, &["world", "ls"]), "");
@@ -340,14 +354,19 @@ fn the_world_verb_refuses_like_the_others() {
 }
 
 /// The mint and the removal ride the same dispatch as the other doc verbs:
-/// the skeleton, the refusals, the exit codes.
+/// the skeleton, the refusals, the exit codes. The skeleton lands in the
+/// layer of the strict record and nowhere else
+/// (`archi/requirements/world-facts/the-world-holds-four-layers.md`).
 #[test]
 fn the_verb_mints_and_retires_from_the_bound_seat() {
     let (_primary, wt) = temp_project();
 
     let out = ok(&wt, &["world", "add", "Trains lose the signal"]);
-    assert!(out.contains("archi/world/trains-lose-the-signal.md"), "{out}");
-    let path = wt.join("archi/world/trains-lose-the-signal.md");
+    assert!(
+        out.contains("archi/world/facts/trains-lose-the-signal.md"),
+        "{out}"
+    );
+    let path = wt.join("archi/world/facts/trains-lose-the-signal.md");
     assert_eq!(
         fs::read_to_string(&path).unwrap(),
         "---\ncovers: []\nsources: []\nuses: []\n---\n\n\
@@ -360,7 +379,10 @@ fn the_verb_mints_and_retires_from_the_bound_seat() {
     fact(&wt, "trains-lose-the-signal", "Trains lose the signal", "AuthService", "", "");
     let (code, err) = refuse(&wt, &["world", "add", "Trains lose the signal"]);
     assert_eq!(code, Some(1));
-    assert!(err.contains("archi/world/trains-lose-the-signal.md"), "{err}");
+    assert!(
+        err.contains("archi/world/facts/trains-lose-the-signal.md"),
+        "{err}"
+    );
 
     ok(&wt, &["world", "rm", "trains-lose-the-signal"]);
     assert!(!path.exists());
@@ -372,7 +394,46 @@ fn the_verb_mints_and_retires_from_the_bound_seat() {
     let (code, err) = refuse(&wt, &["world", "add"]);
     assert_eq!(code, Some(2));
     assert!(err.contains("archi world add"), "{err}");
-    assert!(!wt.join("archi/world").join("trains-lose-the-signal.md").exists());
+    assert!(
+        !wt.join("archi/world/facts")
+            .join("trains-lose-the-signal.md")
+            .exists()
+    );
+}
+
+/// The wing arrives with the file: a tree that holds no `archi/world/` at all
+/// takes its first fact, and the mint makes the layer and the folder over it
+/// on the way (`archi/requirements/world-facts/the-wing-arrives-without-noise.md`,
+/// `archi/requirements/world-facts/the-world-holds-four-layers.md`).
+#[test]
+fn the_first_mint_creates_the_layer_and_its_parent() {
+    let (_primary, wt) = temp_project();
+    assert!(!wt.join("archi/world").exists(), "the tree opens with no wing");
+
+    ok(&wt, &["world", "add", "Trains lose the signal"]);
+    assert!(wt.join("archi/world/facts").is_dir());
+    assert!(
+        wt.join("archi/world/facts/trains-lose-the-signal.md")
+            .is_file()
+    );
+    // Nothing stands in the wing's root: the folder is what says how a file
+    // is read, so the mint leaves no file outside a layer.
+    let loose: Vec<String> = fs::read_dir(wt.join("archi/world"))
+        .unwrap()
+        .flatten()
+        .filter(|e| e.path().is_file())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(loose, Vec::<String>::new());
+
+    // The walk that lists a fact finds it in its new home, and the removal
+    // takes it from there.
+    assert!(ok(&wt, &["world", "ls"]).contains("archi/world/facts/trains-lose-the-signal.md"));
+    ok(&wt, &["world", "rm", "trains-lose-the-signal"]);
+    assert!(
+        !wt.join("archi/world/facts/trains-lose-the-signal.md")
+            .exists()
+    );
 }
 
 /// A replayed mint converges: the second `world add` on the untouched
@@ -383,7 +444,7 @@ fn the_verb_mints_and_retires_from_the_bound_seat() {
 #[test]
 fn the_replayed_mint_converges_like_req_add() {
     let (_primary, wt) = temp_project();
-    let path = wt.join("archi/world/trains-lose-the-signal.md");
+    let path = wt.join("archi/world/facts/trains-lose-the-signal.md");
     ok(&wt, &["world", "add", "Trains lose the signal"]);
     let minted = fs::read_to_string(&path).unwrap();
 
@@ -413,7 +474,10 @@ fn the_replayed_mint_converges_like_req_add() {
     .unwrap();
     let (code, err) = refuse(&wt, &["world", "add", "Trains lose the signal"]);
     assert_eq!(code, Some(1));
-    assert!(err.contains("archi/world/trains-lose-the-signal.md"), "{err}");
+    assert!(
+        err.contains("archi/world/facts/trains-lose-the-signal.md"),
+        "{err}"
+    );
 }
 
 /// `world ls` lists the wing, and `--covers` walks the bridge
@@ -431,7 +495,7 @@ fn one_verb_walks_the_bridge() {
         "tunnels-run-long",
     ] {
         assert!(
-            out.contains(&format!("{slug}  archi/world/{slug}.md")),
+            out.contains(&format!("{slug}  archi/world/facts/{slug}.md")),
             "{out}"
         );
     }
@@ -447,7 +511,7 @@ fn one_verb_walks_the_bridge() {
     // The fact that covers the gate alone is not a block here — it rides
     // the listing only as the `uses` of one that is.
     assert!(
-        !out.contains("trains-lose-the-signal  archi/world/"),
+        !out.contains("trains-lose-the-signal  archi/world/facts/"),
         "{out}"
     );
 
@@ -466,7 +530,7 @@ fn one_verb_walks_the_bridge() {
         .iter()
         .find(|f| f["slug"] == "tunnels-run-long")
         .expect("the fact");
-    assert_eq!(f["path"], "archi/world/tunnels-run-long.md");
+    assert_eq!(f["path"], "archi/world/facts/tunnels-run-long.md");
     assert_eq!(f["covers"], json!(["AuthService", "RateLimiter"]));
     assert_eq!(f["sources"], json!([]));
     assert_eq!(f["uses"], json!(["trains-lose-the-signal"]));
@@ -474,7 +538,7 @@ fn one_verb_walks_the_bridge() {
         .iter()
         .find(|f| f["slug"] == "the-guard-walks-the-line")
         .expect("the fact");
-    assert_eq!(f["sources"], json!(["notes/line.md"]));
+    assert_eq!(f["sources"], json!([NOTE]));
 
     // The filter narrows the envelope the same way.
     let v = parsed(&ok(&wt, &["world", "ls", "--covers", "AuthService", "--json"]));

@@ -18,6 +18,7 @@ use modeling_lang::Model;
 
 use super::md::slugify;
 use super::schema::Origin;
+use super::world::WORLD;
 use crate::versions;
 
 /// Project-relative requirements dir.
@@ -307,11 +308,16 @@ pub fn stress_rm(root: &Path, slug: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-/// Project-relative world dir. It is not required to exist: a tree that
-/// never minted a fact carries no wing
-/// (`archi/requirements/world-facts/the-wing-arrives-without-noise.md`).
-fn world_dir(root: &Path) -> PathBuf {
-    root.join("archi").join("world")
+/// The layer of the strict record, under the world
+/// (`archi/requirements/world-facts/the-world-holds-four-layers.md`). One
+/// function answers where a fact lives, and everything that mints, walks or
+/// retires one asks it — a second answer is a tool that disagrees with itself
+/// about what a fact is.
+///
+/// It is not required to exist: a tree that never minted a fact carries no
+/// wing (`archi/requirements/world-facts/the-wing-arrives-without-noise.md`).
+pub fn facts_dir(root: &Path) -> PathBuf {
+    root.join(WORLD).join("facts")
 }
 
 /// Every world fact on disk, by slug — the wing's own walk, which the
@@ -338,7 +344,7 @@ fn world_facts(root: &Path) -> Vec<super::world::WorldDoc> {
 /// (`archi/requirements/world-facts/one-verb-mints-the-world-fact.md`).
 pub fn world_add(root: &Path, title: &str) -> Result<PathBuf, String> {
     let slug = slug_of(title)?;
-    let dir = world_dir(root);
+    let dir = facts_dir(root);
     let path = dir.join(format!("{slug}.md"));
     let text = format!(
         "---\ncovers: []\nsources: []\nuses: []\n---\n\n\
@@ -364,7 +370,8 @@ pub fn world_add(root: &Path, title: &str) -> Result<PathBuf, String> {
             ))
         };
     }
-    // The wing arrives with the file: no verb requires `archi/world/`
+    // The wing arrives with the file: no verb requires `archi/world/facts/`,
+    // and the layer and the folder over it are made together
     // (`archi/requirements/world-facts/the-wing-arrives-without-noise.md`).
     fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     fs::write(&path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
@@ -401,7 +408,7 @@ pub fn world_rm(root: &Path, slug: &str) -> Result<PathBuf, String> {
     if !holders.is_empty() || !stranded.is_empty() || !dependants.is_empty() {
         return Err(refusal(slug, &holders, &stranded, &dependants));
     }
-    let path = world_dir(root).join(format!("{slug}.md"));
+    let path = facts_dir(root).join(format!("{slug}.md"));
     fs::remove_file(&path).map_err(|e| format!("cannot remove {}: {e}", path.display()))?;
     Ok(path)
 }
@@ -575,7 +582,7 @@ mod tests {
 
     /// A fact on disk, titled so its name derives back to its slug.
     fn put_fact(root: &Path, slug: &str, uses: &[&str]) {
-        let dir = world_dir(root);
+        let dir = facts_dir(root);
         fs::create_dir_all(&dir).unwrap();
         fs::write(
             dir.join(format!("{slug}.md")),
@@ -651,7 +658,7 @@ mod tests {
 
     /// The fact read back through the schema — what `check` would say.
     fn diagnostics(root: &Path, slug: &str) -> Vec<String> {
-        let file = format!("archi/world/{slug}.md");
+        let file = format!("{WORLD}facts/{slug}.md");
         let text = fs::read_to_string(root.join(&file)).unwrap();
         let mut diags = Vec::new();
         match super::super::md::parse(&text) {
@@ -706,7 +713,16 @@ mod tests {
     fn the_mint_writes_the_schema_shape() {
         let root = temp_root();
         let path = world_add(&root, TITLE).unwrap();
-        assert_eq!(path, root.join("archi").join("world").join("the-train-has-no-signal.md"));
+        // The strict record lives in the layer of the strict record, and the
+        // mint writes nowhere else
+        // (`archi/requirements/world-facts/the-world-holds-four-layers.md`).
+        assert_eq!(
+            path,
+            root.join("archi")
+                .join("world")
+                .join("facts")
+                .join("the-train-has-no-signal.md")
+        );
         let text = fs::read_to_string(&path).unwrap();
         // The three keys, present and empty; the headings in order; the
         // optional one omitted.
@@ -757,7 +773,7 @@ mod tests {
         fs::write(&path, &authored).unwrap();
 
         let e = world_add(&root, TITLE).unwrap_err();
-        assert!(e.contains("archi/world/the-train-has-no-signal.md"), "{e}");
+        assert!(e.contains("archi/world/facts/the-train-has-no-signal.md"), "{e}");
         // The refusal left the standing file as it was.
         assert_eq!(fs::read_to_string(&path).unwrap(), authored);
 
@@ -765,7 +781,7 @@ mod tests {
         // last newline from is not the skeleton the mint writes.
         fs::write(&path, minted.trim_end()).unwrap();
         let e = world_add(&root, TITLE).unwrap_err();
-        assert!(e.contains("archi/world/the-train-has-no-signal.md"), "{e}");
+        assert!(e.contains("archi/world/facts/the-train-has-no-signal.md"), "{e}");
         assert_eq!(fs::read_to_string(&path).unwrap(), minted.trim_end());
         fs::remove_dir_all(&root).unwrap();
     }
@@ -798,16 +814,24 @@ mod tests {
         fs::remove_dir_all(&root).unwrap();
     }
 
+    /// The first mint makes the layer and the folder over it in one call: a
+    /// tree that holds no `archi/world/` at all takes its first fact
+    /// (`archi/requirements/world-facts/the-wing-arrives-without-noise.md`).
     #[test]
     fn the_wing_arrives_with_the_first_mint() {
         let root = temp_root();
         // A tree with no wing reads as no facts, and no verb makes the folder.
         assert!(world_facts(&root).is_empty());
-        assert!(!world_dir(&root).exists());
+        assert!(!root.join(WORLD).exists());
+        assert!(!facts_dir(&root).exists());
 
         world_add(&root, TITLE).unwrap();
-        assert!(world_dir(&root).is_dir());
-        assert!(world_dir(&root).join("the-train-has-no-signal.md").is_file());
+        assert!(root.join(WORLD).is_dir());
+        assert!(facts_dir(&root).is_dir());
+        assert!(facts_dir(&root).join("the-train-has-no-signal.md").is_file());
+        // The walk that reads the wing finds it where the mint put it.
+        let slugs: Vec<String> = world_facts(&root).into_iter().map(|f| f.slug).collect();
+        assert_eq!(slugs, [SLUG]);
         fs::remove_dir_all(&root).unwrap();
     }
 
@@ -836,7 +860,7 @@ mod tests {
               # `the-carriage-is-a-tunnel` names `the-train-has-no-signal` in uses"]
         );
         // Nothing was retired.
-        assert!(world_dir(&root).join(format!("{SLUG}.md")).is_file());
+        assert!(facts_dir(&root).join(format!("{SLUG}.md")).is_file());
         fs::remove_dir_all(&root).unwrap();
     }
 
@@ -911,7 +935,7 @@ mod tests {
         assert!(e.contains("offline-open"), "{e}");
         assert!(e.contains("t1"), "{e}");
         // Nothing was retired.
-        assert!(world_dir(&root).join(format!("{SLUG}.md")).is_file());
+        assert!(facts_dir(&root).join(format!("{SLUG}.md")).is_file());
 
         // The same fact retires once that plan is completed.
         put_plan_carrying(&root, "offline-open", "completed", &[SLUG]);

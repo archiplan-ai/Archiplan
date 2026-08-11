@@ -2089,11 +2089,20 @@ mod tests {
         }
     }
 
-    /// One world fact under `archi/world/`: the three lists, the
-    /// conditioning paragraph, the killer and a `Scenarios` block. A
-    /// scenario is a `### ` heading and its steps — the fact's own title is
-    /// the feature, so the block names none
+    /// The material every fact here rests on: a note of the world, named the
+    /// way a `sources` entry names one — a path from the project root into a
+    /// loose layer of the world
+    /// (`archi/requirements/world-facts/a-source-is-reachable-and-lives-in-the-world.md`).
+    const NOTE: &str = "archi/world/notes/the-guard-walked-the-platform.md";
+
+    /// One world fact under `archi/world/facts/`, the layer of the strict
+    /// record (`archi/requirements/world-facts/the-world-holds-four-layers.md`):
+    /// the three lists, the conditioning paragraph, the killer and a
+    /// `Scenarios` block. A scenario is a `### ` heading and its steps — the
+    /// fact's own title is the feature, so the block names none
     /// (`archi/requirements/world-facts/the-grammar-is-a-named-subset.md`).
+    /// The note it rests on arrives with it, so a fact written here is
+    /// grounded wherever the test puts it.
     fn put_fact(root: &Path, slug: &str, title: &str, covers: &str, scenarios: &[&str]) {
         let mut block = String::new();
         for s in scenarios {
@@ -2102,14 +2111,25 @@ mod tests {
                  When the rider opens the door\nThen the door holds\n\n"
             ));
         }
+        put_note(root);
         put(
             root,
-            &format!("archi/world/{slug}.md"),
+            &format!("archi/world/facts/{slug}.md"),
             &format!(
-                "---\ncovers: [{covers}]\nsources: [https://example.org/thread/42]\nuses: []\n\
+                "---\ncovers: [{covers}]\nsources: [{NOTE}]\nuses: []\n\
                  ---\n\n# {title}\n\nThe carriage drops the network for minutes at a time.\n\n\
                  ## What kills this\n\nThe condition ends.\n\n## Scenarios\n\n{block}"
             ),
+        );
+    }
+
+    /// The note [`NOTE`] names: a name and the prose under it, which is the
+    /// whole schema of a loose layer.
+    fn put_note(root: &Path) {
+        put(
+            root,
+            NOTE,
+            "# The guard walked the platform\n\nHe timed the tunnel once at four minutes.\n",
         );
     }
 
@@ -2521,7 +2541,7 @@ mod tests {
         assert_eq!((plan.state, plan.closed_waves), (PlanState::Draft, 0));
         assert!(!plan.cleanup_displayed && !plan.scenarios_displayed && !plan.scenarios_closed);
         assert!(!plan_dir(&root, "mvp").join("waves").exists());
-        fs::remove_file(root.join("archi/world/riders-lose-the-signal.md")).unwrap();
+        fs::remove_file(root.join("archi/world/facts/riders-lose-the-signal.md")).unwrap();
         put_fact(
             &root,
             "tunnels-run-long",
@@ -2548,16 +2568,19 @@ mod tests {
     #[test]
     fn the_carried_fingerprint_is_the_wing_s_own_digest() {
         let root = temp_project();
+        put_note(&root);
         put(
             &root,
-            "archi/world/riders-lose-the-signal.md",
-            "---\ncovers: [Gate]\nsources: [https://example.org/thread/42]\nuses: []\n---\n\n\
+            "archi/world/facts/riders-lose-the-signal.md",
+            &format!(
+                "---\ncovers: [Gate]\nsources: [{NOTE}]\nuses: []\n---\n\n\
              # Riders lose the signal\n\n\
              The carriage drops the network for minutes at a time.\n\n\
              ## What kills this\n\nThe condition ends.\n\n## Scenarios\n\n\
              ### the app opens with no network\n\n\
              Given the device has no network\nWhen the user opens the app\n\
-             Then the last synced view appears\n",
+             Then the last synced view appears\n"
+            ),
         );
         let ws = compiled(&root);
         let (tree, _) = docs::load(&root, ws.model());

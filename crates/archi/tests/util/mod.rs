@@ -132,10 +132,12 @@ pub struct Fact<'a> {
 }
 
 impl Fact<'_> {
-    /// Write the fact as `archi/world/<slug>.md`. The folder arrives with the
-    /// file, exactly as the mint makes it.
+    /// Write the fact as `archi/world/facts/<slug>.md` — the layer of the
+    /// strict record (`archi/requirements/world-facts/the-world-holds-four-layers.md`).
+    /// The layer and the folder over it arrive with the file, exactly as the
+    /// mint makes them.
     pub fn write(&self, root: &Path, slug: &str, title: &str) {
-        let dir = root.join("archi/world");
+        let dir = root.join("archi/world/facts");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join(format!("{slug}.md")),

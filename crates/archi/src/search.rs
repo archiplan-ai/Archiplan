@@ -293,11 +293,17 @@ fn fill_doc_text(root: &Path, card: &mut Card) -> bool {
     true
 }
 
-/// The world wing, flat by construction: one file under `archi/world/` is one
-/// fact. A tree with no wing is an empty one — the scan neither needs the
-/// directory nor makes it (the-wing-arrives-without-noise).
+/// The world wing's strict records: one file under `archi/world/facts/` is
+/// one fact, and the corpus reads the layer the checker reads, through the
+/// one function that says where a fact lives — search and `check` can never
+/// disagree about where to look
+/// (`archi/requirements/world-facts/the-world-holds-four-layers.md`). The
+/// three loose layers hold no fact and stay out of the corpus.
+///
+/// A tree with no wing is an empty one — the scan neither needs the directory
+/// nor makes it (the-wing-arrives-without-noise).
 fn world_files(root: &Path) -> Vec<PathBuf> {
-    docs::sorted_entries(&root.join("archi").join("world"))
+    docs::sorted_entries(&docs::mint::facts_dir(root))
         .into_iter()
         .filter(|p| docs::is_md(p))
         .collect()
@@ -952,12 +958,14 @@ mod tests {
         );
     }
 
-    /// One fact of the world wing: the condition, what would kill it, and the
-    /// scenarios it dictates — whose steps the card does not hold.
+    /// One fact of the world wing, in the layer the strict record lives in
+    /// (`archi/requirements/world-facts/the-world-holds-four-layers.md`): the
+    /// condition, what would kill it, and the scenarios it dictates — whose
+    /// steps the card does not hold.
     fn world_fact(root: &Path) {
         put(
             root,
-            "archi/world/trains-lose-the-signal-in-tunnels.md",
+            "archi/world/facts/trains-lose-the-signal-in-tunnels.md",
             "---\ncovers: [AuthService]\nsources: []\nuses: [the-carriage-is-metal]\n---\n\n# Trains lose the signal in tunnels\n\nThe carriage keeps no reception for minutes at a time, so a call that must reach\nthe far end fails for a reason nobody aboard can fix.\n\n## What kills this\n\nTrackside repeaters that never drop.\n\n## Scenarios\n\nFeature: Offline open\n  Scenario: the rider opens the app underground\n    Given the device holds no dugong\n    When the rider opens the app\n    Then the last synced view appears\n",
         );
     }
@@ -1228,7 +1236,7 @@ mod tests {
         assert_eq!(hit.slug, "trains-lose-the-signal-in-tunnels");
         assert_eq!(
             hit.file.as_deref(),
-            Some("archi/world/trains-lose-the-signal-in-tunnels.md")
+            Some("archi/world/facts/trains-lose-the-signal-in-tunnels.md")
         );
         assert!(hit.line.is_some());
 
@@ -1272,7 +1280,7 @@ mod tests {
         // An unparseable fact degrades to raw text, kind intact.
         put(
             &root,
-            "archi/world/broken.md",
+            "archi/world/facts/broken.md",
             "---\nnever closed\n\n# Broken\n\nA numbat hides in the raw text.\n",
         );
         let r = run(&root, "numbat", &[], 10);
@@ -1288,8 +1296,45 @@ mod tests {
         let r = run(&root, "rate limiting", &[], 20);
         assert!(!kinds_of(&r).contains("world"));
         assert!(run(&root, "trackside", &[Kind::World], 10).hits.is_empty());
-        // The scan neither needs the directory nor makes it.
+        // The scan neither needs the directory nor makes it — neither the
+        // wing nor the layer inside it.
         assert!(!root.join("archi/world").exists());
+        assert!(!docs::mint::facts_dir(&root).exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The corpus reads the layer the checker reads: a fact under `facts/`
+    /// is a card, and a file left in the wing's root is no fact and no card —
+    /// the folder is what says what a file is
+    /// (`archi/requirements/world-facts/the-world-holds-four-layers.md`,
+    /// `search-reaches-the-new-wing`). Two answers to "where does a fact
+    /// live" is a tool that disagrees with itself, so this reads the one
+    /// function the mint and the walk read.
+    #[test]
+    fn the_corpus_reads_the_layer_the_checker_reads() {
+        let root = temp_project();
+        full_kb(&root);
+        world_fact(&root);
+        assert_eq!(
+            world_files(&root),
+            [docs::mint::facts_dir(&root).join("trains-lose-the-signal-in-tunnels.md")]
+        );
+
+        // The three loose layers hold no fact, and neither does the root of
+        // the wing: none of them reaches the corpus.
+        for at in [
+            "archi/world/a-loose-file.md",
+            "archi/world/notes/a-rider-said-the-app-froze.md",
+            "archi/world/hypotheses/the-tunnel-is-the-cause.md",
+            "archi/world/resources/a-quokka-transcript.md",
+        ] {
+            put(&root, at, "# A quokka watched\n\nIt said nothing at all.\n");
+        }
+        assert!(run(&root, "quokka", &[], 10).hits.is_empty());
+        assert_eq!(
+            slugs_of(&run(&root, "tunnels", &[Kind::World], 10)),
+            ["trains-lose-the-signal-in-tunnels"]
+        );
         fs::remove_dir_all(&root).unwrap();
     }
 

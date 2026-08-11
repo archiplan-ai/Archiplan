@@ -452,6 +452,21 @@ fn starter(name: &str) -> String {
 /// keywords the check refuses — has one line to fit in and does not. It stands
 /// where a person writes a scenario instead: the workflow skill's world step
 /// and the migration skill, both of which the reader has open at that moment.
+///
+/// The four layers of the world and the source rule stay out on the same
+/// count. The block wraps near eighty-five columns, and the four folder names
+/// alone fill two lines there. Saying what each holds — the strict record, the
+/// claim not settled, what was seen, the raw material — fills two more, and the
+/// source rule needs three: an entry is a path under `archi/world/`, and the
+/// two shapes it refuses, a path into the spec and an external locator, read as
+/// arbitrary to a reader who is not told why. That is seven lines against the
+/// one that is free.
+///
+/// The budget is not the whole argument. An agent meets the folders only when
+/// it writes into the world, and at that moment it is inside the workflow
+/// skill's world step or inside the migration skill, where both rules stand in
+/// full. What is left here is the one line about the world that holds wherever
+/// the reader is: a fact speaks the world's words, not the model's.
 fn claude_block(src: &str) -> String {
     format!(
         "{FENCE_OPEN}\n\

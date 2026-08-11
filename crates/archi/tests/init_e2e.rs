@@ -11,7 +11,10 @@
 //! a project that stands without a wing can gain one. The planning skill moved
 //! with the behaviour too: it collects its closing block from the world and
 //! asks for none of it. Both skills that ask for a scenario teach its shape —
-//! a heading and its step lines — and the block stays inside its budget.
+//! a heading and its step lines — and the block stays inside its budget. The
+//! same two skills carry the four folders of the world and the rule that a
+//! `sources` entry points inside it: neither fits the block, and a migrated
+//! fact carries no source at all.
 
 mod util;
 
@@ -567,6 +570,103 @@ fn the_skills_teach_the_scenario_shape_and_the_block_stays_short() {
     fs::remove_dir_all(&root).unwrap();
 }
 
+/// The world is four folders, and a source lives inside it
+/// (`archi/requirements/world-facts/the-world-holds-four-layers.md`,
+/// `archi/requirements/world-facts/a-source-is-reachable-and-lives-in-the-world.md`).
+/// `archi --help` prints neither rule and the block has no room for either
+/// (`the-briefing-says-what-help-does-not`), so the two skills that ask a person
+/// to write into the world carry them — the folder a file goes in, and the only
+/// place a `sources` entry may point.
+#[test]
+fn the_skills_describe_the_four_layers_and_the_source_rule() {
+    let root = temp_dir();
+    ok_in(&root, &["init", "."]);
+    let workflow = fs::read_to_string(root.join(".claude/skills/archi/SKILL.md")).unwrap();
+    let migration =
+        fs::read_to_string(root.join(".claude/skills/archi-migrate-world/SKILL.md")).unwrap();
+
+    // What a project gets is what this suite reads.
+    assert_eq!(workflow, SKILL_ARCHI, "the workflow skill drifted on install");
+    assert_eq!(migration, SKILL_MIGRATE_WORLD, "the migration skill drifted on install");
+
+    // The prose is hard-wrapped, so every sentence is read over its breaks.
+    fn flat(text: &str) -> String {
+        text.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    // The workflow skill names each folder and says what that folder holds.
+    let workflow_flat = flat(&workflow);
+    for (folder, holds) in [
+        ("`archi/world/facts/`", "the strict record"),
+        ("`archi/world/hypotheses/`", "means to settle"),
+        ("`archi/world/notes/`", "seen or heard"),
+        ("`archi/world/resources/`", "raw material"),
+    ] {
+        let at = workflow_flat
+            .find(folder)
+            .unwrap_or_else(|| panic!("the workflow skill names no {folder}"));
+        let window: String = workflow_flat[at..].chars().take(220).collect();
+        assert!(
+            window.contains(holds),
+            "{folder} is named without what it holds (`{holds}`): {window}"
+        );
+    }
+    // And what a file directly under the wing is: nothing the reader may write.
+    assert!(
+        workflow_flat.contains("in no layer"),
+        "the workflow skill never says a file outside the four folders is refused"
+    );
+
+    // The source rule, in both texts that ask for one: every path a paragraph
+    // about `sources` offers the reader is a path inside the world.
+    let installed = [("archi", workflow.as_str()), ("archi-migrate-world", migration.as_str())];
+    for (name, text) in installed {
+        let mut explained = 0;
+        for paragraph in text.split("\n\n") {
+            let flattened = flat(paragraph);
+            if !flattened.contains("`sources`") {
+                continue;
+            }
+            explained += 1;
+            for token in flattened.split('`').skip(1).step_by(2) {
+                if !token.contains('/') {
+                    continue;
+                }
+                assert!(
+                    token.starts_with("archi/world/"),
+                    "{name} sends a `sources` entry to `{token}`:\n{flattened}"
+                );
+            }
+        }
+        assert!(explained > 0, "{name} never explains `sources`");
+    }
+
+    // What a migration writes into the field, now that the origin file cannot
+    // go there: nothing, and the skill says so in those words.
+    let migration_flat = flat(&migration);
+    assert!(
+        migration_flat.contains("a claim lifted from prose carries no source"),
+        "the migration skill does not say what a migrated fact rests on"
+    );
+    for retired in ["names the file the claim came from", "provenance, not observation"] {
+        assert!(
+            !migration_flat.contains(retired),
+            "the migration skill still teaches `{retired}`"
+        );
+    }
+
+    // None of it reached the block. It stands at nineteen lines against a
+    // budget of twenty, and four folders plus a source rule do not fit in one.
+    let block = block_of(&root);
+    let count = block.lines().count();
+    assert!(count < 20, "the block is {count} lines:\n{block}");
+    for spelled in ["facts/", "hypotheses/", "notes/", "resources/", "sources"] {
+        assert!(!block.contains(spelled), "the block spells `{spelled}` out:\n{block}");
+    }
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
 /// The migration skill asks the way the first real run taught it to
 /// (`archi/requirements/world-facts/a-skill-migrates-a-standing-project-into-the-wing.md`):
 /// by offering shapes instead of open questions, by asking a second time when
@@ -667,8 +767,9 @@ fn the_migration_skill_installs_and_names_its_gate() {
     assert_eq!(installed, SKILL_MIGRATE_WORLD);
 
     // The procedure the text must carry: the material it reads, the gate that
-    // stops a fact being written, the provenance a migrated fact records, the
-    // brief it hands back, and the check it closes on
+    // stops a fact being written, the state a migrated fact is left in, the one
+    // place material may be carried into, the brief it hands back, and the
+    // check it closes on
     // (archi/requirements/world-facts/a-skill-migrates-a-standing-project-into-the-wing.md).
     for phrase in [
         "archi world add",
@@ -677,8 +778,8 @@ fn the_migration_skill_installs_and_names_its_gate() {
         "writes nothing",
         "only a wish",
         "did not map",
-        "names the file the claim came from",
-        "provenance, not observation",
+        "world_ungrounded",
+        "`archi/world/resources/`",
         "deletes nothing",
         "archi check",
     ] {
@@ -688,8 +789,20 @@ fn the_migration_skill_installs_and_names_its_gate() {
     fs::remove_dir_all(&root).unwrap();
 }
 
+/// A migrated fact rests on nothing anybody observed, and the wing says so
+/// (`archi/requirements/world-facts/a-source-is-reachable-and-lives-in-the-world.md`).
+///
+/// This test asserted the opposite and is rewritten, not relaxed. It pinned the
+/// rule the migration skill used to teach: write the intent a claim was lifted
+/// from into `sources`, and the wing counts the fact grounded and reports
+/// nothing. The quiet was the defect. The spec is what the world conditions, so
+/// a fact grounded in a requirement grounds itself in what it explains, and
+/// `sources` now reaches only into `archi/world/`. What the requirement behind
+/// this test asked for — a migrated project whose check a reader can trust — is
+/// what it asks for still, and it is met now by the count telling the truth
+/// instead of by the field being filled.
 #[test]
-fn a_migrated_fact_rests_on_its_origin_file_and_reports_nothing() {
+fn a_migrated_fact_carries_no_source_and_the_wing_says_so() {
     let root = temp_dir();
     ok_in(&root, &["init", "."]);
     fs::write(
@@ -705,12 +818,9 @@ fn a_migrated_fact_rests_on_its_origin_file_and_reports_nothing() {
     )
     .unwrap();
 
-    // The record the skill leaves behind: the condition, its killer, its
-    // scenarios, the node it conditions, and the intent the claim was lifted
-    // from — the provenance that makes the fact rest on something recorded.
-    util::Fact {
+    let fact = |sources| util::Fact {
         covers: "AuthService",
-        sources: "archi/requirements/riding/riding.md",
+        sources,
         uses: "",
         condition: "The carriage drops the network for minutes at a time, so a reader on the move \
                     works from what the device already holds.",
@@ -719,14 +829,27 @@ fn a_migrated_fact_rests_on_its_origin_file_and_reports_nothing() {
                     Given the device has no network\n\
                     When the reader opens the app\n\
                     Then the last synced view appears\n",
-    }
-    .write(&root, "trains-lose-the-signal", "Trains lose the signal");
+    };
 
-    // The wing counts the fact as grounded and says nothing else about it: a
-    // migration that swapped one finding for another would defeat its purpose.
+    // The retired shape: the intent the sentence was lifted from, written in as
+    // the fact's source. It is a located error now, and the message says why.
+    let origin = "archi/requirements/riding/riding.md";
+    fact(origin).write(&root, "trains-lose-the-signal", "Trains lose the signal");
+    let (code, out, err) = run_in(&root, &["check"]);
+    assert_eq!(code, Some(1), "the origin file still passes as a source:\n{out}{err}");
+    let said = format!("{out}{err}");
+    assert!(said.contains("lies outside"), "{said}");
+
+    // The honest shape: the same record with an empty field. It lands clean,
+    // and the one thing the wing says about it is the one thing that is true —
+    // nobody has been to look yet.
+    fact("").write(&root, "trains-lose-the-signal", "Trains lose the signal");
     let check = ok_in(&root, &["check"]);
-    assert!(check.contains("world — 1 facts · 0 ungrounded"), "{check}");
-    assert!(!check.contains("world_"), "{check}");
+    assert!(check.contains("world — 1 facts · 1 ungrounded"), "{check}");
+    assert!(
+        check.contains("world fact `trains-lose-the-signal`: world_ungrounded"),
+        "{check}"
+    );
 
     fs::remove_dir_all(&root).unwrap();
 }
@@ -798,12 +921,12 @@ fn a_pre_wing_project_upgrades_stays_green_and_takes_its_first_fact() {
     assert_eq!(ok_in(&root, &["check"]), before);
 
     // The first fact, written as the skill prescribes: the condition, its
-    // killer, its scenarios, the node it conditions, and the intent the
-    // claim was lifted from as its source. It lands clean, and the wing is
-    // born counted.
+    // killer, its scenarios, the node it conditions — and no source, because
+    // the claim was lifted from prose and nobody has been to look. It lands
+    // clean, and the wing is born counted and honest about what it rests on.
     util::Fact {
         covers: "AuthService",
-        sources: "archi/requirements/riding/riding.md",
+        sources: "",
         uses: "",
         condition: "The carriage drops the network for minutes at a time, so a reader on the \
                     move works from what the device already holds.",
@@ -816,8 +939,11 @@ fn a_pre_wing_project_upgrades_stays_green_and_takes_its_first_fact() {
     .write(&root, "trains-lose-the-signal", "Trains lose the signal");
 
     let after = ok_in(&root, &["check"]);
-    assert!(after.contains("world — 1 facts · 0 ungrounded"), "{after}");
-    assert!(!after.contains("world_"), "{after}");
+    assert!(after.contains("world — 1 facts · 1 ungrounded"), "{after}");
+    assert!(
+        after.contains("world fact `trains-lose-the-signal`: world_ungrounded"),
+        "{after}"
+    );
 
     fs::remove_dir_all(&root).unwrap();
 }
