@@ -7,7 +7,7 @@ deferred:
 
 # One verb mints the world fact
 
-`archi world add "<title>"` writes one file under `archi/world/` in the exact schema
+`archi world add "<title>"` writes one file under `archi/world/facts/` in the exact schema
 shape — the frontmatter keys present and empty, the headings in order, the text slots
 empty — and a person writes the prose. `archi world rm <slug>` retires one fact, and
 it refuses while another fact names that slug in `uses`, naming the dependants. The

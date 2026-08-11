@@ -7,7 +7,7 @@ deferred:
 
 # A world fact carries its scenarios
 
-One file under `archi/world/` holds one fact about the world together with every
+One file under `archi/world/facts/` holds one fact about the world together with every
 scenario that fact dictates. The name is the fact in one line. The paragraph after
 it states the outside condition and why the behavior follows from it. `## What
 kills this` states what would make the fact false. `## Scenarios` holds one or more

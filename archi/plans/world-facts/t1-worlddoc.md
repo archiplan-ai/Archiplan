@@ -1,6 +1,6 @@
 ---
 node: WorldDoc
-owns: [a-world-fact-carries-its-scenarios, the-header-points-three-ways, a-source-may-lie-outside-the-tree]
+owns: [a-world-fact-carries-its-scenarios, the-header-points-three-ways]
 ---
 
 # t1 — WorldDoc
@@ -42,9 +42,3 @@ the world-fact record: frontmatter, headings, the three lists
 - test — world_e2e: an empty `sources` parses and the record reads as ungrounded
 - test — world_e2e: a fourth frontmatter key raises a located error
 
-### a-source-may-lie-outside-the-tree
-
-- test — world_e2e: a schemeless entry resolves as a tree path and a missing file raises a located error
-- test — world_e2e: a schemed entry parses with no filesystem access
-- test — world_e2e: a malformed schemed entry raises a located error
-- test — world_e2e: a record mixing both forms parses

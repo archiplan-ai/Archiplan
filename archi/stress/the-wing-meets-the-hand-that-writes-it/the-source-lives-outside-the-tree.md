@@ -22,8 +22,12 @@ rather than the world.
 
 ## Resolution
 
-`sources` takes two forms: a tree path that resolves, or a schemed external locator kept
-verbatim and never resolved. Derived `a-source-may-lie-outside-the-tree`. The cost is that
-an external entry cannot be verified — taken deliberately, because an unverifiable pointer
-to a real recording carries more than a verifiable pointer to a note somebody typed to
-satisfy the checker.
+First answered by letting `sources` hold an external locator — a URI, a ticket id — kept
+verbatim and never resolved. That answer was wrong and is retired. An entry nobody here can
+open is a claim about evidence rather than evidence, and the field became unfalsifiable in
+exactly the way the wing exists to prevent.
+
+Answered instead by `a-source-is-reachable-and-lives-in-the-world`: the material comes into
+`archi/world/resources/` or the field stays empty. Transcribing an interview is work, and
+that work is the price of the field meaning anything. An empty `sources` says the true
+thing — nobody has grounded this yet — and `world_ungrounded` reports it.

@@ -8,7 +8,7 @@ deferred:
 # The wing arrives without noise
 
 A project that upgrades into a binary that knows the wing keeps a green `check`. No
-finding fires for a node that no fact covers, and no verb requires `archi/world/` to
+finding fires for a node that no fact covers, and no verb requires `archi/world/facts/` to
 exist. The first `world add` creates the folder. The briefing that `init` and
 `sync-skills` install is where the wing is announced, so an agent learns of it by
 reading its instructions and not by meeting an error.
@@ -26,10 +26,10 @@ nothing at the tree.
 
 `Scaffold` (the briefing names the wing, its verb and the shape of a fact; `init` stays
 create-only and adds nothing to a standing tree). `DocMint` (the first `world add`
-creates `archi/world/` on the way to writing the file).
+creates `archi/world/facts/` on the way to writing the file).
 
-- test — a tree with no `archi/world/` passes `check` with no world finding
-- test — `world add` on a tree with no `archi/world/` creates it and writes the file
+- test — a tree with no `archi/world/facts/` passes `check` with no world finding
+- test — `world add` on a tree with no `archi/world/facts/` creates it and writes the file
 - test — no finding fires for a model element that no fact covers
 - test — the installed briefing names the `world` verb and the fact's headings
 - test — `sync-skills` on a standing project reports the briefing as updated
