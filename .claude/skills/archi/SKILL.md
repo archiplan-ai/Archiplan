@@ -200,17 +200,50 @@ once.
 3. **Capture the world.** The conditions outside the system that make
    the behavior necessary are records of their own under `archi/world/`.
    They come before the requirements, because a condition from outside
-   decides which claims are requirements at all. `archi world add
-   "<title>"` mints the skeleton. You write the fact in one line, the
-   paragraph saying what condition this is and why the behavior follows,
-   `## What kills this`, and `## Scenarios` in the Gherkin subset. The
-   frontmatter points three ways: `covers` names the model elements the
-   fact conditions, `sources` names the material it rests on, `uses`
-   names the facts it presumes. Write the fact in the world's own words,
-   **without the nouns of the model** — a fact that speaks the model is a
-   requirement in costume, and `check` says so. An empty `sources` is the
-   hypothesis state. Ask what people do today instead: a condition nobody
-   can name a workaround for is a wish, and it belongs in no file.
+   decides which claims are requirements at all. The wing is four
+   folders, and the folder a file sits in is what that file is:
+
+   - `archi/world/facts/` holds the strict record: the condition, what
+     kills it, its scenarios and the three lists. `check` holds every
+     one of them.
+   - `archi/world/hypotheses/` holds a claim somebody means to settle
+     and has not.
+   - `archi/world/notes/` holds what was seen or heard and is not yet
+     shaped into a fact or a hypothesis.
+   - `archi/world/resources/` holds raw material — a transcript, a
+     measurement, a thread. Nothing parses it. It is listed so a source
+     can resolve against it.
+
+   A file in the loose three needs a name and the prose under it, and
+   nothing more. A `.md` directly under `archi/world/` sits in no layer,
+   and `check` refuses it by name.
+
+   `archi world add "<title>"` mints the skeleton under
+   `archi/world/facts/`. You write the fact in one line, the paragraph
+   saying what condition this is and why the behavior follows,
+   `## What kills this`, and `## Scenarios`. In that block `### <name>`
+   opens one scenario, and `Given`, `When`, `Then` and `And` open its
+   step lines; those four are the whole vocabulary. The heading text is
+   the scenario's name and its address, so a code-link anchors to it,
+   and the code the link points at says where the scenario runs. A
+   `Feature:` or a `Scenario:` line is refused, because the fact's own
+   title is the feature and the heading is the scenario. Write the fact
+   in the world's own words, **without the nouns of the model** — a fact
+   that speaks the model is a requirement in costume, and `check` says
+   so. Ask what people do today instead: a condition nobody can name a
+   workaround for is a wish, and it belongs in no file.
+
+   The frontmatter points three ways. `covers` names the model elements
+   the fact conditions, and `uses` names the facts it presumes.
+   `sources` names the material the fact rests on, and every entry is a
+   path from the project root to a file under `archi/world/`. Nothing
+   else resolves: a path into the spec grounds the fact in what the fact
+   explains, and a locator nobody here can open is a claim about
+   evidence and not evidence. Material from outside is carried into
+   `archi/world/resources/` first, or the field stays empty. An empty
+   `sources` is the honest state of a claim nobody has observed, and
+   `check` counts it as ungrounded.
+
    `archi world rm <slug>` retires one, and it refuses while a plan or a
    code-link stands on it. `archi world ls [--covers <element>]` is the
    traversal from a node to the conditions that rule it. A project that
