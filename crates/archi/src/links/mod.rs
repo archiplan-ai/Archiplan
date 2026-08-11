@@ -705,14 +705,16 @@ fn fact_scenarios(root: &Path, slug: &str) -> Option<Vec<(String, usize)>> {
     )
 }
 
-/// The `Scenario:` lines of a `Scenarios` block and the names on them. The
-/// smallest reader an address needs.
+/// The `### ` headings of a `Scenarios` block and the names on them. The
+/// smallest reader an address needs: the heading text is the scenario's name,
+/// and the name is the address. `### ` is the whole opener, exactly as the
+/// grammar reads it, so a deeper heading opens no scenario here either.
 ///
 /// [`docs::gherkin::parse`] reads the same block whole, and it does not
 /// replace this reader: the grammar reports form, and a link resolves an
 /// address. The grammar drops every scenario any refusal touched — a `But`
-/// step, a `@runs:` naming no declared member, a block with no `Feature`
-/// line — and keeps a name with its inner whitespace as written, so a
+/// step, a heading over no step, a `Scenario:` line of the shape this one
+/// replaced — and keeps a name with its inner whitespace as written, so a
 /// normalized ref matches it only after the same collapse. Reading an address
 /// through it would report a doc-grammar error as a lost reference, and would
 /// unresolve a link on a malformed fact that `archi check` already reports.
@@ -728,7 +730,7 @@ fn scenario_names(block: &docs::world::Block) -> Vec<(String, usize)> {
         .lines()
         .enumerate()
         .filter_map(|(i, line)| {
-            let name = line.trim().strip_prefix("Scenario:")?;
+            let name = line.trim().strip_prefix("###")?.strip_prefix(' ')?;
             Some((normalize_ref(name), block.line + i))
         })
         .filter(|(name, _)| !name.is_empty())
@@ -745,16 +747,10 @@ fn scenario_names(block: &docs::world::Block) -> Vec<(String, usize)> {
 /// wing walks its own folder with, so a link and a check hold one fact one
 /// way. A block the grammar refuses digests as an empty story, and `archi
 /// check` reports that form error where form errors belong.
-fn fact_digest(
-    root: &Path,
-    members: &crate::members::MemberSet,
-    slug: &str,
-    scenario: Option<&str>,
-) -> Option<String> {
+fn fact_digest(root: &Path, slug: &str, scenario: Option<&str>) -> Option<String> {
     let fact = docs::world_check::read_fact(
         root,
         &root.join(fact_file(slug)),
-        members,
         // The form of a fact is `archi check`'s to report, never a link's.
         &mut Vec::new(),
     )?;
@@ -766,9 +762,9 @@ fn fact_digest(
 /// the scenario it names, so a sibling in the same fact is another link's
 /// business
 /// (`archi/requirements/world-facts/the-digest-witnesses-one-scenario.md`).
-fn bind_scenario(root: &Path, roots: &Roots, spec: &SpecRef) -> Option<String> {
+fn bind_scenario(root: &Path, spec: &SpecRef) -> Option<String> {
     let (slug, name) = spec.scenario()?;
-    fact_digest(root, roots.set(), slug, Some(name))
+    fact_digest(root, slug, Some(name))
 }
 
 /// Whether the scenario side of a witnessed pair parted from what the link
@@ -782,17 +778,17 @@ fn bind_scenario(root: &Path, roots: &Roots, spec: &SpecRef) -> Option<String> {
 /// false-fails on the day it narrows; the first `repin` writes the scenario's
 /// own fingerprint, and the narrow grain rules the link from there
 /// (`archi/requirements/world-facts/the-digest-witnesses-one-scenario.md`).
-fn scenario_moved(root: &Path, roots: &Roots, link: &Link) -> bool {
+fn scenario_moved(root: &Path, link: &Link) -> bool {
     let Some(recorded) = &link.pins.scenario else {
         return false;
     };
     let Some((slug, _)) = link.spec.scenario() else {
         return false;
     };
-    if bind_scenario(root, roots, &link.spec).is_none_or(|now| now == *recorded) {
+    if bind_scenario(root, &link.spec).is_none_or(|now| now == *recorded) {
         return false;
     }
-    fact_digest(root, roots.set(), slug, None).is_none_or(|whole| whole != *recorded)
+    fact_digest(root, slug, None).is_none_or(|whole| whole != *recorded)
 }
 
 pub(crate) fn normalize_ref(text: &str) -> String {
@@ -1036,7 +1032,7 @@ pub fn add(
     // The pair is bound at birth: the scenario says what must happen, the
     // code answers it, and both sides are witnessed together.
     let mut pins = resolved.pins;
-    pins.scenario = bind_scenario(root, &roots, &spec);
+    pins.scenario = bind_scenario(root, &spec);
     let folded = load(root)?;
     let link = Link {
         id: folded.next_id(&format!("{spec_text}{code_text}")),
@@ -1150,7 +1146,7 @@ pub fn repin(root: &Path, id: &str, to: Option<&str>) -> Result<Link, String> {
     let member_root = roots.require(&anchor.repo)?;
     let resolved = resolve_anchor(&member_root, &anchor)?;
     let mut pins = resolved.pins;
-    pins.scenario = bind_scenario(root, &roots, &link.spec);
+    pins.scenario = bind_scenario(root, &link.spec);
     append(
         root,
         &[Event::Repin {
@@ -1190,9 +1186,8 @@ pub fn repin_spec(root: &Path, id: &str, spec_text: &str) -> Result<Link, String
     if !resolves_scenario(root, slug, name)? {
         return Err(scenario_refusal(root, slug, &target.path));
     }
-    let roots = Roots::resolve(root)?;
     let mut pins = link.pins.clone();
-    pins.scenario = bind_scenario(root, &roots, &target);
+    pins.scenario = bind_scenario(root, &target);
     append(
         root,
         &[Event::Repin {
@@ -1463,7 +1458,7 @@ fn check_link(
     // The scenario side is read before the code side, and folded in after
     // it: a pair that parted on both sides names both, and that needs both
     // answers in hand.
-    let moved = scenario_moved(root, roots, &link);
+    let moved = scenario_moved(root, &link);
     let checked = check_projection(root, roots, link, working_note)?;
     Ok(witness(checked, moved))
 }
@@ -2433,21 +2428,22 @@ Trackside coverage that never drops.
 
 ## Scenarios
 
-Feature: Offline open
-  Scenario: the app opens with no network
-    Given the device has no network
-    When the user opens the app
-    Then the last synced view appears
+### the app opens with no network
+
+Given the device has no network
+When the user opens the app
+Then the last synced view appears
 ";
 
     /// A second scenario of the same fact — the sibling whose motion a link
     /// on the first scenario must not feel
     /// (`archi/requirements/world-facts/the-digest-witnesses-one-scenario.md`).
-    const SIBLING: &str = "\
-  Scenario: the app opens on a slow line
-    Given the device has one bar of signal
-    When the user opens the app
-    Then the view arrives late
+    const SIBLING: &str = "
+### the app opens on a slow line
+
+Given the device has one bar of signal
+When the user opens the app
+Then the view arrives late
 ";
 
     const FACT_SLUG: &str = "users-open-the-app-on-a-train";
@@ -3289,9 +3285,9 @@ Feature: Offline open
         write_fact(
             &root,
             &format!(
-                "{reworded}  Scenario: the app opens in a tunnel\n    \
-                 Given the device has no network for minutes\n    \
-                 When the user opens the app\n    Then the last synced view appears\n"
+                "{reworded}\n### the app opens in a tunnel\n\n\
+                 Given the device has no network for minutes\n\
+                 When the user opens the app\nThen the last synced view appears\n"
             ),
         );
         assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
@@ -3368,10 +3364,7 @@ Feature: Offline open
         let renamed = "the app opens off the network";
         write_fact(
             &root,
-            &both.replace(
-                &format!("Scenario: {SCENARIO}"),
-                &format!("Scenario: {renamed}"),
-            ),
+            &both.replace(&format!("### {SCENARIO}"), &format!("### {renamed}")),
         );
         let c = checked_of(&root, &ws, &l.id);
         assert_eq!(c.state, State::SpecDrifted);
@@ -3400,9 +3393,7 @@ Feature: Offline open
         let ws = model_of(&root);
         let both = format!("{FACT}{SIBLING}");
         write_fact(&root, &both);
-        let roots = Roots::resolve(&root).unwrap();
-        let whole =
-            fact_digest(&root, roots.set(), FACT_SLUG, None).expect("the fact stands in the tree");
+        let whole = fact_digest(&root, FACT_SLUG, None).expect("the fact stands in the tree");
         let anchor = Anchor::parse("code/auth.rs#Vault::persist").unwrap();
         let resolved = resolve_anchor(&root, &anchor).unwrap();
         let old = serde_json::json!({
@@ -3580,10 +3571,7 @@ Feature: Offline open
         let renamed = "the app opens off the network";
         write_fact(
             &root,
-            &FACT.replace(
-                &format!("Scenario: {SCENARIO}"),
-                &format!("Scenario: {renamed}"),
-            ),
+            &FACT.replace(&format!("### {SCENARIO}"), &format!("### {renamed}")),
         );
         let report = verify(&root, ws.model(), &VerifyOptions::default()).unwrap();
         let checked = report.checked.iter().find(|c| c.link.id == l.id).unwrap();
@@ -3661,8 +3649,8 @@ Feature: Offline open
         // Two scenarios of one name inside one fact: the address is
         // ambiguous, and the error locates the second one.
         let twin = format!(
-            "{FACT}\n  Scenario: {SCENARIO}\n    Given the device has no network\n    \
-             When the user opens the app\n    Then the last synced view appears\n"
+            "{FACT}\n### {SCENARIO}\n\nGiven the device has no network\n\
+             When the user opens the app\nThen the last synced view appears\n"
         );
         write_fact(&root, &twin);
         let err = add(
@@ -3676,7 +3664,7 @@ Feature: Offline open
         let second = twin
             .lines()
             .enumerate()
-            .filter(|(_, l)| l.trim() == format!("Scenario: {SCENARIO}"))
+            .filter(|(_, l)| l.trim() == format!("### {SCENARIO}"))
             .map(|(i, _)| i + 1)
             .nth(1)
             .expect("two lines name the scenario");
@@ -3684,6 +3672,67 @@ Feature: Offline open
             err.contains(&format!("archi/world/{FACT_SLUG}.md:{second}")),
             "{err}"
         );
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The address is a `### ` heading, and the shape this one replaced holds
+    /// no address at all: a `Scenario:` line names a scenario nowhere, and
+    /// the form of such a block is `archi check`'s to report
+    /// (`archi/requirements/world-facts/the-scenario-is-the-address-not-the-step.md`).
+    #[test]
+    fn a_heading_is_the_address_and_a_retired_scenario_line_is_not() {
+        let root = temp_project();
+        let ws = model_of(&root);
+
+        // The retired shape, whole: the name stands on a `Scenario:` line.
+        write_fact(
+            &root,
+            &FACT.replace(
+                &format!("### {SCENARIO}"),
+                &format!("Feature: Offline open\n\n  Scenario: {SCENARIO}"),
+            ),
+        );
+        let err = add(
+            &root,
+            ws.model(),
+            &format!("{FACT_SLUG}#{SCENARIO}"),
+            "code/auth.rs#Vault::persist",
+            LinkKind::Literal,
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("names no scenario") && err.contains("E_MODEL_REF"),
+            "{err}"
+        );
+
+        // A deeper heading opens no scenario either: `### ` is the opener.
+        write_fact(
+            &root,
+            &FACT.replace(&format!("### {SCENARIO}"), &format!("#### {SCENARIO}")),
+        );
+        assert!(
+            add(
+                &root,
+                ws.model(),
+                &format!("{FACT_SLUG}#{SCENARIO}"),
+                "code/auth.rs#Vault::persist",
+                LinkKind::Literal,
+            )
+            .is_err()
+        );
+
+        // The heading is the address, and the pair it binds verifies clean.
+        write_fact(&root, FACT);
+        let l = add(
+            &root,
+            ws.model(),
+            &format!("{FACT_SLUG}#{SCENARIO}"),
+            "code/auth.rs#Vault::persist",
+            LinkKind::Literal,
+        )
+        .expect("the heading names the scenario");
+        assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
 
         fs::remove_dir_all(&root).unwrap();
     }

@@ -32,7 +32,6 @@ use super::gherkin::{self, ScenarioBlock};
 use super::md::slugify;
 use super::world::{self, WorldDoc};
 use super::{DocDiagnostic, Tree, is_md, read_doc, sorted_entries, stem};
-use crate::members::{HOME, Member, MemberSet};
 
 /// A `uses` chain of this many facts still reads; one deeper holds a theory
 /// of the world instead of a record of it.
@@ -173,22 +172,9 @@ pub(crate) fn discover(root: &Path, diags: &mut Vec<DocDiagnostic>) -> Vec<World
     if files.is_empty() {
         return Vec::new();
     }
-    // The `@runs:` tags resolve against the declared members. An unreadable
-    // manifest is `members::check`'s to report, and it is a compile error
-    // long before this — the wing reads on with home alone.
-    let members = MemberSet::resolve(root).unwrap_or_else(|_| MemberSet {
-        project_root: root.to_path_buf(),
-        members: vec![Member {
-            name: HOME.to_string(),
-            url: None,
-            declared_path: None,
-            mapped_path: None,
-            root: Some(root.to_path_buf()),
-        }],
-    });
     files
         .into_iter()
-        .filter_map(|path| read_fact(root, &path, &members, diags))
+        .filter_map(|path| read_fact(root, &path, diags))
         .collect()
 }
 
@@ -202,7 +188,6 @@ pub(crate) fn discover(root: &Path, diags: &mut Vec<DocDiagnostic>) -> Vec<World
 pub(crate) fn read_fact(
     root: &Path,
     path: &Path,
-    members: &MemberSet,
     diags: &mut Vec<DocDiagnostic>,
 ) -> Option<WorldFact> {
     let (file, doc) = read_doc(root, path, diags)?;
@@ -681,12 +666,17 @@ fn internal(
 ///
 /// The grain is the argument, and that is why there is one function
 /// (`archi/requirements/world-facts/the-digest-witnesses-one-scenario.md`).
-/// `Some(name)` fingerprints that scenario alone — its name, its step
+/// `Some(name)` fingerprints that scenario alone — its heading name, its step
 /// keywords and its step text — so a sibling reworded in the same fact moves
-/// nothing a link on this scenario stands on. `None` is the whole block, the
-/// feature line with it, and that value is the one the plans already carry,
-/// byte for byte: the plan's drift line asks whether the fact moved, not
-/// whether one scenario did.
+/// nothing a link on this scenario stands on. `None` is every scenario of the
+/// block in source order: the plan's drift line asks whether the fact moved,
+/// not whether one scenario did.
+///
+/// The whole-block value moved once, when the shape retired the `Feature:`
+/// line the digest used to hash first. Nothing carries the old value forward:
+/// a drift line pinned under the old shape is re-pinned, and a link that
+/// witnessed a whole block is repinned by the operator who reads the two
+/// sides against each other.
 ///
 /// The name is matched as an address is matched — inner whitespace collapsed
 /// on both sides — because the grammar keeps a name as written and a ref
@@ -767,21 +757,23 @@ Gate.out calls Engine.take
 Data type_of Payload
 ";
 
-    /// The block every fact carries unless the test says otherwise.
+    /// The block every fact carries unless the test says otherwise: a `### `
+    /// heading names the scenario, and the four keywords open its steps.
     const SCENARIOS: &str = "\
-Feature: Offline open
-  Scenario: the app opens with no network
-    Given the device has no network
-    When the user opens the app
-    Then the last synced view appears
+### the app opens with no network
+
+Given the device has no network
+When the user opens the app
+Then the last synced view appears
 ";
 
     /// A second scenario of the same block — the sibling the grain is about.
-    const SIBLING: &str = "\
-  Scenario: the app opens on a slow line
-    Given the device has one bar of signal
-    When the user opens the app
-    Then the view arrives late
+    const SIBLING: &str = "
+### the app opens on a slow line
+
+Given the device has one bar of signal
+When the user opens the app
+Then the view arrives late
 ";
 
     /// The scenario the narrow grain is read on, as a ref addresses it.
@@ -1038,8 +1030,8 @@ Feature: Offline open
             &lists("Gate", SOURCE, ""),
             "Riders lose the signal",
             "The carriage drops the network for minutes at a time.",
-            "Feature: Offline open\n  Scenario: the engine waits\n    \
-             Given Engine.Inner is idle\n    Then the last synced view appears\n",
+            "### the engine waits\n\nGiven Engine.Inner is idle\n\
+             Then the last synced view appears\n",
         );
         let report = check_at(&root);
         assert_eq!(states(&report), Vec::<String>::new());
@@ -1293,9 +1285,14 @@ Feature: Offline open
 
     /// The fingerprint the plan's drift line reads: six hex digits over the
     /// whole parsed block, moving with a step and standing still under the
-    /// prose around it. Naming no scenario is that grain, and its value is
-    /// the one the plans already carry — down to the byte
+    /// prose around it. Naming no scenario is that grain
     /// (`the-digest-witnesses-one-scenario`).
+    ///
+    /// The value moved with the shape, and it had to: the block held a
+    /// `Feature:` line, the digest hashed it first, and the shape retired the
+    /// line. What the digest reads now is the scenarios alone, so every drift
+    /// line a plan carries is re-pinned once and reads the new value from
+    /// there.
     #[test]
     fn the_scenario_digest_reads_the_parsed_block() {
         let root = temp_project();
@@ -1303,8 +1300,9 @@ Feature: Offline open
         let first = digest_at(&root, None);
         assert_eq!(first.len(), 6, "{first}");
         assert!(first.chars().all(|c| c.is_ascii_hexdigit()), "{first}");
-        // The value is the one the plans already carry: the move keeps it.
-        assert_eq!(first, "5b5815");
+        // The block under the retired shape hashed as `5b5815`, the feature
+        // line `Offline open` first. The line is gone and the value with it.
+        assert_eq!(first, "fc6e9d");
 
         // The conditioning paragraph moves; the story does not.
         fact(
@@ -1324,9 +1322,10 @@ Feature: Offline open
             &lists("Gate", SOURCE, ""),
             "Riders lose the signal",
             "The carriage drops the network for minutes at a time.",
-            "Feature: Offline open\n  Scenario: the app opens with no network\n    \
-             Given the device has no network\n    When the user opens the app\n    \
-             Then nothing appears at all\n",
+            &SCENARIOS.replace(
+                "Then the last synced view appears",
+                "Then nothing appears at all",
+            ),
         );
         assert_ne!(digest_at(&root, None), first);
         fs::remove_dir_all(&root).unwrap();
