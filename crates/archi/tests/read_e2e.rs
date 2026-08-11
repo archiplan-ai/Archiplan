@@ -103,8 +103,9 @@ def conn ledger_wire := * ->LedgerId *
 Ledger.post ledger_wire Vault.keep
 ";
 
-/// One whole world fact under `archi/world/`: the covers list as given, the
-/// conditioning paragraph, the killer and one scenario named after the fact.
+/// One whole world fact under `archi/world/facts/`: the covers list as given,
+/// the conditioning paragraph, the killer and one scenario named after the
+/// fact.
 fn fact(root: &Path, slug: &str, title: &str, covers: &str, condition: &str) {
     util::Fact {
         covers,
@@ -205,7 +206,7 @@ fn the_read_envelope_carries_the_conditions() {
     // Each fact carries its address, what it conditions, the statement and
     // the scenarios it dictates.
     let f = &facts[0];
-    assert_eq!(f["path"], "archi/world/riders-lose-the-signal.md");
+    assert_eq!(f["path"], "archi/world/facts/riders-lose-the-signal.md");
     assert_eq!(strings(&f["covers"]), ["Orders"]);
     assert_eq!(
         f["condition"],

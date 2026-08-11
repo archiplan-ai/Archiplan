@@ -144,9 +144,9 @@ const T1_STORE_CURATED: &str =
      ## Inputs\n\n## Outputs\n\n- code/store.rs\n\n## Stack\n\n## Verifications\n\n\
      ### store-encrypted\n\n- test — proves store-encrypted\n";
 
-/// One world fact under `archi/world/`, in the shape `world add` mints and
-/// a person fills: the three lists, the conditioning paragraph, the killer
-/// and a `Scenarios` block (`archi/requirements/world-facts/`).
+/// One world fact under `archi/world/facts/`, in the shape `world add` mints
+/// and a person fills: the three lists, the conditioning paragraph, the
+/// killer and a `Scenarios` block (`archi/requirements/world-facts/`).
 fn put_fact(root: &Path, slug: &str, title: &str, covers: &str, scenarios: &[&str]) {
     let with_steps: Vec<(&str, &[&str])> = scenarios.iter().map(|s| (*s, STEPS)).collect();
     put_fact_with_steps(root, slug, title, covers, &with_steps);
@@ -866,7 +866,7 @@ fn a_task_carries_the_facts_that_cover_its_node() {
 
     // A fact retired since the pin is drift, reported on demand — never an
     // error, because the plan may finish against the picture it planned for.
-    fs::remove_file(root.join("archi/world/riders-lose-the-signal.md")).unwrap();
+    fs::remove_file(root.join("archi/world/facts/riders-lose-the-signal.md")).unwrap();
     let out = ok(&root, &["plan", "verify"]);
     assert!(
         out.contains("drift: world fact `riders-lose-the-signal` retired"),

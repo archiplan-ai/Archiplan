@@ -3,8 +3,8 @@
 //! unbuilt, what the record hands an assistant that did not write the
 //! obligation, and what still answers once the author and their history are
 //! gone (`archi/requirements/code-link/`,
-//! `archi/world/a-design-written-apart-from-the-code-falls-behind-it.md`,
-//! `archi/world/an-assistant-guesses-which-files-answer-a-written-obligation.md`).
+//! `archi/world/facts/a-design-written-apart-from-the-code-falls-behind-it.md`,
+//! `archi/world/facts/an-assistant-guesses-which-files-answer-a-written-obligation.md`).
 
 mod util;
 
@@ -48,7 +48,7 @@ fn cleanup(fixture: &Path) {
 /// unbuilt — when somebody asks what is unaccounted for; code recorded
 /// against it lifts the finding, and the claim still waiting keeps its line
 /// (`archi/requirements/code-link/the-audit-inverts-coverage.md`,
-/// `archi/world/a-design-written-apart-from-the-code-falls-behind-it.md`,
+/// `archi/world/facts/a-design-written-apart-from-the-code-falls-behind-it.md`,
 /// "A claim is written that no code answers").
 #[test]
 fn the_audit_names_a_claim_no_code_answers() {
@@ -88,7 +88,7 @@ fn the_audit_names_a_claim_no_code_answers() {
 /// and work landing in a file no record names is reported rather than
 /// assumed to be covered
 /// (`archi/requirements/code-link/code-link.md`,
-/// `archi/world/an-assistant-guesses-which-files-answer-a-written-obligation.md`,
+/// `archi/world/facts/an-assistant-guesses-which-files-answer-a-written-obligation.md`,
 /// "Work arrives over an obligation the assistant did not write").
 #[test]
 fn the_record_hands_over_the_files_and_names_what_it_does_not_cover() {
@@ -143,7 +143,7 @@ fn the_record_hands_over_the_files_and_names_what_it_does_not_cover() {
 /// code and the journal and holds no repository at all — no commit history
 /// to walk — and the same question gets the same answer
 /// (`archi/requirements/code-link/code-link.md`,
-/// `archi/world/an-assistant-guesses-which-files-answer-a-written-obligation.md`,
+/// `archi/world/facts/an-assistant-guesses-which-files-answer-a-written-obligation.md`,
 /// "The thread is recovered after its author has gone").
 #[test]
 fn the_record_answers_with_no_history_to_walk() {

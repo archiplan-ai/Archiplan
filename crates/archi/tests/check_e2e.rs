@@ -87,26 +87,25 @@ fn put(root: &Path, rel_path: &str, text: &str) {
     fs::write(path, text).unwrap();
 }
 
-/// One strict record, in the layer the strict record lives in
+/// One strict record, written by the shared skeleton into the layer the
+/// strict record lives in
 /// (`archi/requirements/world-facts/the-world-holds-four-layers.md`), with the
-/// note it is grounded in beside it. The shared skeleton still writes into the
-/// wing's root, which is no layer at all, so this family writes its own.
+/// note it is grounded in beside it — the note is what this family adds.
 fn fact(root: &Path, slug: &str, title: &str, covers: &str, condition: &str, scenarios: &str) {
     put(
         root,
         NOTE,
         "# The guard walked the platform\n\nHe timed the tunnel once at four minutes.\n",
     );
-    put(
-        root,
-        &format!("archi/world/facts/{slug}.md"),
-        &format!(
-            "---\ncovers: [{covers}]\nsources: [{NOTE}]\nuses: []\n---\n\n\
-             # {title}\n\n{condition}\n\n\
-             ## What kills this\n\nTrackside coverage that never drops.\n\n\
-             ## Scenarios\n\n{scenarios}"
-        ),
-    );
+    util::Fact {
+        covers,
+        sources: NOTE,
+        uses: "",
+        condition,
+        killer: "Trackside coverage that never drops.",
+        scenarios,
+    }
+    .write(root, slug, title);
 }
 
 /// The one standing fact of the coverage tests: it conditions the gate, and

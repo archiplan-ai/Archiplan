@@ -107,7 +107,7 @@ fn qualified_refs_run_the_whole_link_loop_across_members() {
     // reported, qualified, and exits 0. The row carries both sides — the
     // claim by name and the file that moved under it — so nobody has to
     // notice the gap by hand
-    // (`archi/world/a-design-written-apart-from-the-code-falls-behind-it.md`,
+    // (`archi/world/facts/a-design-written-apart-from-the-code-falls-behind-it.md`,
     // "The code moves and nobody updates the writing").
     let (success, verify, _) = run(&spec, &["link", "verify"]);
     assert!(success, "{verify}");

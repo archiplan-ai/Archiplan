@@ -222,7 +222,7 @@ fn an_empty_search_over_the_wing_names_the_traversal_that_answers() {
     let out = ok(&root, &["world", "ls", "--covers", "RateLimiter"]);
     assert!(
         out.contains(
-            "the-farm-replays-stolen-pairs  archi/world/the-farm-replays-stolen-pairs.md"
+            "the-farm-replays-stolen-pairs  archi/world/facts/the-farm-replays-stolen-pairs.md"
         ),
         "{out}"
     );
@@ -262,7 +262,7 @@ fn advisory_states_search_fine_and_a_save_still_reports_unchanged() {
 /// record answers, and the answer carries the reasoning, the trade and what
 /// the trade cost, with the address the whole record reads from — no author
 /// in the loop
-/// (`archi/world/why-a-design-was-chosen-lives-in-one-person-s-memory.md`,
+/// (`archi/world/facts/why-a-design-was-chosen-lives-in-one-person-s-memory.md`,
 /// "Somebody asks why months after the choice").
 #[test]
 fn a_reader_who_was_not_there_is_answered_with_the_trade_and_its_cost() {
@@ -293,7 +293,7 @@ fn a_reader_who_was_not_there_is_answered_with_the_trade_and_its_cost() {
 /// The person who chose the shape is still here and cannot recall what they
 /// traded. They know the shape, so they ask the shape: the element card
 /// names the record that priced it, and that record answers in their place
-/// (`archi/world/why-a-design-was-chosen-lives-in-one-person-s-memory.md`,
+/// (`archi/world/facts/why-a-design-was-chosen-lives-in-one-person-s-memory.md`,
 /// "The person who made the choice has forgotten").
 #[test]
 fn the_shape_names_the_record_that_priced_it() {

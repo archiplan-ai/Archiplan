@@ -73,6 +73,25 @@ fn block_of(root: &Path) -> String {
     text[start..end].to_string()
 }
 
+/// The two skills that ask a person to write into the world, read off an
+/// initialized tree — and pinned byte-equal to the copies this binary embeds,
+/// so what the suite reads is what a project gets.
+fn world_skills(root: &Path) -> (String, String) {
+    let workflow = fs::read_to_string(root.join(".claude/skills/archi/SKILL.md")).unwrap();
+    let migration =
+        fs::read_to_string(root.join(".claude/skills/archi-migrate-world/SKILL.md")).unwrap();
+    assert_eq!(workflow, SKILL_ARCHI, "the workflow skill drifted on install");
+    assert_eq!(migration, SKILL_MIGRATE_WORLD, "the migration skill drifted on install");
+    (workflow, migration)
+}
+
+/// One skill's prose on one line. The text is hard-wrapped, so every sentence
+/// is read over its line breaks: what a skill says must not depend on where a
+/// line ends.
+fn flat(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// Every file under `dir` with its bytes, path-sorted.
 fn snapshot(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
     fn walk(dir: &Path, out: &mut Vec<(PathBuf, Vec<u8>)>) {
@@ -485,19 +504,7 @@ fn the_briefing_says_what_help_does_not() {
 fn the_skills_teach_the_scenario_shape_and_the_block_stays_short() {
     let root = temp_dir();
     ok_in(&root, &["init", "."]);
-    let workflow = fs::read_to_string(root.join(".claude/skills/archi/SKILL.md")).unwrap();
-    let migration =
-        fs::read_to_string(root.join(".claude/skills/archi-migrate-world/SKILL.md")).unwrap();
-
-    // Installed byte-equal to the embedded copies: what the suite reads is what
-    // a project gets.
-    assert_eq!(workflow, SKILL_ARCHI, "the workflow skill drifted on install");
-    assert_eq!(migration, SKILL_MIGRATE_WORLD, "the migration skill drifted on install");
-
-    // The prose is hard-wrapped, so every sentence is read over its line breaks.
-    fn flat(text: &str) -> String {
-        text.split_whitespace().collect::<Vec<_>>().join(" ")
-    }
+    let (workflow, migration) = world_skills(&root);
 
     // The workflow skill says what a scenario is.
     let workflow_flat = flat(&workflow);
@@ -581,18 +588,7 @@ fn the_skills_teach_the_scenario_shape_and_the_block_stays_short() {
 fn the_skills_describe_the_four_layers_and_the_source_rule() {
     let root = temp_dir();
     ok_in(&root, &["init", "."]);
-    let workflow = fs::read_to_string(root.join(".claude/skills/archi/SKILL.md")).unwrap();
-    let migration =
-        fs::read_to_string(root.join(".claude/skills/archi-migrate-world/SKILL.md")).unwrap();
-
-    // What a project gets is what this suite reads.
-    assert_eq!(workflow, SKILL_ARCHI, "the workflow skill drifted on install");
-    assert_eq!(migration, SKILL_MIGRATE_WORLD, "the migration skill drifted on install");
-
-    // The prose is hard-wrapped, so every sentence is read over its breaks.
-    fn flat(text: &str) -> String {
-        text.split_whitespace().collect::<Vec<_>>().join(" ")
-    }
+    let (workflow, migration) = world_skills(&root);
 
     // The workflow skill names each folder and says what that folder holds.
     let workflow_flat = flat(&workflow);
