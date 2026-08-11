@@ -104,11 +104,16 @@ fn qualified_refs_run_the_whole_link_loop_across_members() {
     .unwrap();
     // Drifted fails only asserted literal links
     // (archi/requirements/code-link/verify-grades-every-claim.md): the indirect drift is
-    // reported, qualified, and exits 0.
+    // reported, qualified, and exits 0. The row carries both sides — the
+    // claim by name and the file that moved under it — so nobody has to
+    // notice the gap by hand
+    // (`archi/world/a-design-written-apart-from-the-code-falls-behind-it.md`,
+    // "The code moves and nobody updates the writing").
     let (success, verify, _) = run(&spec, &["link", "verify"]);
     assert!(success, "{verify}");
     assert!(verify.contains("drifted"), "{verify}");
     assert!(verify.contains("backend//src/lib.rs#serve_gate"), "{verify}");
+    assert!(verify.contains("Gate ← backend//src/lib.rs#serve_gate"), "{verify}");
     assert!(verify.contains("the declared shape moved"), "{verify}");
 }
 
