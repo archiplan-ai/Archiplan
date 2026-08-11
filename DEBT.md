@@ -66,6 +66,20 @@ asks for.
 What a round would have to decide: nothing about design — these are defects against a
 requirement already standing. They need a task, not a verdict.
 
+## The test fixture may not survive being run in parallel
+
+`crates/archi/tests/util/mod.rs:105`. Reported by the cleanup sweep of this unit and **not
+reproduced**: one `cargo test` run out of five failed five `world_e2e` cases, each at
+`git ["commit", "-qm", "seed"]` in the temp-repo setup, with empty stderr. Four later runs
+of the same command were green, and the full suite has been green on every run since.
+
+This is hearsay against a flake, recorded because a fixture that fails one run in five will
+eventually fail a run somebody trusts, and an empty stderr gives that person nothing. It is
+not attributed to this unit: the setup predates it.
+
+What a round would have to decide: nothing yet. Somebody has to see it a second time and
+capture the stderr before there is anything to press.
+
 ---
 
 Related: `archi/world/notes/the-words-in-the-code-are-not-the-words-in-the-design.md` — why
