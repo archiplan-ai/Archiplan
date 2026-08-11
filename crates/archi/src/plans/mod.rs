@@ -726,9 +726,6 @@ pub struct BlockScenario {
 pub struct BlockFact {
     /// The fact's slug.
     pub fact: String,
-    /// The `Feature` line of its `Scenarios` block; empty when the grammar
-    /// accepted none.
-    pub feature: String,
     /// Its scenarios, in source order.
     pub scenarios: Vec<BlockScenario>,
     /// The nodes it covers that this plan holds no task for — empty when
@@ -750,7 +747,6 @@ fn collect_block(tree: &docs::Tree, plan: &Plan) -> Vec<BlockFact> {
             // A fact covering two of the plan's nodes joins the block once.
             out.entry(f.doc.slug.as_str()).or_insert_with(|| BlockFact {
                 fact: f.doc.slug.clone(),
-                feature: String::new(),
                 scenarios: block_scenarios(f),
                 outside: f
                     .doc
@@ -791,66 +787,79 @@ fn outside_mark(f: &BlockFact) -> String {
     )
 }
 
-// ---- the closing render: the Gherkin, the state, the command -----------------
+// ---- the closing render: the steps, the state, the line under them -----------
 
-/// One collected scenario as the closing step hands it back: its Gherkin
-/// whole, the state of the link that reaches it, and — while nothing does —
-/// the line that anchors it
+/// One collected scenario as the closing step hands it back: its steps
+/// whole, the state of the link that reaches it, and one closing line — the
+/// command that anchors it while nothing does, the ask for a re-read once
+/// something does
 /// (`archi/requirements/world-facts/the-closing-step-hands-back-the-work.md`).
 #[derive(Clone, PartialEq, Eq, Debug, Serialize)]
 pub struct ScenarioState {
     /// The spec ref a link anchors: `<fact-slug>#<scenario name>`.
     pub spec: String,
-    /// The `Feature` line of the fact that dictates it.
-    pub feature: String,
     /// Its steps as written, in source order.
     pub steps: Vec<String>,
-    /// The state in one clause: `unanchored`, `anchored, clean`, or
-    /// `anchored, drifted` with the side that moved.
+    /// The state in one clause: `unanchored`, or `anchored at <file#symbol>`
+    /// with the side that moved after it while the digests disagree.
     pub state: String,
     /// The `archi link add` line, ready for a shell; `None` once a link
-    /// reaches the scenario.
+    /// reaches the scenario — the one thing that tells the two states apart.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
 }
 
+/// What an anchored scenario is handed back with. A green link says the pair
+/// has not moved since it was bound, and no more than that: whether the story
+/// and the code still say the same thing is a reading, and only a person
+/// makes it.
+const RE_READ: &str = "read this scenario and that code against each other and repair whichever \
+                       is wrong — a link proves the pair has not moved, not that it is right";
+
 impl ScenarioState {
     /// The record as it prints: the head line the caller marks, then the
-    /// Gherkin and the ready command indented under it.
+    /// steps and the closing line indented under it. Exactly one line
+    /// closes it, because [`grade_block`] mints the command for a scenario
+    /// nothing anchors and for no other.
     fn render(&self) -> String {
-        let mut out = format!("{} — {}\n    Feature: {}", self.spec, self.state, self.feature);
+        let mut out = format!("{} — {}", self.spec, self.state);
         for s in &self.steps {
-            out.push_str(&format!("\n      {s}"));
+            out.push_str(&format!("\n    {s}"));
         }
-        if let Some(c) = &self.command {
-            out.push_str(&format!("\n    {c}"));
-        }
+        out.push_str(&format!(
+            "\n    {}",
+            self.command.as_deref().unwrap_or(RE_READ)
+        ));
         out
     }
 }
 
-/// The state of one link in one clause. The grade is the link wing's own,
-/// and it already separates the two sides of a witnessed pair
+/// The state of one anchored link in one clause: where it reaches, and what
+/// moved under it. The grade is the link wing's own, and it already separates
+/// the two sides of a witnessed pair
 /// (`archi/requirements/world-facts/a-scenario-link-binds-two-hashes.md`).
-fn anchoring(state: &links::State) -> String {
+fn anchoring(link: &links::Link, state: &links::State) -> String {
+    // The address is the whole point of the clause: the operator reads that
+    // file and that symbol against the steps printed under it.
+    let at = format!("anchored at {}", link.anchor);
     match state {
-        links::State::Clean => "anchored, clean".to_string(),
+        links::State::Clean => at,
         // The story moved under an address that still stands, or the
         // address itself stopped resolving: either way the spec side is
         // the one that moved.
         links::State::ScenarioDrifted { code: false } | links::State::SpecDrifted => {
-            "anchored, drifted: the scenario side moved".to_string()
+            format!("{at}, drifted: the scenario side moved")
         }
         links::State::ScenarioDrifted { code: true } => {
-            "anchored, drifted: both sides moved".to_string()
+            format!("{at}, drifted: both sides moved")
         }
         // Absence is not drift: the member holding the code is not on this
         // machine, so nothing about it was read
         // (`archi/requirements/multi-repo/absence-is-not-drift`).
         links::State::Unreachable { member } => {
-            format!("anchored, unread: member `{member}` has no checkout here")
+            format!("{at}, unread: member `{member}` has no checkout here")
         }
-        _ => "anchored, drifted: the code side moved".to_string(),
+        _ => format!("{at}, drifted: the code side moved"),
     }
 }
 
@@ -908,11 +917,10 @@ fn grade_block(
                 .or_else(|| anchored.first());
             let (state, command) = match graded {
                 None => ("unanchored".to_string(), Some(link_add(&spec))),
-                Some(c) => (anchoring(&c.state), None),
+                Some(c) => (anchoring(&c.link, &c.state), None),
             };
             out.push(ScenarioState {
                 spec,
-                feature: f.feature.clone(),
                 steps: s.steps.clone(),
                 state,
                 command,
@@ -2082,13 +2090,16 @@ mod tests {
     }
 
     /// One world fact under `archi/world/`: the three lists, the
-    /// conditioning paragraph, the killer and a `Scenarios` block.
+    /// conditioning paragraph, the killer and a `Scenarios` block. A
+    /// scenario is a `### ` heading and its steps — the fact's own title is
+    /// the feature, so the block names none
+    /// (`archi/requirements/world-facts/the-grammar-is-a-named-subset.md`).
     fn put_fact(root: &Path, slug: &str, title: &str, covers: &str, scenarios: &[&str]) {
-        let mut block = format!("Feature: {title}\n");
+        let mut block = String::new();
         for s in scenarios {
             block.push_str(&format!(
-                "  Scenario: {s}\n    Given the carriage leaves the platform\n    \
-                 When the rider opens the door\n    Then the door holds\n"
+                "### {s}\n\nGiven the carriage leaves the platform\n\
+                 When the rider opens the door\nThen the door holds\n\n"
             ));
         }
         put(
@@ -2462,15 +2473,14 @@ mod tests {
         let Step::Scenarios(lines) = &outcome.step else {
             panic!("after the cleanup wave comes the scenario step");
         };
-        // The record is the scenario whole: its state, its Gherkin, and the
+        // The record is the scenario whole: its state, its steps, and the
         // line that anchors it while nothing does.
         assert_eq!(
             lines,
             &vec![
                 "riders-lose-the-signal#a user logs in end to end — unanchored\n    \
-                 Feature: Riders lose the signal\n      \
-                 Given the carriage leaves the platform\n      \
-                 When the rider opens the door\n      \
+                 Given the carriage leaves the platform\n    \
+                 When the rider opens the door\n    \
                  Then the door holds\n    \
                  archi link add 'riders-lose-the-signal#a user logs in end to end' \
                  <file#symbol> --kind indirect"
@@ -2545,8 +2555,8 @@ mod tests {
              # Riders lose the signal\n\n\
              The carriage drops the network for minutes at a time.\n\n\
              ## What kills this\n\nThe condition ends.\n\n## Scenarios\n\n\
-             Feature: Offline open\n  Scenario: the app opens with no network\n    \
-             Given the device has no network\n    When the user opens the app\n    \
+             ### the app opens with no network\n\n\
+             Given the device has no network\nWhen the user opens the app\n\
              Then the last synced view appears\n",
         );
         let ws = compiled(&root);
@@ -2558,7 +2568,13 @@ mod tests {
             world_check::scenario_digest(&tree.world[0], None)
         );
         // The value the links pin for this block: one function, one string.
-        assert_eq!(carried[0].digest, "5b5815");
+        // It moved with the shape — the block used to open on `Feature:
+        // Offline open` and the digest hashed that line first, so `5b5815`
+        // is the reading of an input that no longer exists. This is the same
+        // block the wing's own test pins
+        // (`world_check::tests::the_scenario_digest_reads_the_parsed_block`),
+        // and the two agree to the byte, which is the claim.
+        assert_eq!(carried[0].digest, "fc6e9d");
 
         fs::remove_dir_all(&root).unwrap();
     }

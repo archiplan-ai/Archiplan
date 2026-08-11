@@ -61,9 +61,8 @@ fn fact(root: &Path, slug: &str, title: &str, covers: &str, sources: &str, uses:
         uses,
         condition: "The carriage drops the network for minutes at a time.",
         killer: "Trackside coverage that never drops.",
-        scenarios: "Feature: Offline open\n  \
-                    Scenario: the app opens with no network\n    \
-                    Given the device has no network\n    When the user opens the app\n    \
+        scenarios: "### the app opens with no network\n\n\
+                    Given the device has no network\nWhen the user opens the app\n\
                     Then the last synced view appears\n",
     }
     .write(root, slug, title);
@@ -406,7 +405,10 @@ fn the_replayed_mint_converges_like_req_add() {
     // One authored line and the mint is a wall that names the file.
     fs::write(
         &path,
-        minted.replace("## Scenarios\n", "## Scenarios\n\nFeature: Offline open\n"),
+        minted.replace(
+            "## Scenarios\n",
+            "## Scenarios\n\n### the app opens with no network\n",
+        ),
     )
     .unwrap();
     let (code, err) = refuse(&wt, &["world", "add", "Trains lose the signal"]);

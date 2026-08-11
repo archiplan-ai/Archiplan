@@ -161,7 +161,9 @@ const STEPS: &[&str] = &[
 
 /// The same fixture with the steps spelled out, so a test can reword one
 /// step and watch the witness part — `put_fact`'s block with its Gherkin
-/// under the test's control.
+/// under the test's control. A scenario is a `### ` heading and its steps:
+/// the fact's own title is the feature, so the block names none
+/// (`archi/requirements/world-facts/the-grammar-is-a-named-subset.md`).
 fn put_fact_with_steps(
     root: &Path,
     slug: &str,
@@ -169,12 +171,13 @@ fn put_fact_with_steps(
     covers: &str,
     scenarios: &[(&str, &[&str])],
 ) {
-    let mut block = format!("Feature: {title}\n");
+    let mut block = String::new();
     for (name, steps) in scenarios {
-        block.push_str(&format!("  Scenario: {name}\n"));
+        block.push_str(&format!("### {name}\n\n"));
         for step in *steps {
-            block.push_str(&format!("    {step}\n"));
+            block.push_str(&format!("{step}\n"));
         }
+        block.push('\n');
     }
     util::Fact {
         covers,
@@ -979,16 +982,14 @@ fn the_close_collects_the_wing_and_marks_what_lies_outside() {
     assert_eq!(
         listed,
         "1. riders-lose-the-signal#the app opens with no network at all — unanchored\n    \
-         Feature: Riders lose the signal\n      \
-         Given the carriage leaves the platform\n      \
-         When the rider opens the door\n      \
+         Given the carriage leaves the platform\n    \
+         When the rider opens the door\n    \
          Then the door holds\n    \
          archi link add 'riders-lose-the-signal#the app opens with no network at all' \
          <file#symbol> --kind indirect\n\
          2. tunnels-run-long#the tunnel ends — unanchored\n    \
-         Feature: Tunnels run long\n      \
-         Given the carriage leaves the platform\n      \
-         When the rider opens the door\n      \
+         Given the carriage leaves the platform\n    \
+         When the rider opens the door\n    \
          Then the door holds\n    \
          archi link add 'tunnels-run-long#the tunnel ends' <file#symbol> --kind indirect\n\
          3. tunnels-run-long also covers Gate, Ledger — outside this plan\n"
@@ -1172,9 +1173,10 @@ fn a_post_wing_plan_on_a_tree_with_no_wing_closes_without_a_refusal() {
 }
 
 /// The closing step hands back the work it already did: every collected
-/// scenario whole — the feature line and every step — with the state of its
-/// link beside it, and a ready `archi link add` under the ones nothing
-/// anchors
+/// scenario whole — its name and every step — with the state of its link
+/// beside it. A scenario nothing anchors carries a ready `archi link add`;
+/// one something anchors names the file and symbol it reaches and asks for
+/// the re-read, and names the side that moved once the digests disagree
 /// (`archi/requirements/world-facts/the-closing-step-hands-back-the-work.md`).
 #[test]
 fn the_closing_step_prints_the_gherkin_the_state_and_the_command() {
@@ -1210,14 +1212,15 @@ fn the_closing_step_prints_the_gherkin_the_state_and_the_command() {
     curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
     curate(&root, "archi/plans/mvp/t2-auth.md", "service-hardening", "code/auth.rs");
 
-    // One of the two is anchored before the close; the other is not.
+    // One of the two is anchored before the close, at a symbol inside a
+    // file; the other is not.
     ok(
         &root,
         &[
             "link",
             "add",
             "riders-lose-the-signal#the app opens with no network",
-            "code/store.rs",
+            "code/store.rs#Store::put",
             "--kind",
             "indirect",
         ],
@@ -1226,32 +1229,41 @@ fn the_closing_step_prints_the_gherkin_the_state_and_the_command() {
     ok(&root, &["plan", "next"]);
     let out = ok(&root, &["plan", "next"]);
 
-    // The Gherkin whole: the feature line and every step of both.
-    assert!(out.contains("    Feature: Riders lose the signal"), "{out}");
-    assert!(out.contains("      Given the rider boards"), "{out}");
-    assert!(out.contains("      When the app opens"), "{out}");
-    assert!(out.contains("      Then the rows are there"), "{out}");
-    assert!(out.contains("    Feature: Tunnels run long"), "{out}");
-    assert!(out.contains("      Given the train is under the hill"), "{out}");
-    assert!(out.contains("      Then the session holds"), "{out}");
+    // The Gherkin whole: every step of both, under the address that names
+    // them. The fact's own title is the feature, so no line says it again.
+    assert!(out.contains("    Given the rider boards"), "{out}");
+    assert!(out.contains("    When the app opens"), "{out}");
+    assert!(out.contains("    Then the rows are there"), "{out}");
+    assert!(out.contains("    Given the train is under the hill"), "{out}");
+    assert!(out.contains("    Then the session holds"), "{out}");
+    assert!(!out.contains("Feature:"), "{out}");
 
-    // The anchored one carries its state and no command.
+    // The anchored one names the file and the symbol it reaches, and asks
+    // for the re-read: a link says the pair has not moved, never that the
+    // two still say the same thing.
     assert!(
         out.contains(
-            "riders-lose-the-signal#the app opens with no network — anchored, clean"
+            "riders-lose-the-signal#the app opens with no network — \
+             anchored at code/store.rs#Store::put"
         ),
         "{out}"
     );
+    assert!(
+        out.contains("    read this scenario and that code against each other"),
+        "{out}"
+    );
     // The unanchored one carries the line that anchors it, ref quoted for a
-    // shell, the code side left to the operator.
+    // shell, the code side left to the operator — and no ask, because there
+    // is nothing yet to read it against.
     assert!(out.contains("tunnels-run-long#the tunnel ends — unanchored"), "{out}");
     assert_eq!(
         printed_link_add(&out),
         "archi link add 'tunnels-run-long#the tunnel ends' <file#symbol> --kind indirect"
     );
 
-    // A step reworded under an anchored scenario parts the witness, and the
-    // state names the side that moved — the listing answers the same way.
+    // A step reworded under an anchored scenario parts the witness: the
+    // anchor stays beside the side that moved, and the ask stays with it —
+    // the listing answers the same way.
     put_fact_with_steps(
         &root,
         "riders-lose-the-signal",
@@ -1270,11 +1282,15 @@ fn the_closing_step_prints_the_gherkin_the_state_and_the_command() {
     assert!(
         listed.contains(
             "riders-lose-the-signal#the app opens with no network — \
-             anchored, drifted: the scenario side moved"
+             anchored at code/store.rs#Store::put, drifted: the scenario side moved"
         ),
         "{listed}"
     );
-    assert!(listed.contains("      Given the rider boards the carriage"), "{listed}");
+    assert!(listed.contains("    Given the rider boards the carriage"), "{listed}");
+    assert!(
+        listed.contains("    read this scenario and that code against each other"),
+        "{listed}"
+    );
 
     fs::remove_dir_all(&root).unwrap();
 }
@@ -1357,7 +1373,7 @@ fn plan_verify_prints_the_scenario_states_while_a_wave_is_still_open() {
             "link",
             "add",
             "riders-lose-the-signal#the rider signs in",
-            "code/auth.rs",
+            "code/auth.rs#login",
             "--kind",
             "indirect",
         ],
@@ -1368,7 +1384,7 @@ fn plan_verify_prints_the_scenario_states_while_a_wave_is_still_open() {
             "link",
             "add",
             "riders-lose-the-signal#the tunnel ends",
-            "code/store.rs",
+            "code/store.rs#Store::put",
             "--kind",
             "indirect",
         ],
@@ -1388,18 +1404,24 @@ fn plan_verify_prints_the_scenario_states_while_a_wave_is_still_open() {
         "{out}"
     );
     assert!(
-        out.contains("scenario: riders-lose-the-signal#the rider signs in — anchored, clean"),
+        out.contains(
+            "scenario: riders-lose-the-signal#the rider signs in — \
+             anchored at code/auth.rs#login"
+        ),
         "{out}"
     );
     assert!(
         out.contains(
             "scenario: riders-lose-the-signal#the tunnel ends — \
-             anchored, drifted: the code side moved"
+             anchored at code/store.rs#Store::put, drifted: the code side moved"
         ),
         "{out}"
     );
-    assert!(out.contains("    Feature: Riders lose the signal"), "{out}");
-    assert!(out.contains("      Given the rider boards"), "{out}");
+    assert!(
+        out.contains("    read this scenario and that code against each other"),
+        "{out}"
+    );
+    assert!(out.contains("    Given the rider boards"), "{out}");
     assert_eq!(
         printed_link_add(&out),
         "archi link add 'riders-lose-the-signal#the app opens with no network' \

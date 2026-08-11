@@ -113,8 +113,8 @@ fn fact(root: &Path, slug: &str, title: &str, covers: &str, condition: &str) {
         condition,
         killer: "Trackside coverage that never drops.",
         scenarios: &format!(
-            "Feature: {title}\n  Scenario: {slug} holds\n    \
-             Given the device has no network\n    When the user opens the app\n    \
+            "### {slug} holds\n\n\
+             Given the device has no network\nWhen the user opens the app\n\
              Then the last synced view appears\n"
         ),
     }

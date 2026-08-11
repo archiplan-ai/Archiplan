@@ -86,9 +86,8 @@ fn gate_fact(root: &Path) {
         uses: "",
         condition: "The carriage drops the network for minutes at a time.",
         killer: "Trackside coverage that never drops.",
-        scenarios: "Feature: Offline open\n  \
-                    Scenario: the app opens with no network\n    \
-                    Given the device has no network\n    When the user opens the app\n    \
+        scenarios: "### the app opens with no network\n\n\
+                    Given the device has no network\nWhen the user opens the app\n\
                     Then the last synced view appears\n",
     }
     .write(root, "trains-lose-the-signal", "Trains lose the signal");
@@ -201,9 +200,8 @@ fn the_wing_names_what_it_never_reaches_and_the_tree_stands() {
         uses: "",
         condition: "The carriage drops the network for minutes at a time.",
         killer: "Trackside coverage that never drops.",
-        scenarios: "Feature: Offline open\n  \
-                    Scenario: the app opens with no network\n    \
-                    Given the device has no network\n    When the user opens the app\n    \
+        scenarios: "### the app opens with no network\n\n\
+                    Given the device has no network\nWhen the user opens the app\n\
                     Then the last synced view appears\n",
     }
     .write(&root, "trains-lose-the-signal", "Trains lose the signal");
@@ -213,9 +211,8 @@ fn the_wing_names_what_it_never_reaches_and_the_tree_stands() {
         uses: "",
         condition: "The guard walks the length of the platform every hour.",
         killer: "The walk stops.",
-        scenarios: "Feature: The walk\n  \
-                    Scenario: the guard reaches the last door\n    \
-                    Given the guard leaves the first door\n    When the walk ends\n    \
+        scenarios: "### the guard reaches the last door\n\n\
+                    Given the guard leaves the first door\nWhen the walk ends\n\
                     Then every door was tried\n",
     }
     .write(&root, "the-guard-walks-the-line", "The guard walks the line");
