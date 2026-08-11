@@ -673,6 +673,23 @@ fn scenario_names(fact: &WorldFact) -> Vec<String> {
         .collect()
 }
 
+/// The scenarios one fact dictates, whole — the name and every step, as the
+/// grammar read them.
+fn block_scenarios(fact: &WorldFact) -> Vec<BlockScenario> {
+    fact.scenarios
+        .iter()
+        .flat_map(|b| b.scenarios.iter())
+        .map(|s| BlockScenario {
+            name: s.name.clone(),
+            steps: s
+                .steps
+                .iter()
+                .map(|st| format!("{} {}", st.keyword, st.text))
+                .collect(),
+        })
+        .collect()
+}
+
 /// The facts covering one node, in slug order, each with its fingerprint —
 /// the one question the planner asks of the wing, at author time and on
 /// every read after. The fingerprint is the wing's own
@@ -691,14 +708,29 @@ fn covering_facts(wing: &Wing, node: &str) -> Vec<CoveringFact> {
         .collect()
 }
 
+/// One scenario of the closing block, whole: the address and the story
+/// under it. The closing step hands back the Gherkin, not the name, so the
+/// block carries the steps it read
+/// (`archi/requirements/world-facts/the-closing-step-hands-back-the-work.md`).
+#[derive(Clone, PartialEq, Eq, Debug, Serialize)]
+pub struct BlockScenario {
+    /// The scenario's name — the address inside the fact.
+    pub name: String,
+    /// Its steps as written, keyword and text, in source order.
+    pub steps: Vec<String>,
+}
+
 /// One fact of the closing block: what it dictates, and what of its reach
 /// this plan never built.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize)]
 pub struct BlockFact {
     /// The fact's slug.
     pub fact: String,
-    /// Its scenario names, in source order.
-    pub scenarios: Vec<String>,
+    /// The `Feature` line of its `Scenarios` block; empty when the grammar
+    /// accepted none.
+    pub feature: String,
+    /// Its scenarios, in source order.
+    pub scenarios: Vec<BlockScenario>,
     /// The nodes it covers that this plan holds no task for — empty when
     /// the plan holds them all
     /// (`archi/requirements/world-facts/the-block-marks-what-lies-outside-the-plan.md`).
@@ -718,7 +750,8 @@ fn collect_block(tree: &docs::Tree, plan: &Plan) -> Vec<BlockFact> {
             // A fact covering two of the plan's nodes joins the block once.
             out.entry(f.doc.slug.as_str()).or_insert_with(|| BlockFact {
                 fact: f.doc.slug.clone(),
-                scenarios: scenario_names(f),
+                feature: f.scenarios.as_ref().map_or(String::new(), |b| b.feature.clone()),
+                scenarios: block_scenarios(f),
                 outside: f
                     .doc
                     .covers
@@ -734,34 +767,173 @@ fn collect_block(tree: &docs::Tree, plan: &Plan) -> Vec<BlockFact> {
 }
 
 /// The block as printable lines: one per scenario, and one mark per fact
-/// that reaches past the plan.
+/// that reaches past the plan. The authoring read surface's summary — the
+/// closing step renders the same block whole ([`render_graded`]).
 fn render_block(block: &[BlockFact]) -> Vec<String> {
     let mut out = Vec::new();
     for f in block {
         for s in &f.scenarios {
-            out.push(format!("{}#{s}", f.fact));
+            out.push(format!("{}#{}", f.fact, s.name));
         }
         if !f.outside.is_empty() {
-            out.push(format!(
-                "{} also covers {} — outside this plan",
-                f.fact,
-                f.outside.join(", ")
-            ));
+            out.push(outside_mark(f));
         }
     }
     out
 }
 
-/// Every scenario of the block as the spec ref a link anchors to code.
-fn block_refs(block: &[BlockFact]) -> Vec<String> {
-    block
-        .iter()
-        .flat_map(|f| {
-            f.scenarios
+/// What a fact rules that this plan never built.
+fn outside_mark(f: &BlockFact) -> String {
+    format!(
+        "{} also covers {} — outside this plan",
+        f.fact,
+        f.outside.join(", ")
+    )
+}
+
+// ---- the closing render: the Gherkin, the state, the command -----------------
+
+/// One collected scenario as the closing step hands it back: its Gherkin
+/// whole, the state of the link that reaches it, and — while nothing does —
+/// the line that anchors it
+/// (`archi/requirements/world-facts/the-closing-step-hands-back-the-work.md`).
+#[derive(Clone, PartialEq, Eq, Debug, Serialize)]
+pub struct ScenarioState {
+    /// The spec ref a link anchors: `<fact-slug>#<scenario name>`.
+    pub spec: String,
+    /// The `Feature` line of the fact that dictates it.
+    pub feature: String,
+    /// Its steps as written, in source order.
+    pub steps: Vec<String>,
+    /// The state in one clause: `unanchored`, `anchored, clean`, or
+    /// `anchored, drifted` with the side that moved.
+    pub state: String,
+    /// The `archi link add` line, ready for a shell; `None` once a link
+    /// reaches the scenario.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+}
+
+impl ScenarioState {
+    /// The record as it prints: the head line the caller marks, then the
+    /// Gherkin and the ready command indented under it.
+    fn render(&self) -> String {
+        let mut out = format!("{} — {}\n    Feature: {}", self.spec, self.state, self.feature);
+        for s in &self.steps {
+            out.push_str(&format!("\n      {s}"));
+        }
+        if let Some(c) = &self.command {
+            out.push_str(&format!("\n    {c}"));
+        }
+        out
+    }
+}
+
+/// The state of one link in one clause. The grade is the link wing's own,
+/// and it already separates the two sides of a witnessed pair
+/// (`archi/requirements/world-facts/a-scenario-link-binds-two-hashes.md`).
+fn anchoring(state: &links::State) -> String {
+    match state {
+        links::State::Clean => "anchored, clean".to_string(),
+        // The story moved under an address that still stands, or the
+        // address itself stopped resolving: either way the spec side is
+        // the one that moved.
+        links::State::ScenarioDrifted { code: false } | links::State::SpecDrifted => {
+            "anchored, drifted: the scenario side moved".to_string()
+        }
+        links::State::ScenarioDrifted { code: true } => {
+            "anchored, drifted: both sides moved".to_string()
+        }
+        // Absence is not drift: the member holding the code is not on this
+        // machine, so nothing about it was read
+        // (`archi/requirements/multi-repo/absence-is-not-drift`).
+        links::State::Unreachable { member } => {
+            format!("anchored, unread: member `{member}` has no checkout here")
+        }
+        _ => "anchored, drifted: the code side moved".to_string(),
+    }
+}
+
+/// The line that anchors one scenario, ready for a shell: the ref carries a
+/// scenario name and its spaces, so it is quoted here and not by hand, and
+/// the operator supplies only the code side. Single quotes are literal in
+/// POSIX shells, so a name carrying an apostrophe closes the quote, escapes
+/// it and opens again — the form the world mint's refusal already prints.
+fn link_add(spec: &str) -> String {
+    format!(
+        "archi link add '{}' <file#symbol> --kind indirect",
+        spec.replace('\'', "'\\''")
+    )
+}
+
+/// Every collected scenario with the state of its link — the one read the
+/// closing step, the final latch and `plan verify` all answer from. The
+/// grade comes from [`links::verify`] over the folded link set the gate
+/// already consults: a second reader here could only disagree with it.
+fn grade_block(
+    root: &Path,
+    model: &Model,
+    block: &[BlockFact],
+) -> Result<Vec<ScenarioState>, String> {
+    let mut out = Vec::new();
+    for f in block {
+        for s in &f.scenarios {
+            let spec = format!("{}#{}", f.fact, links::normalize_ref(&s.name));
+            let report = links::verify(
+                root,
+                model,
+                &links::VerifyOptions {
+                    spec: Some(spec.clone()),
+                    ..Default::default()
+                },
+            )?;
+            // The gate's own predicate: an asserted link at Working anchors
+            // a scenario, and nothing else does.
+            let anchored: Vec<&links::Checked> = report
+                .checked
                 .iter()
-                .map(move |s| format!("{}#{}", f.fact, links::normalize_ref(s)))
-        })
-        .collect()
+                .filter(|c| {
+                    c.link.standing == links::Standing::Asserted && c.link.spec.version.is_none()
+                })
+                .collect();
+            // The news is what moved: where two links reach one scenario,
+            // the one that is not clean is the one worth printing.
+            let graded = anchored
+                .iter()
+                .find(|c| c.state != links::State::Clean)
+                .or_else(|| anchored.first());
+            let (state, command) = match graded {
+                None => ("unanchored".to_string(), Some(link_add(&spec))),
+                Some(c) => (anchoring(&c.state), None),
+            };
+            out.push(ScenarioState {
+                spec,
+                feature: f.feature.clone(),
+                steps: s.steps.clone(),
+                state,
+                command,
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// The graded block as printable records, and one mark per fact that
+/// reaches past the plan. Both walks are one walk: [`grade_block`] grades
+/// the block in the order this prints it.
+fn render_graded(block: &[BlockFact], graded: &[ScenarioState]) -> Vec<String> {
+    let mut states = graded.iter();
+    let mut out = Vec::new();
+    for f in block {
+        for _ in &f.scenarios {
+            let Some(s) = states.next() else { break };
+            out.push(s.render());
+        }
+        if !f.outside.is_empty() {
+            out.push(outside_mark(f));
+        }
+    }
+    out
 }
 
 /// What moved in the wing since the tasks were authored: a fact retired, a
@@ -809,30 +981,25 @@ fn wing_drift(tree: &docs::Tree, plan: &Plan) -> Vec<String> {
 
 /// The block's own gate: every collected scenario carries an asserted link
 /// to code. Archi runs nothing — it proves the edge exists, reading the
-/// folded link set the coverage gate already consults
-/// (`archi/requirements/world-facts/the-close-gates-on-anchored-scenarios.md`).
-fn gate_anchored(root: &Path, block: &[BlockFact]) -> Result<(), String> {
-    let live = links::ls(root, None, false)?;
-    let anchored = |r: &str| {
-        live.iter().any(|l| {
-            l.standing == links::Standing::Asserted
-                && l.spec.version.is_none()
-                && l.spec.path == r
-        })
-    };
-    let unanchored: Vec<String> = block_refs(block)
-        .into_iter()
-        .filter(|r| !anchored(r))
+/// same graded set the closing step printed. The refusal is the ordered
+/// continuation the rest of the tool speaks: one runnable line per scenario
+/// nothing reaches
+/// (`archi/requirements/world-facts/the-close-gates-on-anchored-scenarios.md`,
+/// `archi/requirements/world-facts/the-refusal-is-an-ordered-continuation.md`).
+fn gate_anchored(graded: &[ScenarioState]) -> Result<(), String> {
+    let lines: Vec<String> = graded
+        .iter()
+        .filter_map(|s| s.command.as_ref())
+        .map(|c| format!("  {c}"))
         .collect();
-    if unanchored.is_empty() {
+    if lines.is_empty() {
         return Ok(());
     }
     Err(format!(
-        "the closing block is not anchored — no link reaches:\n  {}\n\
-         archi runs nothing: it proves the edge a runner executes exists. Author it \
-         (`archi link add \"<fact-slug>#<scenario name>\" <file#symbol> --kind indirect`), \
-         then re-run `archi plan next`",
-        unanchored.join("\n  ")
+        "the closing block is not anchored — no link reaches:\n{}\n\
+         archi runs nothing: it proves the edge a runner executes exists. Run the lines \
+         above with the code side filled in, then re-run `archi plan next`",
+        lines.join("\n")
     ))
 }
 
@@ -1026,6 +1193,12 @@ pub struct PlanReport {
     pub notes: Vec<String>,
     /// The closing block as the wing stands now — collected, never stored.
     pub block: Vec<BlockFact>,
+    /// The same block with the state of every scenario's link, graded on
+    /// demand: `plan verify` asks for it, and the reads that only need
+    /// structure never pay for the grade
+    /// (`archi/requirements/world-facts/the-closing-step-hands-back-the-work.md`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub scenarios: Vec<ScenarioState>,
     /// What moved in the wing since the tasks were authored.
     pub drift: Vec<String>,
     /// The derived view.
@@ -1034,10 +1207,14 @@ pub struct PlanReport {
 }
 
 /// `archi plan verify`: structural invariants against the pinned version,
-/// drift notes against the live model.
+/// drift notes against the live model — and the closing block graded, so
+/// the three states answer on demand while a wave is still open
+/// (`archi/requirements/world-facts/the-closing-step-hands-back-the-work.md`).
 pub fn verify(root: &Path, model: &Model) -> Result<PlanReport, String> {
     let plan = load_active(root)?;
-    verify_plan(root, model, &plan)
+    let mut report = verify_plan(root, model, &plan)?;
+    report.scenarios = grade_block(root, model, &report.block)?;
+    Ok(report)
 }
 
 /// `archi plan show`: the active plan and its derived view — the authoring
@@ -1313,6 +1490,8 @@ pub(crate) fn verify_plan(root: &Path, live: &Model, plan: &Plan) -> Result<Plan
         errors,
         notes,
         block,
+        // The grade is the caller's ask: `plan verify` fills it.
+        scenarios: Vec::new(),
         drift,
         derived: Derived {
             matched,
@@ -1503,9 +1682,10 @@ pub fn next(root: &Path, model: &Model) -> Result<NextOutcome, String> {
                 Step::Done
             } else {
                 plan.scenarios_displayed = true;
+                let graded = grade_block(root, model, &report.block)?;
                 let mut lines: Vec<String> =
                     report.drift.iter().map(|d| format!("drift: {d}")).collect();
-                lines.extend(render_block(&report.block));
+                lines.extend(render_graded(&report.block, &graded));
                 Step::Scenarios(lines)
             };
             save_state(root, &plan)?;
@@ -1517,7 +1697,7 @@ pub fn next(root: &Path, model: &Model) -> Result<NextOutcome, String> {
         }
         if !plan.scenarios_closed {
             // The latch has teeth: it claims the block is attached to code.
-            gate_anchored(root, &report.block)?;
+            gate_anchored(&grade_block(root, model, &report.block)?)?;
             plan.scenarios_closed = true;
             plan.state = PlanState::Completed;
             save_state(root, &plan)?;
@@ -1651,6 +1831,11 @@ pub fn render_report(report: &PlanReport) -> String {
     for d in &report.drift {
         out.push_str(&format!("drift: {d}\n"));
     }
+    // The closing block, whole: the same records the closing step prints,
+    // on demand and mid-wave.
+    for s in render_graded(&report.block, &report.scenarios) {
+        out.push_str(&format!("scenario: {s}\n"));
+    }
     let reqs: usize = report.derived.matched.values().map(Vec::len).sum();
     out.push_str(&format!(
         "{} tasks in {} waves, {} matched requirements: {}\n",
@@ -1741,7 +1926,8 @@ pub fn render_show(plan: &Plan, report: &PlanReport) -> String {
 pub fn scenarios_list(root: &Path, model: &Model) -> Result<Vec<String>, String> {
     let plan = load_active(root)?;
     let report = verify_plan(root, model, &plan)?;
-    Ok(render_block(&report.block))
+    let graded = grade_block(root, model, &report.block)?;
+    Ok(render_graded(&report.block, &graded))
 }
 
 /// The standalone brief `archi plan task show` renders: everything a
@@ -2278,9 +2464,20 @@ mod tests {
         let Step::Scenarios(lines) = &outcome.step else {
             panic!("after the cleanup wave comes the scenario step");
         };
+        // The record is the scenario whole: its state, its Gherkin, and the
+        // line that anchors it while nothing does.
         assert_eq!(
             lines,
-            &vec!["riders-lose-the-signal#a user logs in end to end".to_string()]
+            &vec![
+                "riders-lose-the-signal#a user logs in end to end — unanchored\n    \
+                 Feature: Riders lose the signal\n      \
+                 Given the carriage leaves the platform\n      \
+                 When the rider opens the door\n      \
+                 Then the door holds\n    \
+                 archi link add 'riders-lose-the-signal#a user logs in end to end' \
+                 <file#symbol> --kind indirect"
+                    .to_string()
+            ]
         );
         assert_eq!(&scenarios_list(&root, ws.model()).unwrap(), lines);
         assert!(active(&root).scenarios_displayed);

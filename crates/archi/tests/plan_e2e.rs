@@ -9,6 +9,7 @@
 mod util;
 
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -164,6 +165,88 @@ fn put_fact(root: &Path, slug: &str, title: &str, covers: &str, scenarios: &[&st
         scenarios: &block,
     }
     .write(root, slug, title);
+}
+
+/// The same fixture with the steps spelled out, so a test can reword one
+/// step and watch the witness part — `put_fact`'s block with its Gherkin
+/// under the test's control.
+fn put_fact_with_steps(
+    root: &Path,
+    slug: &str,
+    title: &str,
+    covers: &str,
+    scenarios: &[(&str, &[&str])],
+) {
+    let mut block = format!("Feature: {title}\n");
+    for (name, steps) in scenarios {
+        block.push_str(&format!("  Scenario: {name}\n"));
+        for step in *steps {
+            block.push_str(&format!("    {step}\n"));
+        }
+    }
+    util::Fact {
+        covers,
+        sources: "https://example.org/thread/42",
+        uses: "",
+        condition: "The carriage drops the network for minutes at a time.",
+        killer: "The condition ends.",
+        scenarios: &block,
+    }
+    .write(root, slug, title);
+}
+
+/// A directory whose `archi` is the built binary bound to `root`. A printed
+/// command is a line a person pastes into a shell, so the test pastes it
+/// into one: the quoting meets a real `sh`, not a splitter written to agree
+/// with it.
+fn shim(root: &Path) -> PathBuf {
+    let dir = util::scratch("archi-plan-e2e", "bin");
+    let path = dir.join("archi");
+    fs::write(
+        &path,
+        format!(
+            "#!/bin/sh\nexec \"{}\" \"$@\" --project \"{}\"\n",
+            env!("CARGO_BIN_EXE_archi"),
+            root.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    dir
+}
+
+/// Run one line through `sh`, exactly as it was printed.
+fn shell(bin: &Path, line: &str) -> (Option<i32>, String, String) {
+    let out = Command::new("sh")
+        .arg("-c")
+        .arg(line)
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                bin.display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .output()
+        .expect("sh runs");
+    (
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// The one `archi link add` line a transcript printed, trimmed of the
+/// bullet the caller marked it with.
+fn printed_link_add(out: &str) -> String {
+    let lines: Vec<&str> = out
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("archi link add"))
+        .collect();
+    assert_eq!(lines.len(), 1, "one command, for the one unanchored scenario: {out}");
+    lines[0].to_string()
 }
 
 /// Curate a minted task file the way a person does: own one requirement,
@@ -902,12 +985,12 @@ fn the_close_collects_the_wing_and_marks_what_lies_outside() {
     let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("all waves closed — scenarios:"), "{out}");
     assert_eq!(
-        out.matches("riders-lose-the-signal#the app opens with no network at all")
+        out.matches("riders-lose-the-signal#the app opens with no network at all — unanchored")
             .count(),
         1,
         "a fact covering two of the plan's nodes prints once: {out}"
     );
-    assert!(out.contains("tunnels-run-long#the tunnel ends"), "{out}");
+    assert!(out.contains("tunnels-run-long#the tunnel ends — unanchored"), "{out}");
     // The mark names the node paths the plan never built, and a fact whose
     // covered nodes the plan all holds prints clean.
     assert!(
@@ -928,13 +1011,25 @@ fn the_close_collects_the_wing_and_marks_what_lies_outside() {
         "{show}"
     );
     assert!(show.contains("scenario: tunnels-run-long#the tunnel ends"), "{show}");
-    // And so does the listing: the same block, numbered, in slug order.
+    // And so does the listing: the same block, numbered, in slug order —
+    // each scenario whole, with its state and the line that anchors it.
     let listed = ok(&root, &["plan", "scenarios", "list"]);
     assert!(!listed.contains("no scenarios"), "{listed}");
     assert_eq!(
         listed,
-        "1. riders-lose-the-signal#the app opens with no network at all\n\
-         2. tunnels-run-long#the tunnel ends\n\
+        "1. riders-lose-the-signal#the app opens with no network at all — unanchored\n    \
+         Feature: Riders lose the signal\n      \
+         Given the carriage leaves the platform\n      \
+         When the rider opens the door\n      \
+         Then the door holds\n    \
+         archi link add 'riders-lose-the-signal#the app opens with no network at all' \
+         <file#symbol> --kind indirect\n\
+         2. tunnels-run-long#the tunnel ends — unanchored\n    \
+         Feature: Tunnels run long\n      \
+         Given the carriage leaves the platform\n      \
+         When the rider opens the door\n      \
+         Then the door holds\n    \
+         archi link add 'tunnels-run-long#the tunnel ends' <file#symbol> --kind indirect\n\
          3. tunnels-run-long also covers Gate, Ledger — outside this plan\n"
     );
 
@@ -1111,6 +1206,244 @@ fn a_post_wing_plan_on_a_tree_with_no_wing_closes_without_a_refusal() {
     assert!(!out.contains("no world fact covers any node"), "{out}");
     assert_eq!(state_json(&root, "mvp")["state"], "completed");
     assert!(!root.join("archi/world").exists());
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The closing step hands back the work it already did: every collected
+/// scenario whole — the feature line and every step — with the state of its
+/// link beside it, and a ready `archi link add` under the ones nothing
+/// anchors
+/// (`archi/requirements/world-facts/the-closing-step-hands-back-the-work.md`).
+#[test]
+fn the_closing_step_prints_the_gherkin_the_state_and_the_command() {
+    let root = temp_project();
+    put_fact_with_steps(
+        &root,
+        "riders-lose-the-signal",
+        "Riders lose the signal",
+        "Store",
+        &[(
+            "the app opens with no network",
+            &[
+                "Given the rider boards",
+                "When the app opens",
+                "Then the rows are there",
+            ],
+        )],
+    );
+    put_fact_with_steps(
+        &root,
+        "tunnels-run-long",
+        "Tunnels run long",
+        "Auth",
+        &[(
+            "the tunnel ends",
+            &["Given the train is under the hill", "Then the session holds"],
+        )],
+    );
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
+    ok(&root, &["plan", "task", "add", "Auth", "--desc", "guard the door"]);
+    curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
+    curate(&root, "archi/plans/mvp/t2-auth.md", "service-hardening", "code/auth.rs");
+
+    // One of the two is anchored before the close; the other is not.
+    ok(
+        &root,
+        &[
+            "link",
+            "add",
+            "riders-lose-the-signal#the app opens with no network",
+            "code/store.rs",
+            "--kind",
+            "indirect",
+        ],
+    );
+    ok(&root, &["plan", "start"]);
+    ok(&root, &["plan", "next"]);
+    let out = ok(&root, &["plan", "next"]);
+
+    // The Gherkin whole: the feature line and every step of both.
+    assert!(out.contains("    Feature: Riders lose the signal"), "{out}");
+    assert!(out.contains("      Given the rider boards"), "{out}");
+    assert!(out.contains("      When the app opens"), "{out}");
+    assert!(out.contains("      Then the rows are there"), "{out}");
+    assert!(out.contains("    Feature: Tunnels run long"), "{out}");
+    assert!(out.contains("      Given the train is under the hill"), "{out}");
+    assert!(out.contains("      Then the session holds"), "{out}");
+
+    // The anchored one carries its state and no command.
+    assert!(
+        out.contains(
+            "riders-lose-the-signal#the app opens with no network — anchored, clean"
+        ),
+        "{out}"
+    );
+    // The unanchored one carries the line that anchors it, ref quoted for a
+    // shell, the code side left to the operator.
+    assert!(out.contains("tunnels-run-long#the tunnel ends — unanchored"), "{out}");
+    assert_eq!(
+        printed_link_add(&out),
+        "archi link add 'tunnels-run-long#the tunnel ends' <file#symbol> --kind indirect"
+    );
+
+    // A step reworded under an anchored scenario parts the witness, and the
+    // state names the side that moved — the listing answers the same way.
+    put_fact_with_steps(
+        &root,
+        "riders-lose-the-signal",
+        "Riders lose the signal",
+        "Store",
+        &[(
+            "the app opens with no network",
+            &[
+                "Given the rider boards the carriage",
+                "When the app opens",
+                "Then the rows are there",
+            ],
+        )],
+    );
+    let listed = ok(&root, &["plan", "scenarios", "list"]);
+    assert!(
+        listed.contains(
+            "riders-lose-the-signal#the app opens with no network — \
+             anchored, drifted: the scenario side moved"
+        ),
+        "{listed}"
+    );
+    assert!(listed.contains("      Given the rider boards the carriage"), "{listed}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The printed line is the product: a real `sh` reads it as written and the
+/// scenario is anchored — the quoting is what makes the render worth more
+/// than the name it replaced
+/// (`archi/requirements/world-facts/the-closing-step-hands-back-the-work.md`).
+#[test]
+fn the_printed_link_add_line_anchors_the_scenario_through_a_real_shell() {
+    let root = temp_project();
+    // A name with a space and an apostrophe: the two things a hand-quoted
+    // ref gets wrong.
+    let name = "the rider's app opens with no network";
+    put_fact_with_steps(
+        &root,
+        "riders-lose-the-signal",
+        "Riders lose the signal",
+        "Store",
+        &[(name, &["Given the rider boards", "Then the rows are there"])],
+    );
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
+    curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
+    ok(&root, &["plan", "start"]);
+    ok(&root, &["plan", "next"]);
+    let out = ok(&root, &["plan", "next"]);
+
+    let line = printed_link_add(&out);
+    assert!(
+        line.contains("'riders-lose-the-signal#the rider'\\''s app opens with no network'"),
+        "the apostrophe closes the quote and is escaped: {line}"
+    );
+
+    // The operator supplies only the code side; everything else runs as
+    // printed, through a shell that has never heard of this scenario.
+    let command = line.replace("<file#symbol>", "code/store.rs");
+    let bin = shim(&root);
+    let (code, stdout, stderr) = shell(&bin, &command);
+    assert_eq!(code, Some(0), "`{command}`:\n{stdout}\n{stderr}");
+
+    // The latch is satisfied by what the shell did: the plan closes and the
+    // scenario is named nowhere.
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("DONE"), "{out}");
+    assert!(!out.contains(name), "{out}");
+    assert_eq!(state_json(&root, "mvp")["state"], "completed");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// `plan verify` answers with the same three states on demand, while a wave
+/// is still open — the operator never has to reach the closing step to see
+/// where the block stands
+/// (`archi/requirements/world-facts/the-closing-step-hands-back-the-work.md`).
+#[test]
+fn plan_verify_prints_the_scenario_states_while_a_wave_is_still_open() {
+    let root = temp_project();
+    put_fact_with_steps(
+        &root,
+        "riders-lose-the-signal",
+        "Riders lose the signal",
+        "Store",
+        &[
+            ("the app opens with no network", &["Given the rider boards"]),
+            ("the rider signs in", &["Given the rider boards"]),
+            ("the tunnel ends", &["Given the rider boards"]),
+        ],
+    );
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
+    curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
+
+    // One clean, one whose code moved under it, one nothing reaches.
+    ok(
+        &root,
+        &[
+            "link",
+            "add",
+            "riders-lose-the-signal#the rider signs in",
+            "code/auth.rs",
+            "--kind",
+            "indirect",
+        ],
+    );
+    ok(
+        &root,
+        &[
+            "link",
+            "add",
+            "riders-lose-the-signal#the tunnel ends",
+            "code/store.rs",
+            "--kind",
+            "indirect",
+        ],
+    );
+    ok(&root, &["plan", "start"]);
+    fs::write(
+        root.join("code/store.rs"),
+        "pub struct Store;\nimpl Store {\n    pub fn put(&mut self, n: u8) { let _ = n; }\n}\n",
+    )
+    .unwrap();
+
+    // Wave 1 is in flight — nothing closed, nothing latched.
+    assert!(ok(&root, &["plan", "current-wave"]).contains("wave 1 in flight"));
+    let out = ok(&root, &["plan", "verify"]);
+    assert!(
+        out.contains("scenario: riders-lose-the-signal#the app opens with no network — unanchored"),
+        "{out}"
+    );
+    assert!(
+        out.contains("scenario: riders-lose-the-signal#the rider signs in — anchored, clean"),
+        "{out}"
+    );
+    assert!(
+        out.contains(
+            "scenario: riders-lose-the-signal#the tunnel ends — \
+             anchored, drifted: the code side moved"
+        ),
+        "{out}"
+    );
+    assert!(out.contains("    Feature: Riders lose the signal"), "{out}");
+    assert!(out.contains("      Given the rider boards"), "{out}");
+    assert_eq!(
+        printed_link_add(&out),
+        "archi link add 'riders-lose-the-signal#the app opens with no network' \
+         <file#symbol> --kind indirect"
+    );
 
     fs::remove_dir_all(&root).unwrap();
 }
