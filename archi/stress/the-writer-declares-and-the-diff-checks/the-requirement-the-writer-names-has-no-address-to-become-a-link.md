@@ -1,6 +1,6 @@
 ---
 affects: [Links, Links.Journal, DocMint]
-outcome: pending
+outcome: breaking
 ---
 
 # the requirement the writer names has no address to become a link
@@ -28,3 +28,14 @@ requirement" has to be answered by reading every closed plan that ever owned the
 is the archaeology the whole tool exists to abolish.
 
 ## Resolution
+
+The journal gains the third shape: derived `a-requirement-is-addressable-in-the-journal`,
+priced by `the-journal-carries-what-it-is-asked-about`. The cheap path — the pair as a plan
+record — was refused for the reason this stressor's own attractor names: a plan folder is
+the record of one unit of work, and the pair would be gone from every reading that outlives
+it.
+
+The permanence is real and unmitigated: append-only truth means `req:<slug>` is fixed from
+its first entry, chosen before anybody has used it enough to know it was right. The one
+hedge is the prefix, which leaves room for a fourth kind of address beside it. A bare slug
+would have left none.

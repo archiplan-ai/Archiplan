@@ -1,6 +1,6 @@
 ---
 affects: [Links.Grader, Links.Journal, Planner]
-outcome: pending
+outcome: breaking
 ---
 
 # the declaration is true when written and false by the next wave
@@ -26,3 +26,15 @@ on the same failure it was built to prevent — a written claim that the code ha
 behind — with the difference that it now looks authoritative.
 
 ## Resolution
+
+Drift stops being advisory for declared rows: derived
+`a-drifted-declaration-refuses-the-wave-that-moved-it`. The refusal lands on the wave that
+moved the symbol, because the person who just rewrote it knows whether it still answers what
+it answered, and nobody reading the audit three months later does.
+
+Confining the refusal to declared rows is what makes it landable at all. The 184 rows
+standing advisory in this tree were made by inference and nobody leaned on them; promoting
+all of them at once would wall the next wave anybody runs. What the round does not settle is
+the repin itself — `a-fold-may-move-a-body-never-an-interface` grants it over a body, and
+that grant is the loophole this pressure would use if the interface test is ever drawn
+loosely.

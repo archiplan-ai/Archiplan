@@ -1,6 +1,6 @@
 ---
 affects: [Links.Capture, Links.Journal, Planner]
-outcome: pending
+outcome: breaking
 ---
 
 # the writer names a port it did not answer
@@ -26,3 +26,13 @@ the record. Coverage reports rise. The reverse view — which code answers this 
 answers confidently and wrongly, and it is now rendered wherever a reader looks.
 
 ## Resolution
+
+The pressure holds and nothing in the proposal answers it. A declaration cannot be verified
+by anything the tool can compute, so the answer is not a check but a second name the writer
+must supply: derived `a-declaration-names-the-test-that-proves-it`.
+
+Naming the test does not make the pair true. It moves the claim from "I say so" to "this
+says so", which a reader settles in one step, and it costs the writer nothing new — under
+TDD the test exists before the implementation, and the task's verifications are already the
+contract. What remains unanswered is a writer who names a real, passing test that proves
+something other than the pair. Nothing here catches that, and nothing proposed would.

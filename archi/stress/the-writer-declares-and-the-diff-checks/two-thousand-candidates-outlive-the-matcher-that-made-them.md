@@ -1,6 +1,6 @@
 ---
 affects: [Links.Journal, Links.Grader]
-outcome: pending
+outcome: breaking
 ---
 
 # two thousand candidates outlive the matcher that made them
@@ -26,3 +26,14 @@ and it took the confirmed and authored rows down with it. The reverse view is th
 over a set that is mostly noise, and the first thing it says about any element is wrong.
 
 ## Resolution
+
+Mark them, do not retire them: derived `the-journal-says-which-rule-made-a-row`. Every row
+records what produced it — inferred, declared or authored — and the reverse view answers
+from the last two alone. The 2036 inferred rows keep standing and keep grading, readable as
+history and no longer read as evidence.
+
+A mass edit of append-only truth was the obvious escape and is refused for the reason the
+journal exists: a record that can be rewritten when it becomes inconvenient is not a record.
+What the round does not solve is the audit's decay list, which is already past reading at
+229 rows and will not shrink by being labelled. That is left standing and named here so the
+next round can aim at it.

@@ -1,6 +1,6 @@
 ---
 affects: [Links.Capture, Planner]
-outcome: pending
+outcome: breaking
 ---
 
 # two tasks change one symbol and each expects the other to declare it
@@ -26,3 +26,13 @@ which is a coin toss, and the reverse view reports that coin toss as the answer 
 built what.
 
 ## Resolution
+
+The rule is "both", written down rather than left to whichever reading the implementation
+happens to take: derived `every-task-that-touched-a-symbol-declares-it`. A symbol two tasks
+answered carries two pairs, each naming its task, so the record reads as two claims instead
+of one duplicated.
+
+"Either" was the attractor precisely because it never blocks a wave, and that is what makes
+it the wrong answer: it buys a green wave with a coin toss about who built what. Capture
+already marks such files `shared`, so the owing set costs nothing to derive — only the
+decision, which now has consequences it did not have while candidates were cheap.

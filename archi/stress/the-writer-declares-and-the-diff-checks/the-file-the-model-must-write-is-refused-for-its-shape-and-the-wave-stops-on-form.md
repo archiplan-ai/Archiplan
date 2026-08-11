@@ -1,6 +1,6 @@
 ---
 affects: [Planner, DocMint]
-outcome: pending
+outcome: breaking
 ---
 
 # the file the model must write is refused for its shape and the wave stops on form
@@ -27,3 +27,12 @@ name, having stopped checking anything, and the round that argued declaration is
 than inference ends with a declaration nobody validates.
 
 ## Resolution
+
+The answer is a refusal that costs one read to fix, not a laxer parser: derived
+`the-declaration-refusal-repairs-without-guessing`. Line, expectation, finding — and every
+field stays required, because an optional field is where a file that always parses begins.
+
+`refusals-name-the-continuation` already claims this for the whole tool, and the derived
+requirement restates it because this reader is not this writer: the sub-agent has returned
+by the time the parser speaks, and the orchestrator must repair a format it did not choose.
+That case did not exist when the standing requirement was written.

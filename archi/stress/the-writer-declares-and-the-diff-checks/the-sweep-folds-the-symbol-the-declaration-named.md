@@ -1,6 +1,6 @@
 ---
 affects: [Links.Grader, Planner]
-outcome: pending
+outcome: accepted
 ---
 
 # the sweep folds the symbol the declaration named
@@ -27,3 +27,14 @@ stamp — which quietly grants the permission that `the-declaration-is-true-when
 false-by-the-next-wave` says must never be automatic.
 
 ## Resolution
+
+Accepted, and priced by `a-fold-may-move-a-body-never-an-interface`. The sweep may move code
+a declaration named and the repin follows; it may not change what that code offers. The line
+is one the tool already computes, since a link pins interface and body apart and the sweep's
+own probe reports `body moved; the watched interface holds`.
+
+The consequence kept is the one the attractor named: a repin over a body becomes routine,
+and a routine repin is a rubber stamp. We keep it because the opposite failure is silent and
+permanent — code nobody may tidy rots in place, and the tool built to keep design and code
+together becomes the reason they cannot be brought back together. The first sign the line was
+drawn wrong will be a repinned pair that no longer answers what it says.
