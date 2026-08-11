@@ -11,7 +11,9 @@ deferred:
 orphan: it says the condition is recorded and the model has not reached it yet.
 `world_uncovered` reports it so the gap stays visible, and `world_orphan` narrows to the
 fact that nothing names in `uses` and that carries no scenarios either — dead weight
-rather than early work.
+rather than early work. A missing or empty `Scenarios` block is itself a blocking error, so
+that state is reachable only beside one: `world_orphan` marks a file that is broken and
+unreferenced, and never a healthy fact.
 
 ## System Context
 

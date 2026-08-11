@@ -8,9 +8,13 @@ deferred:
 # Coverage reaches down the graph
 
 A node is covered when a world fact names it in `covers`, when it is reachable from such a
-node along the declared connection edges, or when it is a child of a covered node. On a
-tree holding at least one fact, `check` reports `world_unreached` for every element outside
-that set. On a tree with no facts it reports nothing at all, because a project that has not
+node along the declared connection edges, or when it is a child of a covered node. Elements
+classified as `Data` are outside the question entirely and are never reported: a payload rides
+inside a connection and is never its destination, so asking whether a behavior arrives at one
+is a question of the wrong kind. Of the rest, an element that `archi/world/.worldignore` names
+as internal is not reported either — `an-internal-element-says-so` owns that file. On a tree
+holding at least one fact, `check` reports `world_unreached` for every element still outside
+the set. On a tree with no facts it reports nothing at all, because a project that has not
 opted into the wing is not behind on it.
 
 ## System Context
@@ -39,5 +43,7 @@ it; silent when the wing is empty).
 - test — an element reachable from a covered element is not reported
 - test — a child of a covered element is not reported
 - test — an element nothing reaches is reported by path
+- test — a Data-classified element is never reported, covered or not
+- test — an element named in `.worldignore` is not reported
 - test — a tree with no world facts reports nothing about coverage
 - test — the finding never changes the exit code

@@ -23,7 +23,8 @@ envelope answers it for the reader who did not know to ask.
 ## Satisfy
 
 `Query` (resolves the covering facts for the elements in a composed slice and carries
-them in the answer). `Cli` (`read` and `query` render them in the human and JSON forms).
+them in the answer). `Cli` (`read` and `query` both answer in JSON and have no human
+rendering, so the facts ride that one form under their own key).
 
 - test — a slice naming a covered element carries that fact's statement and scenarios
 - test — a slice naming an uncovered element carries the slice alone

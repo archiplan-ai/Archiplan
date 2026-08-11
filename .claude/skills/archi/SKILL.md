@@ -1,6 +1,6 @@
 ---
 name: archi
-description: Drive the archiplan spec workflow — capture intent, derive requirements, model, harden by stress, version. Use when you architect a system with archiplan, greenfield or brownfield. Planning is the archi-plan skill. Execution is the archi-implement skill.
+description: Drive the archiplan spec workflow — capture intent, capture the world facts it rests on, derive requirements, model, harden by stress, version. Use when you architect a system with archiplan, greenfield or brownfield. Planning is the archi-plan skill. Execution is the archi-implement skill.
 ---
 
 > **Skill freshness — the first step.** In an initialized project, run
@@ -197,7 +197,26 @@ once.
    question does belong here: what is this project willing to be bad at?
    Record the answers as decisions under `archi/decisions/` with `prefer`
    and `over`. They are the first entries of the recorded priorities.
-3. **Derive requirements.** One claim is one file, and the command makes it:
+3. **Capture the world.** The conditions outside the system that make
+   the behavior necessary are records of their own under `archi/world/`.
+   They come before the requirements, because a condition from outside
+   decides which claims are requirements at all. `archi world add
+   "<title>"` mints the skeleton. You write the fact in one line, the
+   paragraph saying what condition this is and why the behavior follows,
+   `## What kills this`, and `## Scenarios` in the Gherkin subset. The
+   frontmatter points three ways: `covers` names the model elements the
+   fact conditions, `sources` names the material it rests on, `uses`
+   names the facts it presumes. Write the fact in the world's own words,
+   **without the nouns of the model** — a fact that speaks the model is a
+   requirement in costume, and `check` says so. An empty `sources` is the
+   hypothesis state. Ask what people do today instead: a condition nobody
+   can name a workaround for is a wish, and it belongs in no file.
+   `archi world rm <slug>` retires one, and it refuses while a plan or a
+   code-link stands on it. `archi world ls [--covers <element>]` is the
+   traversal from a node to the conditions that rule it. A project that
+   stands without a wing gains one through the `archi-migrate-world`
+   skill.
+4. **Derive requirements.** One claim is one file, and the command makes it:
 
    ```
    archi req add "<title>" --intent <folder> --kind functional|non-functional --origin intent
@@ -214,7 +233,7 @@ once.
    Any other heading in the file opens a subrequirement. Leave
    requirements open: `unsatisfied_requirement` findings are work to do,
    not errors.
-4. **Draft the model.** Read the ontology first with `archi query --top`.
+5. **Draft the model.** Read the ontology first with `archi query --top`.
    The unclassified nodes are the types of the preset, and each one
    carries its definition. Classify every term against them (`Service
    type_of AuthService`) or against types you define. Then write nodes,
@@ -238,8 +257,8 @@ once.
      (K̄ 1–3) is the target: changes propagate without cascading. CHAOTIC
      makes every change ripple, so decompose the hotspots before you
      refactor.
-5. **Save.** `archi version save -m "<why>"` seals the render.
-6. **Stress.** Run an adversarial round against the version you just
+6. **Save.** `archi version save -m "<why>"` seals the render.
+7. **Stress.** Run an adversarial round against the version you just
    saved.
 
    **What the round writes.** The round writes stressors, verdicts,
@@ -416,17 +435,17 @@ once.
    still counts it as a break. `version save` closes the round, and until
    then the report is incomplete.
 
-   Repeat steps 4 to 6 until a round survives. That version is the
+   Repeat steps 5 to 7 until a round survives. That version is the
    hardened spec. After that final `version save`, put one question to
    the user through the poll tool with two options: **commit the spec
    work now** on the worktree's branch, or **leave the tree as it is**.
    Never commit unasked.
-7. **Plan.** Use the `archi-plan` skill. It authors the charter with a
+8. **Plan.** Use the `archi-plan` skill. It authors the charter with a
    user-polled stack and its infrastructure, the tasks per node, the
    requirement ownership, the named verifications and the scenarios.
    `plan use` refuses on an unsaved model, so save first. To execute the
    plan, use the `archi-implement` skill.
-8. **Steady state.** Run `archi check` and `archi link verify` in CI. Run
+9. **Steady state.** Run `archi check` and `archi link verify` in CI. Run
    `archi link audit` for code that moved with no spec account, spec that
    no code realizes, and decayed evidence.
 

@@ -8,8 +8,8 @@ deferred:
 # The scenario is the address, not the step
 
 A link into the wing addresses a scenario: `<fact-slug>#<scenario name>`. Steps are not
-addressable. Rewording a step changes nothing about the link, because the step text was
-never the reference; renaming a scenario breaks it, and that break is a located error the
+addressable, and the step text is never the reference. Renaming a scenario breaks the
+address, and that break is a located error the
 operator repairs with `link repin`.
 
 ## System Context
@@ -29,7 +29,7 @@ fact cannot share a name). `Links` (resolves `<fact-slug>#<scenario name>` as a 
 grades it as it grades any other, and reports a renamed scenario as an unresolved ref).
 
 - test — a link to `<fact-slug>#<scenario name>` resolves and verifies
-- test — rewording a step under that scenario leaves the link untouched
+- test — rewording a step leaves the address resolving, and the digest decides the link
 - test — renaming the scenario reports the link as unresolved
 - test — `link repin` moves the link onto the new scenario name
 - test — two scenarios with the same name inside one fact raise a located error

@@ -9,9 +9,14 @@ deferred:
 
 `archi-migrate-world` is the skill that gives a standing project its world facts. It reads
 what the project already claims — the world prose inside its intents, and the free-text
-story blocks its plans authored — and turns candidates into facts one at a time, by
-interview. Its gate is the workaround: an operator who cannot say what people do today
-instead of this has no condition, only a wish, and the skill writes nothing. Its output is
+story blocks its plans authored, and the tests its suites already name — and turns
+candidates into facts one at a time, by interview. Its gate is the workaround: an operator
+who cannot say what people do today instead of this has no condition, only a wish, and the
+skill writes nothing. It asks by offering concrete options wherever answers have shapes,
+because an open question phrased in the abstract stalls where the same question with two or
+three candidate answers is answered at once. And a first "nothing would make this false" is
+not a verdict: the skill asks again with concrete shapes, because a claim that looks like an
+axiom is far more often a claim stated badly. Its output is
 facts under `archi/world/` plus a brief naming what did not map and why. It deletes
 nothing.
 
@@ -37,10 +42,15 @@ observation.
 
 `Scaffold` (installs `.claude/skills/archi-migrate-world/SKILL.md` byte-equal to the
 binary's embedded copy, as it installs the other skills). `AgentBrief` (the durable carrier
-of the procedure: the interview, the workaround gate and the brief it must return).
+of the procedure: the interview, the workaround gate, the options it must offer instead of
+open questions, the second ask on an apparent axiom, the test suites it reads for candidates,
+and the brief it must return).
 
 - test — `init` and `sync-skills` install the skill file byte-equal to the embedded copy
 - test — the skill text names the workaround as the gate that stops a fact being written
+- test — the skill text tells the reader to offer options rather than ask open questions
+- test — the skill text tells the reader to ask again after a first "nothing would falsify it"
+- test — the skill text names the test suites as a third place candidates come from
 - test — the skill text requires a brief of what did not map
 - test — a fact the skill mints names its origin file in `sources` and reports nothing
 - test — a migrated project passes `check` with no world finding
