@@ -422,6 +422,93 @@ fn a_migrated_fact_rests_on_its_origin_file_and_reports_nothing() {
     fs::remove_dir_all(&root).unwrap();
 }
 
+/// The machine-provable half of the migration, walked as one flow: a project
+/// that stands from before the wing checks green with no wing at all, the
+/// upgrade hands it the verb and the procedure without moving the check by a
+/// byte, and the first fact written the way the skill prescribes lands clean
+/// (`archi/requirements/world-facts/a-skill-migrates-a-standing-project-into-the-wing.md`,
+/// `archi/requirements/world-facts/the-wing-arrives-without-noise.md`).
+///
+/// Running the procedure is not machine-provable: the skill is a text a
+/// person or an agent reads, and no test can read an intent and decide which
+/// of its claims is a condition of the world. What the test proves is the
+/// ground the reader stands on before and after.
+#[test]
+fn a_pre_wing_project_upgrades_stays_green_and_takes_its_first_fact() {
+    let root = temp_dir();
+    ok_in(&root, &["init", "."]);
+    fs::write(
+        root.join("archi/src/model.arch"),
+        "def node AuthService:\n  port handle_login\n",
+    )
+    .unwrap();
+    // The material the skill reads: the intent the standing project captured.
+    let intent = root.join("archi/requirements/riding");
+    fs::create_dir_all(&intent).unwrap();
+    fs::write(
+        intent.join("riding.md"),
+        "# Riding\n\nPeople read on the move, and the line drops.\n",
+    )
+    .unwrap();
+
+    // The project as it stood before the wing: the old block, the old
+    // workflow skill, no migration skill — and no `archi/world/` at all.
+    fs::write(
+        root.join("CLAUDE.md"),
+        "<!-- archi:begin -->\n## Archiplan\n\nthe briefing as it stood\n<!-- archi:end -->\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join(".claude/skills/archi/SKILL.md"),
+        "# Archi workflow\n\nthe loop as it stood\n",
+    )
+    .unwrap();
+    fs::remove_dir_all(root.join(".claude/skills/archi-migrate-world")).unwrap();
+    assert!(!root.join("archi/world").exists());
+
+    // It checks green, and the wing it never opted into says nothing.
+    let before = ok_in(&root, &["check"]);
+    assert!(!before.contains("world"), "{before}");
+
+    // The upgrade: the verb in the block, the procedure in a skill beside
+    // the others — and the check does not move by a byte.
+    let out = ok_in(&root, &["sync-skills"]);
+    assert!(
+        out.contains("created  .claude/skills/archi-migrate-world/SKILL.md"),
+        "{out}"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join(".claude/skills/archi-migrate-world/SKILL.md")).unwrap(),
+        SKILL_MIGRATE_WORLD
+    );
+    assert!(fs::read_to_string(root.join("CLAUDE.md")).unwrap().contains("archi world add"));
+    assert_eq!(ok_in(&root, &["check"]), before);
+
+    // The first fact, written as the skill prescribes: the condition, its
+    // killer, its scenarios, the node it conditions, and the intent the
+    // claim was lifted from as its source. It lands clean, and the wing is
+    // born counted.
+    util::Fact {
+        covers: "AuthService",
+        sources: "archi/requirements/riding/riding.md",
+        uses: "",
+        condition: "The carriage drops the network for minutes at a time, so a reader on the \
+                    move works from what the device already holds.",
+        killer: "Trackside coverage that never drops.",
+        scenarios: "Feature: Offline open\n  \
+                    Scenario: the app opens with no network\n    \
+                    Given the device has no network\n    When the reader opens the app\n    \
+                    Then the last synced view appears\n",
+    }
+    .write(&root, "trains-lose-the-signal", "Trains lose the signal");
+
+    let after = ok_in(&root, &["check"]);
+    assert!(after.contains("world — 1 facts · 0 ungrounded"), "{after}");
+    assert!(!after.contains("world_"), "{after}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
 #[test]
 fn a_nested_init_names_the_enclosing_root() {
     let root = temp_dir();

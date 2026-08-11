@@ -153,6 +153,82 @@ fn findings_stay_advisory_and_do_not_withhold_the_read() {
     fs::remove_dir_all(&root).unwrap();
 }
 
+/// A fact written before the model reaches it: the wing says which fact
+/// covers nothing yet and which elements no recorded behavior arrives at,
+/// and none of it fails the tree — the wing's states are advisory like every
+/// finding, and the read still closes the check
+/// (`archi/requirements/world-facts/a-fact-may-stand-before-the-model-does.md`,
+/// `archi/requirements/world-facts/coverage-reaches-down-the-graph.md`,
+/// `archi/requirements/world-facts/the-check-counts-the-wing.md`).
+#[test]
+fn the_wing_names_what_it_never_reaches_and_the_tree_stands() {
+    let root = temp_project(COUPLED);
+    // One fact on the hotspot, and one recorded before the model reached it.
+    util::Fact {
+        covers: "X",
+        sources: "https://example.org/thread/42",
+        uses: "",
+        condition: "The carriage drops the network for minutes at a time.",
+        killer: "Trackside coverage that never drops.",
+        scenarios: "Feature: Offline open\n  \
+                    Scenario: the app opens with no network\n    \
+                    Given the device has no network\n    When the user opens the app\n    \
+                    Then the last synced view appears\n",
+    }
+    .write(&root, "trains-lose-the-signal", "Trains lose the signal");
+    util::Fact {
+        covers: "",
+        sources: "https://example.org/thread/77",
+        uses: "",
+        condition: "The guard walks the length of the platform every hour.",
+        killer: "The walk stops.",
+        scenarios: "Feature: The walk\n  \
+                    Scenario: the guard reaches the last door\n    \
+                    Given the guard leaves the first door\n    When the walk ends\n    \
+                    Then every door was tried\n",
+    }
+    .write(&root, "the-guard-walks-the-line", "The guard walks the line");
+
+    let out = ok(&root, &["check"]);
+
+    // Every node the coverage never arrives at, named once; the covered one
+    // is not among them.
+    for element in ["A", "B", "C", "P", "Q"] {
+        assert!(
+            out.contains(&format!(
+                "world_unreached: {element} — no world fact reaches it"
+            )),
+            "{out}"
+        );
+    }
+    assert!(!out.contains("world_unreached: X"), "{out}");
+    // The fact the model has not reached says so, and stands.
+    assert!(
+        out.contains("world fact `the-guard-walks-the-line`: world_uncovered"),
+        "{out}"
+    );
+    assert!(!out.contains("world fact `trains-lose-the-signal`"), "{out}");
+    // None of it withholds the read, and the wing closes on its own count.
+    assert!(out.contains("nkp — N=6 · E=4"), "{out}");
+    assert!(out.contains("world — 2 facts · 0 ungrounded"), "{out}");
+
+    // The same picture in the envelope, and the status stays ok.
+    let json = ok(&root, &["check", "--json"]);
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["status"], "ok", "{json}");
+    assert_eq!(v["world"]["facts"], 2, "{json}");
+    let unreached: Vec<&str> = v["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["kind"] == "world_unreached")
+        .map(|f| f["element"].as_str().unwrap())
+        .collect();
+    assert_eq!(unreached, ["A", "B", "C", "P", "Q"], "{json}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
 #[test]
 fn errors_withhold_the_read() {
     // A tampered archive is an error: the check fails and earns no read.

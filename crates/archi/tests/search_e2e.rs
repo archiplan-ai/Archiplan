@@ -69,6 +69,25 @@ fn docs(root: &Path) {
     );
 }
 
+/// The wing: one fact on the limiter, written the way a fact is written —
+/// about the world, without the nouns of the model
+/// (`archi/requirements/world-facts/the-fact-speaks-the-world-and-check-says-when-it-does-not.md`).
+fn wing(root: &Path) {
+    util::Fact {
+        covers: "RateLimiter",
+        sources: "https://example.org/thread/42",
+        uses: "",
+        condition: "Stolen pairs arrive from one bot farm in bursts of thousands, \
+                    minutes apart.",
+        killer: "The farm goes quiet for a year.",
+        scenarios: "Feature: The burst\n  \
+                    Scenario: the burst arrives\n    \
+                    Given a burst of stolen pairs\n    When the pairs arrive at once\n    \
+                    Then the organic traffic is unaffected\n",
+    }
+    .write(root, "the-farm-replays-stolen-pairs", "The farm replays stolen pairs");
+}
+
 fn run(root: &Path, args: &[&str]) -> (bool, String, String) {
     let out = Command::new(env!("CARGO_BIN_EXE_archi"))
         .args(args)
@@ -155,6 +174,51 @@ fn a_dark_model_keeps_doc_hits_and_the_exit_stays_zero() {
             .all(|h| h["kind"] != "element"),
         "{out}"
     );
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The phrase path over the wing, end to end: a fact is written about the
+/// world and never in the nouns of the model, so an architecture phrase
+/// finds nothing there — and the empty answer names the traversal that does
+/// answer, which then answers
+/// (`archi/requirements/world-facts/each-retrieval-path-names-the-other.md`,
+/// `archi/decisions/the-wing-is-reached-by-traversal.md`).
+#[test]
+fn an_empty_search_over_the_wing_names_the_traversal_that_answers() {
+    let root = temp_project();
+    docs(&root);
+    wing(&root);
+
+    // The phrase an operator has: it finds the element and the requirement,
+    // and over the wing it finds nothing at all — the exit stays zero, and
+    // the answer names the other door.
+    let out = ok(&root, &["search", "rate", "limiting"]);
+    assert!(out.contains("element     RateLimiter"), "{out}");
+    assert!(!out.contains("the-farm-replays-stolen-pairs"), "{out}");
+    let out = ok(&root, &["search", "rate", "limiting", "--kind", "world"]);
+    assert!(!out.contains("the-farm-replays-stolen-pairs"), "{out}");
+    assert!(
+        out.contains("a world fact is reached from the element it conditions: \
+                      `archi world ls --covers <element>`"),
+        "{out}"
+    );
+
+    // The named traversal, run with the element the phrase was about: the
+    // fact the search could not reach, with its path.
+    let out = ok(&root, &["world", "ls", "--covers", "RateLimiter"]);
+    assert!(
+        out.contains(
+            "the-farm-replays-stolen-pairs  archi/world/the-farm-replays-stolen-pairs.md"
+        ),
+        "{out}"
+    );
+
+    // The note rides an empty answer alone: a phrase out of the fact itself
+    // finds it, and carries no such line.
+    let out = ok(&root, &["search", "bot", "farm", "--kind", "world"]);
+    assert!(out.contains("the-farm-replays-stolen-pairs"), "{out}");
+    assert!(!out.contains("archi world ls --covers"), "{out}");
+
     fs::remove_dir_all(&root).unwrap();
 }
 

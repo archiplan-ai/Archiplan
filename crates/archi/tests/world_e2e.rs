@@ -8,6 +8,7 @@
 mod util;
 
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -128,6 +129,212 @@ fn refuse(root: &Path, args: &[&str]) -> (Option<i32>, String) {
 
 fn parsed(text: &str) -> Value {
     serde_json::from_str(text).unwrap_or_else(|e| panic!("json: {e}\n{text}"))
+}
+
+/// A directory whose `archi` is the built binary bound to `root`. A printed
+/// continuation is a line a person pastes into a shell, so the test pastes
+/// it into one: the quoting, the `&&` and the trailing comment all meet a
+/// real `sh`, not a parser written to agree with them.
+fn shim(root: &Path) -> PathBuf {
+    let dir = util::scratch("archi-world-e2e", "bin");
+    let path = dir.join("archi");
+    fs::write(
+        &path,
+        format!(
+            "#!/bin/sh\nexec \"{}\" \"$@\" --project \"{}\"\n",
+            env!("CARGO_BIN_EXE_archi"),
+            root.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    dir
+}
+
+/// Run one line through `sh`, exactly as it was printed.
+fn shell(bin: &Path, line: &str) -> (Option<i32>, String, String) {
+    let out = Command::new("sh")
+        .arg("-c")
+        .arg(line)
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                bin.display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .output()
+        .expect("sh runs");
+    (
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// The command lines of a refusal — every line the head line does not carry.
+fn commands(refusal: &str) -> Vec<String> {
+    refusal
+        .lines()
+        .skip(1)
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect()
+}
+
+/// The whole first flow, end to end: the operator mints the skeleton, fills
+/// the prose, and `check` holds the file the whole way — first for the slots
+/// nobody wrote, then for the references that resolve to nothing — and lets
+/// go the moment the record is whole
+/// (`archi/requirements/world-facts/one-verb-mints-the-world-fact.md`,
+/// `archi/requirements/world-facts/the-header-points-three-ways.md`).
+#[test]
+fn the_check_holds_the_minted_fact_until_it_is_whole() {
+    let (_primary, wt) = temp_project();
+    ok(&wt, &["world", "add", "Trains lose the signal"]);
+
+    // The skeleton alone: one located error per empty slot, and the check
+    // refuses — the mint hands back a worklist, not a finished record.
+    let (code, _out, err) = run(&wt, &["check"]);
+    assert_eq!(code, Some(1), "{err}");
+    assert_eq!(
+        err.matches("archi/world/trains-lose-the-signal.md")
+            .count(),
+        3,
+        "{err}"
+    );
+    assert!(err.contains("a world fact needs a summary paragraph"), "{err}");
+    assert!(err.contains("`What kills this` holds nothing"), "{err}");
+    assert!(err.contains("`Scenarios` holds nothing"), "{err}");
+
+    // The prose lands, but the three lists point at nothing: an element no
+    // model declares, a file no tree holds, a fact no wing holds.
+    fact(
+        &wt,
+        "trains-lose-the-signal",
+        "Trains lose the signal",
+        "Gate",
+        "notes/ghost.md",
+        "tunnels-run-long",
+    );
+    let (code, _out, err) = run(&wt, &["check"]);
+    assert_eq!(code, Some(1), "{err}");
+    assert!(err.contains("covers names no element `Gate`"), "{err}");
+    assert!(err.contains("`sources` names no `notes/ghost.md`"), "{err}");
+    assert!(
+        err.contains("uses names no world fact `tunnels-run-long`"),
+        "{err}"
+    );
+    // The slots are written now, and nothing says otherwise.
+    assert!(!err.contains("holds nothing"), "{err}");
+
+    // Every reference resolves: the element the model declares, a file that
+    // stands in the tree, and no dependency at all.
+    put(&wt, "notes/line.md", "the ride, written down\n");
+    fact(
+        &wt,
+        "trains-lose-the-signal",
+        "Trains lose the signal",
+        "AuthService",
+        "notes/line.md",
+        "",
+    );
+    let (code, out, err) = run(&wt, &["check"]);
+    assert_eq!(code, Some(0), "{out}{err}");
+    assert!(!err.contains("archi/world/"), "{err}");
+    assert!(out.contains("world — 1 facts · 0 ungrounded"), "{out}");
+}
+
+/// The whole retirement flow: a fact a dependant, a link and an open plan
+/// all hold refuses once, with the ordered commands that clear each hold —
+/// and each of those lines, pasted into a shell as printed, clears its own
+/// (`archi/requirements/world-facts/the-refusal-is-an-ordered-continuation.md`,
+/// `archi/requirements/world-facts/removal-names-the-code-it-strands.md`,
+/// `archi/requirements/world-facts/retirement-refuses-a-plan-in-flight.md`).
+#[test]
+fn the_held_removal_hands_back_the_commands_that_clear_it() {
+    let (_primary, wt) = temp_project();
+    put(&wt, "notes/line.md", "the ride, written down\n");
+    put(&wt, "code/app.rs", "pub fn open() -> bool { true }\n");
+    fact(
+        &wt,
+        "trains-lose-the-signal",
+        "Trains lose the signal",
+        "AuthService",
+        "notes/line.md",
+        "",
+    );
+    // A second fact rests on it.
+    fact(
+        &wt,
+        "tunnels-run-long",
+        "Tunnels run long",
+        "RateLimiter",
+        "notes/line.md",
+        "trains-lose-the-signal",
+    );
+    // A link anchors one of its scenarios in code.
+    ok(
+        &wt,
+        &[
+            "link",
+            "add",
+            "trains-lose-the-signal#the app opens with no network",
+            "code/app.rs",
+            "--kind",
+            "indirect",
+        ],
+    );
+    // And a plan in flight carries it: the task on the node the fact covers.
+    ok(&wt, &["version", "save", "-m", "first"]);
+    ok(&wt, &["plan", "use", "offline-open"]);
+    ok(&wt, &["plan", "task", "add", "AuthService", "--desc", "hold the door"]);
+    assert!(
+        ok(&wt, &["plan", "task", "show", "t1"]).contains("fact: trains-lose-the-signal"),
+        "the plan carries the fact"
+    );
+
+    // One refusal for all three, and nothing retired.
+    let (code, err) = refuse(&wt, &["world", "rm", "trains-lose-the-signal"]);
+    assert_eq!(code, Some(1));
+    let head = err.lines().next().expect("a head line");
+    assert!(head.contains("1 plan in flight"), "{err}");
+    assert!(head.contains("1 stranded link"), "{err}");
+    assert!(head.contains("1 dependant fact"), "{err}");
+    let lines = commands(&err);
+    assert_eq!(lines.len(), 3, "{err}");
+    assert!(
+        lines[0].starts_with("archi plan use offline-open && archi plan close"),
+        "{err}"
+    );
+    assert!(
+        lines[1].starts_with(
+            "archi link rm --spec 'trains-lose-the-signal#the app opens with no network' --yes"
+        ),
+        "{err}"
+    );
+    assert!(lines[2].starts_with("archi world rm tunnels-run-long"), "{err}");
+    assert!(err.contains("code/app.rs"), "the line names the code it strands: {err}");
+    assert!(wt.join("archi/world/trains-lose-the-signal.md").is_file());
+    assert!(wt.join("archi/world/tunnels-run-long.md").is_file());
+
+    // Paste them into a shell in the printed order: each clears its own hold
+    // and the removal is still held until the last one runs.
+    let bin = shim(&wt);
+    for (i, line) in lines.iter().enumerate() {
+        let (code, out, err) = shell(&bin, line);
+        assert_eq!(code, Some(0), "`{line}` did not run:\n{out}{err}");
+        if i + 1 < lines.len() {
+            let (_, err) = refuse(&wt, &["world", "rm", "trains-lose-the-signal"]);
+            assert_eq!(commands(&err).len(), lines.len() - i - 1, "{err}");
+        }
+    }
+    ok(&wt, &["world", "rm", "trains-lose-the-signal"]);
+    assert!(!wt.join("archi/world/trains-lose-the-signal.md").exists());
+    // Nothing cascaded: the dependant retired by its own printed line, and
+    // the wing is what those lines left behind.
+    assert_eq!(ok(&wt, &["world", "ls"]), "");
 }
 
 /// `add` and `rm` mutate, so the seat rule holds for them exactly as it
