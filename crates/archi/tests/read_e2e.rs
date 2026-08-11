@@ -104,7 +104,7 @@ Ledger.post ledger_wire Vault.keep
 ";
 
 /// One whole world fact under `archi/world/facts/`: the covers list as given,
-/// the conditioning paragraph, the killer and one scenario named after the
+/// the conditioning paragraph, the workaround and one scenario named after the
 /// fact.
 fn fact(root: &Path, slug: &str, title: &str, covers: &str, condition: &str) {
     util::Fact {
@@ -112,7 +112,8 @@ fn fact(root: &Path, slug: &str, title: &str, covers: &str, condition: &str) {
         sources: "https://example.org/thread/42",
         uses: "",
         condition,
-        killer: "Trackside coverage that never drops.",
+        workaround: "Riders load the page at the platform and redo the trip's work when they \
+                     forget.",
         scenarios: &format!(
             "### {slug} holds\n\n\
              Given the device has no network\nWhen the user opens the app\n\

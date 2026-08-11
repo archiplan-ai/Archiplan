@@ -203,8 +203,8 @@ once.
    decides which claims are requirements at all. The wing is four
    folders, and the folder a file sits in is what that file is:
 
-   - `archi/world/facts/` holds the strict record: the condition, what
-     kills it, its scenarios and the three lists. `check` holds every
+   - `archi/world/facts/` holds the strict record: the condition, the
+     workaround, its scenarios and the three lists. `check` holds every
      one of them.
    - `archi/world/hypotheses/` holds a claim somebody means to settle
      and has not.
@@ -221,17 +221,29 @@ once.
    `archi world add "<title>"` mints the skeleton under
    `archi/world/facts/`. You write the fact in one line, the paragraph
    saying what condition this is and why the behavior follows,
-   `## What kills this`, and `## Scenarios`. In that block `### <name>`
-   opens one scenario, and `Given`, `When`, `Then` and `And` open its
-   step lines; those four are the whole vocabulary. The heading text is
-   the scenario's name and its address, so a code-link anchors to it,
-   and the code the link points at says where the scenario runs. A
-   `Feature:` or a `Scenario:` line is refused, because the fact's own
-   title is the feature and the heading is the scenario. Write the fact
-   in the world's own words, **without the nouns of the model** — a fact
-   that speaks the model is a requirement in costume, and `check` says
-   so. Ask what people do today instead: a condition nobody can name a
-   workaround for is a wish, and it belongs in no file.
+   `## What people do instead`, and `## Scenarios`. In that block
+   `### <name>` opens one scenario, and `Given`, `When`, `Then` and
+   `And` open its step lines; those four are the whole vocabulary. The
+   heading text is the scenario's name and its address, so a code-link
+   anchors to it, and the code the link points at says where the
+   scenario runs. A `Feature:` or a `Scenario:` line is refused, because
+   the fact's own title is the feature and the heading is the scenario.
+
+   `## What people do instead` names the workaround and what it costs,
+   and it does two jobs. It is the gate: a condition nobody can name a
+   workaround for is a wish, and it belongs in no file. It is also the
+   falsification test, an observable and not a prediction — watch
+   whether people still do it, and the day they stop, the fact is dead.
+
+   Write the fact in the world's own words,
+   **without the nouns of the model** — a fact that speaks the model is
+   a requirement in costume, and `check` says so. A fact also names no
+   person and quotes nobody: it says how the world is, as a reader who
+   was not in the room would say it, not that somebody disliked a thing,
+   not what somebody said, and never in their words. Who saw it is
+   `sources`, and their words are a file under
+   `archi/world/resources/`. No check holds this half, so it holds only
+   where the person writing holds it.
 
    The frontmatter points three ways. `covers` names the model elements
    the fact conditions, and `uses` names the facts it presumes.

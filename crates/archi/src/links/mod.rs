@@ -2425,9 +2425,10 @@ uses: []
 The carriage drops the network for minutes at a time, so a call that must reach
 the server fails for a reason the user cannot fix.
 
-## What kills this
+## What people do instead
 
-Trackside coverage that never drops.
+Riders load the page at the platform and redo the trip's work when they
+forget.
 
 ## Scenarios
 

@@ -348,7 +348,7 @@ pub fn world_add(root: &Path, title: &str) -> Result<PathBuf, String> {
     let path = dir.join(format!("{slug}.md"));
     let text = format!(
         "---\ncovers: []\nsources: []\nuses: []\n---\n\n\
-         # {title}\n\n## What kills this\n\n## Scenarios\n"
+         # {title}\n\n## What people do instead\n\n## Scenarios\n"
     );
     // A replayed line converges on the untouched skeleton — the exact bytes
     // this mint writes, never a guess at emptiness. One byte apart is
@@ -357,8 +357,8 @@ pub fn world_add(root: &Path, title: &str) -> Result<PathBuf, String> {
     if let Ok(standing) = fs::read_to_string(&path) {
         return if standing == text {
             println!(
-                "already minted — {} stands; write the condition, what kills it and \
-                 its scenarios",
+                "already minted — {} stands; write the condition, what people do instead \
+                 and its scenarios",
                 rel(root, &path)
             );
             Ok(path)
@@ -588,7 +588,8 @@ mod tests {
             dir.join(format!("{slug}.md")),
             format!(
                 "---\ncovers: []\nsources: []\nuses: [{}]\n---\n\n# {slug}\n\nIt is so.\n\n\
-                 ## What kills this\n\nA mast.\n\n## Scenarios\n\nFeature: F\n",
+                 ## What people do instead\n\nThey go around it.\n\n## Scenarios\n\n\
+                 Feature: F\n",
                 uses.join(", ")
             ),
         )
@@ -729,7 +730,7 @@ mod tests {
         assert_eq!(
             text,
             "---\ncovers: []\nsources: []\nuses: []\n---\n\n\
-             # The train has no signal\n\n## What kills this\n\n## Scenarios\n"
+             # The train has no signal\n\n## What people do instead\n\n## Scenarios\n"
         );
         assert!(!text.contains("Open questions"));
         fs::remove_dir_all(&root).unwrap();
@@ -802,8 +803,8 @@ mod tests {
                 "# The train has no signal\n\nThe carriage drops the network.\n",
             )
             .replace(
-                "## What kills this\n",
-                "## What kills this\n\nTrackside coverage.\n",
+                "## What people do instead\n",
+                "## What people do instead\n\nRiders load the page at the platform.\n",
             )
             .replace(
                 "## Scenarios\n",

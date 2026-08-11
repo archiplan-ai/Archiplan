@@ -467,6 +467,18 @@ fn starter(name: &str) -> String {
 /// skill's world step or inside the migration skill, where both rules stand in
 /// full. What is left here is the one line about the world that holds wherever
 /// the reader is: a fact speaks the world's words, not the model's.
+///
+/// The workaround section and the rule that a fact names no person stay out on
+/// that argument alone — the count would have taken them. The world bullet
+/// ends at thirty-six columns, so `names no person and quotes nobody` fits on
+/// the line that is already there and the block stays at nineteen. It stays
+/// out because it holds at one moment only, the moment somebody writes a fact,
+/// and that reader has one of the two skills open. Both say what `## What
+/// people do instead` is for — the gate, and the observable that can kill the
+/// fact — and both say where a person and their words go instead: `sources`,
+/// and a file under `archi/world/resources/`. Neither fits here, and the
+/// suite keeps them out by name: a prohibition whose alternative has no room
+/// is a rule the reader works around.
 fn claude_block(src: &str) -> String {
     format!(
         "{FENCE_OPEN}\n\

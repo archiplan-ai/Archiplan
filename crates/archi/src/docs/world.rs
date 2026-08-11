@@ -2,7 +2,7 @@
 //! `archi/requirements/world-facts/the-header-points-three-ways.md`,
 //! `archi/requirements/world-facts/a-source-is-reachable-and-lives-in-the-world.md`):
 //! one file under `archi/world/facts/` holds one condition outside the system,
-//! what would make that condition false, and the scenarios it dictates.
+//! what people do instead while it holds, and the scenarios it dictates.
 //! Parsing is best-effort as it is in [`super::schema`] — every deviation
 //! lands in the diagnostics and the record keeps what was sound.
 //!
@@ -60,8 +60,9 @@ pub struct WorldDoc {
     pub uses: Option<(Vec<String>, usize)>,
     /// The conditioning paragraph; `None` when absent (already reported).
     pub condition: Option<Block>,
-    /// What would make the fact false; `None` when absent or empty.
-    pub killer: Option<Block>,
+    /// What people do instead — the workaround and what it costs; `None` when
+    /// absent or empty.
+    pub workaround: Option<Block>,
     /// The `Scenarios` block, unparsed; `None` when absent or empty.
     pub scenarios: Option<Block>,
     /// The optional `Open questions` section; absence and emptiness are both
@@ -79,8 +80,15 @@ impl WorldDoc {
 }
 
 /// The sections a world fact holds, in the order it holds them. Any other
-/// heading is the author's own: kept, reported by nothing.
-const SECTIONS: [&str; 3] = ["What kills this", "Scenarios", "Open questions"];
+/// heading is the author's own: kept, reported by nothing — [`RETIRED`] alone
+/// excepted.
+const SECTIONS: [&str; 3] = ["What people do instead", "Scenarios", "Open questions"];
+
+/// The section [`SECTIONS`]`[0]` replaced. It is not an unknown heading: a
+/// person who learned the earlier shape writes it out of habit, and a heading
+/// that passes untouched would take the workaround's content out of the reach
+/// of every reader (`archi/requirements/world-facts/a-world-fact-carries-its-scenarios.md`).
+const RETIRED: &str = "What kills this";
 
 /// Parse a world-fact document. `root` is the project root the schemeless
 /// `sources` entries resolve against.
@@ -106,7 +114,7 @@ pub fn parse(
         .map(|(entries, line)| (sources_of(&entries, root, file, line, diags), line));
     let uses = list(fm, "uses", file, diags);
 
-    let [killer, scenarios, open_questions] = sections(doc, file, diags);
+    let [workaround, scenarios, open_questions] = sections(doc, file, diags);
     WorldDoc {
         slug: stem.to_string(),
         file: file.to_string(),
@@ -115,10 +123,10 @@ pub fn parse(
         sources,
         uses,
         condition: block(&doc.summary),
-        killer: required(
-            killer,
-            "What kills this",
-            "what would make the fact false",
+        workaround: required(
+            workaround,
+            SECTIONS[0],
+            "the workaround and what it costs",
             doc,
             file,
             diags,
@@ -162,12 +170,27 @@ fn lines_of(doc: &MdDoc, at: usize) -> Vec<(usize, String)> {
 /// The recognized sections in canonical order, each `None` when the file does
 /// not hold it, and each carried as its index in [`MdDoc::headings`] — the
 /// section is the heading and everything under it, and [`lines_of`] needs the
-/// place to read on from. A section out of order or a second copy of one is
-/// reported here; any other heading is the author's own and passes untouched.
+/// place to read on from. A section out of order, a second copy of one, or the
+/// [`RETIRED`] heading is reported here; any other heading is the author's own
+/// and passes untouched.
 fn sections(doc: &MdDoc, file: &str, diags: &mut Vec<DocDiagnostic>) -> [Option<usize>; 3] {
     let mut found: [Option<usize>; 3] = [None, None, None];
     let mut reached = 0;
     for (at, h) in doc.headings.iter().enumerate() {
+        if h.level == 2 && h.text == RETIRED {
+            diags.push(DocDiagnostic::new(
+                "E_DOC",
+                format!(
+                    "`{RETIRED}` is no section of a world fact — `## {}` took its slot: the \
+                     workaround is the gate and the falsification test at once, so what would \
+                     end the fact is the day people stop doing it, and this content goes there",
+                    SECTIONS[0]
+                ),
+                file,
+                h.line,
+            ));
+            continue;
+        }
         let Some(i) = (h.level == 2)
             .then(|| SECTIONS.iter().position(|s| *s == h.text))
             .flatten()
@@ -186,8 +209,8 @@ fn sections(doc: &MdDoc, file: &str, diags: &mut Vec<DocDiagnostic>) -> [Option<
         if i < reached {
             diags.push(DocDiagnostic::new(
                 "E_DOC",
-                "a world fact runs `What kills this`, then `Scenarios`, then the optional \
-                 `Open questions`",
+                "a world fact runs `What people do instead`, then `Scenarios`, then the \
+                 optional `Open questions`",
                 file,
                 h.line,
             ));
@@ -318,9 +341,9 @@ mod tests {
 The carriage drops the network for minutes at a time, so a call that must reach
 the server fails for a reason the user cannot fix.
 
-## What kills this
+## What people do instead
 
-Trackside coverage that never drops.
+Riders load the page at the platform and redo the trip's work when they forget.
 
 ## Scenarios
 
@@ -439,7 +462,7 @@ Then the write reaches the server
         assert_eq!(w.covers.as_ref().unwrap().0, Vec::<String>::new());
         assert_eq!(w.uses.as_ref().unwrap().0, Vec::<String>::new());
         assert!(w.condition.as_ref().unwrap().text.contains("carriage"));
-        assert!(w.killer.as_ref().unwrap().text.contains("Trackside"));
+        assert!(w.workaround.as_ref().unwrap().text.contains("Riders load"));
         // The scenario block is carried, not parsed: its text and the line it
         // opens on, so the grammar can map a location back onto the file.
         let block = w.scenarios.as_ref().unwrap();
@@ -554,13 +577,17 @@ Then the write reaches the server
 
     /// The folder decides what a file is
     /// (`archi/requirements/world-facts/the-world-holds-four-layers.md`), so a
-    /// record standing directly in `archi/world/` has no kind at all. The four
-    /// standing facts live under `facts/` and nothing is left beside them.
+    /// record standing directly in `archi/world/` has no kind at all. Every
+    /// standing fact lives under `facts/` and nothing is left beside them.
+    ///
+    /// The number of facts is not written here: the wing grows as the project
+    /// records more conditions, so a count would fail on the next fact rather
+    /// than on a record in the wrong place, which is what this test is for.
     #[test]
     fn no_record_stands_directly_under_archi_world() {
         let loose = md_files(&project_root().join("archi/world"));
         assert_eq!(loose, Vec::<PathBuf>::new());
-        assert_eq!(standing_facts().len(), 4, "{:?}", standing_facts());
+        assert!(!standing_facts().is_empty(), "the wing stands");
     }
 
     /// Every `sources` entry the tree holds names a file inside the world
@@ -589,11 +616,13 @@ Then the write reaches the server
         assert_eq!(outside, Vec::<String>::new());
     }
 
-    /// The four standing facts rest on nothing anybody recorded, and each one
-    /// says so — the state the wing counts
-    /// (`archi/requirements/world-facts/an-ungrounded-fact-says-so.md`).
+    /// The standing facts rest on nothing anybody recorded, and each one says
+    /// so — the state the wing counts
+    /// (`archi/requirements/world-facts/an-ungrounded-fact-says-so.md`). Each
+    /// is also read in the shape the schema now holds, so a fact left in the
+    /// retired one fails here as well.
     #[test]
-    fn the_four_standing_facts_carry_no_source_and_report_ungrounded() {
+    fn the_standing_facts_carry_no_source_and_report_ungrounded() {
         let root = project_root();
         let mut grounded: Vec<String> = Vec::new();
         for path in standing_facts() {
@@ -658,10 +687,10 @@ Then the write reaches the server
             ("E_DOC", line_of(&text, "# Users open the app"))
         );
 
-        // No killer.
+        // No workaround.
         let text = fact(
             HEADER,
-            &without(BODY, &["## What kills this", "Trackside coverage"]),
+            &without(BODY, &["## What people do instead", "Riders load"]),
         );
         let (_, diags) = read(&root, &text);
         assert_eq!(
@@ -669,14 +698,14 @@ Then the write reaches the server
             ("E_DOC", line_of(&text, "# Users open the app"))
         );
 
-        // A killer heading over nothing states nothing either.
-        let text = fact(HEADER, &without(BODY, &["Trackside coverage"]));
+        // A workaround heading over nothing states nothing either.
+        let text = fact(HEADER, &without(BODY, &["Riders load"]));
         let (w, diags) = read(&root, &text);
         assert_eq!(
             only(&diags),
-            ("E_DOC", line_of(&text, "## What kills this"))
+            ("E_DOC", line_of(&text, "## What people do instead"))
         );
-        assert!(w.unwrap().killer.is_none());
+        assert!(w.unwrap().workaround.is_none());
 
         // An empty `Scenarios`.
         let text = fact(
@@ -696,8 +725,8 @@ Then the write reaches the server
         let text = fact(
             HEADER,
             &BODY
-                .replace("## What kills this", "## SWAP")
-                .replace("## Scenarios", "## What kills this")
+                .replace("## What people do instead", "## SWAP")
+                .replace("## Scenarios", "## What people do instead")
                 .replace("## SWAP", "## Scenarios"),
         );
         let (_, diags) = read(&root, &text);
@@ -705,9 +734,110 @@ Then the write reaches the server
         // own line.
         assert_eq!(
             only(&diags),
-            ("E_DOC", line_of(&text, "## What kills this"))
+            ("E_DOC", line_of(&text, "## What people do instead"))
         );
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// `What kills this` is not an unknown heading — it is the section this
+    /// one replaced, so a person who learned the old shape is told where the
+    /// content goes now
+    /// (`archi/requirements/world-facts/a-world-fact-carries-its-scenarios.md`).
+    #[test]
+    fn the_retired_heading_is_a_located_error_naming_what_replaced_it() {
+        let root = temp_root();
+        // Beside a sound workaround: the retired heading is the one fault, at
+        // its own line, and the message names the section that took its slot.
+        let text = fact(
+            HEADER,
+            &format!("{BODY}\n## What kills this\n\nTrackside coverage that never drops.\n"),
+        );
+        let (w, diags) = read(&root, &text);
+        assert_eq!(
+            only(&diags),
+            ("E_DOC", line_of(&text, "## What kills this"))
+        );
+        assert!(
+            diags[0].message.contains("What people do instead"),
+            "{}",
+            diags[0].message
+        );
+        // The record keeps what was sound beside it.
+        let w = w.unwrap();
+        assert!(w.workaround.is_some());
+        assert!(w.scenarios.is_some());
+
+        // The old shape whole — the retired heading standing in the slot. Two
+        // faults, each at its own line: the heading, and the slot left empty.
+        let text = fact(
+            HEADER,
+            &BODY
+                .replace("## What people do instead", "## What kills this")
+                .replace(
+                    "Riders load the page at the platform and redo the trip's work when they \
+                     forget.",
+                    "Trackside coverage that never drops.",
+                ),
+        );
+        let (w, diags) = read(&root, &text);
+        assert_eq!(
+            diags
+                .iter()
+                .map(|d| (d.code, d.line))
+                .collect::<Vec<(&str, usize)>>(),
+            [
+                ("E_DOC", line_of(&text, "## What kills this")),
+                ("E_DOC", line_of(&text, "# Users open the app")),
+            ]
+        );
+        assert!(w.unwrap().workaround.is_none());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// No standing fact is written in the retired shape
+    /// (`archi/requirements/world-facts/a-world-fact-carries-its-scenarios.md`).
+    #[test]
+    fn no_standing_fact_holds_the_retired_heading() {
+        let mut left: Vec<String> = Vec::new();
+        for path in standing_facts() {
+            for (i, line) in fs::read_to_string(&path).unwrap().lines().enumerate() {
+                if line.trim() == "## What kills this" {
+                    left.push(format!("{}:{}", path.display(), i + 1));
+                }
+            }
+        }
+        assert_eq!(left, Vec::<String>::new());
+    }
+
+    /// A fact names no person and quotes nobody
+    /// (`archi/requirements/world-facts/the-fact-speaks-the-world-and-check-says-when-it-does-not.md`).
+    /// The rule is not checked in general — a phrase list would fire on honest
+    /// prose and miss the rest — so this holds the standing facts against the
+    /// two forms this tree actually carried: the observer named in the prose,
+    /// and words quoted back.
+    #[test]
+    fn no_standing_fact_names_a_person_or_quotes_one() {
+        let mut left: Vec<String> = Vec::new();
+        for path in standing_facts() {
+            for (i, line) in fs::read_to_string(&path).unwrap().lines().enumerate() {
+                let lower = line.to_lowercase();
+                if [
+                    "the operator",
+                    "he said",
+                    "she said",
+                    "they said",
+                    "\"",
+                    "\u{201c}",
+                    "\u{201d}",
+                ]
+                .iter()
+                .any(|p| lower.contains(p))
+                {
+                    left.push(format!("{}:{}: {line}", path.display(), i + 1));
+                }
+            }
+        }
+        assert_eq!(left, Vec::<String>::new());
     }
 
     #[test]
@@ -748,7 +878,7 @@ Then the write reaches the server
         assert_eq!(rendered(&diags), Vec::<String>::new());
         // The author's own heading changes nothing the schema holds.
         let w = w.unwrap();
-        assert!(w.killer.is_some());
+        assert!(w.workaround.is_some());
         assert!(w.scenarios.is_some());
         fs::remove_dir_all(&root).unwrap();
     }

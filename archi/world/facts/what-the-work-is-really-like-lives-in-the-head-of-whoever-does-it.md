@@ -1,5 +1,5 @@
 ---
-covers: [WorldDoc, DocsCompiler, Scaffold]
+covers: [WorldDoc, DocsCompiler, Scaffold, Tradeoffs]
 sources: []
 uses: []
 ---
@@ -14,13 +14,6 @@ happened to get said aloud, and the parts nobody thought to mention are absent f
 decision that follows. The behavior follows from the not-coming-out: a record of a
 condition has to be produced by asking, and it has to say how the condition is known, or
 it is a sentence somebody typed and nothing more.
-
-## What kills this
-
-People start writing the conditions of their work down as they meet them, unprompted, in a
-form a later reader can check. This section exists because the code still demands it; the
-wave that lands the new shape deletes it from every fact, this one included, and the line
-below is what it was always a negation of.
 
 ## What people do instead
 

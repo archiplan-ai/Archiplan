@@ -14,7 +14,9 @@
 //! a heading and its step lines — and the block stays inside its budget. The
 //! same two skills carry the four folders of the world and the rule that a
 //! `sources` entry points inside it: neither fits the block, and a migrated
-//! fact carries no source at all.
+//! fact carries no source at all. They carry the workaround the same way: it
+//! is the section a writer owes, nothing asks what would end the fact, and a
+//! fact names no person and quotes nobody.
 
 mod util;
 
@@ -663,6 +665,133 @@ fn the_skills_describe_the_four_layers_and_the_source_rule() {
     fs::remove_dir_all(&root).unwrap();
 }
 
+/// The workaround is the record, and the killer is gone
+/// (`archi/requirements/world-facts/a-world-fact-carries-its-scenarios.md`,
+/// `archi/requirements/world-facts/the-fact-speaks-the-world-and-check-says-when-it-does-not.md`).
+/// The two skills that ask a person to write a fact are the texts that spell
+/// the sections out, so the change lands there: `## What people do instead` is
+/// a section the writer owes, nothing asks what would end the fact, and both
+/// texts carry the rule that a fact names no person and quotes nobody — the
+/// half of the content rule no check can hold. The block takes none of it: it
+/// stands at nineteen lines against a budget of twenty
+/// (`the-briefing-says-what-help-does-not`), and a reader meets both rules with
+/// the skill already open.
+#[test]
+fn the_skills_ask_for_the_workaround_and_not_for_the_killer() {
+    let root = temp_dir();
+    ok_in(&root, &["init", "."]);
+    // Byte-equal to the copies this binary embeds — asserted inside.
+    let (workflow, migration) = world_skills(&root);
+    let installed = [("archi", workflow.as_str()), ("archi-migrate-world", migration.as_str())];
+
+    for (name, text) in installed {
+        let text_flat = flat(text);
+
+        // The section a writer owes, named as one of them.
+        assert!(
+            text_flat.contains("`## What people do instead`"),
+            "{name} never names the workaround section"
+        );
+
+        // Nothing asks for a prediction of the end — not as a heading, not as
+        // an interview question, not as a section of the file.
+        for retired in [
+            "What kills this",
+            "The killer",
+            "call the condition over",
+            "would you have to see",
+            "would end the fact",
+        ] {
+            assert!(!text_flat.contains(retired), "{name} still carries `{retired}`");
+        }
+
+        // The workaround took the killer's other job, and both texts say how it
+        // does it: it is watched, not predicted.
+        assert!(
+            text_flat.contains("the day they stop, the fact is dead"),
+            "{name} never says the workaround is what falsifies the fact"
+        );
+
+        // And its first job, in the same words in both texts.
+        assert!(
+            text_flat.contains("nobody can name a workaround for is a wish"),
+            "{name} does not make the workaround the gate"
+        );
+
+        // A fact is about the world, not about whoever reported it — and the
+        // text says where the person and their words go instead.
+        for rule in ["names no person", "quotes nobody"] {
+            assert!(text_flat.contains(rule), "{name} misses `{rule}`");
+        }
+        assert!(
+            text_flat.contains("`archi/world/resources/`"),
+            "{name} says a fact quotes nobody without saying where the words go"
+        );
+    }
+
+    let migration_flat = flat(&migration);
+
+    // The interview asks four things, in this order, and the workaround is the
+    // second. The list is read off the skill, so a fifth question cannot bring
+    // the killer back under another name.
+    let labels: Vec<&str> = migration
+        .lines()
+        .filter(|l| l.starts_with(|c: char| c.is_ascii_digit()) && l.contains(". **"))
+        .filter_map(|l| l.split("**").nth(1))
+        .collect();
+    assert_eq!(
+        labels,
+        ["The condition.", "The workaround.", "The behavior.", "The reach."],
+        "the interview changed shape"
+    );
+
+    // The gate stops a fact being written and says what happens to the
+    // candidate instead.
+    for phrase in [
+        "The gate is question 2",
+        "this skill writes nothing for that candidate",
+        "It goes in the brief",
+    ] {
+        assert!(migration_flat.contains(phrase), "the migration skill misses `{phrase}`");
+    }
+
+    // The second ask outlives the question that used to carry it: an apparent
+    // axiom is asked again, and what it is asked again for is the workaround.
+    let axiom = migration
+        .split("\n\n")
+        .map(flat)
+        .find(|p| p.contains("Ask again"))
+        .expect("the migration skill keeps the second ask");
+    assert!(
+        axiom.contains("instead"),
+        "the second ask no longer asks for the workaround: {axiom}"
+    );
+
+    // The example fact carries the section the skill just asked for.
+    let example = migration
+        .split("```")
+        .skip(1)
+        .step_by(2)
+        .find(|b| b.contains("## Scenarios"))
+        .expect("the migration skill shows an example fact");
+    assert!(
+        example.contains("## What people do instead"),
+        "the example fact skips the workaround:\n{example}"
+    );
+
+    // None of it reached the block. It stands at nineteen lines against a
+    // budget of twenty, and the sections of a file the reader is not writing
+    // yet are not what the one free line is for.
+    let block = block_of(&root);
+    let count = block.lines().count();
+    assert!(count < 20, "the block is {count} lines:\n{block}");
+    for spelled in ["What people do instead", "workaround", "no person", "quotes"] {
+        assert!(!block.contains(spelled), "the block spells `{spelled}` out:\n{block}");
+    }
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
 /// The migration skill asks the way the first real run taught it to
 /// (`archi/requirements/world-facts/a-skill-migrates-a-standing-project-into-the-wing.md`):
 /// by offering shapes instead of open questions, by asking a second time when
@@ -820,7 +949,8 @@ fn a_migrated_fact_carries_no_source_and_the_wing_says_so() {
         uses: "",
         condition: "The carriage drops the network for minutes at a time, so a reader on the move \
                     works from what the device already holds.",
-        killer: "Trackside coverage that never drops.",
+        workaround: "Readers load the page at the platform and redo the trip's work when they \
+                     forget.",
         scenarios: "### The app opens with no network\n\n\
                     Given the device has no network\n\
                     When the reader opens the app\n\
@@ -916,17 +1046,19 @@ fn a_pre_wing_project_upgrades_stays_green_and_takes_its_first_fact() {
     );
     assert_eq!(ok_in(&root, &["check"]), before);
 
-    // The first fact, written as the skill prescribes: the condition, its
-    // killer, its scenarios, the node it conditions — and no source, because
-    // the claim was lifted from prose and nobody has been to look. It lands
-    // clean, and the wing is born counted and honest about what it rests on.
+    // The first fact, written as the skill prescribes: the condition, what
+    // people do instead, its scenarios, the node it conditions — and no source,
+    // because the claim was lifted from prose and nobody has been to look. It
+    // lands clean, and the wing is born counted and honest about what it rests
+    // on.
     util::Fact {
         covers: "AuthService",
         sources: "",
         uses: "",
         condition: "The carriage drops the network for minutes at a time, so a reader on the \
                     move works from what the device already holds.",
-        killer: "Trackside coverage that never drops.",
+        workaround: "Readers load the page at the platform and redo the trip's work when they \
+                     forget.",
         scenarios: "### The app opens with no network\n\n\
                     Given the device has no network\n\
                     When the reader opens the app\n\

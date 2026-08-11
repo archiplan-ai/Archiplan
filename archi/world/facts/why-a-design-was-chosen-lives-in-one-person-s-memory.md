@@ -10,17 +10,20 @@ The reasons behind a shape — what was traded, what was refused, what the press
 stay with whoever made it. They are not in the files, because the files say what the
 system does and not why it does that instead of the other thing. Memory decays, so the
 person who made the shape reconstructs it later from what they can still recall, and
-everybody else asks them. The operator has kept a whole design that way and watched it
-fade. The behavior follows: the reasons have to be written down as records that a tool
-reads and holds against the shape, or the only copy leaves when the person does.
+everybody else asks them. A whole design can be held that way, and it fades. The behavior
+follows: the reasons have to be written down as records that a tool reads and holds
+against the shape, or the only copy leaves when the person does.
 
-## What kills this
+## What people do instead
 
-Code that carries the semantics of the decisions behind it — a reader looks at the source,
-across every repository the system spans, and sees why the shape is this one and not the
-other. The operator does not expect that to arrive, and notes that people invented notations
-and decision records precisely because it has not. But it is an observable state: the day a
-reader can answer "why" from the code alone, the written reasons are duplication.
+Everybody asks the person. While that person is here the answer arrives in a few minutes
+and is a reconstruction rather than a record — what fades first is the trade, which is
+the part the asker came for. When that person is not here the shape is argued out again
+from nothing, and it is argued at the worst moment, because the question only comes up
+when somebody wants to change the thing. What survives in writing survives by accident: a
+long message in a review, a thread in a chat, a note on a ticket, each in a different
+place and none of them attached to the shape it explains. The cost is the same decision
+made twice, the second time without what the first one learned.
 
 ## Scenarios
 

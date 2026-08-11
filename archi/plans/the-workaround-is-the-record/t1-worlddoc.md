@@ -18,6 +18,8 @@ the workaround takes the killer's slot, and the four facts move with the shape
 ## Outputs
 
 - crates/archi/src/docs/world.rs
+- crates/archi/src/docs/mint.rs
+- crates/archi/tests/util/mod.rs
 - archi/world/facts/a-design-written-apart-from-the-code-falls-behind-it.md
 - archi/world/facts/an-assistant-guesses-which-files-answer-a-written-obligation.md
 - archi/world/facts/why-a-design-was-chosen-lives-in-one-person-s-memory.md
@@ -30,6 +32,7 @@ the workaround takes the killer's slot, and the four facts move with the shape
 - `## What kills this` earns a named refusal rather than being read as an unknown heading: it is what this replaced
 - the shape and the four files land in one task, because a check that outran its records would empty the wing between commits
 - each fact keeps its slug and its scenario names byte-identical — six links address them
+- two more places write the shape and must flip with the reader: the mint's skeleton, or `world add` creates a file the checker refuses, and the shared test fixture, or fifteen suites go red
 
 ## Verifications
 
@@ -44,3 +47,4 @@ the workaround takes the killer's slot, and the four facts move with the shape
 - test — e2e: `archi link verify` reports the six scenario links clean after the rewrite
 - test — grep assertion: no file under `archi/world/facts/` holds a `What kills this` heading
 - test — grep assertion: no fact names a person or carries a quoted phrase from one
+- test — world_e2e: `world add` mints a skeleton the checker accepts, with the workaround heading and no killer

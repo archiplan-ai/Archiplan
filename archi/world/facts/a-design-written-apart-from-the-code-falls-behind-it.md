@@ -9,19 +9,22 @@ uses: [why-a-design-was-chosen-lives-in-one-person-s-memory]
 The code moves faster than the document that describes it. Every change to the code is a
 change somebody chose to make, and every matching change to the document is a chore
 somebody has to remember; the first happens because the work demands it, the second
-happens when there is time. So the gap opens from the first week and never closes. The
-operator has written a heavy specification twice and abandoned it both times for exactly
-this reason — not because the writing was hard, but because keeping two separated things
-in step is work nobody does twice. The behavior follows: the two have to be joined by
-something a machine recomputes, so that falling behind is a state a tool reports rather
-than a state a person notices too late.
+happens when there is time. So the gap opens from the first week and never closes. Heavy
+specifications get written and then abandoned for exactly this reason — not because the
+writing is hard, but because keeping two separated things in step is work nobody does
+twice. The behavior follows: the two have to be joined by something a machine recomputes,
+so that falling behind is a state a tool reports rather than a state a person notices too
+late.
 
-## What kills this
+## What people do instead
 
-The document and the code stop being able to diverge — a change to one is impossible
-without a change to the other, not merely expected to come with it. A signal after the
-fact is not enough: a report that says "these have drifted" still needs a person to act,
-and that person is the one who did not update the document in the first place.
+The document is left to rot and the code is read in its place: whoever needs to know what
+the system does opens the source and works it out again, and the writing stays for
+onboarding or for show. Where the document still has to be right, somebody walks it
+against the code by hand before a release — an afternoon each time, and the first thing
+dropped when the release is late. Both cost the same thing twice: the hours spent
+re-deriving what was already written down, and the decisions taken from a page that has
+been wrong for months with nobody able to say which parts.
 
 ## Scenarios
 
@@ -40,6 +43,7 @@ Then the claim is named as promised and unbuilt
 
 ## Open questions
 
-Whether reporting drift is enough in practice is not observed. The operator says a signal
-alone will not do, and the tool ships a signal, so the two disagree until somebody watches
-a real project drift and sees whether the report gets acted on.
+Whether reporting drift is enough in practice is not observed. A report still needs a
+person to act on it, and that person is the one who did not update the document in the
+first place, so the question stays open until somebody watches a real project drift and
+sees whether the report gets acted on.

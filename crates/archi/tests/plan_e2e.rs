@@ -146,7 +146,7 @@ const T1_STORE_CURATED: &str =
 
 /// One world fact under `archi/world/facts/`, in the shape `world add` mints
 /// and a person fills: the three lists, the conditioning paragraph, the
-/// killer and a `Scenarios` block (`archi/requirements/world-facts/`).
+/// workaround and a `Scenarios` block (`archi/requirements/world-facts/`).
 fn put_fact(root: &Path, slug: &str, title: &str, covers: &str, scenarios: &[&str]) {
     let with_steps: Vec<(&str, &[&str])> = scenarios.iter().map(|s| (*s, STEPS)).collect();
     put_fact_with_steps(root, slug, title, covers, &with_steps);
@@ -184,10 +184,33 @@ fn put_fact_with_steps(
         sources: "https://example.org/thread/42",
         uses: "",
         condition: "The carriage drops the network for minutes at a time.",
-        killer: "The condition ends.",
+        workaround: "Riders load the page at the platform and redo what the drop takes.",
         scenarios: &block,
     }
     .write(root, slug, title);
+}
+
+/// The nodes of [`MODEL`] a test's own fact never reaches, declared internal
+/// so the save mints
+/// (`archi/requirements/world-facts/the-save-refuses-an-unconditioned-element.md`).
+///
+/// A test of this family writes the one fact its point needs — the fact that
+/// covers the node its task sits on — and the gate on `version save` asks
+/// about the whole model. The nodes left over are named here with the reason
+/// this fixture holds, which is the gate's second exit; nothing about the plan
+/// loop under test moves, because `covers` is still exactly what each test
+/// wrote.
+fn declare_internal(root: &Path, nodes: &[&str]) {
+    let dir = root.join("archi/world");
+    fs::create_dir_all(&dir).unwrap();
+    let mut text = String::new();
+    for n in nodes {
+        text.push_str(&format!(
+            "{n} — the fixture's own plumbing: this family conditions the node its task \
+             sits on, and nothing outside the tool reaches this one\n"
+        ));
+    }
+    fs::write(dir.join(".worldignore"), text).unwrap();
 }
 
 /// This family's shim: the shared one ([`util::shim`]) under this family's
@@ -437,6 +460,9 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     // A plan pins a hardened spec: refuses before the first save.
     let (_, err) = fails(&root, &["plan", "use", "mvp"]);
     assert!(err.contains("version save"), "{err}");
+    // The fact reaches `Auth` and `Store` behind it; `Gate` is the node it never
+    // touches, and the save's gate takes the declaration as its second exit.
+    declare_internal(&root, &["Gate"]);
     ok(&root, &["version", "save", "-m", "first"]);
     let out = ok(&root, &["plan", "use", "mvp"]);
     assert!(out.contains("created plan `mvp` @ v0001"), "{out}");
@@ -837,6 +863,9 @@ fn a_task_carries_the_facts_that_cover_its_node() {
         "Store",
         &["the app opens with no network"],
     );
+    // The fact covers `Store` alone — by design, so the second task carries no
+    // fact — so the two nodes above it are declared for the save's gate.
+    declare_internal(&root, &["Gate", "Auth"]);
     ok(&root, &["version", "save", "-m", "first"]);
     ok(&root, &["plan", "use", "mvp"]);
     ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
@@ -888,6 +917,8 @@ fn a_task_carries_the_facts_that_cover_its_node() {
     // `plan repin` re-resolves the covering facts against the new version:
     // the record carries what covers the node now, and the drift is gone.
     fs::write(root.join("archi/src/extra.arch"), "def node Ledger\n").unwrap();
+    // The new node arrives unreached like the other two.
+    declare_internal(&root, &["Gate", "Auth", "Ledger"]);
     ok(&root, &["version", "save", "-m", "second"]);
     ok(&root, &["plan", "repin"]);
     let t1 = fs::read_to_string(root.join("archi/plans/mvp/t1-store.md")).unwrap();
@@ -1012,6 +1043,9 @@ fn the_close_gates_on_anchored_scenarios() {
         "Store",
         &["the app opens with no network"],
     );
+    // The fact covers `Store`; the nodes above it are the save's gate, not this
+    // test's subject.
+    declare_internal(&root, &["Gate", "Auth"]);
     ok(&root, &["version", "save", "-m", "first"]);
     ok(&root, &["plan", "use", "mvp"]);
     ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
@@ -1081,6 +1115,8 @@ fn a_post_wing_plan_on_a_tree_with_a_wing_refuses_until_a_fact_covers_a_node() {
         "Auth",
         &["the tunnel ends"],
     );
+    // The fact reaches `Auth` and `Store`; `Gate` is declared for the save.
+    declare_internal(&root, &["Gate"]);
     ok(&root, &["version", "save", "-m", "first"]);
     ok(&root, &["plan", "use", "mvp"]);
 
@@ -1205,6 +1241,8 @@ fn the_closing_step_prints_the_gherkin_the_state_and_the_command() {
             &["Given the train is under the hill", "Then the session holds"],
         )],
     );
+    // The two facts reach `Auth` and `Store`; `Gate` is declared for the save.
+    declare_internal(&root, &["Gate"]);
     ok(&root, &["version", "save", "-m", "first"]);
     ok(&root, &["plan", "use", "mvp"]);
     ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
@@ -1312,6 +1350,8 @@ fn the_printed_link_add_line_anchors_the_scenario_through_a_real_shell() {
         "Store",
         &[(name, &["Given the rider boards", "Then the rows are there"])],
     );
+    // The fact covers `Store`; the nodes above it are declared for the save.
+    declare_internal(&root, &["Gate", "Auth"]);
     ok(&root, &["version", "save", "-m", "first"]);
     ok(&root, &["plan", "use", "mvp"]);
     ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
@@ -1361,6 +1401,8 @@ fn plan_verify_prints_the_scenario_states_while_a_wave_is_still_open() {
             ("the tunnel ends", &["Given the rider boards"]),
         ],
     );
+    // The fact covers `Store`; the nodes above it are declared for the save.
+    declare_internal(&root, &["Gate", "Auth"]);
     ok(&root, &["version", "save", "-m", "first"]);
     ok(&root, &["plan", "use", "mvp"]);
     ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
@@ -1444,6 +1486,8 @@ fn a_pre_wing_plan_closes_with_no_block_and_keeps_its_old_one() {
         "Auth",
         &["the app opens with no network"],
     );
+    // The fact reaches `Auth` and `Store`; `Gate` is declared for the save.
+    declare_internal(&root, &["Gate"]);
     ok(&root, &["version", "save", "-m", "first"]);
     ok(&root, &["plan", "use", "old"]);
     ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
