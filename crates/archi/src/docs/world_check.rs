@@ -674,15 +674,38 @@ fn internal(
     out
 }
 
-/// The fingerprint of a fact's scenarios: the feature, the names and the
-/// steps, hashed to six hex digits. It is not the story — nothing that reads
-/// it holds a copy of one — it is only enough to say the story moved. It
-/// sits beside the parsed block so the plan and the link read one function.
-pub(crate) fn scenario_digest(fact: &WorldFact) -> String {
+/// The fingerprint of a fact's scenarios: the names and the steps, hashed to
+/// six hex digits. It is not the story — nothing that reads it holds a copy
+/// of one — it is only enough to say the story moved. It sits beside the
+/// parsed block so the plan and the link read one function.
+///
+/// The grain is the argument, and that is why there is one function
+/// (`archi/requirements/world-facts/the-digest-witnesses-one-scenario.md`).
+/// `Some(name)` fingerprints that scenario alone — its name, its step
+/// keywords and its step text — so a sibling reworded in the same fact moves
+/// nothing a link on this scenario stands on. `None` is the whole block, the
+/// feature line with it, and that value is the one the plans already carry,
+/// byte for byte: the plan's drift line asks whether the fact moved, not
+/// whether one scenario did.
+///
+/// The name is matched as an address is matched — inner whitespace collapsed
+/// on both sides — because the grammar keeps a name as written and a ref
+/// arrives normalized. A name the fact does not hold fingerprints the empty
+/// story, the same nothing a block the grammar refused gives.
+pub(crate) fn scenario_digest(fact: &WorldFact, scenario: Option<&str>) -> String {
+    let wanted = scenario.map(crate::links::normalize_ref);
     let mut text = String::new();
     if let Some(block) = &fact.scenarios {
-        text.push_str(&block.feature);
+        if wanted.is_none() {
+            text.push_str(&block.feature);
+        }
         for s in &block.scenarios {
+            if wanted
+                .as_deref()
+                .is_some_and(|w| w != crate::links::normalize_ref(&s.name))
+            {
+                continue;
+            }
             text.push('\u{1f}');
             text.push_str(&s.name);
             for step in &s.steps {
@@ -756,6 +779,17 @@ Feature: Offline open
     Then the last synced view appears
 ";
 
+    /// A second scenario of the same block — the sibling the grain is about.
+    const SIBLING: &str = "\
+  Scenario: the app opens on a slow line
+    Given the device has one bar of signal
+    When the user opens the app
+    Then the view arrives late
+";
+
+    /// The scenario the narrow grain is read on, as a ref addresses it.
+    const NAMED: &str = "the app opens with no network";
+
     /// A `sources` entry that never touches the filesystem.
     const SOURCE: &str = "https://example.org/thread/42";
 
@@ -823,13 +857,13 @@ Feature: Offline open
         docs_check(root, ws.model())
     }
 
-    /// The fingerprint of the tree's one fact.
-    fn digest_at(root: &Path) -> String {
+    /// The fingerprint of the tree's one fact, at the grain the caller names.
+    fn digest_at(root: &Path, scenario: Option<&str>) -> String {
         let ws = modeling_lang::source::compile_project(root)
             .unwrap_or_else(|f| panic!("test model failed to compile:\n{}", f.render()))
             .workspace;
         let (tree, _) = load(root, ws.model());
-        scenario_digest(&tree.world[0])
+        scenario_digest(&tree.world[0], scenario)
     }
 
     fn rendered(diags: &[DocDiagnostic]) -> Vec<String> {
@@ -1260,14 +1294,16 @@ Feature: Offline open
         fs::remove_dir_all(&root).unwrap();
     }
 
-    /// The fingerprint the plan and the links both read: six hex digits over
-    /// the parsed block, moving with a step and standing still under the
-    /// prose around it.
+    /// The fingerprint the plan's drift line reads: six hex digits over the
+    /// whole parsed block, moving with a step and standing still under the
+    /// prose around it. Naming no scenario is that grain, and its value is
+    /// the one the plans already carry — down to the byte
+    /// (`the-digest-witnesses-one-scenario`).
     #[test]
     fn the_scenario_digest_reads_the_parsed_block() {
         let root = temp_project();
         healthy(&root, "riders-lose-the-signal", "Riders lose the signal");
-        let first = digest_at(&root);
+        let first = digest_at(&root, None);
         assert_eq!(first.len(), 6, "{first}");
         assert!(first.chars().all(|c| c.is_ascii_hexdigit()), "{first}");
         // The value is the one the plans already carry: the move keeps it.
@@ -1282,7 +1318,7 @@ Feature: Offline open
             "A tunnel runs for minutes on the northern line.",
             SCENARIOS,
         );
-        assert_eq!(digest_at(&root), first);
+        assert_eq!(digest_at(&root, None), first);
 
         // One step moves, and the fingerprint says so.
         fact(
@@ -1295,8 +1331,106 @@ Feature: Offline open
              Given the device has no network\n    When the user opens the app\n    \
              Then nothing appears at all\n",
         );
-        assert_ne!(digest_at(&root), first);
+        assert_ne!(digest_at(&root, None), first);
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The grain is an argument: a named scenario is fingerprinted alone, so
+    /// a sibling moving in the same fact moves nothing, while the whole block
+    /// moves with either of them (`the-digest-witnesses-one-scenario`).
+    #[test]
+    fn a_named_scenario_is_fingerprinted_alone() {
+        let root = temp_project();
+        let both = format!("{SCENARIOS}{SIBLING}");
+        let write = |scenarios: &str| {
+            fact(
+                &root,
+                "riders-lose-the-signal",
+                &lists("Gate", SOURCE, ""),
+                "Riders lose the signal",
+                "The carriage drops the network for minutes at a time.",
+                scenarios,
+            );
+        };
+        write(&both);
+        let one = digest_at(&root, Some(NAMED));
+        let whole = digest_at(&root, None);
+        assert_eq!(one.len(), 6, "{one}");
+        assert_ne!(one, whole, "one scenario is not the block it sits in");
+        // The address is normalized where the grammar keeps the name as
+        // written, so a ref with wider spacing reads the same scenario.
+        assert_eq!(digest_at(&root, Some("the  app opens  with no network")), one);
+
+        // A sibling's step is reworded: the block moved, the named scenario
+        // did not.
+        write(&both.replace("Then the view arrives late", "Then the view takes its time"));
+        assert_eq!(digest_at(&root, Some(NAMED)), one);
+        assert_ne!(digest_at(&root, None), whole);
+
+        // The named scenario's own step moves, and its fingerprint says so.
+        write(&both.replace("Then the last synced view appears", "Then nothing appears at all"));
+        assert_ne!(digest_at(&root, Some(NAMED)), one);
+
+        // A name the fact does not hold witnesses the empty story — the same
+        // nothing a block the grammar refused witnesses.
+        write(&both);
+        assert_eq!(
+            digest_at(&root, Some("the train stops")),
+            digest_at(&root, Some("the doors open"))
+        );
+        assert_ne!(digest_at(&root, Some("the train stops")), one);
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// One place in the crate hashes a parsed block, and the grain being an
+    /// argument is what keeps it one: a second fingerprint over the same
+    /// story would start disagreeing with this one about what moved
+    /// (`the-digest-witnesses-one-scenario`).
+    #[test]
+    fn exactly_one_item_in_the_crate_hashes_a_parsed_block() {
+        assert_eq!(hashing_items(), ["docs/world_check.rs — scenario_digest"]);
+    }
+
+    /// Every top-level item of the crate's own source that hashes and reads a
+    /// parsed step, named by its file and its first `fn`. Test modules are cut
+    /// off first: the claim is about the code, and a test naming the hash is
+    /// no second digest.
+    fn hashing_items() -> Vec<String> {
+        let src = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"));
+        let mut files = Vec::new();
+        let mut stack = vec![src.clone()];
+        while let Some(dir) = stack.pop() {
+            for entry in fs::read_dir(&dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    files.push(path);
+                }
+            }
+        }
+        files.sort();
+        let mut out = Vec::new();
+        for path in &files {
+            let text = fs::read_to_string(path).unwrap();
+            let code = text.split("#[cfg(test)]").next().unwrap_or_default();
+            // A top-level item stands until a closing brace in column one.
+            for item in code.split("\n}\n") {
+                if !(item.contains("Sha256") && item.contains(".steps")) {
+                    continue;
+                }
+                let name = item
+                    .lines()
+                    .find_map(|l| l.split_once("fn "))
+                    .and_then(|(_, rest)| rest.split(['(', '<']).next())
+                    .unwrap_or("")
+                    .to_string();
+                let file = path.strip_prefix(&src).unwrap_or(path).display();
+                out.push(format!("{file} — {name}"));
+            }
+        }
+        out
     }
 
     /// A project that has not opted into the wing is not behind on it: no

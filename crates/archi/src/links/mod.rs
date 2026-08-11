@@ -712,13 +712,14 @@ fn fact_scenarios(root: &Path, slug: &str) -> Option<Vec<(String, usize)>> {
 /// replace this reader: the grammar reports form, and a link resolves an
 /// address. The grammar drops every scenario any refusal touched — a `But`
 /// step, a `@runs:` naming no declared member, a block with no `Feature`
-/// line — and keeps a name with its inner whitespace as written, which a
-/// normalized ref never matches. Reading an address through it would report a
-/// doc-grammar error as a lost reference, and would unresolve a link on a
-/// malformed fact that `archi check` already reports. The digest beside it
-/// does read through the grammar ([`fact_digest`]), because a witness is of
-/// the story the grammar accepted; the two readers answer two questions, and
-/// only `check` gates on form
+/// line — and keeps a name with its inner whitespace as written, so a
+/// normalized ref matches it only after the same collapse. Reading an address
+/// through it would report a doc-grammar error as a lost reference, and would
+/// unresolve a link on a malformed fact that `archi check` already reports.
+/// The digest beside it does read through the grammar ([`fact_digest`]),
+/// because a witness is of the story the grammar accepted, and it collapses
+/// the name the same way to find the scenario a ref names; the two readers
+/// answer two questions, and only `check` gates on form
 /// (`archi/requirements/world-facts/the-grammar-is-a-named-subset.md`,
 /// `archi/requirements/world-facts/the-scenario-is-the-address-not-the-step.md`).
 fn scenario_names(block: &docs::world::Block) -> Vec<(String, usize)> {
@@ -737,15 +738,19 @@ fn scenario_names(block: &docs::world::Block) -> Vec<(String, usize)> {
 /// The fingerprint of one fact's scenarios, as the grammar parsed them —
 /// [`docs::world_check::scenario_digest`], the one function the plan and the
 /// link both read, so a plan and a link can never disagree about whether the
-/// story moved. `None` when no file holds the fact.
+/// story moved. `scenario` is the grain: the name a ref addresses, or `None`
+/// for the whole block. `None` for the result when no file holds the fact.
 ///
 /// The file is read through [`docs::world_check::read_fact`], the reader the
 /// wing walks its own folder with, so a link and a check hold one fact one
-/// way. The digest is of the fact, not of the one scenario a ref addresses: a
-/// link into a fact witnesses the whole story that fact tells. A block the
-/// grammar refuses digests as an empty story, and `archi check` reports that
-/// form error where form errors belong.
-fn fact_digest(root: &Path, members: &crate::members::MemberSet, slug: &str) -> Option<String> {
+/// way. A block the grammar refuses digests as an empty story, and `archi
+/// check` reports that form error where form errors belong.
+fn fact_digest(
+    root: &Path,
+    members: &crate::members::MemberSet,
+    slug: &str,
+    scenario: Option<&str>,
+) -> Option<String> {
     let fact = docs::world_check::read_fact(
         root,
         &root.join(fact_file(slug)),
@@ -753,25 +758,41 @@ fn fact_digest(root: &Path, members: &crate::members::MemberSet, slug: &str) -> 
         // The form of a fact is `archi check`'s to report, never a link's.
         &mut Vec::new(),
     )?;
-    Some(docs::world_check::scenario_digest(&fact))
+    Some(docs::world_check::scenario_digest(&fact, scenario))
 }
 
-/// The spec side of a link as it stands now: the fact's fingerprint for a
-/// scenario ref, nothing for an element path.
+/// The spec side of a link as it stands now: the fingerprint of the one
+/// scenario the ref addresses, nothing for an element path. A link witnesses
+/// the scenario it names, so a sibling in the same fact is another link's
+/// business
+/// (`archi/requirements/world-facts/the-digest-witnesses-one-scenario.md`).
 fn bind_scenario(root: &Path, roots: &Roots, spec: &SpecRef) -> Option<String> {
-    let (slug, _) = spec.scenario()?;
-    fact_digest(root, roots.set(), slug)
+    let (slug, name) = spec.scenario()?;
+    fact_digest(root, roots.set(), slug, Some(name))
 }
 
 /// Whether the scenario side of a witnessed pair parted from what the link
 /// recorded. A link that recorded no digest — every link over an element
 /// path, and every scenario link journaled before the pair was witnessed —
 /// has nothing to compare against, and nothing never moved.
+///
+/// A digest journaled while the grain was the whole block is read at the
+/// grain it was written: if it is the fact's whole story as that story stands
+/// now, nothing moved. Narrowing the grain is not motion, so no link
+/// false-fails on the day it narrows; the first `repin` writes the scenario's
+/// own fingerprint, and the narrow grain rules the link from there
+/// (`archi/requirements/world-facts/the-digest-witnesses-one-scenario.md`).
 fn scenario_moved(root: &Path, roots: &Roots, link: &Link) -> bool {
     let Some(recorded) = &link.pins.scenario else {
         return false;
     };
-    bind_scenario(root, roots, &link.spec).is_some_and(|now| now != *recorded)
+    let Some((slug, _)) = link.spec.scenario() else {
+        return false;
+    };
+    if bind_scenario(root, roots, &link.spec).is_none_or(|now| now == *recorded) {
+        return false;
+    }
+    fact_digest(root, roots.set(), slug, None).is_none_or(|whole| whole != *recorded)
 }
 
 pub(crate) fn normalize_ref(text: &str) -> String {
@@ -2419,6 +2440,16 @@ Feature: Offline open
     Then the last synced view appears
 ";
 
+    /// A second scenario of the same fact — the sibling whose motion a link
+    /// on the first scenario must not feel
+    /// (`archi/requirements/world-facts/the-digest-witnesses-one-scenario.md`).
+    const SIBLING: &str = "\
+  Scenario: the app opens on a slow line
+    Given the device has one bar of signal
+    When the user opens the app
+    Then the view arrives late
+";
+
     const FACT_SLUG: &str = "users-open-the-app-on-a-train";
     const SCENARIO: &str = "the app opens with no network";
 
@@ -3224,6 +3255,202 @@ Feature: Offline open
         repin(&root, &l.id, None).unwrap();
         assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
         assert_eq!(ls(&root, None, false).unwrap()[0].birth, before);
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The digest witnesses the scenario the ref addresses: a sibling
+    /// reworded in the same fact, and a scenario added beside it, move
+    /// nothing this link stands on
+    /// (`archi/requirements/world-facts/the-digest-witnesses-one-scenario.md`).
+    #[test]
+    fn a_sibling_scenario_moves_and_the_link_stays_clean() {
+        let root = temp_project();
+        let ws = model_of(&root);
+        let both = format!("{FACT}{SIBLING}");
+        write_fact(&root, &both);
+        let l = add(
+            &root,
+            ws.model(),
+            &format!("{FACT_SLUG}#{SCENARIO}"),
+            "code/auth.rs#Vault::persist",
+            LinkKind::Literal,
+        )
+        .unwrap();
+        assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
+
+        // The sibling's step is reworded.
+        let reworded = both.replace("Then the view arrives late", "Then the view takes its time");
+        write_fact(&root, &reworded);
+        assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
+
+        // A third scenario joins the fact: the condition was elaborated, and
+        // an elaborated condition must not cost its links anything.
+        write_fact(
+            &root,
+            &format!(
+                "{reworded}  Scenario: the app opens in a tunnel\n    \
+                 Given the device has no network for minutes\n    \
+                 When the user opens the app\n    Then the last synced view appears\n"
+            ),
+        );
+        assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The addressed scenario moves and the pair parts: the grade is the
+    /// scenario side, the message names it, and one `repin` binds the narrow
+    /// pair again (`the-digest-witnesses-one-scenario`).
+    #[test]
+    fn a_step_of_the_addressed_scenario_moves_and_the_note_names_the_scenario_side() {
+        let root = temp_project();
+        let ws = model_of(&root);
+        let both = format!("{FACT}{SIBLING}");
+        write_fact(&root, &both);
+        let l = add(
+            &root,
+            ws.model(),
+            &format!("{FACT_SLUG}#{SCENARIO}"),
+            "code/auth.rs#Vault::persist",
+            LinkKind::Literal,
+        )
+        .unwrap();
+
+        write_fact(
+            &root,
+            &both.replace(
+                "Then the last synced view appears",
+                "Then the view synced last is on screen",
+            ),
+        );
+        let c = checked_of(&root, &ws, &l.id);
+        assert_eq!(c.state.describe(), "scenario-drifted");
+        assert!(c.failing);
+        assert_eq!(
+            c.note.as_deref(),
+            Some(
+                format!(
+                    "the scenario side moved: `archi/world/{FACT_SLUG}.md` no longer matches the \
+                     digest this link recorded; the code side holds — `link repin {}` binds the \
+                     pair again",
+                    l.id
+                )
+                .as_str()
+            )
+        );
+
+        repin(&root, &l.id, None).unwrap();
+        assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A renamed address and a moved witness are two failures, and they keep
+    /// reading differently: the name is the address, so a rename unresolves
+    /// the ref and never reaches the digest at all
+    /// (`the-digest-witnesses-one-scenario`).
+    #[test]
+    fn renaming_the_addressed_scenario_is_spec_drift_not_a_moved_digest() {
+        let root = temp_project();
+        let ws = model_of(&root);
+        let both = format!("{FACT}{SIBLING}");
+        write_fact(&root, &both);
+        let l = add(
+            &root,
+            ws.model(),
+            &format!("{FACT_SLUG}#{SCENARIO}"),
+            "code/auth.rs#Vault::persist",
+            LinkKind::Literal,
+        )
+        .unwrap();
+
+        let renamed = "the app opens off the network";
+        write_fact(
+            &root,
+            &both.replace(
+                &format!("Scenario: {SCENARIO}"),
+                &format!("Scenario: {renamed}"),
+            ),
+        );
+        let c = checked_of(&root, &ws, &l.id);
+        assert_eq!(c.state, State::SpecDrifted);
+        assert_ne!(c.state.describe(), "scenario-drifted");
+        assert!(c.failing);
+        let note = c.note.unwrap_or_default();
+        assert!(note.contains("names no scenario") && note.contains("--spec"), "{note}");
+
+        // The repair is the one the note names, and the pair binds to the
+        // scenario under its new name.
+        repin_spec(&root, &l.id, &format!("{FACT_SLUG}#{renamed}")).unwrap();
+        assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The links journaled while the digest covered the whole block — six of
+    /// them in this repository — keep the grain they recorded. A recorded
+    /// digest that is the fact's whole story as it stands now is not motion,
+    /// so nothing false-fails on the day the grain narrows; the first `repin`
+    /// binds the link to the scenario it addresses, and the narrow grain
+    /// rules it from there (`the-digest-witnesses-one-scenario`).
+    #[test]
+    fn a_link_recorded_over_the_whole_block_holds_until_a_repin_narrows_it() {
+        let root = temp_project();
+        let ws = model_of(&root);
+        let both = format!("{FACT}{SIBLING}");
+        write_fact(&root, &both);
+        let roots = Roots::resolve(&root).unwrap();
+        let whole =
+            fact_digest(&root, roots.set(), FACT_SLUG, None).expect("the fact stands in the tree");
+        let anchor = Anchor::parse("code/auth.rs#Vault::persist").unwrap();
+        let resolved = resolve_anchor(&root, &anchor).unwrap();
+        let old = serde_json::json!({
+            "event": "add",
+            "link": {
+                "id": "l0001",
+                "spec": {"ref": format!("{FACT_SLUG}#{SCENARIO}")},
+                "anchor": {"file": "code/auth.rs", "symbol": "Vault::persist"},
+                "kind": "literal",
+                "standing": "asserted",
+                "origin": {"kind": "authored"},
+                "birth": {
+                    "created": now(),
+                    "spans": [{
+                        "file": "code/auth.rs",
+                        "start": resolved.span.start,
+                        "end": resolved.span.end,
+                        "hash": &resolved.span.hash,
+                    }],
+                },
+                "pins": {
+                    "canonicalizer": &resolved.pins.canonicalizer,
+                    "interface": &resolved.pins.interface,
+                    "body": &resolved.pins.body,
+                    "scenario": &whole,
+                },
+            },
+        })
+        .to_string();
+        fs::create_dir_all(root.join("archi").join("links")).unwrap();
+        fs::write(journal_path(&root), format!("{old}\n")).unwrap();
+        assert_eq!(state_of(&root, &ws, "l0001"), (State::Clean, false));
+
+        // Its own grain still rules it: a sibling moving fails it, exactly as
+        // it failed the day it was written. Narrowing costs it nothing and
+        // gains it nothing until somebody looks.
+        let reworded = both.replace("Then the view arrives late", "Then the view takes its time");
+        write_fact(&root, &reworded);
+        assert_eq!(checked_of(&root, &ws, "l0001").state.describe(), "scenario-drifted");
+
+        // The repin binds the scenario the ref addresses, and the sibling
+        // stops reaching the link.
+        repin(&root, "l0001", None).unwrap();
+        write_fact(
+            &root,
+            &reworded.replace("Then the view takes its time", "Then the view is late"),
+        );
+        assert_eq!(state_of(&root, &ws, "l0001"), (State::Clean, false));
 
         fs::remove_dir_all(&root).unwrap();
     }

@@ -677,13 +677,16 @@ fn scenario_names(fact: &WorldFact) -> Vec<String> {
 /// the one question the planner asks of the wing, at author time and on
 /// every read after. The fingerprint is the wing's own
 /// ([`world_check::scenario_digest`]), so the drift this plan reports and the
-/// grade a link carries can never disagree about what moved.
+/// grade a link carries can never disagree about what moved. The plan names
+/// no scenario: it covers a node with a whole fact, so any scenario of that
+/// fact moving is drift the plan must report
+/// (`archi/requirements/world-facts/the-digest-witnesses-one-scenario.md`).
 fn covering_facts(wing: &Wing, node: &str) -> Vec<CoveringFact> {
     wing.covering(node)
         .into_iter()
         .map(|f| CoveringFact {
             fact: f.doc.slug.clone(),
-            digest: world_check::scenario_digest(f),
+            digest: world_check::scenario_digest(f, None),
         })
         .collect()
 }
@@ -2357,7 +2360,7 @@ mod tests {
         assert_eq!(carried.len(), 1, "{carried:?}");
         assert_eq!(
             carried[0].digest,
-            world_check::scenario_digest(&tree.world[0])
+            world_check::scenario_digest(&tree.world[0], None)
         );
         // The value the links pin for this block: one function, one string.
         assert_eq!(carried[0].digest, "5b5815");

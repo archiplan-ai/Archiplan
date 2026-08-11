@@ -8,7 +8,9 @@
 //! `world` verb and the no-model-nouns rule stand in both the workflow skill
 //! and the CLAUDE.md block, the workflow captures the world before it derives
 //! requirements, and `archi-migrate-world` installs beside the other skills so
-//! a project that stands without a wing can gain one.
+//! a project that stands without a wing can gain one. The planning skill moved
+//! with the behaviour too: it collects its closing block from the world and
+//! asks for none of it.
 
 mod util;
 
@@ -21,6 +23,7 @@ static NEXT: AtomicUsize = AtomicUsize::new(0);
 
 /// This binary's embedded briefing sources, for byte-equality checks.
 const SKILL_ARCHI: &str = include_str!("../../../skills/archi.md");
+const SKILL_PLAN: &str = include_str!("../../../skills/archi-plan.md");
 const SKILL_MERGE: &str = include_str!("../../../skills/archi-merge.md");
 const SKILL_MIGRATE: &str = include_str!("../../../skills/archi-migrate-fractal.md");
 const SKILL_MIGRATE_WORLD: &str = include_str!("../../../skills/archi-migrate-world.md");
@@ -303,6 +306,98 @@ fn the_briefing_carries_the_wing() {
             "the no-model-nouns rule is missing:\n{text}"
         );
     }
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The planning procedure moved with the behaviour
+/// (`archi/requirements/world-facts/the-plan-collects-its-scenarios-and-authors-none.md`):
+/// the closing block is collected from the world facts that cover the plan's
+/// task nodes, the author writes none of it, and an empty block is spec work.
+/// A rule that lives only in a requirement is a rule the planner meets after
+/// they have already done the wrong thing.
+#[test]
+fn the_planning_skill_collects_its_scenarios_and_authors_none() {
+    let root = temp_dir();
+    ok_in(&root, &["init", "."]);
+    let installed = fs::read_to_string(root.join(".claude/skills/archi-plan/SKILL.md")).unwrap();
+
+    // Installed byte-equal to the embedded copy, as every other skill is.
+    assert_eq!(installed, SKILL_PLAN, "the planning skill drifted on install");
+
+    // The prose is hard-wrapped, so a sentence is read over its line breaks:
+    // what the skill says must not depend on where a line ends.
+    let flat = installed.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    // No instruction to author the file. The skill still names `scenarios.md`,
+    // because it has to say the author writes nothing into it — so every line
+    // that names the file carries the denial on it. A mention without one is
+    // the old instruction coming back.
+    for line in installed.lines().filter(|l| l.contains("scenarios.md")) {
+        let padded = format!("{line} ");
+        assert!(
+            ["no ", "not ", "never", "nobody", "nothing", "none"]
+                .iter()
+                .any(|deny| padded.contains(deny)),
+            "the skill still asks for `scenarios.md`: {line}"
+        );
+    }
+    for gone in [
+        "Walk the architecture as a user",
+        "one bullet per flow",
+        "delete its bullet",
+        "the plan's own user stories",
+    ] {
+        assert!(!flat.contains(gone), "the skill still says `{gone}`");
+    }
+
+    // Where the block comes from, and who authors it: nobody.
+    for phrase in [
+        "collected",
+        "world fact",
+        "holds a task for",
+        "writes none of it",
+        "archi plan scenarios list",
+    ] {
+        assert!(flat.contains(phrase), "the skill misses `{phrase}`");
+    }
+
+    // An empty block is spec work, not a blank to fill.
+    for phrase in [
+        "no world fact covers any node this plan builds",
+        "spec work",
+        "not a blank to fill",
+        "/archi",
+    ] {
+        assert!(flat.contains(phrase), "the skill misses `{phrase}`");
+    }
+
+    // The close gates on the block: every collected scenario carries a link
+    // to code (`the-close-gates-on-anchored-scenarios`).
+    assert!(flat.contains("link to code"), "the skill misses the anchor gate");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// A project installed before the rewrite takes the new procedure the way it
+/// takes any drifted skill: `sync-skills` reports it updated and the old
+/// instruction is gone from the tree.
+#[test]
+fn a_standing_project_syncs_the_new_planning_skill() {
+    let root = temp_dir();
+    ok_in(&root, &["init", "."]);
+    fs::write(
+        root.join(".claude/skills/archi-plan/SKILL.md"),
+        "# Generate an implementation plan\n\nWalk the architecture as a user, and write \
+         one bullet per flow into `scenarios.md`.\n",
+    )
+    .unwrap();
+
+    let out = ok_in(&root, &["sync-skills"]);
+    assert!(out.contains("updated  .claude/skills/archi-plan/SKILL.md"), "{out}");
+    let installed = fs::read_to_string(root.join(".claude/skills/archi-plan/SKILL.md")).unwrap();
+    assert_eq!(installed, SKILL_PLAN);
+    assert!(!installed.contains("one bullet per flow"), "{installed}");
 
     fs::remove_dir_all(&root).unwrap();
 }
