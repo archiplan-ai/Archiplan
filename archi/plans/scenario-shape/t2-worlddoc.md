@@ -18,6 +18,7 @@ the four standing facts move to the new shape
 
 ## Outputs
 
+- crates/archi/src/docs/world.rs
 - archi/world/a-design-written-apart-from-the-code-falls-behind-it.md
 - archi/world/an-assistant-guesses-which-files-answer-a-written-obligation.md
 - archi/world/why-a-design-was-chosen-lives-in-one-person-s-memory.md
@@ -25,6 +26,7 @@ the four standing facts move to the new shape
 
 ## Stack
 
+- the `Scenarios` section must reach the reader with its `###` sub-headings intact: `md::parse` lifts every `###` into its own heading, so the section arrives empty and the grammar is never called
 - each `## Scenarios` block becomes `### <name>` plus its step lines
 - the names stay byte-identical, because six links address them and a rename unresolves those
 
@@ -32,6 +34,7 @@ the four standing facts move to the new shape
 
 ### a-world-fact-carries-its-scenarios
 
+- test — unit test in `world.rs`: a fact in the new shape delivers its `Scenarios` section with every `###` heading and step line, and the grammar is called on it
 - test — check_e2e: all four facts parse under the new reader with no diagnostic
 - test — check_e2e: `archi check` on this tree exits 0 and reports the same four facts
 - test — grep assertion: no `Feature:` and no `Scenario:` line remains under `archi/world/`

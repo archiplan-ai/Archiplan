@@ -1,60 +1,61 @@
 //! The scenario grammar
 //! (`archi/requirements/world-facts/the-grammar-is-a-named-subset.md`,
-//! `archi/requirements/world-facts/scenarios-parse-or-the-check-fails.md`,
-//! `archi/requirements/world-facts/a-scenario-names-where-it-runs.md`): the
-//! `Scenarios` block of a world fact reads as six keywords and a tag line.
+//! `archi/requirements/world-facts/scenarios-parse-or-the-check-fails.md`):
+//! the `Scenarios` block of a world fact reads as level-three headings and
+//! four step keywords.
 //!
-//! The `gherkin` crate reads the whole language; this module reads it and
-//! then refuses everything outside the subset — backgrounds, rules, outlines,
-//! examples, docstrings, data tables, free prose and any other step keyword —
-//! with one located error naming the construct and the six keywords the
-//! subset holds (`archi/decisions/the-grammar-stays-small.md`). Every location
-//! the crate reports sits inside the block, so it is mapped onto the fact file
-//! before it is reported.
+//! A `### ` heading opens a scenario, and its text is the name — the address
+//! a later `archi link` anchors to running code. `Given`, `When`, `Then` and
+//! `And` open its step lines, and those four are the whole vocabulary. Every
+//! other non-blank line is one located `E_DOC` naming what it found
+//! (`archi/decisions/the-grammar-stays-small.md`). `Feature:` and `Scenario:`
+//! earn a refusal of their own, because they are the shape this one replaced:
+//! the fact's own title is the feature and the heading is the scenario, so
+//! each names where it now belongs.
 //!
-//! A `@runs:<member>` tag names the member whose tree runs the scenario. It
-//! resolves against the declared members, and its absence is the claim that
-//! the project's own repository runs it.
-
-use gherkin::{Feature, GherkinEnv};
+//! The reader is a walk over the lines of the block, so it needs no parser.
+//! Every location it reports is the line in the fact file: line `i` of the
+//! block is line `block.line + i` of the file.
 
 use super::DocDiagnostic;
 use super::world::Block;
-use crate::members::{HOME, MemberSet};
 
-/// What every refusal names — the whole grammar in one clause.
-const SUBSET: &str = "the grammar reads `Feature`, `Scenario`, `Given`, `When`, `Then` and \
-                      `And`, and a tag line above a feature or a scenario";
-
-/// The step keywords the subset holds.
+/// The step keywords — the whole vocabulary.
 const STEPS: [&str; 4] = ["Given", "When", "Then", "And"];
 
-/// The tag prefix that names where a scenario runs.
-const RUNS: &str = "runs:";
+/// The vocabulary as every refusal names it, so the repair is mechanical
+/// rather than a guessing game.
+const VOCABULARY: &str = "a step line opens with `Given`, `When`, `Then` or `And`";
 
-/// One `Scenarios` block, parsed and held to the subset.
+/// The heading as every refusal names it.
+const HEADING: &str = "`### <name>` opens a scenario";
+
+/// What a `Feature:` line earns: the fact's own title is the feature.
+const FEATURE: &str = "a `Feature:` line names the feature twice — the fact's own title is the \
+                       feature, and a scenario block holds none of its own";
+
+/// What a `Scenario:` line earns: the heading is the scenario.
+const SCENARIO: &str = "a `Scenario:` line names the scenario twice — the `### ` heading is the \
+                        scenario, and the heading text is the name";
+
+/// What a heading with no text earns: a scenario with no name has no address.
+const NAMELESS: &str = "a `### ` heading with no text names no scenario — the heading text is the \
+                        name, and the name is the address";
+
+/// One `Scenarios` block, read.
 pub struct ScenarioBlock {
-    /// The feature's name — the block in one line.
-    pub feature: String,
-    /// 1-based fact-file line of the `Feature` keyword.
-    pub line: usize,
-    /// The scenarios the subset accepted, in source order.
+    /// The scenarios the grammar accepted, in source order.
     pub scenarios: Vec<Scenario>,
 }
 
 /// One scenario — the address a later `archi link` anchors to running code.
 pub struct Scenario {
-    /// The scenario's name.
+    /// The heading text: the scenario's name.
     pub name: String,
-    /// 1-based fact-file line of the `Scenario` keyword.
+    /// 1-based fact-file line of the heading.
     pub line: usize,
     /// The steps, in source order.
     pub steps: Vec<Step>,
-    /// The member whose tree runs it; [`HOME`] — the project's own repository
-    /// — when no `@runs:` tag names one.
-    pub runs: String,
-    /// Every tag the scenario carries, `@` stripped, `runs:` among them.
-    pub tags: Vec<String>,
 }
 
 /// One step of a scenario.
@@ -67,193 +68,194 @@ pub struct Step {
     pub line: usize,
 }
 
+/// The scenario the walk is inside: what it has read so far, and whether any
+/// refusal touched it.
+struct Open {
+    scenario: Scenario,
+    refused: bool,
+}
+
 /// Parse one `Scenarios` block. `block` is the text and its offset as the
-/// world-fact reader carried them; `members` are the declared members the
-/// `@runs:` tags resolve against. Every deviation lands in the diagnostics and
-/// the result keeps the scenarios that were sound; `None` means none was.
-pub fn parse(
-    block: &Block,
-    file: &str,
-    members: &MemberSet,
-    diags: &mut Vec<DocDiagnostic>,
-) -> Option<ScenarioBlock> {
-    // Blank lines and comments state no scenario: the heading stands over
-    // nothing.
-    if block.text.lines().all(|l| {
-        let line = l.trim_start();
-        line.is_empty() || line.starts_with('#')
-    }) {
+/// world-fact reader carried them. Every deviation lands in the diagnostics
+/// and the result keeps the scenarios that were sound; `None` means none was.
+pub fn parse(block: &Block, file: &str, diags: &mut Vec<DocDiagnostic>) -> Option<ScenarioBlock> {
+    // A block with no heading is one refusal at the block, not one per line:
+    // the whole block is in the wrong shape, and a refusal on every line of
+    // it says one thing many times. The two replaced keywords are reported
+    // even there, because each names the repair.
+    let headed = block.text.lines().any(|l| heading(l).is_some());
+    if !headed {
         diags.push(err(
             file,
             block.line,
-            format!("`Scenarios` holds no scenario — {SUBSET}"),
+            format!("`Scenarios` holds no scenario — {HEADING}, and {VOCABULARY}"),
         ));
-        return None;
     }
-    // The crate reads the whole language, so what it refuses outright is
-    // prose in place of Gherkin, or a line no keyword at all opens.
-    let feature = match Feature::parse(&block.text, GherkinEnv::default()) {
-        Ok(f) => f,
-        Err(e) => {
-            let line = line_in(block, reported_line(&e.to_string()));
-            diags.push(err(file, line, refusal("this line")));
-            return None;
+
+    let mut out: Vec<Scenario> = Vec::new();
+    let mut open: Option<Open> = None;
+    // Every heading the block carried, sound or not: the name is the address,
+    // and a name that resolved twice would address nothing.
+    let mut named: Vec<(String, usize)> = Vec::new();
+
+    for (i, raw) in block.text.lines().enumerate() {
+        // Line `i` of the block is line `block.line + i` of the fact file.
+        let at = block.line + i;
+        let line = raw.trim();
+        if line.is_empty() {
+            continue;
         }
+        // `Feature:` and `Scenario:` are the shape this one replaced, so each
+        // names where it now belongs instead of what the grammar reads.
+        if let Some(message) = replaced(line) {
+            diags.push(err(file, at, message));
+            refuse(&mut open);
+            continue;
+        }
+        if let Some(name) = heading(line) {
+            close(open.take(), &mut out, file, diags);
+            let mut this = Open {
+                scenario: Scenario {
+                    name: name.to_string(),
+                    line: at,
+                    steps: Vec::new(),
+                },
+                refused: false,
+            };
+            if name.is_empty() {
+                diags.push(err(file, at, NAMELESS));
+                this.refused = true;
+            }
+            if let Some((_, first)) = named.iter().find(|(n, _)| n == name) {
+                diags.push(
+                    err(
+                        file,
+                        at,
+                        format!(
+                            "two scenarios are named `{name}` — the name is the address, and one \
+                             fact holds it once"
+                        ),
+                    )
+                    .with_note("first named here", file, *first),
+                );
+                this.refused = true;
+            }
+            named.push((name.to_string(), at));
+            open = Some(this);
+            continue;
+        }
+        // A line before the first heading stands under no scenario; a block
+        // that holds none was refused whole above.
+        let Some(this) = open.as_mut() else {
+            if headed {
+                diags.push(err(
+                    file,
+                    at,
+                    format!(
+                        "`{}` stands under no scenario — {HEADING}, and {VOCABULARY}",
+                        opener(line)
+                    ),
+                ));
+            }
+            continue;
+        };
+        let (keyword, text) = split(line);
+        if !STEPS.contains(&keyword) {
+            diags.push(err(
+                file,
+                at,
+                format!("`{keyword}` opens no step — {VOCABULARY}"),
+            ));
+            this.refused = true;
+            continue;
+        }
+        if text.is_empty() {
+            diags.push(err(
+                file,
+                at,
+                format!(
+                    "`{keyword}` states nothing — {VOCABULARY}, and what follows the keyword is \
+                     the step"
+                ),
+            ));
+            this.refused = true;
+            continue;
+        }
+        this.scenario.steps.push(Step {
+            keyword: keyword.to_string(),
+            text: text.to_string(),
+            line: at,
+        });
+    }
+    close(open, &mut out, file, diags);
+    (!out.is_empty()).then_some(ScenarioBlock { scenarios: out })
+}
+
+/// Finish the scenario the walk was inside. A scenario any refusal touched is
+/// reported and dropped, and the block keeps what was sound, as every doc
+/// primitive does.
+fn close(open: Option<Open>, out: &mut Vec<Scenario>, file: &str, diags: &mut Vec<DocDiagnostic>) {
+    let Some(Open { scenario, refused }) = open else {
+        return;
     };
-
-    let line = line_in(block, feature.position.line);
-    if feature.keyword != "Feature" {
-        diags.push(err(file, line, refusal(&quoted(&feature.keyword))));
-    }
-    // A description is free prose, and a scenario a machine cannot read is a
-    // paragraph wearing a costume.
-    if feature.description.is_some() {
-        diags.push(err(file, line, refusal("free prose")));
-    }
-    if let Some(b) = &feature.background {
-        let at = line_in(block, b.position.line);
-        diags.push(err(file, at, refusal(&quoted(&b.keyword))));
-    }
-    for r in &feature.rules {
-        let at = line_in(block, r.position.line);
-        diags.push(err(file, at, refusal(&quoted(&r.keyword))));
-    }
-    if feature.scenarios.is_empty() {
-        diags.push(err(
-            file,
-            line,
-            format!("`Feature` holds one `Scenario` or more — {SUBSET}"),
-        ));
-    }
-    // A `runs:` tag above the feature is the default its scenarios inherit —
-    // Gherkin tags read down — and a scenario states its own.
-    let inherited = runs_tag(&feature.tags, file, line, members, diags)
-        .unwrap_or_else(|| HOME.to_string());
-
-    let mut scenarios = Vec::new();
-    for s in &feature.scenarios {
-        // A scenario any refusal touched is reported and dropped; the block
-        // keeps what was sound, as every doc primitive does.
-        let before = diags.len();
-        let line = line_in(block, s.position.line);
-        if s.keyword != "Scenario" {
-            diags.push(err(file, line, refusal(&quoted(&s.keyword))));
-        }
-        if s.description.is_some() {
-            diags.push(err(file, line, refusal("free prose")));
-        }
-        for e in &s.examples {
-            let at = line_in(block, e.position.line);
-            diags.push(err(file, at, refusal(&quoted(&e.keyword))));
-        }
-        if s.steps.is_empty() {
+    if scenario.steps.is_empty() {
+        // A heading a refusal already touched carries its error; a second one
+        // at the same place says the same thing twice.
+        if !refused {
             diags.push(err(
                 file,
-                line,
-                format!("`Scenario` holds one step or more — {SUBSET}"),
+                scenario.line,
+                format!("`{}` holds no step — {VOCABULARY}", scenario.name),
             ));
         }
-        let mut steps = Vec::new();
-        for st in &s.steps {
-            let at = line_in(block, st.position.line);
-            // The crate keeps the keyword as written, trailing space and all.
-            let keyword = st.keyword.trim();
-            if !STEPS.contains(&keyword) {
-                diags.push(err(file, at, refusal(&quoted(keyword))));
-                continue;
-            }
-            // A docstring carries no location of its own: it opens under its
-            // step, and the step's line is where the trimming starts.
-            if st.docstring.is_some() {
-                diags.push(err(file, at, refusal("a docstring")));
-            }
-            if let Some(t) = &st.table {
-                let at = line_in(block, t.position.line);
-                diags.push(err(file, at, refusal("a data table")));
-            }
-            steps.push(Step {
-                keyword: keyword.to_string(),
-                text: st.value.clone(),
-                line: at,
-            });
-        }
-        let runs =
-            runs_tag(&s.tags, file, line, members, diags).unwrap_or_else(|| inherited.clone());
-        if diags.len() == before {
-            scenarios.push(Scenario {
-                name: s.name.clone(),
-                line,
-                steps,
-                runs,
-                tags: s.tags.clone(),
-            });
-        }
+        return;
     }
-    (!scenarios.is_empty()).then(|| ScenarioBlock {
-        feature: feature.name.clone(),
-        line,
-        scenarios,
-    })
-}
-
-/// The member a tag line names, resolved against the declared members;
-/// `None` when the tags name none. Home is never named on a tag: absence is
-/// the claim that the project's own repository runs the scenario.
-fn runs_tag(
-    tags: &[String],
-    file: &str,
-    line: usize,
-    members: &MemberSet,
-    diags: &mut Vec<DocDiagnostic>,
-) -> Option<String> {
-    let named: Vec<&str> = tags.iter().filter_map(|t| t.strip_prefix(RUNS)).collect();
-    match named.as_slice() {
-        [] => None,
-        [name] if members.declared().iter().any(|m| m.name == *name) => {
-            Some((*name).to_string())
-        }
-        [name] => {
-            diags.push(err(file, line, unknown_member(name, members)));
-            None
-        }
-        // A walk that crosses members is one scenario per member, joined by
-        // the fact that carries them.
-        _ => {
-            diags.push(err(
-                file,
-                line,
-                format!("`@{RUNS}` appears twice — one scenario runs in one place"),
-            ));
-            None
-        }
+    if !refused {
+        out.push(scenario);
     }
 }
 
-/// The refusal an unresolved `@runs:` earns: it names what the manifest
-/// declares, because the repair is either the name or the declaration.
-fn unknown_member(name: &str, members: &MemberSet) -> String {
-    let declared: Vec<&str> = members.declared().iter().map(|m| m.name.as_str()).collect();
-    let known = if declared.is_empty() {
-        "archi.toml declares no member".to_string()
+/// The refusal a line of the replaced shape earns; `None` when the line is
+/// neither.
+fn replaced(line: &str) -> Option<&'static str> {
+    if line.starts_with("Feature:") {
+        Some(FEATURE)
+    } else if line.starts_with("Scenario:") {
+        Some(SCENARIO)
     } else {
-        format!("archi.toml declares {}", declared.join(", "))
-    };
-    format!(
-        "`@{RUNS}{name}` names no declared member — {known}; a scenario with no `@{RUNS}` tag \
-         runs in the project's own repository"
-    )
+        None
+    }
 }
 
-/// The 1-based block line a crate parse failure sits on. The crate keeps the
-/// position private and renders it as `Error at <line>:<col>: …`, so the
-/// rendering is the only exposure; a rendering that reads otherwise falls
-/// back to the block's first line.
-fn reported_line(rendered: &str) -> usize {
-    rendered
-        .strip_prefix("Error at ")
-        .and_then(|rest| rest.split_once(':'))
-        .and_then(|(line, _)| line.parse().ok())
-        .unwrap_or(1)
+/// The name a level-three heading carries; `None` when the line is no such
+/// heading. A deeper heading is not one: `### ` is the whole opener.
+fn heading(line: &str) -> Option<&str> {
+    let rest = line.trim().strip_prefix("###")?;
+    let name = rest
+        .strip_prefix(' ')
+        .or_else(|| rest.is_empty().then_some(rest))?;
+    Some(name.trim())
+}
+
+/// The first word of a line, and what follows it.
+fn split(line: &str) -> (&str, &str) {
+    match line.split_once(char::is_whitespace) {
+        Some((first, rest)) => (first, rest.trim()),
+        None => (line, ""),
+    }
+}
+
+/// What a line opens with — what a refusal names it by.
+fn opener(line: &str) -> &str {
+    split(line).0
+}
+
+/// A scenario the walk is inside, refused: the line that failed is reported
+/// where it sits, and the scenario around it is dropped.
+fn refuse(open: &mut Option<Open>) {
+    if let Some(this) = open.as_mut() {
+        this.refused = true;
+    }
 }
 
 /// Every refusal is one located `E_DOC`: the code `check` blocks on.
@@ -261,28 +263,10 @@ fn err(file: &str, line: usize, message: impl Into<String>) -> DocDiagnostic {
     DocDiagnostic::new("E_DOC", message, file, line)
 }
 
-/// A keyword as a refusal names it.
-fn quoted(keyword: &str) -> String {
-    format!("`{keyword}`")
-}
-
-/// The one refusal every construct outside the subset earns: it names what it
-/// found and what the grammar reads, so trimming a foreign feature file is
-/// mechanical rather than a guessing game.
-fn refusal(construct: &str) -> String {
-    format!("{construct} is outside the scenario grammar — {SUBSET}")
-}
-
-/// A location the grammar reports, mapped onto the fact file: line `i` of the
-/// block is line `block.line + i - 1` of the file.
-fn line_in(block: &Block, line: usize) -> usize {
-    block.line + line.saturating_sub(1)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::members::Member;
+    use std::fs;
     use std::path::PathBuf;
 
     const FILE: &str = "archi/world/users-open-the-app-on-a-train.md";
@@ -293,114 +277,88 @@ mod tests {
     const AT: usize = 12;
 
     const BLOCK: &str = "\
-Feature: Offline open
+### the app opens with no network
 
-  @runs:backend
-  Scenario: the app opens with no network
-    Given the device has no network
-    When the user opens the app
-    Then the last synced view appears
-    And the banner names the outage
+Given the device has no network
+When the user opens the app
+Then the last synced view appears
+And the banner names the outage
 
-  Scenario: the queue drains on reconnect
-    Given a queued write
-    When the network returns
-    Then the write reaches the server
+### the queue drains on reconnect
+
+Given a queued write
+When the network returns
+Then the write reaches the server
 ";
 
-    const BACKGROUND: &str = "\
-Feature: Offline open
-
-  Background:
-    Given the device has no network
-
-  Scenario: the app opens with no network
-    Given the device has no network
-    Then the last synced view appears
-";
-
-    const RULE: &str = "\
+    /// The shape this one replaced, whole: a feature line, a scenario line
+    /// and no heading at all.
+    const REPLACED: &str = "\
 Feature: Offline open
 
   Scenario: the app opens with no network
     Given the device has no network
     Then the last synced view appears
-
-  Rule: the carriage drops the network
-
-    Scenario: the queue drains on reconnect
-      Given a queued write
-      Then the write reaches the server
 ";
 
-    const OUTLINE: &str = "\
+    /// A `Feature:` line over a sound scenario — a fact half moved.
+    const FEATURE_LINE: &str = "\
 Feature: Offline open
 
-  Scenario Outline: the app opens with no network
-    Given the device has <signal>
-    Then the last synced view appears
+### the app opens with no network
+
+Given the device has no network
+Then the last synced view appears
 ";
 
-    const EXAMPLES: &str = "\
-Feature: Offline open
+    /// A `Scenario:` line under the heading that replaced it.
+    const SCENARIO_LINE: &str = "\
+### the app opens with no network
 
-  Scenario: the app opens with no network
-    Given the device has no network
-    Then the last synced view appears
-
-    Examples:
-      | signal |
-      | none   |
+Scenario: the app opens with no network
+Given the device has no network
+Then the last synced view appears
 ";
 
-    const DOCSTRING: &str = "\
-Feature: Offline open
+    const PARAGRAPH: &str = "\
+### the app opens with no network
 
-  Scenario: the app opens with no network
-    Given the payload
-      \"\"\"
-      {\"queued\": 1}
-      \"\"\"
-    Then the last synced view appears
+The user opens the app and the last synced view appears.
+Given the device has no network
+Then the last synced view appears
 ";
 
-    const TABLE: &str = "\
-Feature: Offline open
-
-  Scenario: the app opens with no network
-    Given the rows
-      | device | state |
-      | phone  | dark  |
-    Then the last synced view appears
-";
-
-    /// A step keyword the crate reads and the subset refuses.
     const BUT: &str = "\
-Feature: Offline open
+### the app opens with no network
 
-  Scenario: the app opens with no network
-    Given the device has no network
-    But the banner never appears
-    Then the last synced view appears
+Given the device has no network
+But the banner never appears
+Then the last synced view appears
 ";
 
     const STAR: &str = "\
-Feature: Offline open
+### the app opens with no network
 
-  Scenario: the app opens with no network
-    Given the device has no network
-    * the banner never appears
-    Then the last synced view appears
+Given the device has no network
+* the banner never appears
+Then the last synced view appears
 ";
 
-    /// A step keyword nothing reads — the grammar stops on the line.
     const MISSPELT: &str = "\
-Feature: Offline open
+### the app opens with no network
 
-  Scenario: the app opens with no network
-    Given the device has no network
-    Whn the user opens the app
-    Then the last synced view appears
+Given the device has no network
+Whn the user opens the app
+Then the last synced view appears
+";
+
+    const STEPLESS: &str = "\
+### the app opens with no network
+
+### the queue drains on reconnect
+
+Given a queued write
+Then the write reaches the server
 ";
 
     const PROSE: &str = "\
@@ -408,43 +366,31 @@ The carriage drops the network for minutes at a time, so the app opens on
 whatever it synced last.
 ";
 
-    /// A paragraph inside a scenario: Gherkin reads it as a description, the
-    /// subset as prose wearing a costume.
-    const PARAGRAPH: &str = "\
-Feature: Offline open
+    const TWICE: &str = "\
+### the app opens with no network
 
-  Scenario: the app opens with no network
-    The user opens the app and the last synced view appears.
-    Given the device has no network
-    Then the last synced view appears
+Given the device has no network
+Then the last synced view appears
+
+### the app opens with no network
+
+Given a queued write
+Then the write reaches the server
 ";
 
-    /// A member set with the named members declared — home first, as
-    /// [`MemberSet::declared`] assumes.
-    fn members(declared: &[&str]) -> MemberSet {
-        let member = |name: &str| Member {
-            name: name.to_string(),
-            url: None,
-            declared_path: None,
-            mapped_path: None,
-            root: None,
-        };
-        let mut members = vec![member(HOME)];
-        members.extend(declared.iter().map(|n| member(n)));
-        MemberSet {
-            project_root: PathBuf::from("/nowhere"),
-            members,
-        }
+    /// Parse a block sitting at [`AT`] in the fact file.
+    fn read(text: &str) -> (Option<ScenarioBlock>, Vec<DocDiagnostic>) {
+        read_at(text, AT)
     }
 
-    /// Parse a block sitting at [`AT`] in the fact file.
-    fn read(text: &str, declared: &[&str]) -> (Option<ScenarioBlock>, Vec<DocDiagnostic>) {
+    /// Parse a block sitting at `line` in the fact file.
+    fn read_at(text: &str, line: usize) -> (Option<ScenarioBlock>, Vec<DocDiagnostic>) {
         let block = Block {
             text: text.to_string(),
-            line: AT,
+            line,
         };
         let mut diags = Vec::new();
-        let out = parse(&block, FILE, &members(declared), &mut diags);
+        let out = parse(&block, FILE, &mut diags);
         (out, diags)
     }
 
@@ -468,11 +414,15 @@ Feature: Offline open
             + AT
     }
 
-    /// Whether a refusal lists the six keywords the subset holds.
-    fn lists_the_six(message: &str) -> bool {
-        ["`Feature`", "`Scenario`", "`Given`", "`When`", "`Then`", "`And`"]
+    /// Whether a refusal lists the four step keywords.
+    fn lists_the_four(message: &str) -> bool {
+        ["`Given`", "`When`", "`Then`", "`And`"]
             .iter()
             .all(|k| message.contains(k))
+    }
+
+    fn names(b: &ScenarioBlock) -> Vec<&str> {
+        b.scenarios.iter().map(|s| s.name.as_str()).collect()
     }
 
     fn steps(s: &Scenario) -> Vec<String> {
@@ -482,22 +432,36 @@ Feature: Offline open
             .collect()
     }
 
+    /// Every block the grammar refuses, for the claims made about all of them
+    /// at once.
+    const MALFORMED: [&str; 9] = [
+        REPLACED,
+        FEATURE_LINE,
+        SCENARIO_LINE,
+        PARAGRAPH,
+        BUT,
+        STAR,
+        MISSPELT,
+        STEPLESS,
+        PROSE,
+    ];
+
+    /// The shape itself: a heading names a scenario, and the four keywords
+    /// open its steps (`the-grammar-is-a-named-subset`).
     #[test]
-    fn a_feature_with_two_scenarios_parses() {
-        let (b, diags) = read(BLOCK, &["backend"]);
+    fn two_headings_and_their_steps_parse_into_two_named_scenarios() {
+        let (b, diags) = read(BLOCK);
         assert_eq!(rendered(&diags), Vec::<String>::new());
         let b = b.unwrap();
-        assert_eq!(b.feature, "Offline open");
-        assert_eq!(b.line, at(BLOCK, "Feature: Offline open"));
         assert_eq!(
-            b.scenarios.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+            names(&b),
             [
                 "the app opens with no network",
                 "the queue drains on reconnect"
             ]
         );
         let first = &b.scenarios[0];
-        assert_eq!(first.line, at(BLOCK, "Scenario: the app opens"));
+        assert_eq!(first.line, at(BLOCK, "### the app opens"));
         assert_eq!(
             steps(first),
             [
@@ -510,102 +474,186 @@ Feature: Offline open
         // Every step carries its line in the fact file, not in the block.
         assert_eq!(first.steps[0].line, at(BLOCK, "Given the device"));
         assert_eq!(first.steps[3].line, at(BLOCK, "And the banner"));
-        assert_eq!(b.scenarios[1].steps.len(), 3);
+        let second = &b.scenarios[1];
+        assert_eq!(second.line, at(BLOCK, "### the queue drains"));
+        assert_eq!(second.steps.len(), 3);
     }
 
+    /// The fact's title is the feature, so a `Feature:` line says it twice.
     #[test]
-    fn every_construct_outside_the_subset_is_a_located_error() {
-        for (construct, text, marker) in [
-            ("`Background`", BACKGROUND, "Background:"),
-            ("`Rule`", RULE, "Rule: the carriage"),
-            ("`Scenario Outline`", OUTLINE, "Scenario Outline:"),
-            ("`Examples`", EXAMPLES, "Examples:"),
-            ("a docstring", DOCSTRING, "Given the payload"),
-            ("a data table", TABLE, "| device | state |"),
+    fn a_feature_line_names_the_fact_s_title_as_its_place() {
+        let (b, diags) = read(FEATURE_LINE);
+        let (code, line, message) = only(&diags);
+        assert_eq!((code, line), ("E_DOC", at(FEATURE_LINE, "Feature:")));
+        assert!(message.contains("`Feature:`"), "{message}");
+        assert!(message.contains("title"), "the place: {message}");
+        // The line stands over no scenario, so the scenario under it stands.
+        assert_eq!(names(&b.unwrap()), ["the app opens with no network"]);
+    }
+
+    /// The heading is the scenario, so a `Scenario:` line says it twice.
+    #[test]
+    fn a_scenario_line_names_the_heading_as_its_place() {
+        let (b, diags) = read(SCENARIO_LINE);
+        let (code, line, message) = only(&diags);
+        assert_eq!((code, line), ("E_DOC", at(SCENARIO_LINE, "Scenario:")));
+        assert!(message.contains("`Scenario:`"), "{message}");
+        assert!(message.contains("heading"), "the place: {message}");
+        // The refusal touched the scenario, so the scenario is dropped.
+        assert!(b.is_none());
+    }
+
+    /// Free prose in place of a step is a paragraph wearing a costume, and
+    /// the refusal names the vocabulary it is not written in.
+    #[test]
+    fn prose_under_a_heading_names_the_four_step_keywords() {
+        let (b, diags) = read(PARAGRAPH);
+        let (code, line, message) = only(&diags);
+        assert_eq!((code, line), ("E_DOC", at(PARAGRAPH, "The user opens")));
+        assert!(message.contains("`The`"), "what it found: {message}");
+        assert!(lists_the_four(message), "{message}");
+        assert!(b.is_none());
+    }
+
+    /// The four keywords are the whole vocabulary: the keywords Gherkin holds
+    /// beyond them read as any other unknown opener does.
+    #[test]
+    fn but_and_star_are_refused_like_any_other_opener() {
+        let mut shapes = Vec::new();
+        for (opener, text, marker) in [
+            ("But", BUT, "But the banner"),
+            ("*", STAR, "* the banner"),
+            ("Whn", MISSPELT, "Whn the user"),
         ] {
-            let (_, diags) = read(text, &[]);
+            let (b, diags) = read(text);
             let (code, line, message) = only(&diags);
-            assert_eq!((code, line), ("E_DOC", at(text, marker)), "on {construct}");
-            assert!(message.contains(construct), "{message}");
-            assert!(lists_the_six(message), "{message}");
+            assert_eq!((code, line), ("E_DOC", at(text, marker)), "on `{opener}`");
+            assert!(message.contains(&format!("`{opener}`")), "{message}");
+            assert!(lists_the_four(message), "{message}");
+            assert!(b.is_none(), "on `{opener}`");
+            shapes.push(message.replace(opener, "<opener>"));
+        }
+        // One refusal covers every opener: `But` and `*` earn no error of
+        // their own.
+        assert_eq!(shapes[0], shapes[1]);
+        assert_eq!(shapes[1], shapes[2]);
+    }
+
+    /// A heading over nothing states no scenario.
+    #[test]
+    fn a_heading_with_no_step_is_a_located_error() {
+        let (b, diags) = read(STEPLESS);
+        let (code, line, message) = only(&diags);
+        assert_eq!((code, line), ("E_DOC", at(STEPLESS, "### the app opens")));
+        assert!(lists_the_four(message), "{message}");
+        // The stepless scenario is dropped; the sound one beside it stands.
+        assert_eq!(names(&b.unwrap()), ["the queue drains on reconnect"]);
+    }
+
+    /// A block with no heading is one error at the block: the whole block is
+    /// in the wrong shape, and a refusal on every line says one thing many
+    /// times.
+    #[test]
+    fn a_block_with_no_heading_is_a_located_error() {
+        for text in [PROSE, "\n\n"] {
+            let (b, diags) = read(text);
+            let (code, line, message) = only(&diags);
+            assert_eq!((code, line), ("E_DOC", AT));
+            assert!(lists_the_four(message), "{message}");
+            assert!(message.contains("### "), "the opener: {message}");
+            assert!(b.is_none());
         }
     }
 
+    /// The shape this one replaced, whole: the block-level refusal, and the
+    /// two lines that name where each half now belongs.
     #[test]
-    fn but_and_star_are_refused_like_any_other_unknown_step_keyword() {
-        for (named, text, marker) in [
-            (Some("`But`"), BUT, "But the banner"),
-            (Some("`*`"), STAR, "* the banner"),
-            (None, MISSPELT, "Whn the user"),
-        ] {
-            let (_, diags) = read(text, &[]);
-            let (code, line, message) = only(&diags);
-            assert_eq!((code, line), ("E_DOC", at(text, marker)), "on {marker}");
-            assert!(lists_the_six(message), "{message}");
-            if let Some(named) = named {
-                assert!(message.contains(named), "{message}");
+    fn the_replaced_shape_is_refused_line_by_line() {
+        let (b, diags) = read(REPLACED);
+        assert!(b.is_none());
+        let lines: Vec<usize> = diags.iter().map(|d| d.line).collect();
+        assert_eq!(
+            lines,
+            [
+                AT,
+                at(REPLACED, "Feature:"),
+                at(REPLACED, "Scenario: the app opens")
+            ]
+        );
+        assert!(diags[1].message.contains("title"), "{}", diags[1].message);
+        assert!(diags[2].message.contains("heading"), "{}", diags[2].message);
+    }
+
+    /// The name is the address, and an ambiguous address names nothing.
+    #[test]
+    fn two_headings_sharing_a_name_name_both_lines() {
+        let (b, diags) = read(TWICE);
+        let [d] = &diags[..] else {
+            panic!("one diagnostic, got {:#?}", rendered(&diags));
+        };
+        // The second heading carries the error; the first is the note.
+        assert_eq!((d.code, d.line), ("E_DOC", AT + 5));
+        assert!(d.message.contains("the app opens with no network"), "{d}");
+        let note = d.note.as_ref().expect("the first line");
+        assert_eq!((note.file.as_str(), note.line), (FILE, AT));
+        // The first scenario is unambiguous in itself and stands.
+        assert_eq!(names(&b.unwrap()), ["the app opens with no network"]);
+    }
+
+    /// Every location is the line in the fact file, computed from the block's
+    /// offset (`scenarios-parse-or-the-check-fails`): the same block read at
+    /// two offsets reports the same lines, moved by the difference.
+    #[test]
+    fn every_error_reports_its_line_in_the_fact_file() {
+        for text in MALFORMED {
+            let (_, here) = read_at(text, AT);
+            let (_, further) = read_at(text, AT + 100);
+            let moved: Vec<usize> = here.iter().map(|d| d.line + 100).collect();
+            let there: Vec<usize> = further.iter().map(|d| d.line).collect();
+            assert_eq!(moved, there, "on {text}");
+            // Every line falls inside the block it was read from.
+            let last = AT + text.lines().count();
+            assert!(
+                here.iter().all(|d| (AT..last).contains(&d.line)),
+                "on {text}"
+            );
+        }
+    }
+
+    /// Every refusal carries `E_DOC` — the code the docs pass
+    /// ([`super::super::check`]) collects and `archi check` exits non-zero
+    /// on. A malformed block blocks; it is never a finding.
+    #[test]
+    fn a_malformed_block_is_the_code_the_check_blocks_on() {
+        for text in MALFORMED {
+            let (_, diags) = read(text);
+            assert!(!diags.is_empty(), "on {text}");
+            assert!(diags.iter().all(|d| d.code == "E_DOC"), "on {text}");
+        }
+    }
+
+    /// Four keywords and a markdown heading need no parser: nothing in the
+    /// workspace depends on the `gherkin` crate any more.
+    #[test]
+    fn no_cargo_toml_of_the_workspace_names_the_gherkin_crate() {
+        let root = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
+        let mut stack = vec![root];
+        let mut named: Vec<String> = Vec::new();
+        while let Some(dir) = stack.pop() {
+            for entry in fs::read_dir(&dir).unwrap().flatten() {
+                let path = entry.path();
+                let name = entry.file_name();
+                if path.is_dir() {
+                    if name != "target" && name != ".git" {
+                        stack.push(path);
+                    }
+                } else if name == "Cargo.toml"
+                    && fs::read_to_string(&path).unwrap().contains("gherkin")
+                {
+                    named.push(path.display().to_string());
+                }
             }
         }
-    }
-
-    #[test]
-    fn prose_and_emptiness_are_errors() {
-        // A `Scenarios` heading over prose: the grammar stops on its first
-        // line, and the line is the one in the fact file.
-        let (b, diags) = read(PROSE, &[]);
-        assert!(b.is_none());
-        let (code, line, message) = only(&diags);
-        assert_eq!((code, line), ("E_DOC", AT));
-        assert!(lists_the_six(message), "{message}");
-
-        // A paragraph in place of steps is refused at its scenario, and the
-        // scenario it costumed is dropped.
-        let (b, diags) = read(PARAGRAPH, &[]);
-        assert!(b.is_none());
-        let (code, line, message) = only(&diags);
-        assert_eq!((code, line), ("E_DOC", at(PARAGRAPH, "Scenario: the app opens")));
-        assert!(message.contains("free prose"), "{message}");
-
-        // A block of blank lines states no scenario either.
-        let (b, diags) = read("\n\n", &[]);
-        assert!(b.is_none());
-        assert_eq!(only(&diags).0, "E_DOC");
-        assert_eq!(only(&diags).1, AT);
-    }
-
-    #[test]
-    fn a_runs_tag_resolves_against_the_declared_members() {
-        // The tagged scenario runs in the member's tree; the untagged one in
-        // the project's own repository.
-        let (b, diags) = read(BLOCK, &["backend"]);
-        assert_eq!(rendered(&diags), Vec::<String>::new());
-        let b = b.unwrap();
-        assert_eq!(b.scenarios[0].runs, "backend");
-        assert_eq!(b.scenarios[0].tags, ["runs:backend"]);
-        assert_eq!(b.scenarios[1].runs, HOME);
-
-        // A name no declaration carries is a located error at the scenario.
-        let (b, diags) = read(BLOCK, &["frontend"]);
-        let (code, line, message) = only(&diags);
-        assert_eq!((code, line), ("E_DOC", at(BLOCK, "Scenario: the app opens")));
-        assert!(message.contains("backend"), "{message}");
-        assert!(message.contains("frontend"), "the declared members: {message}");
-        // The unsound scenario is dropped; the sound one stands.
-        assert_eq!(b.unwrap().scenarios.len(), 1);
-    }
-
-    #[test]
-    fn a_tag_above_the_feature_is_the_default_every_scenario_inherits() {
-        let text = format!("@runs:backend\n{BLOCK}");
-        let block = Block {
-            text: text.clone(),
-            line: AT,
-        };
-        let mut diags = Vec::new();
-        let b = parse(&block, FILE, &members(&["backend"]), &mut diags);
-        assert_eq!(rendered(&diags), Vec::<String>::new());
-        let b = b.unwrap();
-        assert_eq!(b.scenarios[0].runs, "backend");
-        assert_eq!(b.scenarios[1].runs, "backend", "the tag reads down");
+        assert_eq!(named, Vec::<String>::new());
     }
 }
