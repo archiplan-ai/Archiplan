@@ -28,7 +28,6 @@ use std::time::SystemTime;
 
 use modeling_lang::{Definition, ElementKind, Model, Statement, Workspace};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::docs;
 use crate::docs::world_check::{self, Wing, WorldFact};
@@ -666,31 +665,6 @@ fn seed_spec_refs(model: &Model, node: &str) -> Vec<String> {
 
 // ---- the wing: covering facts, the closing block, its drift ------------------
 
-/// The fingerprint of a fact's scenarios: the feature, the names and the
-/// steps, hashed to six hex digits. It is not the story — a plan holds no
-/// copy of one — it is only enough to say the story moved.
-fn scenario_digest(fact: &WorldFact) -> String {
-    let mut text = String::new();
-    if let Some(block) = &fact.scenarios {
-        text.push_str(&block.feature);
-        for s in &block.scenarios {
-            text.push('\u{1f}');
-            text.push_str(&s.name);
-            for step in &s.steps {
-                text.push('\u{1f}');
-                text.push_str(&step.keyword);
-                text.push(' ');
-                text.push_str(&step.text);
-            }
-        }
-    }
-    Sha256::digest(text.as_bytes())
-        .iter()
-        .take(3)
-        .map(|b| format!("{b:02x}"))
-        .collect()
-}
-
 /// The scenario names one fact dictates, in source order.
 fn scenario_names(fact: &WorldFact) -> Vec<String> {
     fact.scenarios
@@ -701,13 +675,15 @@ fn scenario_names(fact: &WorldFact) -> Vec<String> {
 
 /// The facts covering one node, in slug order, each with its fingerprint —
 /// the one question the planner asks of the wing, at author time and on
-/// every read after.
+/// every read after. The fingerprint is the wing's own
+/// ([`world_check::scenario_digest`]), so the drift this plan reports and the
+/// grade a link carries can never disagree about what moved.
 fn covering_facts(wing: &Wing, node: &str) -> Vec<CoveringFact> {
     wing.covering(node)
         .into_iter()
         .map(|f| CoveringFact {
             fact: f.doc.slug.clone(),
-            digest: scenario_digest(f),
+            digest: world_check::scenario_digest(f),
         })
         .collect()
 }
@@ -855,6 +831,15 @@ fn gate_anchored(root: &Path, block: &[BlockFact]) -> Result<(), String> {
          then re-run `archi plan next`",
         unanchored.join("\n  ")
     ))
+}
+
+/// Whether this tree opted into the wing at all: one standing world fact is
+/// the opt-in. It reads the folder [`docs::Tree`] reads, through the very
+/// same walk, so the two answers cannot disagree — and it is asked only on
+/// the empty-block path, where the tree is about to be judged for holding
+/// nothing (`archi/requirements/world-facts/the-wing-arrives-without-noise.md`).
+fn tree_holds_a_wing(root: &Path) -> bool {
+    !world_check::discover(root, &mut Vec::new()).is_empty()
 }
 
 /// The refusal a plan minted after the wing meets when nothing in the world
@@ -1503,10 +1488,12 @@ pub fn next(root: &Path, model: &Model) -> Result<NextOutcome, String> {
             }
             // The sweep ran: the block the wing dictates over the plan's
             // nodes, the drift above it — or straight to done when no fact
-            // covers anything the plan built, which only a plan from before
-            // the wing may do.
+            // covers anything the plan built. A plan from before the wing may
+            // do that, and so may any plan on a tree that holds no fact at
+            // all: the refusal needs a wing to refuse against, and a project
+            // that has not opted in is not behind on one.
             let step = if report.block.is_empty() {
-                if plan.minted_after_the_wing {
+                if plan.minted_after_the_wing && tree_holds_a_wing(root) {
                     return Err(EMPTY_BLOCK.into());
                 }
                 plan.state = PlanState::Completed;
@@ -2318,14 +2305,22 @@ mod tests {
         assert!(next(&root, ws.model()).is_err());
 
         // Reset rewinds whole; the waves sail through on the standing
-        // asserted links and the cleanup wave still gates. With the fact
-        // retired no world fact covers the plan's nodes, and a plan minted
-        // after the wing does not close on nothing.
+        // asserted links and the cleanup wave still gates. The wing stands —
+        // one fact, over a node this plan holds no task for — so no world
+        // fact covers what the plan built, and a plan minted after the wing
+        // does not close on nothing.
         let plan = reset(&root).unwrap();
         assert_eq!((plan.state, plan.closed_waves), (PlanState::Draft, 0));
         assert!(!plan.cleanup_displayed && !plan.scenarios_displayed && !plan.scenarios_closed);
         assert!(!plan_dir(&root, "mvp").join("waves").exists());
         fs::remove_file(root.join("archi/world/riders-lose-the-signal.md")).unwrap();
+        put_fact(
+            &root,
+            "tunnels-run-long",
+            "Tunnels run long",
+            "Gate",
+            &["the tunnel ends"],
+        );
         start(&root, ws.model()).unwrap();
         let outcome = next(&root, ws.model()).unwrap();
         assert!(matches!(outcome.step, Step::Wave { closed: 1, .. }));
@@ -2334,6 +2329,38 @@ mod tests {
         let err = next(&root, ws.model()).err().unwrap();
         assert!(err.contains("no world fact covers any node"), "{err}");
         assert_eq!(active(&root).state, PlanState::Started);
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The plan's drift and the link's grade read one function: the
+    /// fingerprint a task carries is the wing's own digest over the same
+    /// block, down to the byte — so "the scenario changed" can never mean two
+    /// things (`archi/requirements/world-facts/a-plan-s-own-scenarios-block-retires.md`).
+    #[test]
+    fn the_carried_fingerprint_is_the_wing_s_own_digest() {
+        let root = temp_project();
+        put(
+            &root,
+            "archi/world/riders-lose-the-signal.md",
+            "---\ncovers: [Gate]\nsources: [https://example.org/thread/42]\nuses: []\n---\n\n\
+             # Riders lose the signal\n\n\
+             The carriage drops the network for minutes at a time.\n\n\
+             ## What kills this\n\nThe condition ends.\n\n## Scenarios\n\n\
+             Feature: Offline open\n  Scenario: the app opens with no network\n    \
+             Given the device has no network\n    When the user opens the app\n    \
+             Then the last synced view appears\n",
+        );
+        let ws = compiled(&root);
+        let (tree, _) = docs::load(&root, ws.model());
+        let carried = covering_facts(&world_check::serve_world(&tree), "Gate");
+        assert_eq!(carried.len(), 1, "{carried:?}");
+        assert_eq!(
+            carried[0].digest,
+            world_check::scenario_digest(&tree.world[0])
+        );
+        // The value the links pin for this block: one function, one string.
+        assert_eq!(carried[0].digest, "5b5815");
 
         fs::remove_dir_all(&root).unwrap();
     }

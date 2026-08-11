@@ -10,7 +10,9 @@ deferred:
 No verb reads a plan's `scenarios.md`, no verb deletes it, and no finding fires for one.
 A plan written before the wing simply has no scenarios, and that is the end of it. For a
 plan created after, an empty collected block is not a valid close: `plan next` refuses the
-final latch and says that no world fact covers any node this plan holds a task for.
+final latch and says that no world fact covers any node this plan holds a task for. The
+refusal needs a wing to refuse against: on a tree that holds no world facts at all the plan
+closes as a pre-wing plan does, because a project that has not opted in is not behind.
 
 ## System Context
 
@@ -30,6 +32,7 @@ block for a plan minted after the wing, and closes a pre-wing plan as it always 
 
 - test — a pre-wing plan closes with no block and raises no finding
 - test — a post-wing plan with an empty collected block refuses the final latch
+- test — a post-wing plan on a tree with no world facts at all closes without a refusal
 - test — the refusal says that no fact covers any of the plan's task nodes
 - test — the same plan closes once one covering fact exists
 - test — no verb writes or deletes `scenarios.md`

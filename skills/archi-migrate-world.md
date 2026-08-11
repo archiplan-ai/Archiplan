@@ -1,6 +1,6 @@
 ---
 name: archi-migrate-world
-description: Give a standing archiplan project its world facts — read the world prose its intents already hold and the story blocks its old plans authored, interview one candidate at a time, and write a fact only where a person can name the workaround. Use when a project modeled before the wing must record the outside conditions its spec assumes.
+description: Give a standing archiplan project its world facts — read the world prose its intents already hold, the story blocks its old plans authored and the suites it already runs, interview one candidate at a time by offering concrete options, and write a fact only where a person can name the workaround. Use when a project modeled before the wing must record the outside conditions its spec assumes.
 ---
 
 > **Skill freshness — the first step.** In an initialized project, run
@@ -12,11 +12,11 @@ description: Give a standing archiplan project its world facts — read the worl
 # Migrate a standing project into the wing
 
 A project modeled before the wing already claims things about the world.
-The claims sit in the opening prose of its intents, and in the free-text
-story blocks its old plans authored. No verb reads them there, and
-nothing in the repository can make them false. This skill moves the ones
-a person can stand behind into `archi/world/`, one at a time, by
-interview.
+The claims sit in the opening prose of its intents, in the free-text
+story blocks its old plans authored, and under the tests its suites
+already name. No verb reads them there, and nothing in the repository
+can make them false. This skill moves the ones a person can stand behind
+into `archi/world/`, one at a time, by interview.
 
 It deletes nothing. The intent keeps its paragraph, the old plan keeps
 its stories, and the wing stands beside them. The run returns two
@@ -38,9 +38,10 @@ archi world ls                       # the wing today; often empty
 archi search <phrase> --kind intent  # the world prose, by phrase
 ls archi/requirements/*/             # the intents, one folder each
 ls archi/plans/*/scenarios.md        # the story blocks, if the tree has old plans
+ls tests/ */tests/ test/             # the suites, wherever this project keeps them
 ```
 
-Two places hold candidates, and nothing else does:
+Three places hold candidates, and nothing else does:
 
 - **The intents.** The opening paragraph of
   `archi/requirements/<intent>/<intent>.md`. A sentence about people,
@@ -50,6 +51,16 @@ Two places hold candidates, and nothing else does:
 - **The old plans.** `archi/plans/<name>/scenarios.md`, written before a
   plan was forbidden to author stories. No verb reads those blocks. Each
   story that rests on an unstated condition is a candidate.
+- **The test suites.** A suite named for a behavior is a behavior
+  somebody thought worth pinning, and the condition under it is a
+  candidate. Read the names first — the file names, the module names,
+  the test names: `offline_open`, `a_retry_after_the_timeout`,
+  `a_half_written_upload`. Then read what the test sets up before it
+  acts: a clock that jumps, a link that drops, a payload that arrives
+  truncated, a limit somebody chose a number for. The test says what the
+  system does; the candidate is what the world does to it. A test that
+  pins an internal contract — a parser, a formatter, an error string —
+  carries no condition and is not a candidate.
 
 Write the candidate list down, each with the file it came from, and work
 down it. One candidate is one interview. Never batch them: a batch is a
@@ -77,6 +88,31 @@ that candidate. It goes in the brief with the sentence it came from, and
 you move to the next one. Do not soften the question, do not answer it
 from the prose, and do not mint a skeleton "to fill in later". An empty
 wing is an honest state. A fact nobody observed is not.
+
+**Ask by options, never by a bare open question.** Every question above
+has shapes, so put the shapes on the table. Ask through the poll tool
+(AskUserQuestion) with two or three concrete candidate answers — the
+condition as the prose states it, the same condition one degree
+stronger, the same one degree weaker — and let the operator choose. An
+open question in the abstract stalls: "what would you have to see to
+call this over?" reads as a riddle, and what comes back is "I do not
+understand the question". The same question with three answers beside it
+is answered in seconds. Say plainly what the options are: scaffolding
+for the operator's own thinking, not a menu. The best answer of a run is
+often the fourth one, the one the operator writes after seeing that none
+of the three fits.
+
+**Ask again after an apparent axiom.** The first
+"nothing would make this false" is not a verdict: a claim that looks
+like an axiom is far more often a claim stated badly. Ask the killer a
+second time with shapes — name two observations that would end the
+condition and one that would only dent it, and ask which of them the
+operator would call. Two outcomes follow and both are right. The second
+ask names a real killer, the candidate becomes a fact, and the wing
+gains a condition somebody can watch. Or it confirms a premise that
+truly cannot fail here — and a premise is not a world fact: it stays in
+the intent that already holds it, and the brief says so. Neither outcome
+is the mistake. The mistake is stopping at the first answer.
 
 ## 3. Write the fact
 
@@ -149,8 +185,8 @@ operator it is there. It holds:
   in the operator's terms, not as a verdict.
 - **What is thin** — facts with one scenario, facts with an empty
   `covers`, and conditions the operator named but could not date.
-- **Where the prose still stands** — the intents and the `scenarios.md`
-  files this run read and left untouched.
+- **Where the prose still stands** — the intents, the `scenarios.md`
+  files and the suites this run read and left untouched.
 
 A later run starts from that brief. The candidates that stopped at the
 gate are the ones to ask about again, when somebody has watched the

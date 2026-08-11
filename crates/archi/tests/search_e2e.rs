@@ -88,6 +88,20 @@ fn wing(root: &Path) {
     .write(root, "the-farm-replays-stolen-pairs", "The farm replays stolen pairs");
 }
 
+/// The reasons behind one shape, written when it was chosen: the rationale
+/// prose plus the price — `prefer` names what the trade bought, `over` what
+/// it paid (`archi/requirements/spec-docs/a-decision-prices-the-fork.md`).
+fn decision(root: &Path) {
+    put(
+        root,
+        "archi/decisions/accept-throttle-lag.md",
+        "---\nlinks: [RateLimiter, credential-stuffing]\nprefer: [simplicity]\nover: [performance]\n---\n\n\
+         # Accept throttle lag\n\n\
+         One limiter stands in front of the hash, so organic logins wait behind the burst.\n\
+         A second queue keeps them fast and is one more thing to run.\n",
+    );
+}
+
 fn run(root: &Path, args: &[&str]) -> (bool, String, String) {
     let out = Command::new(env!("CARGO_BIN_EXE_archi"))
         .args(args)
@@ -241,5 +255,69 @@ fn advisory_states_search_fine_and_a_save_still_reports_unchanged() {
         (stdout.clone() + &stderr).contains("unchanged since v0001"),
         "{stdout}\n{stderr}"
     );
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// A reader who was not there arrives with a phrase and nothing else. The
+/// record answers, and the answer carries the reasoning, the trade and what
+/// the trade cost, with the address the whole record reads from — no author
+/// in the loop
+/// (`archi/world/why-a-design-was-chosen-lives-in-one-person-s-memory.md`,
+/// "Somebody asks why months after the choice").
+#[test]
+fn a_reader_who_was_not_there_is_answered_with_the_trade_and_its_cost() {
+    let root = temp_project();
+    docs(&root);
+    decision(&root);
+
+    let out = ok(&root, &["search", "throttle", "lag", "--kind", "decision"]);
+    assert!(out.contains("decision    accept-throttle-lag"), "{out}");
+
+    // Why it is this way, in the record's own words.
+    assert!(
+        out.contains("One limiter stands in front of the hash"),
+        "{out}"
+    );
+    // The trade and its price ride the same answer.
+    assert!(out.contains("prefer: simplicity"), "{out}");
+    assert!(out.contains("over: performance"), "{out}");
+    // And the address the reader opens for the rest of it.
+    assert!(
+        out.contains("archi/decisions/accept-throttle-lag.md:"),
+        "{out}"
+    );
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The person who chose the shape is still here and cannot recall what they
+/// traded. They know the shape, so they ask the shape: the element card
+/// names the record that priced it, and that record answers in their place
+/// (`archi/world/why-a-design-was-chosen-lives-in-one-person-s-memory.md`,
+/// "The person who made the choice has forgotten").
+#[test]
+fn the_shape_names_the_record_that_priced_it() {
+    let root = temp_project();
+    docs(&root);
+    decision(&root);
+
+    // From the shape: the element carries the inversion, the trades that
+    // touch it.
+    let out = ok(&root, &["search", "replay", "burst"]);
+    assert!(out.contains("element     RateLimiter"), "{out}");
+    assert!(out.contains("decided-by: accept-throttle-lag"), "{out}");
+
+    // The named record, asked by name, says what was traded away.
+    let out = ok(&root, &[
+        "search",
+        "accept",
+        "throttle",
+        "lag",
+        "--kind",
+        "decision",
+    ]);
+    assert!(out.contains("prefer: simplicity"), "{out}");
+    assert!(out.contains("over: performance"), "{out}");
+
     fs::remove_dir_all(&root).unwrap();
 }

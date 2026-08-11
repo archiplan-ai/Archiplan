@@ -10,7 +10,10 @@
 //! `uses` graph carries the ring and the deep chain
 //! (`archi/requirements/world-facts/the-wing-reports-what-stands-in-the-air.md`),
 //! and the model carries what no fact reaches
-//! (`archi/requirements/world-facts/coverage-reaches-down-the-graph.md`).
+//! (`archi/requirements/world-facts/coverage-reaches-down-the-graph.md`) —
+//! minus what its type puts outside the question and what `.worldignore`
+//! declares internal
+//! (`archi/requirements/world-facts/an-internal-element-says-so.md`).
 //! Nothing here blocks except an unresolved reference and a ring, and a tree
 //! with no `archi/world/` folder reports nothing at all — a project that has
 //! not opted into the wing is not behind on it
@@ -18,10 +21,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::fs;
 use std::path::Path;
 
-use modeling_lang::{Definition, Model, Statement};
+use modeling_lang::{Definition, Layer, Model, Statement};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use super::gherkin::{self, ScenarioBlock};
 use super::md::slugify;
@@ -32,6 +37,19 @@ use crate::members::{HOME, Member, MemberSet};
 /// A `uses` chain of this many facts still reads; one deeper holds a theory
 /// of the world instead of a record of it.
 const CHAIN_MAX: usize = 3;
+
+/// The ontology term whose instances leave the coverage question
+/// (`archi/requirements/world-facts/coverage-reaches-down-the-graph.md`).
+const DATA: &str = "Data";
+
+/// The declaration of what is internal, beside the wing it quiets
+/// (`archi/requirements/world-facts/an-internal-element-says-so.md`).
+const IGNORE: &str = ".worldignore";
+
+/// What one `.worldignore` line writes between the element and the reason it
+/// is internal — `Element — why nothing outside reaches it`. No element path
+/// carries the dash, so the space around it is free.
+const REASON: char = '—';
 
 /// One world fact as the wing holds it: the record the reader parsed and the
 /// scenarios the grammar accepted.
@@ -168,22 +186,35 @@ pub(crate) fn discover(root: &Path, diags: &mut Vec<DocDiagnostic>) -> Vec<World
             root: Some(root.to_path_buf()),
         }],
     });
-    let mut out = Vec::new();
-    for path in files {
-        let Some((file, doc)) = read_doc(root, &path, diags) else {
-            continue;
-        };
-        let record = world::parse(&doc, &file, &stem(&path), root, diags);
-        let scenarios = record
-            .scenarios
-            .as_ref()
-            .and_then(|b| gherkin::parse(b, &file, &members, diags));
-        out.push(WorldFact {
-            doc: record,
-            scenarios,
-        });
-    }
-    out
+    files
+        .into_iter()
+        .filter_map(|path| read_fact(root, &path, &members, diags))
+        .collect()
+}
+
+/// One fact, read from one file: structure, then schema, then the grammar
+/// over the `Scenarios` block. `None` when nothing readable stands there —
+/// [`discover`] skips such a file, and a reader after one fact has none.
+///
+/// It is the one reader: the wing walks the folder through it and a link
+/// reads a single slug through it, so the two can never read one file into
+/// two different stories.
+pub(crate) fn read_fact(
+    root: &Path,
+    path: &Path,
+    members: &MemberSet,
+    diags: &mut Vec<DocDiagnostic>,
+) -> Option<WorldFact> {
+    let (file, doc) = read_doc(root, path, diags)?;
+    let record = world::parse(&doc, &file, &stem(path), root, diags);
+    let scenarios = record
+        .scenarios
+        .as_ref()
+        .and_then(|b| gherkin::parse(b, &file, members, diags));
+    Some(WorldFact {
+        doc: record,
+        scenarios,
+    })
 }
 
 /// The wing of a loaded tree, keyed by what its facts cover.
@@ -202,8 +233,14 @@ pub(crate) fn serve_world(tree: &Tree) -> Wing<'_> {
 
 /// Cross-check the wing: the two references the record left open, the shape
 /// of the `uses` graph, the state of every fact, and the reach of the whole
-/// wing over the model. An empty wing is checked by saying nothing.
-pub(crate) fn check(model: &Model, tree: &Tree, diags: &mut Vec<DocDiagnostic>) -> WorldReport {
+/// wing over the model. An empty wing is checked by saying nothing — the
+/// declaration file beside it is read only where there is coverage to quiet.
+pub(crate) fn check(
+    root: &Path,
+    model: &Model,
+    tree: &Tree,
+    diags: &mut Vec<DocDiagnostic>,
+) -> WorldReport {
     let facts = &tree.world;
     if facts.is_empty() {
         return WorldReport::default();
@@ -212,7 +249,7 @@ pub(crate) fn check(model: &Model, tree: &Tree, diags: &mut Vec<DocDiagnostic>) 
     let mut findings = Vec::new();
     per_fact(model, facts, &mut findings);
     graph(facts, &mut findings, diags);
-    coverage(model, tree, &mut findings);
+    coverage(root, model, tree, &mut findings, diags);
     WorldReport {
         findings,
         count: Some(WorldCount {
@@ -463,7 +500,20 @@ fn chain_under<'a>(
 /// coverage into it, or when it sits inside a covered node — scenarios run
 /// from the surface inward, so a fact on an outer service carries most of a
 /// model (`archi/requirements/world-facts/coverage-reaches-down-the-graph.md`).
-fn coverage(model: &Model, tree: &Tree, findings: &mut Vec<WorldFinding>) {
+///
+/// Two kinds of element never stand on the list: what the model classifies
+/// as [`DATA`], which the question does not apply to, and what a person
+/// declared internal in [`IGNORE`]
+/// (`archi/requirements/world-facts/an-internal-element-says-so.md`).
+fn coverage(
+    root: &Path,
+    model: &Model,
+    tree: &Tree,
+    findings: &mut Vec<WorldFinding>,
+    diags: &mut Vec<DocDiagnostic>,
+) {
+    let carried = data_elements(model);
+    let declared = internal(root, model, &carried, diags);
     let dump = model.dump();
     let mut nodes: BTreeSet<&str> = BTreeSet::new();
     let mut directed: BTreeMap<&str, bool> = BTreeMap::new();
@@ -524,12 +574,130 @@ fn coverage(model: &Model, tree: &Tree, findings: &mut Vec<WorldFinding>) {
         frontier.extend(nodes.iter().filter(|p| p.starts_with(&inside)).copied());
     }
     for node in &nodes {
-        if !covered.contains(node) {
+        if !covered.contains(node) && !carried.contains(*node) && !declared.contains(*node) {
             findings.push(WorldFinding::Unreached {
                 element: (*node).to_string(),
             });
         }
     }
+}
+
+/// Every element the model classifies as [`DATA`] — by its type, not by a
+/// list of names. A payload rides inside a connection and is never its
+/// destination, so asking whether a behavior arrives at one is a question of
+/// the wrong kind. A model whose ontology holds no such classifier — or
+/// classifies nothing under it — leaves nothing out
+/// (`archi/requirements/world-facts/coverage-reaches-down-the-graph.md`).
+fn data_elements(model: &Model) -> BTreeSet<String> {
+    if model.layer_of(DATA) != Some(Layer::Epistemic) {
+        return BTreeSet::new();
+    }
+    model.term_surface(DATA).into_iter().flatten().collect()
+}
+
+/// The elements a person declared internal, read from [`IGNORE`] beside the
+/// wing. One line is one element path, then [`REASON`], then why nothing
+/// outside reaches it; blank lines and `#` comments are skipped, and a tree
+/// with no file declares nothing.
+///
+/// Every entry resolves against the compiled model — the contract `covers`
+/// carries, so a rename breaks the file loudly instead of muting an element
+/// that no longer exists. The reason is mandatory: the entry is a claim a
+/// reader can argue with, not a mute. And an element the model already
+/// classifies as [`DATA`] is refused, because its type excludes it already
+/// (`archi/requirements/world-facts/an-internal-element-says-so.md`).
+fn internal(
+    root: &Path,
+    model: &Model,
+    carried: &BTreeSet<String>,
+    diags: &mut Vec<DocDiagnostic>,
+) -> BTreeSet<String> {
+    let path = root.join("archi").join("world").join(IGNORE);
+    if !path.is_file() {
+        return BTreeSet::new();
+    }
+    let file = format!("archi/world/{IGNORE}");
+    let text = match fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) => {
+            diags.push(DocDiagnostic::new(
+                "E_DOC",
+                format!("cannot read the file: {e}"),
+                &file,
+                1,
+            ));
+            return BTreeSet::new();
+        }
+    };
+    let mut out = BTreeSet::new();
+    for (i, raw) in text.lines().enumerate() {
+        let (entry, line) = (raw.trim(), i + 1);
+        if entry.is_empty() || entry.starts_with('#') {
+            continue;
+        }
+        let (element, reason) = match entry.split_once(REASON) {
+            Some((e, r)) => (e.trim(), r.trim()),
+            None => (entry, ""),
+        };
+        if reason.is_empty() {
+            diags.push(DocDiagnostic::new(
+                "E_DOC",
+                format!(
+                    "`{IGNORE}` states no reason for `{element}` — one line is `<element> {REASON} \
+                     why nothing outside reaches it`, and a claim a reader cannot argue with is a \
+                     mute"
+                ),
+                &file,
+                line,
+            ));
+        } else if model.resolve_element(element).is_none() {
+            diags.push(DocDiagnostic::new(
+                "E_MODEL_REF",
+                format!("`{IGNORE}` names no element `{element}` of the current model"),
+                &file,
+                line,
+            ));
+        } else if carried.contains(element) {
+            diags.push(DocDiagnostic::new(
+                "E_MODEL_REF",
+                format!(
+                    "`{IGNORE}` names `{element}`, which the model classifies as `{DATA}` — its \
+                     type already leaves the coverage question"
+                ),
+                &file,
+                line,
+            ));
+        } else {
+            out.insert(element.to_string());
+        }
+    }
+    out
+}
+
+/// The fingerprint of a fact's scenarios: the feature, the names and the
+/// steps, hashed to six hex digits. It is not the story — nothing that reads
+/// it holds a copy of one — it is only enough to say the story moved. It
+/// sits beside the parsed block so the plan and the link read one function.
+pub(crate) fn scenario_digest(fact: &WorldFact) -> String {
+    let mut text = String::new();
+    if let Some(block) = &fact.scenarios {
+        text.push_str(&block.feature);
+        for s in &block.scenarios {
+            text.push('\u{1f}');
+            text.push_str(&s.name);
+            for step in &s.steps {
+                text.push('\u{1f}');
+                text.push_str(&step.keyword);
+                text.push(' ');
+                text.push_str(&step.text);
+            }
+        }
+    }
+    Sha256::digest(text.as_bytes())
+        .iter()
+        .take(3)
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 /// Every name the compiled model answers to: a node's path and the bare name
@@ -563,9 +731,9 @@ mod tests {
 
     static NEXT: AtomicUsize = AtomicUsize::new(0);
 
-    /// A gate that reaches an engine holding a child, and an island nothing
-    /// reaches — the smallest model the coverage walk has something to say
-    /// about.
+    /// A gate that reaches an engine holding a child, an island nothing
+    /// reaches, and a payload the ontology classifies as `Data` — the
+    /// smallest model the coverage walk has something to say about.
     const MODEL: &str = "\
 def node Gate:
   port out
@@ -573,8 +741,10 @@ def node Engine:
   port take
   def node Inner
 def node Island
+def node Payload
 def conn calls := * -> *
 Gate.out calls Engine.take
+Data type_of Payload
 ";
 
     /// The block every fact carries unless the test says otherwise.
@@ -641,11 +811,25 @@ Feature: Offline open
         );
     }
 
+    /// The declaration file beside the wing, written whole.
+    fn ignore(root: &Path, text: &str) {
+        put(root, &format!("archi/world/{IGNORE}"), text);
+    }
+
     fn check_at(root: &Path) -> DocReport {
         let ws = modeling_lang::source::compile_project(root)
             .unwrap_or_else(|f| panic!("test model failed to compile:\n{}", f.render()))
             .workspace;
         docs_check(root, ws.model())
+    }
+
+    /// The fingerprint of the tree's one fact.
+    fn digest_at(root: &Path) -> String {
+        let ws = modeling_lang::source::compile_project(root)
+            .unwrap_or_else(|f| panic!("test model failed to compile:\n{}", f.render()))
+            .workspace;
+        let (tree, _) = load(root, ws.model());
+        scenario_digest(&tree.world[0])
     }
 
     fn rendered(diags: &[DocDiagnostic]) -> Vec<String> {
@@ -954,7 +1138,164 @@ Feature: Offline open
         let root = temp_project();
         healthy(&root, "riders-lose-the-signal", "Riders lose the signal");
         let report = check_at(&root);
+        // `Engine` rides the edge, `Engine.Inner` sits inside it, and both
+        // stay off the list; the island is the whole report.
         assert_eq!(unreached(&report), ["Island"]);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A `Data`-classified element is outside the coverage question, covered
+    /// or not: a payload rides inside a connection and is never its
+    /// destination (`coverage-reaches-down-the-graph`).
+    #[test]
+    fn a_data_element_is_never_reported_covered_or_not() {
+        let root = temp_project();
+        healthy(&root, "riders-lose-the-signal", "Riders lose the signal");
+        assert_eq!(unreached(&check_at(&root)), ["Island"]);
+
+        // Named by a fact, it is silent for the other reason; the report
+        // does not change.
+        fact(
+            &root,
+            "riders-lose-the-signal",
+            &lists("Gate, Payload", SOURCE, ""),
+            "Riders lose the signal",
+            "The carriage drops the network for minutes at a time.",
+            SCENARIOS,
+        );
+        assert_eq!(unreached(&check_at(&root)), ["Island"]);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The declaration beside the wing: one line names an element and why
+    /// nothing outside reaches it, and the element leaves the list. A tree
+    /// with no file behaves exactly as it does today
+    /// (`an-internal-element-says-so`).
+    #[test]
+    fn a_declared_element_leaves_the_coverage_list() {
+        let root = temp_project();
+        healthy(&root, "riders-lose-the-signal", "Riders lose the signal");
+        assert_eq!(unreached(&check_at(&root)), ["Island"]);
+
+        ignore(
+            &root,
+            "# what no condition outside will ever reach\n\n\
+             Island — a scratch fixture; no behavior from outside arrives at it\n",
+        );
+        let report = check_at(&root);
+        assert_eq!(rendered(&report.diagnostics), Vec::<String>::new());
+        assert_eq!(unreached(&report), Vec::<String>::new());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The file resolves rather than matches by string: a renamed element
+    /// breaks it loudly, on its own line (`an-internal-element-says-so`).
+    #[test]
+    fn a_declared_entry_naming_nothing_is_a_located_error() {
+        let root = temp_project();
+        healthy(&root, "riders-lose-the-signal", "Riders lose the signal");
+        ignore(&root, "# the list\nGhost — it left the model two versions ago\n");
+        let report = check_at(&root);
+        let all = rendered(&report.diagnostics).join("\n");
+        assert_eq!(
+            report
+                .diagnostics
+                .iter()
+                .map(|d| (d.code, d.file.as_str(), d.line))
+                .collect::<Vec<_>>(),
+            [("E_MODEL_REF", "archi/world/.worldignore", 2)],
+            "{all}"
+        );
+        assert!(all.contains("`Ghost`"), "{all}");
+        // The unresolved entry silences nothing.
+        assert_eq!(unreached(&report), ["Island"]);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The reason is mandatory: the entry is a claim somebody can be wrong
+    /// about, not a mute (`an-internal-element-says-so`).
+    #[test]
+    fn a_declared_entry_with_no_reason_is_a_located_error() {
+        let root = temp_project();
+        healthy(&root, "riders-lose-the-signal", "Riders lose the signal");
+        for text in ["\nIsland\n", "\nIsland — \n"] {
+            ignore(&root, text);
+            let report = check_at(&root);
+            let all = rendered(&report.diagnostics).join("\n");
+            assert_eq!(
+                report
+                    .diagnostics
+                    .iter()
+                    .map(|d| (d.code, d.file.as_str(), d.line))
+                    .collect::<Vec<_>>(),
+                [("E_DOC", "archi/world/.worldignore", 2)],
+                "{all}"
+            );
+            assert!(all.contains("`Island`"), "{all}");
+            assert_eq!(unreached(&report), ["Island"], "{all}");
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A `Data` entry is a located error: its type already excludes it, so
+    /// the line claims nothing the model does not already say
+    /// (`an-internal-element-says-so`).
+    #[test]
+    fn a_data_entry_in_the_declaration_is_a_located_error() {
+        let root = temp_project();
+        healthy(&root, "riders-lose-the-signal", "Riders lose the signal");
+        ignore(&root, "Payload — it never leaves the process\n");
+        let report = check_at(&root);
+        let all = rendered(&report.diagnostics).join("\n");
+        assert_eq!(
+            report
+                .diagnostics
+                .iter()
+                .map(|d| (d.code, d.file.as_str(), d.line))
+                .collect::<Vec<_>>(),
+            [("E_MODEL_REF", "archi/world/.worldignore", 1)],
+            "{all}"
+        );
+        assert!(all.contains("`Data`"), "{all}");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The fingerprint the plan and the links both read: six hex digits over
+    /// the parsed block, moving with a step and standing still under the
+    /// prose around it.
+    #[test]
+    fn the_scenario_digest_reads_the_parsed_block() {
+        let root = temp_project();
+        healthy(&root, "riders-lose-the-signal", "Riders lose the signal");
+        let first = digest_at(&root);
+        assert_eq!(first.len(), 6, "{first}");
+        assert!(first.chars().all(|c| c.is_ascii_hexdigit()), "{first}");
+        // The value is the one the plans already carry: the move keeps it.
+        assert_eq!(first, "5b5815");
+
+        // The conditioning paragraph moves; the story does not.
+        fact(
+            &root,
+            "riders-lose-the-signal",
+            &lists("Gate", SOURCE, ""),
+            "Riders lose the signal",
+            "A tunnel runs for minutes on the northern line.",
+            SCENARIOS,
+        );
+        assert_eq!(digest_at(&root), first);
+
+        // One step moves, and the fingerprint says so.
+        fact(
+            &root,
+            "riders-lose-the-signal",
+            &lists("Gate", SOURCE, ""),
+            "Riders lose the signal",
+            "The carriage drops the network for minutes at a time.",
+            "Feature: Offline open\n  Scenario: the app opens with no network\n    \
+             Given the device has no network\n    When the user opens the app\n    \
+             Then nothing appears at all\n",
+        );
+        assert_ne!(digest_at(&root), first);
         fs::remove_dir_all(&root).unwrap();
     }
 

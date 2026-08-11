@@ -28,6 +28,19 @@ const COUPLED: &str = "def conn wire := * -> *\n\
                        C.out wire X.c\n\
                        P.out wire Q.inn\n";
 
+/// A gate reaching an engine, an island nothing arrives at, and two payloads
+/// the ontology classifies as `Data` — the smallest tree the coverage
+/// question has both kinds of answer for.
+const CARRIED: &str = "def conn wire := * -> *\n\
+                       def node Gate:\n  port out\n\
+                       def node Engine:\n  port inn\n\
+                       def node Island\n\
+                       def node Payload\n\
+                       def node Receipt\n\
+                       Gate.out wire Engine.inn\n\
+                       Data type_of Payload\n\
+                       Data type_of Receipt\n";
+
 fn temp_project(model: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "archi-check-e2e-{}-{}",
@@ -61,6 +74,24 @@ fn ok(root: &Path, args: &[&str]) -> String {
     let (success, stdout, stderr) = run(root, args);
     assert!(success, "archi {args:?} failed:\n{stdout}\n{stderr}");
     stdout
+}
+
+/// The one standing fact of the coverage tests: it conditions the gate, and
+/// nothing else, so every other element on [`CARRIED`] answers the coverage
+/// question for its own reason.
+fn gate_fact(root: &Path) {
+    util::Fact {
+        covers: "Gate",
+        sources: "https://example.org/thread/42",
+        uses: "",
+        condition: "The carriage drops the network for minutes at a time.",
+        killer: "Trackside coverage that never drops.",
+        scenarios: "Feature: Offline open\n  \
+                    Scenario: the app opens with no network\n    \
+                    Given the device has no network\n    When the user opens the app\n    \
+                    Then the last synced view appears\n",
+    }
+    .write(root, "trains-lose-the-signal", "Trains lose the signal");
 }
 
 #[test]
@@ -225,6 +256,72 @@ fn the_wing_names_what_it_never_reaches_and_the_tree_stands() {
         .map(|f| f["element"].as_str().unwrap())
         .collect();
     assert_eq!(unreached, ["A", "B", "C", "P", "Q"], "{json}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The coverage list names behavior only: a `Data`-classified element rides
+/// inside a connection and is never its destination, so it never stands on
+/// the list — by its type, whatever it is called
+/// (`archi/requirements/world-facts/coverage-reaches-down-the-graph.md`).
+#[test]
+fn the_coverage_list_names_no_data_element() {
+    let root = temp_project(CARRIED);
+    gate_fact(&root);
+
+    let out = ok(&root, &["check"]);
+    assert!(
+        out.contains("world_unreached: Island — no world fact reaches it"),
+        "{out}"
+    );
+    for payload in ["Payload", "Receipt"] {
+        assert!(!out.contains(&format!("world_unreached: {payload}")), "{out}");
+    }
+
+    let json = ok(&root, &["check", "--json"]);
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let unreached: Vec<&str> = v["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["kind"] == "world_unreached")
+        .map(|f| f["element"].as_str().unwrap())
+        .collect();
+    assert_eq!(unreached, ["Island"], "{json}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The floor under the coverage list: with every element either conditioned,
+/// classified `Data`, or declared internal beside the wing, the list is empty
+/// and the check still passes
+/// (`archi/requirements/world-facts/an-internal-element-says-so.md`).
+#[test]
+fn a_declared_element_empties_the_coverage_list() {
+    let root = temp_project(CARRIED);
+    gate_fact(&root);
+    fs::write(
+        root.join("archi/world/.worldignore"),
+        "# what no condition outside will ever reach\n\n\
+         Island — a maintenance siding; no rider ever stands on it\n",
+    )
+    .unwrap();
+
+    let out = ok(&root, &["check"]);
+    assert!(!out.contains("world_unreached"), "{out}");
+    assert!(out.contains("world — 1 facts · 0 ungrounded"), "{out}");
+
+    let json = ok(&root, &["check", "--json"]);
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["status"], "ok", "{json}");
+    assert!(
+        !v["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["kind"] == "world_unreached"),
+        "{json}"
+    );
 
     fs::remove_dir_all(&root).unwrap();
 }

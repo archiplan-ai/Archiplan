@@ -56,6 +56,16 @@ fn ok_in(dir: &Path, args: &[&str]) -> String {
     stdout
 }
 
+/// The fenced archi block of an initialized tree's CLAUDE.md, markers included.
+fn block_of(root: &Path) -> String {
+    let text = fs::read_to_string(root.join("CLAUDE.md")).unwrap();
+    let start = text.find("<!-- archi:begin -->").expect("the fence opens");
+    let end = text[start..].find("<!-- archi:end -->").expect("the fence closes")
+        + start
+        + "<!-- archi:end -->".len();
+    text[start..end].to_string()
+}
+
 /// Every file under `dir` with its bytes, path-sorted.
 fn snapshot(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
     fn walk(dir: &Path, out: &mut Vec<(PathBuf, Vec<u8>)>) {
@@ -282,16 +292,123 @@ fn the_briefing_carries_the_wing() {
     assert!(capture < derive, "the world is captured after the derivation");
 
     // The rule that keeps a fact from arriving as a requirement in costume
-    // stands in both carriers of the briefing.
+    // stands in both carriers of the briefing. The verb and its subcommands
+    // stand in the skill alone: the block stopped repeating what `archi --help`
+    // prints (`the-briefing-says-what-help-does-not`), and a briefing whose two
+    // carriers say the same thing twice is one carrier plus a copy that rots.
     let claude = fs::read_to_string(root.join("CLAUDE.md")).unwrap();
-    assert!(claude.contains("archi world add"), "{claude}");
-    assert!(claude.contains("archi world ls"), "{claude}");
     for text in [&skill, &claude] {
         assert!(
             text.contains("without the nouns of the model"),
             "the no-model-nouns rule is missing:\n{text}"
         );
     }
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The block says what help does not
+/// (`archi/requirements/world-facts/the-briefing-says-what-help-does-not.md`).
+/// `archi --help` prints every verb with its flags and the harness lists the
+/// installed skills, so a copy of either in the block is a copy that goes
+/// stale. What is left is the part an agent reads nowhere else — and the length
+/// is counted, so the block cannot grow back one bullet at a time.
+#[test]
+fn the_briefing_says_what_help_does_not() {
+    let root = temp_dir();
+    ok_in(&root, &["init", "."]);
+    let block = block_of(&root);
+
+    // No flags: help owns them.
+    let flags: Vec<&str> = block
+        .split_whitespace()
+        .filter(|t| {
+            t.trim_matches(|c: char| c == '`' || c == '(' || c == ')' || c == ',')
+                .strip_prefix("--")
+                .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_alphanumeric()))
+        })
+        .collect();
+    assert!(flags.is_empty(), "the block lists flags {flags:?}:\n{block}");
+
+    // No command syntax beyond the one loop the block exists to state.
+    let forms: Vec<&str> = block
+        .split('`')
+        .skip(1)
+        .step_by(2)
+        .filter(|s| s.starts_with("archi "))
+        .collect();
+    assert!(!forms.is_empty(), "the check loop lost its verb:\n{block}");
+    assert!(
+        forms.iter().all(|f| *f == "archi check"),
+        "the block spells out {forms:?}:\n{block}"
+    );
+
+    // No skill inventory: the harness hands the agent that list already.
+    assert!(!block.contains(".claude/skills"), "{block}");
+    assert!(!block.contains("SKILL.md"), "{block}");
+    for skill in [
+        "archi-plan",
+        "archi-implement",
+        "archi-merge",
+        "archi-finish-worktree",
+        "archi-migrate-fractal",
+        "archi-migrate-world",
+    ] {
+        assert!(
+            !block.contains(skill),
+            "the block still inventories `{skill}`:\n{block}"
+        );
+    }
+
+    // What survives the cut: the lines that live only here.
+    assert!(block.contains("never design"), "{block}");
+    assert!(block.contains("archi/versions/"), "{block}");
+    assert!(block.contains("FILES"), "{block}");
+    assert!(block.contains("paths, not payloads"), "{block}");
+    assert!(block.contains("without the nouns of the model"), "{block}");
+
+    // The budget, over the installed text: a new bullet has to pay for itself.
+    let lines = block.lines().count();
+    assert!(lines < 20, "the block is {lines} lines:\n{block}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The migration skill asks the way the first real run taught it to
+/// (`archi/requirements/world-facts/a-skill-migrates-a-standing-project-into-the-wing.md`):
+/// by offering shapes instead of open questions, by asking a second time when
+/// the answer sounds like an axiom, and by reading the suites the project
+/// already runs for candidates.
+#[test]
+fn the_migration_skill_learns_to_ask() {
+    let root = temp_dir();
+    ok_in(&root, &["init", "."]);
+    let installed =
+        fs::read_to_string(root.join(".claude/skills/archi-migrate-world/SKILL.md")).unwrap();
+
+    // Options, not open questions — and the options are scaffolding, not a menu.
+    for phrase in [
+        "two or three",
+        "open question",
+        "not a menu",
+        "poll tool",
+    ] {
+        assert!(installed.contains(phrase), "the skill misses `{phrase}`");
+    }
+
+    // A first "nothing would make this false" is not a verdict.
+    for phrase in ["Ask again", "nothing would make this false"] {
+        assert!(installed.contains(phrase), "the skill misses `{phrase}`");
+    }
+
+    // The third place candidates come from.
+    for phrase in ["test suites", "worth pinning"] {
+        assert!(installed.contains(phrase), "the skill misses `{phrase}`");
+    }
+    assert!(
+        installed.contains("Three places hold candidates"),
+        "the suites are not counted among the sources"
+    );
 
     fs::remove_dir_all(&root).unwrap();
 }
@@ -323,10 +440,9 @@ fn a_pre_wing_project_syncs_into_the_wing() {
     );
     assert!(out.contains("updated  CLAUDE.md"), "{out}");
 
-    // What the upgrade delivered: the verb in the block, the whole procedure
-    // in the skill.
+    // What the upgrade delivered: the rule in the block, the verb and the whole
+    // procedure in the skills.
     let claude = fs::read_to_string(root.join("CLAUDE.md")).unwrap();
-    assert!(claude.contains("archi world add"), "{claude}");
     assert!(claude.contains("without the nouns of the model"), "{claude}");
     assert_eq!(
         fs::read_to_string(root.join(".claude/skills/archi/SKILL.md")).unwrap(),
@@ -470,7 +586,7 @@ fn a_pre_wing_project_upgrades_stays_green_and_takes_its_first_fact() {
     let before = ok_in(&root, &["check"]);
     assert!(!before.contains("world"), "{before}");
 
-    // The upgrade: the verb in the block, the procedure in a skill beside
+    // The upgrade: the rule in the block, the procedure in a skill beside
     // the others — and the check does not move by a byte.
     let out = ok_in(&root, &["sync-skills"]);
     assert!(
@@ -481,7 +597,11 @@ fn a_pre_wing_project_upgrades_stays_green_and_takes_its_first_fact() {
         fs::read_to_string(root.join(".claude/skills/archi-migrate-world/SKILL.md")).unwrap(),
         SKILL_MIGRATE_WORLD
     );
-    assert!(fs::read_to_string(root.join("CLAUDE.md")).unwrap().contains("archi world add"));
+    assert!(
+        fs::read_to_string(root.join("CLAUDE.md"))
+            .unwrap()
+            .contains("without the nouns of the model")
+    );
     assert_eq!(ok_in(&root, &["check"]), before);
 
     // The first fact, written as the skill prescribes: the condition, its

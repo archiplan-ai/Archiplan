@@ -11,7 +11,10 @@ deferred:
 shape — the frontmatter keys present and empty, the headings in order, the text slots
 empty — and a person writes the prose. `archi world rm <slug>` retires one fact, and
 it refuses while another fact names that slug in `uses`, naming the dependants. The
-slug comes from the title, as it does for a requirement and a stressor.
+slug comes from the title, as it does for a requirement and a stressor. A repeated `add`
+converges: on an untouched skeleton it reports `already minted` and writes nothing, exactly
+as `req add` and `stress add` do, and it refuses only where prose has been written, because
+that is content no verb overwrites.
 
 ## System Context
 
@@ -30,7 +33,8 @@ the inverse of `uses`). `Cli` (the `world` verb: `add` and `rm`, with a missing
 parameter refused and the exit codes of the existing doc verbs).
 
 - test — `world add` writes the three frontmatter keys empty and the headings in order
-- test — a second `world add` with the same title refuses and names the standing file
+- test — a second `world add` on an untouched skeleton reports `already minted` and writes nothing
+- test — a second `world add` on an authored file refuses and names it
 - test — `world rm` on a fact that nothing names retires the file
 - test — `world rm` on a fact named in another fact's `uses` refuses and lists the
   dependants

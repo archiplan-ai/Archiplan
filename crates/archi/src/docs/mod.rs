@@ -257,8 +257,10 @@ pub(crate) fn load(root: &Path, model: &Model) -> (Tree, DocReport) {
     let findings = cross_check(root, model, &tree, &mut diags);
     // The wing rides the same pass: its two open references resolve here,
     // against the model and against the other facts, and its reports are
-    // advisory beside the others (`archi/requirements/world-facts/`).
-    let world = world_check::check(model, &tree, &mut diags);
+    // advisory beside the others (`archi/requirements/world-facts/`). It
+    // reads the tree for one more file — the declaration of what is internal
+    // beside the facts — so the root travels with it.
+    let world = world_check::check(root, model, &tree, &mut diags);
     diags.sort_by(|a, b| (a.file.as_str(), a.line).cmp(&(b.file.as_str(), b.line)));
     (
         tree,

@@ -388,7 +388,9 @@ fn the_verb_mints_and_retires_from_the_bound_seat() {
     );
     assert!(ok(&wt, &["world", "ls"]).contains("trains-lose-the-signal"));
 
-    // A standing file is a wall, at the exit code every doc verb refuses with.
+    // A file whose prose was written is a wall, at the exit code every doc
+    // verb refuses with.
+    fact(&wt, "trains-lose-the-signal", "Trains lose the signal", "AuthService", "", "");
     let (code, err) = refuse(&wt, &["world", "add", "Trains lose the signal"]);
     assert_eq!(code, Some(1));
     assert!(err.contains("archi/world/trains-lose-the-signal.md"), "{err}");
@@ -404,6 +406,44 @@ fn the_verb_mints_and_retires_from_the_bound_seat() {
     assert_eq!(code, Some(2));
     assert!(err.contains("archi world add"), "{err}");
     assert!(!wt.join("archi/world").join("trains-lose-the-signal.md").exists());
+}
+
+/// A replayed mint converges: the second `world add` on the untouched
+/// skeleton reports `already minted`, leaves the file byte-identical, and
+/// exits with the code `req add` returns for the same case. A file whose
+/// prose was written is the other half — a wall that names it
+/// (`archi/requirements/world-facts/one-verb-mints-the-world-fact.md`).
+#[test]
+fn the_replayed_mint_converges_like_req_add() {
+    let (_primary, wt) = temp_project();
+    let path = wt.join("archi/world/trains-lose-the-signal.md");
+    ok(&wt, &["world", "add", "Trains lose the signal"]);
+    let minted = fs::read_to_string(&path).unwrap();
+
+    let (code, out, err) = run(&wt, &["world", "add", "Trains lose the signal"]);
+    assert!(out.contains("already minted"), "{out}{err}");
+    assert_eq!(fs::read_to_string(&path).unwrap(), minted, "the mint rewrote the file");
+
+    // The same case through `req add`: same words, same exit code.
+    let req = [
+        "req", "add", "Gate throttles", "--intent", "hardening", "--kind", "functional",
+        "--origin", "intent",
+    ];
+    ok(&wt, &req);
+    let (req_code, req_out, _) = run(&wt, &req);
+    assert!(req_out.contains("already minted"), "{req_out}");
+    assert_eq!(code, req_code);
+    assert_eq!(code, Some(0), "{err}");
+
+    // One authored line and the mint is a wall that names the file.
+    fs::write(
+        &path,
+        minted.replace("## Scenarios\n", "## Scenarios\n\nFeature: Offline open\n"),
+    )
+    .unwrap();
+    let (code, err) = refuse(&wt, &["world", "add", "Trains lose the signal"]);
+    assert_eq!(code, Some(1));
+    assert!(err.contains("archi/world/trains-lose-the-signal.md"), "{err}");
 }
 
 /// `world ls` lists the wing, and `--covers` walks the bridge
