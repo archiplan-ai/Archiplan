@@ -7,11 +7,13 @@ deferred:
 
 # The closing step hands back the work
 
-The closing step prints each collected scenario whole — its Gherkin, not its name — with
-the state of its link beside it: unanchored, anchored and clean, or anchored and drifted
-with the side that moved. Each unanchored line carries the `archi link add` command with
-the spec ref already quoted, so the operator supplies only the symbol. `plan verify`
-answers the same way on demand.
+The closing step prints each collected scenario whole — its name and its steps, not the
+name alone — and what stands under it. A scenario nothing anchors is named new, and
+carries the `archi link add` command with the spec ref already quoted, so the operator
+supplies only the symbol. A scenario something anchors names the file and symbol it
+anchors, and asks the operator to read the two against each other and repair whichever is
+wrong; when the digests disagree it also names the side that moved. `plan verify` answers
+the same way on demand.
 
 ## System Context
 
@@ -30,9 +32,9 @@ moment the tool is least helpful.
 `Planner` (the closing render: the Gherkin, the per-scenario link state, and the ready
 command; the same on `plan verify`). `Links` (the fold the state is read from).
 
-- test — the closing step prints the Gherkin of every collected scenario
-- test — an unanchored scenario prints a runnable `link add` with the ref quoted
+- test — the closing step prints the name and every step of each collected scenario
+- test — a scenario nothing anchors is named new and prints a runnable `link add` with the ref quoted
 - test — that printed command runs as written and anchors the scenario
-- test — an anchored clean scenario prints as clean and carries no command
-- test — an anchored drifted scenario names the side that moved
-- test — `plan verify` prints the same three states before the last wave closes
+- test — an anchored scenario names the file and symbol it anchors, and asks for the re-read
+- test — an anchored scenario whose digests disagree also names the side that moved
+- test — `plan verify` answers the same way before the last wave closes
