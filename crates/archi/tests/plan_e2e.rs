@@ -499,11 +499,16 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
          ### service-hardening\n\n- test — proves service-hardening\n",
     );
 
-    // The test a declaration names, in the tree before the wave opens so it
-    // is never a change of its own.
+    // The tests the declarations name, in the tree before the wave opens so
+    // they are never a change of their own.
     fs::write(
         root.join("code/store_test.rs"),
         "pub fn a_row_is_persisted() {\n    assert!(true);\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("code/auth_test.rs"),
+        "pub fn a_login_without_a_name_is_refused() {\n    assert!(true);\n}\n",
     )
     .unwrap();
     let out = ok(&root, &["plan", "start"]);
@@ -511,16 +516,16 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     let out = ok(&root, &["plan", "current-wave"]);
     assert!(out.contains("t1 Store — persist rows"), "{out}");
 
-    // Close wave 1: the edit under t1's output presses both of its refs and
-    // the gate blocks. Nothing was captured — the diff proves a symbol moved,
-    // it never proves what that symbol answers.
+    // Close wave 1: the edit under t1's output moves a symbol t1 claims, and
+    // the wave refuses while nothing declares it. Nothing was captured — the
+    // diff proves a symbol moved, it never proves what that symbol answers.
     fs::write(
         root.join("code/store.rs"),
         "pub struct Store;\nimpl Store {\n    pub fn put(&mut self, n: u8) { let _ = n; }\n}\n",
     )
     .unwrap();
     let (stdout, stderr) = fails(&root, &["plan", "next"]);
-    assert!(stderr.contains("coverage of the refs this delta presses is incomplete"), "{stderr}");
+    assert!(stderr.contains("t1 — write"), "{stderr}");
     assert!(captured_ids(&stdout).is_empty(), "{stdout}");
     assert!(stdout.contains("w01.t1.declares.toml"), "{stdout}");
 
@@ -546,12 +551,15 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
          answers = \"Store\"\n\
          proved_by = \"code/store_test.rs#a_row_is_persisted\"\n",
     );
+    let (stdout, stderr) = fails(&root, &["plan", "next"]);
+    assert_eq!(captured_ids(&stdout).len(), 1, "{stdout}");
+    assert!(stderr.contains("coverage of the refs this delta presses is incomplete"), "{stderr}");
     ok(&root, &[
         "link", "add", "Auth.creds wire Store.inn", "code/store.rs#Store::put",
         "--kind", "indirect",
     ]);
     let out = ok(&root, &["plan", "next"]);
-    assert_eq!(captured_ids(&out).len(), 1, "{out}");
+    assert!(captured_ids(&out).is_empty(), "the pair is held, not minted twice: {out}");
     assert!(out.contains("wave 1 closed — in flight: t2"), "{out}");
     let declared = ok(&root, &["link", "ls", "--spec", "Store"]);
     assert!(declared.contains("asserted"), "{declared}");
@@ -571,8 +579,16 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
         "pub fn login(u: &str) -> bool { !u.is_empty() }\n",
     )
     .unwrap();
+    write_record(
+        &root,
+        "archi/plans/mvp/waves/w02.t2.declares.toml",
+        "[[declares]]\n\
+         symbol = \"code/auth.rs#login\"\n\
+         answers = \"req:service-hardening\"\n\
+         proved_by = \"code/auth_test.rs#a_login_without_a_name_is_refused\"\n",
+    );
     let out = ok(&root, &["plan", "next"]);
-    assert!(!out.contains("captured "), "{out}");
+    assert_eq!(captured_ids(&out).len(), 1, "the declaration mints its pair: {out}");
     assert!(out.contains("suppressed 3 no-signal pair(s)"), "{out}");
     assert!(out.contains("hand-author"), "{out}");
     assert!(out.contains("archi link add \"Auth\" <file#symbol> --kind indirect"), "{out}");
@@ -681,6 +697,7 @@ fn a_legacy_plan_json_reads_forever_and_its_lifecycle_verbs_advance_it() {
     // a record folder.
     let out = ok(&root, &["plan", "start"]);
     assert!(out.contains("wave 1 in flight: t1"), "{out}");
+    declares_nothing(&root, 1, &["t1"]);
     let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("the cleanup wave"), "{out}");
     let out = ok(&root, &["plan", "next"]);
@@ -977,6 +994,7 @@ fn the_close_collects_the_wing_and_marks_what_lies_outside() {
     curate(&root, "archi/plans/mvp/t2-auth.md", "service-hardening", "code/auth.rs");
 
     ok(&root, &["plan", "start"]);
+    declares_nothing(&root, 1, &["t1", "t2"]);
     let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("the cleanup wave"), "{out}");
 
@@ -1064,6 +1082,7 @@ fn the_close_gates_on_anchored_scenarios() {
     ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
     curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
     ok(&root, &["plan", "start"]);
+    declares_nothing(&root, 1, &["t1"]);
     ok(&root, &["plan", "next"]);
     let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("riders-lose-the-signal#the app opens with no network"), "{out}");
@@ -1103,6 +1122,9 @@ fn the_close_gates_on_anchored_scenarios() {
         ],
     );
     ok(&root, &["plan", "start"]);
+    // The reset took the waves folder with it, declarations and all: the
+    // second run of the ceremony writes the formality again.
+    declares_nothing(&root, 1, &["t1"]);
     ok(&root, &["plan", "next"]);
     ok(&root, &["plan", "next"]);
     let out = ok(&root, &["plan", "next"]);
@@ -1144,6 +1166,7 @@ fn a_post_wing_plan_on_a_tree_with_a_wing_refuses_until_a_fact_covers_a_node() {
     ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
     curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
     ok(&root, &["plan", "start"]);
+    declares_nothing(&root, 1, &["t1"]);
     ok(&root, &["plan", "next"]);
 
     // No fact covers the node the plan holds a task for: the close refuses.
@@ -1208,6 +1231,7 @@ fn a_post_wing_plan_on_a_tree_with_no_wing_closes_without_a_refusal() {
     ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
     curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
     ok(&root, &["plan", "start"]);
+    declares_nothing(&root, 1, &["t1"]);
     let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("the cleanup wave"), "{out}");
 
@@ -1277,6 +1301,7 @@ fn the_closing_step_prints_the_gherkin_the_state_and_the_command() {
         ],
     );
     ok(&root, &["plan", "start"]);
+    declares_nothing(&root, 1, &["t1", "t2"]);
     ok(&root, &["plan", "next"]);
     let out = ok(&root, &["plan", "next"]);
 
@@ -1370,6 +1395,7 @@ fn the_printed_link_add_line_anchors_the_scenario_through_a_real_shell() {
     ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
     curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
     ok(&root, &["plan", "start"]);
+    declares_nothing(&root, 1, &["t1"]);
     ok(&root, &["plan", "next"]);
     let out = ok(&root, &["plan", "next"]);
 
@@ -1536,6 +1562,461 @@ fn a_pre_wing_plan_closes_with_no_block_and_keeps_its_old_one() {
         fs::read_to_string(root.join("archi/plans/old/scenarios.md")).unwrap(),
         "# Scenarios\n\n- a row survives a restart\n"
     );
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+// ---- the declaration gates ---------------------------------------------------
+//
+// A wave does not close while a task in flight declared nothing, while a
+// symbol the wave moved is named by no declaration of a task that claims its
+// file, or while a declared claim the wave moved still stands on the code as
+// it was (`archi/requirements/planning/an-undeclared-change-refuses-the-wave.md`,
+// `archi/requirements/planning/every-task-that-touched-a-symbol-declares-it.md`,
+// `archi/requirements/code-link/a-drifted-declaration-refuses-the-wave-that-moved-it.md`).
+
+/// The tests the declarations below name. The file is written before the
+/// plan starts, so it sits in every wave-open index and is never a change of
+/// its own.
+const TESTS_RS: &str = "pub fn a_row_is_persisted() {\n    assert!(true);\n}\n\n\
+                        pub fn a_login_without_a_name_is_refused() {\n    assert!(true);\n}\n";
+
+/// The proof a declaration over `code/store.rs` names.
+const PROOF: &str = "code/tests.rs#a_row_is_persisted";
+
+/// The proof a declaration over `code/auth.rs` names.
+const AUTH_PROOF: &str = "code/tests.rs#a_login_without_a_name_is_refused";
+
+/// `code/store.rs` as wave 1 leaves it: two symbols, both moved.
+const STORE_TWO: &str = "pub struct Store;\nimpl Store {\n    \
+                         pub fn put(&mut self, n: u8) { let _ = n; }\n    \
+                         pub fn get(&self) -> u8 { 0 }\n}\n";
+
+/// The same two symbols with both shapes moved again.
+const STORE_TWO_MOVED: &str = "pub struct Store;\nimpl Store {\n    \
+                               pub fn put(&mut self, n: u16) -> bool { let _ = n; true }\n    \
+                               pub fn get(&self, k: u8) -> u16 { let _ = k; 0 }\n}\n";
+
+/// The same two symbols with one shape moved and the other left standing.
+const STORE_PUT_MOVED: &str = "pub struct Store;\nimpl Store {\n    \
+                               pub fn put(&mut self, n: u16) -> bool { let _ = n; true }\n    \
+                               pub fn get(&self) -> u8 { 0 }\n}\n";
+
+/// The project-relative path of one task's declaration file in a wave of
+/// plan `mvp`.
+fn declares_rel(wave: usize, task: &str) -> String {
+    format!("archi/plans/mvp/waves/w{wave:02}.{task}.declares.toml")
+}
+
+/// Write one task's declaration file, as its sub-agent does before it
+/// returns: one `[[declares]]` table per symbol it changed. A task that
+/// changed nothing writes the empty list — the file is the formality, and
+/// what it names is the gate that matters.
+fn declares(root: &Path, wave: usize, task: &str, entries: &[[&str; 3]]) {
+    let mut text = String::new();
+    for [symbol, answers, proved_by] in entries {
+        text.push_str(&format!(
+            "[[declares]]\nsymbol = \"{symbol}\"\nanswers = \"{answers}\"\n\
+             proved_by = \"{proved_by}\"\n\n"
+        ));
+    }
+    if entries.is_empty() {
+        text.push_str("declares = []\n");
+    }
+    let path = root.join(declares_rel(wave, task));
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, text).unwrap();
+}
+
+/// The formality every task of a wave performs before it closes: its
+/// declaration file, naming nothing, because nothing under its outputs moved.
+fn declares_nothing(root: &Path, wave: usize, tasks: &[&str]) {
+    for task in tasks {
+        declares(root, wave, task, &[]);
+    }
+}
+
+/// The id of the one live link whose row holds `row`.
+fn link_id(root: &Path, row: &str) -> String {
+    let rows = ok(root, &["link", "ls"]);
+    let hits: Vec<&str> = rows.lines().filter(|l| l.contains(row)).collect();
+    assert_eq!(hits.len(), 1, "one row holds `{row}`:\n{rows}");
+    hits[0]
+        .split_whitespace()
+        .next()
+        .expect("a row starts with its id")
+        .to_string()
+}
+
+/// Age one journaled row into the shape a row written before the rule field
+/// existed carries: no rule at all, which reads back as `inferred` from its
+/// captured origin — the shape the standing rows of a real tree carry
+/// (`archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`).
+fn unstamp_rule(root: &Path, id: &str) {
+    let path = root.join("archi/links/journal.jsonl");
+    let text = fs::read_to_string(&path).unwrap();
+    let aged: Vec<String> = text
+        .lines()
+        .map(|l| {
+            if l.contains(id) {
+                l.replace(",\"rule\":\"declared\"", "")
+            } else {
+                l.to_string()
+            }
+        })
+        .collect();
+    fs::write(&path, format!("{}\n", aged.join("\n"))).unwrap();
+}
+
+/// The delta says what moved; the declaration says what it answers. The wave
+/// refuses while a task in flight wrote no declaration file, and while a
+/// symbol it moved is named in none — and a changed file no task claims stays
+/// the leftover note it always was
+/// (`archi/requirements/planning/an-undeclared-change-refuses-the-wave.md`).
+#[test]
+fn a_wave_refuses_until_every_changed_symbol_a_task_claims_is_declared() {
+    let root = temp_project();
+    fs::write(root.join("code/tests.rs"), TESTS_RS).unwrap();
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Store"]);
+    ok(&root, &["plan", "task", "add", "Auth"]);
+    write_record(
+        &root,
+        "archi/plans/mvp/t1-store.md",
+        "---\nnode: Store\nowns: [store-encrypted]\n---\n\n# t1 — Store\n\npersist rows\n\n\
+         ## Spec\n\n- `Store`\n\n## Inputs\n\n## Outputs\n\n- code/store.rs\n\n## Stack\n\n\
+         ## Verifications\n\n### store-encrypted\n\n- test — proves store-encrypted\n",
+    );
+    write_record(
+        &root,
+        "archi/plans/mvp/t2-auth.md",
+        "---\nnode: Auth\nowns: [service-hardening]\n---\n\n# t2 — Auth\n\nguard the door\n\n\
+         ## Spec\n\n- `Auth`\n- `Service type_of Auth`\n\n## Inputs\n\n- from t1 — the store api\n\n\
+         ## Outputs\n\n- code/auth.rs\n\n## Stack\n\n## Verifications\n\n\
+         ### service-hardening\n\n- test — proves service-hardening\n",
+    );
+    ok(&root, &["plan", "start"]);
+
+    // Two symbols move under t1's one output, and a file no task claims moves
+    // beside them.
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+    fs::write(root.join("code/orphan.rs"), "pub fn stray() -> u8 { 7 }\n").unwrap();
+
+    // Nothing declared: the wave refuses, naming the task and the file it owes.
+    let (stdout, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains("t1 — write"), "names the task: {err}");
+    assert!(err.contains(&declares_rel(1, "t1")), "names the file: {err}");
+    assert!(err.contains("archi plan next"), "names the continuation: {err}");
+    assert!(stdout.contains("leftover code/orphan.rs#stray"), "{stdout}");
+
+    // One symbol declared and one not: the refusal names the second alone,
+    // with the task whose outputs claim its file.
+    declares(&root, 1, "t1", &[["code/store.rs#Store::put", "Store", PROOF]]);
+    let (stdout, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains("code/store.rs#Store::get — owed by t1"), "{err}");
+    assert!(!err.contains("Store::put"), "the declared symbol is left alone: {err}");
+    assert!(!err.contains("orphan"), "no task claims it, so nothing owes it: {err}");
+    assert!(err.contains(&declares_rel(1, "t1")), "names the file to edit: {err}");
+    assert_eq!(captured_ids(&stdout).len(), 1, "the declared pair minted: {stdout}");
+
+    // Declaring the missing symbol clears the refusal and the wave closes;
+    // the file nobody claims is still a leftover and still owes nothing.
+    declares(
+        &root,
+        1,
+        "t1",
+        &[
+            ["code/store.rs#Store::put", "Store", PROOF],
+            ["code/store.rs#Store::get", "Store", PROOF],
+        ],
+    );
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("wave 1 closed — in flight: t2"), "{out}");
+    assert!(out.contains("leftover code/orphan.rs#stray"), "{out}");
+
+    // Wave 2 moves nothing: no symbol is owed, and the file itself is all
+    // that stands between the wave and its close.
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains("t2 — write"), "{err}");
+    assert!(!err.contains("owed by"), "an empty delta owes no symbol: {err}");
+    declares(&root, 2, "t2", &[]);
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("the cleanup wave"), "{out}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// A symbol two in-flight tasks claim is owed by both of them, and each
+/// declaration mints its own pair on it — so the one symbol carries two
+/// claims and the reverse view names the task behind each
+/// (`archi/requirements/planning/every-task-that-touched-a-symbol-declares-it.md`).
+#[test]
+fn a_symbol_two_tasks_claim_is_owed_by_both_and_carries_two_pairs() {
+    let root = temp_project();
+    fs::write(root.join("code/tests.rs"), TESTS_RS).unwrap();
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Store"]);
+    ok(&root, &["plan", "task", "add", "Auth"]);
+    // Neither task inputs the other, so both open in wave 1 — and both claim
+    // `code/store.rs`.
+    write_record(
+        &root,
+        "archi/plans/mvp/t1-store.md",
+        "---\nnode: Store\nowns: [store-encrypted]\n---\n\n# t1 — Store\n\npersist rows\n\n\
+         ## Spec\n\n- `Store`\n\n## Inputs\n\n## Outputs\n\n- code/store.rs\n\n## Stack\n\n\
+         ## Verifications\n\n### store-encrypted\n\n- test — proves store-encrypted\n",
+    );
+    write_record(
+        &root,
+        "archi/plans/mvp/t2-auth.md",
+        "---\nnode: Auth\nowns: [service-hardening]\n---\n\n# t2 — Auth\n\nguard the door\n\n\
+         ## Spec\n\n- `Auth`\n- `Service type_of Auth`\n\n## Inputs\n\n\
+         ## Outputs\n\n- code/auth.rs\n- code/store.rs\n\n## Stack\n\n## Verifications\n\n\
+         ### service-hardening\n\n- test — proves service-hardening\n",
+    );
+    let out = ok(&root, &["plan", "start"]);
+    assert!(out.contains("wave 1 in flight: t1, t2"), "{out}");
+
+    // One symbol both tasks claim moves, and one only t2 claims.
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+    fs::write(
+        root.join("code/auth.rs"),
+        "pub fn login(u: &str) -> bool { !u.is_empty() }\n",
+    )
+    .unwrap();
+
+    // Neither task wrote a file: the refusal names both.
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains("t1 — write") && err.contains("t2 — write"), "{err}");
+
+    // Both files stand and name nothing: the shared symbol is named once,
+    // with both tasks; the symbol only t2 claims is owed by t2 alone.
+    declares(&root, 1, "t1", &[]);
+    declares(&root, 1, "t2", &[]);
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert_eq!(
+        err.matches("code/store.rs#Store::put").count(),
+        1,
+        "the symbol is named once: {err}"
+    );
+    assert!(err.contains("code/store.rs#Store::put — owed by t1, t2"), "{err}");
+    assert!(err.contains("code/auth.rs#login — owed by t2"), "{err}");
+
+    // One of the two declaring is not enough: the refusal names the other.
+    declares(
+        &root,
+        1,
+        "t1",
+        &[
+            ["code/store.rs#Store::put", "Store", PROOF],
+            ["code/store.rs#Store::get", "Store", PROOF],
+        ],
+    );
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains("code/store.rs#Store::put — owed by t2"), "{err}");
+    assert!(!err.contains("owed by t1"), "t1 declared it: {err}");
+
+    // Both declaring closes the wave, and two pairs stand on the one symbol
+    // — each naming the task that declared it.
+    declares(
+        &root,
+        1,
+        "t2",
+        &[
+            ["code/store.rs#Store::put", "Auth", AUTH_PROOF],
+            ["code/store.rs#Store::get", "Auth", AUTH_PROOF],
+            ["code/auth.rs#login", "Auth", AUTH_PROOF],
+        ],
+    );
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("the cleanup wave"), "{out}");
+    let rows = ok(&root, &["link", "ls"]);
+    let pairs: Vec<&str> = rows
+        .lines()
+        .filter(|l| l.contains("← code/store.rs#Store::put"))
+        .collect();
+    assert_eq!(pairs.len(), 2, "two claims, not one duplicated:\n{rows}");
+    assert!(
+        pairs.iter().any(|l| l.contains("captured(t1)") && l.contains("Store ←")),
+        "{rows}"
+    );
+    assert!(
+        pairs.iter().any(|l| l.contains("captured(t2)") && l.contains("Auth ←")),
+        "{rows}"
+    );
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// A declared pair the wave moves out from under refuses that wave, and the
+/// refusal names the link, the symbol and both exits. The rows nobody
+/// declared — inferred and hand-authored — drift beside it and say nothing
+/// (`archi/requirements/code-link/a-drifted-declaration-refuses-the-wave-that-moved-it.md`).
+#[test]
+fn a_wave_that_moves_a_declared_symbol_refuses_until_the_pair_is_repinned() {
+    let root = temp_project();
+    fs::write(root.join("code/tests.rs"), TESTS_RS).unwrap();
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Store"]);
+    ok(&root, &["plan", "task", "add", "Auth"]);
+    ok(&root, &["plan", "task", "add", "Gate"]);
+    write_record(
+        &root,
+        "archi/plans/mvp/t1-store.md",
+        "---\nnode: Store\nowns: [store-encrypted]\n---\n\n# t1 — Store\n\npersist rows\n\n\
+         ## Spec\n\n- `Store`\n\n## Inputs\n\n## Outputs\n\n- code/store.rs\n\n## Stack\n\n\
+         ## Verifications\n\n### store-encrypted\n\n- test — proves store-encrypted\n",
+    );
+    write_record(
+        &root,
+        "archi/plans/mvp/t2-auth.md",
+        "---\nnode: Auth\nowns: [service-hardening]\n---\n\n# t2 — Auth\n\nguard the door\n\n\
+         ## Spec\n\n- `Auth`\n- `Service type_of Auth`\n\n## Inputs\n\n- from t1 — the store api\n\n\
+         ## Outputs\n\n- code/auth.rs\n\n## Stack\n\n## Verifications\n\n\
+         ### service-hardening\n\n- test — proves service-hardening\n",
+    );
+    write_record(
+        &root,
+        "archi/plans/mvp/t3-gate.md",
+        "---\nnode: Gate\nowns: []\n---\n\n# t3 — Gate\n\nopen the door\n\n\
+         ## Spec\n\n- `Gate`\n\n## Inputs\n\n- from t2 — the guard\n\n\
+         ## Outputs\n\n- code/gate.rs\n- code/store.rs\n\n## Stack\n\n## Verifications\n",
+    );
+    ok(&root, &["plan", "start"]);
+
+    // Wave 1: two symbols move and t1 declares both.
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+    declares(
+        &root,
+        1,
+        "t1",
+        &[
+            ["code/store.rs#Store::put", "Store", PROOF],
+            ["code/store.rs#Store::get", "Store", PROOF],
+        ],
+    );
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("wave 1 closed — in flight: t2"), "{out}");
+    let declared = link_id(&root, "Store ← code/store.rs#Store::put");
+    let aged = link_id(&root, "Store ← code/store.rs#Store::get");
+    unstamp_rule(&root, &aged);
+
+    // Wave 2 moves nothing in `code/store.rs`: the declared pair stands and
+    // the wave closes.
+    fs::write(
+        root.join("code/auth.rs"),
+        "pub fn login(u: &str) -> bool { !u.is_empty() }\n",
+    )
+    .unwrap();
+    declares(&root, 2, "t2", &[["code/auth.rs#login", "Auth", AUTH_PROOF]]);
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("wave 2 closed — in flight: t3"), "{out}");
+
+    // A hand-authored row on the same symbol, to drift beside the declared one.
+    ok(&root, &["link", "add", "Gate", "code/store.rs#Store::put", "--kind", "indirect"]);
+    let authored = link_id(&root, "Gate ← code/store.rs#Store::put");
+
+    // Wave 3 moves both symbols. t3 declares them again — the same claim,
+    // so nothing new is minted — and the declared pair it moved refuses.
+    fs::write(root.join("code/store.rs"), STORE_TWO_MOVED).unwrap();
+    declares(
+        &root,
+        3,
+        "t3",
+        &[
+            ["code/store.rs#Store::put", "Store", PROOF],
+            ["code/store.rs#Store::get", "Store", PROOF],
+        ],
+    );
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains(&declared), "names the link: {err}");
+    assert!(err.contains("code/store.rs#Store::put"), "names the symbol: {err}");
+    assert!(
+        err.contains(&format!("archi link repin {declared}")),
+        "the first exit: {err}"
+    );
+    assert!(
+        err.contains(&format!("archi link rm {declared}")),
+        "the second exit: {err}"
+    );
+    assert!(!err.contains(&aged), "an inferred row that drifts says nothing: {err}");
+    assert!(
+        !err.contains(&authored),
+        "a hand-authored row that drifts says nothing: {err}"
+    );
+
+    // Repinning accepts the drift, and the wave closes.
+    ok(&root, &["link", "repin", &declared]);
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("the cleanup wave"), "{out}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The second exit the drift refusal names: the claim no longer holds, so the
+/// stale pair is retired and this wave's declaration mints it again against
+/// the code as it stands now. The file is the claim, so the pair returns —
+/// which is what the refusal says it will do
+/// (`archi/requirements/code-link/a-drifted-declaration-refuses-the-wave-that-moved-it.md`).
+#[test]
+fn the_second_exit_retires_the_stale_pair_and_the_declaration_mints_it_anew() {
+    let root = temp_project();
+    fs::write(root.join("code/tests.rs"), TESTS_RS).unwrap();
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Store"]);
+    ok(&root, &["plan", "task", "add", "Auth"]);
+    write_record(
+        &root,
+        "archi/plans/mvp/t1-store.md",
+        "---\nnode: Store\nowns: [store-encrypted]\n---\n\n# t1 — Store\n\npersist rows\n\n\
+         ## Spec\n\n- `Store`\n\n## Inputs\n\n## Outputs\n\n- code/store.rs\n\n## Stack\n\n\
+         ## Verifications\n\n### store-encrypted\n\n- test — proves store-encrypted\n",
+    );
+    write_record(
+        &root,
+        "archi/plans/mvp/t2-auth.md",
+        "---\nnode: Auth\nowns: [service-hardening]\n---\n\n# t2 — Auth\n\nguard the door\n\n\
+         ## Spec\n\n- `Auth`\n- `Service type_of Auth`\n\n## Inputs\n\n- from t1 — the store api\n\n\
+         ## Outputs\n\n- code/auth.rs\n- code/store.rs\n\n## Stack\n\n## Verifications\n\n\
+         ### service-hardening\n\n- test — proves service-hardening\n",
+    );
+    ok(&root, &["plan", "start"]);
+
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+    declares(
+        &root,
+        1,
+        "t1",
+        &[
+            ["code/store.rs#Store::put", "Store", PROOF],
+            ["code/store.rs#Store::get", "Store", PROOF],
+        ],
+    );
+    ok(&root, &["plan", "next"]);
+    let declared = link_id(&root, "Store ← code/store.rs#Store::put");
+
+    // Wave 2 moves the symbol t1 declared, and t2 claims the file it sits in.
+    fs::write(root.join("code/store.rs"), STORE_PUT_MOVED).unwrap();
+    declares(&root, 2, "t2", &[["code/store.rs#Store::put", "Store", PROOF]]);
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains(&format!("archi link rm {declared}")), "{err}");
+
+    // The claim did not hold: retire it, and the file that declares the
+    // symbol mints the pair again — this time under the task that moved it.
+    ok(&root, &["link", "rm", &declared]);
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("the cleanup wave"), "{out}");
+    let rows = ok(&root, &["link", "ls"]);
+    let put: Vec<&str> = rows
+        .lines()
+        .filter(|l| l.contains("← code/store.rs#Store::put"))
+        .collect();
+    assert_eq!(put.len(), 1, "the retired pair came back once:\n{rows}");
+    assert!(put[0].contains("captured(t2)") && put[0].contains("declared"), "{rows}");
 
     fs::remove_dir_all(&root).unwrap();
 }

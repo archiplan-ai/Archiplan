@@ -289,8 +289,10 @@ fn item_terms(change: &Changed, canonical: &code::Canonical) -> BTreeSet<String>
 
 /// One task's declaration file, project-relative: beside the index the wave
 /// already writes, and named for the wave and the task, so two tasks of one
-/// wave never write over each other.
-fn declares_rel(plan: &str, wave: usize, task: &str) -> String {
+/// wave never write over each other. The wave gate names this path in every
+/// refusal it raises, so both readers spell it the same way
+/// (`archi/requirements/planning/the-declaration-refusal-repairs-without-guessing.md`).
+pub(crate) fn declares_rel(plan: &str, wave: usize, task: &str) -> String {
     format!("archi/plans/{plan}/waves/w{wave:02}.{task}.declares.toml")
 }
 
@@ -535,6 +537,20 @@ pub struct Suppressed {
     pub item: String,
 }
 
+/// One changed item no declaration names: the item and every in-flight task
+/// whose outputs claim its file. The delta is one set for the whole wave and
+/// the declarations are one file per task, so a symbol several tasks claim is
+/// owed by every one of them and named here once
+/// (`archi/requirements/planning/an-undeclared-change-refuses-the-wave.md`,
+/// `archi/requirements/planning/every-task-that-touched-a-symbol-declares-it.md`).
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Undeclared {
+    /// The changed item, as `file` or `file#symbol`.
+    pub item: String,
+    /// Every task that owes a declaration of it, in wave order.
+    pub tasks: Vec<String>,
+}
+
 /// One capture's outcome.
 #[derive(Default, Serialize)]
 pub struct CaptureOutcome {
@@ -557,6 +573,30 @@ pub struct CaptureOutcome {
     pub pressed: BTreeMap<String, BTreeSet<String>>,
     /// Anchors skipped and files claimed by several tasks.
     pub notes: Vec<String>,
+    /// In-flight tasks that wrote no declaration file: `(task, path)`. What
+    /// capture does with an absent file is a note; what the wave does with it
+    /// is a refusal, and the gate reads this
+    /// (`archi/requirements/code-link/the-writer-declares-what-the-code-answers.md`).
+    #[serde(skip)]
+    pub absent: Vec<(String, String)>,
+    /// Changed items a claiming task's declaration file does not name. Read by
+    /// the wave gate alone: capture reports what it saw, the gate refuses
+    /// (`archi/requirements/planning/an-undeclared-change-refuses-the-wave.md`).
+    #[serde(skip)]
+    pub undeclared: Vec<Undeclared>,
+    /// Every file the delta touched, as scan keys — the scope of the drift
+    /// gate, which refuses the wave that moved a declared pair and no other
+    /// (`archi/requirements/code-link/a-drifted-declaration-refuses-the-wave-that-moved-it.md`).
+    #[serde(skip)]
+    pub moved: BTreeSet<String>,
+}
+
+/// Whether a declaration's anchor names a changed item: the same file and the
+/// same symbol, or the file whole — a claim over a file covers the parts of it
+/// that moved.
+fn names_item(anchor: &Anchor, change: &Changed) -> bool {
+    super::qualify(anchor.repo.as_deref(), &anchor.file) == change.file
+        && (anchor.symbol.is_none() || anchor.symbol == change.symbol)
 }
 
 /// Whether a task's outputs claim a file: an exact path, or a directory
@@ -621,21 +661,60 @@ pub(crate) fn capture_wave(
     // The mint: the declarations the in-flight tasks wrote. A task that wrote
     // none mints nothing and says so — refusing an absent file is the wave
     // gate's, not this reader's.
+    let mut named: BTreeMap<&str, Vec<Anchor>> = BTreeMap::new();
     for task in in_flight
         .iter()
         .filter(|t| only.is_none_or(|o| o == t.id))
     {
         match read_declarations(root, plan_name, wave, &task.id)? {
-            None => out.notes.push(format!(
-                "`{}` declares nothing: `{}` is absent — no link is minted for its delta",
-                task.id,
-                declares_rel(plan_name, wave, &task.id)
-            )),
+            None => {
+                out.absent
+                    .push((task.id.clone(), declares_rel(plan_name, wave, &task.id)));
+                out.notes.push(format!(
+                    "`{}` declares nothing: `{}` is absent — no link is minted for its delta",
+                    task.id,
+                    declares_rel(plan_name, wave, &task.id)
+                ));
+            }
             Some(file) => {
                 for link in mint_declarations(root, model, &file, &task.id, &live)? {
                     out.minted.push(link.clone());
                     live.push(link);
                 }
+                // The mint resolved every symbol in the file, so what parses
+                // here is what stood the resolution.
+                named.insert(
+                    task.id.as_str(),
+                    file.declares
+                        .iter()
+                        .filter_map(|d| Anchor::parse(d.symbol.get_ref()).ok())
+                        .collect(),
+                );
+            }
+        }
+    }
+
+    // What the wave owes: every changed item a task claims and no declaration
+    // of that task names. A file no in-flight task claims owes nothing — it is
+    // a leftover, as it always was.
+    out.moved = changes.iter().map(|c| c.file.clone()).collect();
+    if only.is_none() {
+        for change in &changes {
+            let owing: Vec<String> = in_flight
+                .iter()
+                .filter(|t| claims_file(t, &change.file))
+                .filter(|t| {
+                    !named
+                        .get(t.id.as_str())
+                        .is_some_and(|as_| as_.iter().any(|a| names_item(a, change)))
+                })
+                .map(|t| t.id.clone())
+                .collect();
+            if !owing.is_empty() {
+                out.undeclared.push(Undeclared {
+                    item: change.to_string(),
+                    tasks: owing,
+                });
             }
         }
     }

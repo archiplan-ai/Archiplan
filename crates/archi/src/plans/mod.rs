@@ -1526,6 +1526,127 @@ fn gate_structure(report: &PlanReport) -> Result<(), String> {
 }
 
 
+/// The declaration gates, in the order their refusals repair: the file
+/// first, then the symbols it did not name, then the claims the wave moved
+/// out from under. Each one leaves the wave open exactly as the coverage
+/// gate does, and each names what is wrong, the file to edit and the command
+/// that follows
+/// (`archi/requirements/planning/an-undeclared-change-refuses-the-wave.md`,
+/// `archi/requirements/planning/every-task-that-touched-a-symbol-declares-it.md`,
+/// `archi/requirements/planning/the-declaration-refusal-repairs-without-guessing.md`).
+fn gate_declarations(
+    root: &Path,
+    model: &Model,
+    plan: &str,
+    wave: usize,
+    capture: &links::capture::CaptureOutcome,
+) -> Result<(), String> {
+    // The formality: one file per task in flight. An empty list satisfies it,
+    // and a task that changed nothing says so in one line rather than by
+    // silence.
+    if !capture.absent.is_empty() {
+        let mut msg =
+            String::from("the wave cannot close while a task in flight has declared nothing:");
+        for (task, path) in &capture.absent {
+            msg.push_str(&format!("\n  {task} — write `{path}`"));
+        }
+        msg.push_str(
+            "\neach task in flight writes one file, naming for every symbol it changed what that \
+             symbol answers and the test that proves it:\n  \
+             [[declares]]\n  symbol = \"<file>#<symbol>\"\n  \
+             answers = \"<node, port or req:slug>\"\n  \
+             proved_by = \"<test file>#<test fn>\"\n\
+             a task that changed nothing writes `declares = []`; then re-run `archi plan next`",
+        );
+        return Err(msg);
+    }
+
+    // The gate that matters: the delta already knows every symbol that moved,
+    // so a ref that shares no word with one cannot leave the checklist in
+    // silence — the symbol is owed by every task whose outputs claim its file.
+    if !capture.undeclared.is_empty() {
+        let mut msg = String::from("the wave moved symbols no declaration names:");
+        for u in &capture.undeclared {
+            msg.push_str(&format!("\n  {} — owed by {}", u.item, u.tasks.join(", ")));
+        }
+        msg.push_str(
+            "\nevery task whose outputs claim the file declares the symbol, each in its own file:",
+        );
+        let owing: BTreeSet<&str> = capture
+            .undeclared
+            .iter()
+            .flat_map(|u| u.tasks.iter().map(String::as_str))
+            .collect();
+        for task in owing {
+            msg.push_str(&format!(
+                "\n  {task} — `{}`",
+                links::capture::declares_rel(plan, wave, task)
+            ));
+        }
+        msg.push_str("\nthen re-run `archi plan next`");
+        return Err(msg);
+    }
+
+    gate_declared_drift(root, model, &capture.moved)
+}
+
+/// A declared pair whose code side moved refuses the wave that moved it: the
+/// declaration is consumed once and the link is what survives, so a wave that
+/// rewrites the symbol for an unrelated reason leaves a written claim the code
+/// has left behind. The scope is the delta — the wave that moved it — and the
+/// rule is the row's own: inferred and hand-authored rows grade exactly as
+/// they did, so drift stays advisory everywhere it already was
+/// (`archi/requirements/code-link/a-drifted-declaration-refuses-the-wave-that-moved-it.md`).
+fn gate_declared_drift(
+    root: &Path,
+    model: &Model,
+    moved: &BTreeSet<String>,
+) -> Result<(), String> {
+    let candidates: Vec<links::Link> = links::ls(root, None, false)?
+        .into_iter()
+        .filter(|l| l.rule == links::Rule::Declared && l.spec.version.is_none())
+        .filter(|l| moved.contains(&links::qualify(l.anchor.repo.as_deref(), &l.anchor.file)))
+        .collect();
+    if candidates.is_empty() {
+        return Ok(());
+    }
+    // The grade comes from the one grader, asked per ref: the whole journal
+    // is not this gate's business, and the rows it is are few.
+    let ids: BTreeSet<&str> = candidates.iter().map(|l| l.id.as_str()).collect();
+    let refs: BTreeSet<&str> = candidates.iter().map(|l| l.spec.path.as_str()).collect();
+    let mut drifted = Vec::new();
+    for spec in refs {
+        let report = links::verify(
+            root,
+            model,
+            &links::VerifyOptions {
+                spec: Some(spec.to_string()),
+                ..Default::default()
+            },
+        )?;
+        for c in report.checked {
+            if ids.contains(c.link.id.as_str()) && c.state == links::State::Drifted {
+                drifted.push(c);
+            }
+        }
+    }
+    if drifted.is_empty() {
+        return Ok(());
+    }
+    let mut msg = String::from("this wave moved code a declared pair still claims:");
+    for c in &drifted {
+        msg.push_str(&format!(
+            "\n  {} `{}` ← {}\n    \
+             `archi link repin {}` — the code still answers what it answered\n    \
+             `archi link rm {}` — it does not; this wave's declaration file names the symbol, \
+             so the next capture mints the pair the file states now",
+            c.link.id, c.link.spec, c.link.anchor, c.link.id, c.link.id
+        ));
+    }
+    msg.push_str("\nthen re-run `archi plan next`");
+    Err(msg)
+}
+
 /// Asserted code-link coverage, scoped to the delta: a ref gates only when
 /// the closing capture pressed it — some claimed changed item of its task
 /// carries the ref's terms. Unpressed refs never block; the uncovered ones
@@ -1724,6 +1845,13 @@ pub fn next(root: &Path, model: &Model) -> Result<NextOutcome, String> {
         .filter(|t| waves[wave - 1].contains(&t.id))
         .collect();
     let capture = links::capture::capture_wave(root, model, &plan.name, wave, &in_flight, None)?;
+    if let Err(why) = gate_declarations(root, model, &plan.name, wave, &capture) {
+        return Ok(NextOutcome {
+            capture: Some(capture),
+            step: Step::Blocked(why),
+            checklist: Vec::new(),
+        });
+    }
     let checklist = match gate_coverage(root, &in_flight, &capture.pressed) {
         Ok(suggested) => suggested,
         Err(gaps) => {
@@ -2482,6 +2610,17 @@ mod tests {
             "code/auth.rs",
             "pub fn login(u: &str) -> bool { !u.is_empty() }\n",
         );
+        // t2 claims the file the delta moved, so t2 declares it. Its claim is
+        // over the file whole — the pair the hand-authored link already holds
+        // — so the declaration covers the symbol inside it and mints nothing.
+        put(
+            &root,
+            "archi/plans/mvp/waves/w02.t2.declares.toml",
+            "[[declares]]\n\
+             symbol = \"code/auth.rs\"\n\
+             answers = \"Auth\"\n\
+             proved_by = \"code/store_test.rs#a_row_is_persisted\"\n",
+        );
         let outcome = next(&root, ws.model()).unwrap();
         let capture = outcome.capture.expect("capture ran");
         assert!(
@@ -2577,8 +2716,12 @@ mod tests {
             &["the tunnel ends"],
         );
         start(&root, ws.model()).unwrap();
+        // The reset took the waves folder with it, declarations and all, and
+        // the replay moves no code: each task's file names nothing.
+        put(&root, "archi/plans/mvp/waves/w01.t1.declares.toml", "declares = []\n");
         let outcome = next(&root, ws.model()).unwrap();
         assert!(matches!(outcome.step, Step::Wave { closed: 1, .. }));
+        put(&root, "archi/plans/mvp/waves/w02.t2.declares.toml", "declares = []\n");
         let outcome = next(&root, ws.model()).unwrap();
         assert!(matches!(outcome.step, Step::Cleanup));
         let err = next(&root, ws.model()).err().unwrap();
@@ -2651,6 +2794,13 @@ mod tests {
         plan.tasks[0].outputs.push("code/auth.rs".into());
         store_authored(&root, &plan);
         curate_all(&root, ws.model());
+        // The test a declaration names, in the tree before the wave opens so
+        // it is never a change of its own.
+        put(
+            &root,
+            "code/auth_test.rs",
+            "pub fn a_login_without_a_name_is_refused() {\n    assert!(true);\n}\n",
+        );
         start(&root, ws.model()).unwrap();
 
         // The delta names the incoming wire's ports but never the node:
@@ -2660,6 +2810,26 @@ mod tests {
             &root,
             "code/auth.rs",
             "pub fn login() -> bool { true }\npub fn inn_wire_probe() -> bool { true }\n",
+        );
+
+        // The symbol the delta moved sits in a file t1 claims, so the wave
+        // refuses before it ever reaches the coverage gate.
+        let outcome = next(&root, ws.model()).unwrap();
+        let Step::Blocked(why) = &outcome.step else {
+            panic!("the undeclared symbol gates");
+        };
+        assert!(why.contains("t1 — write"), "{why}");
+
+        // The writer declares it against the requirement behind the node.
+        // The pressed ref is an edge, and an edge is never a declaration's to
+        // name, so the coverage gate is what stands after the declaration.
+        put(
+            &root,
+            "archi/plans/mvp/waves/w01.t1.declares.toml",
+            "[[declares]]\n\
+             symbol = \"code/auth.rs#inn_wire_probe\"\n\
+             answers = \"req:service-hardening\"\n\
+             proved_by = \"code/auth_test.rs#a_login_without_a_name_is_refused\"\n",
         );
         let outcome = next(&root, ws.model()).unwrap();
         let Step::Blocked(why) = &outcome.step else {
@@ -2671,7 +2841,8 @@ mod tests {
         assert!(why.contains("hand-author"), "{why}");
         assert!(why.contains("archi link add \"Auth\""), "{why}");
         let capture = outcome.capture.expect("capture ran");
-        assert!(capture.minted.is_empty(), "{:?}", capture.minted);
+        assert_eq!(capture.minted.len(), 1, "{:?}", capture.minted);
+        assert_eq!(capture.minted[0].spec.path, "req:service-hardening");
         assert_eq!(capture.suppressed.len(), 3, "{:?}", capture.suppressed);
 
         // The pressed ref is an edge, and an edge is never a declaration's to
@@ -2969,6 +3140,9 @@ mod tests {
         let (started, wave1) = start(&root, ws.model()).unwrap();
         assert_eq!(started.state, PlanState::Started);
         assert_eq!(wave1, vec!["t1".to_string()]);
+        // Nothing under the task's outputs moved, so nothing is owed — and
+        // the file that says so is the formality every wave asks for.
+        put(&root, "archi/plans/old/waves/w01.t1.declares.toml", "declares = []\n");
         let outcome = next(&root, ws.model()).unwrap();
         assert!(matches!(outcome.step, Step::Cleanup));
         let outcome = next(&root, ws.model()).unwrap();
