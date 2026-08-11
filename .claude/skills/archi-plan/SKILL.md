@@ -1,6 +1,6 @@
 ---
 name: archi-plan
-description: Generate an implementation plan from a hardened archi spec — a charter with a user-polled stack and its infrastructure, tasks per node, curated requirement ownership, named verifications, scenarios. This skill authors the plan only. The spec is /archi. The code is /archi-implement.
+description: Generate an implementation plan from a hardened archi spec — a charter with a user-polled stack and its infrastructure, tasks per node, curated requirement ownership, named verifications. This skill authors the plan only. The spec is /archi. The code is /archi-implement.
 ---
 
 > **Skill freshness — the first step.** In an initialized project, run
@@ -35,7 +35,8 @@ when the answer is a choice.
 ## Scope — what this skill does and does not do
 
 This skill authors the **implementation plan**: the charter, the tasks,
-the requirement ownership, the verifications and the scenarios. It does
+the requirement ownership and the verifications. It authors **no**
+scenarios — the closing block is collected from the world facts. It does
 **not** edit the spec, which is the work of `/archi`. It does **not**
 write or edit application code or tests, which is the work of
 `/archi-implement`. Its only write surface is the plan.
@@ -72,11 +73,11 @@ archi plan use <name>
 
 It refuses on an unsaved model. Go back to `/archi` and run `version
 save` first. A fresh name creates the record folder: the charter
-`<name>.md`, `scenarios.md` and `state.json`. The folder is pinned to the
-worktree's current spec version, and joined to its binding. Everything
-below authors this plan. A plan in the old json form still reads and
-still runs its lifecycle, but authoring refuses: `plan.json` is
-read-only, because plans author as record folders now.
+`<name>.md` and `state.json`. The folder is pinned to the worktree's
+current spec version, and joined to its binding. Everything below authors
+this plan. A plan in the old json form still reads and still runs its
+lifecycle, but authoring refuses: `plan.json` is read-only, because plans
+author as record folders now.
 
 ## Step 2 — Gather the full picture
 
@@ -108,8 +109,8 @@ producer and on a cycle. Analyze the graph:
 ## Step 4 — Author the plan
 
 The folder is the plan. It holds the charter `<name>.md`, one
-`t<N>-<node-slug>.md` per task, `scenarios.md`, and `state.json`.
-`state.json` is lifecycle only. Commands move it, and you never edit it.
+`t<N>-<node-slug>.md` per task, and `state.json`. `state.json` is
+lifecycle only. Commands move it, and you never edit it.
 `plan use` creates the folder. `plan task add` creates a task file. `plan
 task rm` retires one. You fill every slot inside the records by editing
 the files, and `plan verify` (Step 5) lists the work that holds them
@@ -173,9 +174,9 @@ what you know.
 **Infrastructure.** Some products need running infrastructure: a
 database, a queue, a browser for e2e tests, or provider emulators. For
 those, recommend a configured docker setup — a compose file with the
-utilities you judge right. Record it in the stack with its provenance,
-and name the scenarios that depend on it. The goal is a working product
-at the end, not code that never ran.
+utilities you judge right. Record it in the stack with its provenance, so
+the scenarios collected at the close have somewhere to run. The goal is a
+working product at the end, not code that never ran.
 
 ### Tasks — one file per node
 
@@ -233,6 +234,9 @@ persist rows
 - `## Verifications` — one `### <slug>` subhead per owned requirement,
   with proof bullets under it, as described below.
 
+A record bullet is one bullet on one line. The bullets do not wrap: a
+continuation line carries no `- `, and the record refuses to parse.
+
 ### Curate the requirements
 
 The derived matched set is the candidate list. It is always fresh and
@@ -276,31 +280,37 @@ An owned slug with no proof is a `plan verify` error.
 - Shared types and contracts take one task.
 - Data-store schemas take one task per store. Group them when they couple
   tightly.
-- End-to-end coverage goes to the scenarios. They belong to the plan
-  itself, not to a task.
+- End-to-end coverage is no task of its own. It arrives at the close, from
+  the world.
 
-### Scenarios — end-to-end user-story coverage
+### Scenarios — collected from the world, authored by nobody
 
-A user story crosses many elements, so to pin it to one element would lie
-about its scope. Scenarios belong to the plan itself instead, in
-`scenarios.md`: a heading, then one bullet per flow. `archi plan
-scenarios list` reads them back.
+The closing block is **collected**, never written. It holds the scenarios
+of every world fact whose `covers` reaches a node this plan holds a task
+for, each fact once. The author writes none of it. `archi plan next`
+prints the block after the last wave, as the closing step of the implement
+stage, and one command reads it back on demand:
 
-```markdown
-# Scenarios
-
-- <one user-visible flow>
+```
+archi plan scenarios list
 ```
 
-One flow is one bullet on one line. The record bullets do not wrap, here
-or in the task files. To remove a scenario, delete its bullet.
+`archi plan task show <task_id>` names the facts that cover the task's
+node, so the block is readable task by task while you author.
 
-Walk the architecture as a user, and enumerate every distinct
-user-visible flow the product promises, one sentence each. Scenarios do
-not link to requirements, and `plan verify` does not gate them. They are
-the closing verification step of the implement stage. Name the
-infrastructure that each scenario needs, which is the docker setup above.
-The scenario step then has somewhere to run, instead of a silent skip.
+An **empty** block means that no world fact covers any node this plan
+builds. That is spec work, and it is **not a blank to fill**: go to
+`/archi`, capture the condition the product stands on, give it its
+scenarios and its `covers`, then come back. Never invent a story to close
+the gap. A plan minted after the world wing does not close on nothing.
+
+The close gates on the block: every collected scenario has to carry a
+link to code before the plan closes. `archi` runs nothing — the link
+proves that the edge a runner executes exists.
+
+A plan authored before the world wing carries a `scenarios.md` no verb
+reads. It is not the closing block, nothing you author goes into it, and
+no command removes it.
 
 ## Step 5 — Verify and present
 
@@ -332,8 +342,9 @@ archi plan task show <task_id>     # any brief the user wants to inspect
 - **Verifications pull the work.** Each one is an observable check, named
   in the user's own frameworks. The implementation takes the shape that
   the check asks for.
-- **Scenarios are the plan's own user stories, and they carry their
-  infrastructure.**
+- **Scenarios are collected, never authored.** The closing block comes
+  from the world facts that cover the plan's nodes. An empty block is
+  spec work, not a blank to fill.
 - **Ask. Never assume.** Every stack and infrastructure choice goes
   through the poll tool.
 - **Commands create and retire. Files carry the content.** Creation, removal
