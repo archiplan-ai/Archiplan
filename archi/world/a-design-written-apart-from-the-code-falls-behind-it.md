@@ -25,18 +25,18 @@ and that person is the one who did not update the document in the first place.
 
 ## Scenarios
 
-Feature: The written design and the code stay in step
+### The code moves and nobody updates the writing
 
-  Scenario: The code moves and nobody updates the writing
-    Given a written claim with files recorded against it
-    When those files change and the claim is left alone
-    Then the drift is reported against that claim by name
-    And the report names the files that moved
+Given a written claim with files recorded against it
+When those files change and the claim is left alone
+Then the drift is reported against that claim by name
+And the report names the files that moved
 
-  Scenario: A claim is written that no code answers
-    Given a written claim with no files recorded against it
-    When somebody asks what is unaccounted for
-    Then the claim is named as promised and unbuilt
+### A claim is written that no code answers
+
+Given a written claim with no files recorded against it
+When somebody asks what is unaccounted for
+Then the claim is named as promised and unbuilt
 
 ## Open questions
 

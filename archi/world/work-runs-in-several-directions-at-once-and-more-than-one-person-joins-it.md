@@ -24,19 +24,19 @@ overhead.
 
 ## Scenarios
 
-Feature: Several pieces of work share one design without meeting
+### A second piece of work starts while the first is unfinished
 
-  Scenario: A second piece of work starts while the first is unfinished
-    Given a person has a piece of work in progress
-    When they start a second one that the first does not touch
-    Then each piece has its own copy of the design and its own current plan
-    And neither piece sees what the other has not saved
+Given a person has a piece of work in progress
+When they start a second one that the first does not touch
+Then each piece has its own copy of the design and its own current plan
+And neither piece sees what the other has not saved
 
-  Scenario: A second person joins work already under way
-    Given a piece of work in progress that one person holds
-    When a second person starts their own piece against the same design
-    Then the record names who holds which copy
-    And putting the two back together is a ceremony rather than a hand merge
+### A second person joins work already under way
+
+Given a piece of work in progress that one person holds
+When a second person starts their own piece against the same design
+Then the record names who holds which copy
+And putting the two back together is a ceremony rather than a hand merge
 
 ## Open questions
 

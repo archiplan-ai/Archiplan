@@ -203,7 +203,13 @@ once.
    decides which claims are requirements at all. `archi world add
    "<title>"` mints the skeleton. You write the fact in one line, the
    paragraph saying what condition this is and why the behavior follows,
-   `## What kills this`, and `## Scenarios` in the Gherkin subset. The
+   `## What kills this`, and `## Scenarios`. In that block `### <name>`
+   opens one scenario, and `Given`, `When`, `Then` and `And` open its
+   step lines; those four are the whole vocabulary. The heading text is
+   the scenario's name and its address, so a code-link anchors to it,
+   and the code the link points at says where the scenario runs. A
+   `Feature:` or a `Scenario:` line is refused, because the fact's own
+   title is the feature and the heading is the scenario. The
    frontmatter points three ways: `covers` names the model elements the
    fact conditions, `sources` names the material it rests on, `uses`
    names the facts it presumes. Write the fact in the world's own words,

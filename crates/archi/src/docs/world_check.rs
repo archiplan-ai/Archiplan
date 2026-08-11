@@ -210,7 +210,7 @@ pub(crate) fn read_fact(
     let scenarios = record
         .scenarios
         .as_ref()
-        .and_then(|b| gherkin::parse(b, &file, members, diags));
+        .and_then(|b| gherkin::parse(b, &file, diags));
     Some(WorldFact {
         doc: record,
         scenarios,
@@ -696,9 +696,6 @@ pub(crate) fn scenario_digest(fact: &WorldFact, scenario: Option<&str>) -> Strin
     let wanted = scenario.map(crate::links::normalize_ref);
     let mut text = String::new();
     if let Some(block) = &fact.scenarios {
-        if wanted.is_none() {
-            text.push_str(&block.feature);
-        }
         for s in &block.scenarios {
             if wanted
                 .as_deref()

@@ -24,19 +24,19 @@ thread costs more to keep than to do without.
 
 ## Scenarios
 
-Feature: The thread from a written obligation to the files that answer it
+### Work arrives over an obligation the assistant did not write
 
-  Scenario: Work arrives over an obligation the assistant did not write
-    Given an obligation that has files recorded against it
-    When an assistant is asked to change what that obligation covers
-    Then it reads the recorded files instead of reading the tree and guessing
-    And a file that no record names is reported rather than assumed
+Given an obligation that has files recorded against it
+When an assistant is asked to change what that obligation covers
+Then it reads the recorded files instead of reading the tree and guessing
+And a file that no record names is reported rather than assumed
 
-  Scenario: The thread is recovered after its author has gone
-    Given an obligation whose author no longer works here
-    When somebody asks which files answer it
-    Then the record answers
-    And nobody walks the commit history to rebuild the answer
+### The thread is recovered after its author has gone
+
+Given an obligation whose author no longer works here
+When somebody asks which files answer it
+Then the record answers
+And nobody walks the commit history to rebuild the answer
 
 ## Open questions
 

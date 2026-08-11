@@ -750,7 +750,7 @@ fn collect_block(tree: &docs::Tree, plan: &Plan) -> Vec<BlockFact> {
             // A fact covering two of the plan's nodes joins the block once.
             out.entry(f.doc.slug.as_str()).or_insert_with(|| BlockFact {
                 fact: f.doc.slug.clone(),
-                feature: f.scenarios.as_ref().map_or(String::new(), |b| b.feature.clone()),
+                feature: String::new(),
                 scenarios: block_scenarios(f),
                 outside: f
                     .doc

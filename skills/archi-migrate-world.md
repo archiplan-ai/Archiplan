@@ -129,9 +129,36 @@ the headings in place. You write the prose:
 - **The paragraph under it** states what condition this is and why the
   behavior follows from it.
 - **`## What kills this`** is the observation that would end the fact.
-- **`## Scenarios`** holds one `Feature:` and its scenarios. The grammar
-  is `Feature`, `Scenario`, `Given`, `When`, `Then`, `And`, and a tag
-  line; `@runs:<member>` names the member whose tree runs the scenario.
+- **`## Scenarios`** holds the behavior the condition dictates. A
+  `### <name>` heading opens one scenario, and `Given`, `When`, `Then`
+  and `And` open its step lines; those four are the whole vocabulary.
+  The heading text is the scenario's name and its address, so a later
+  code-link anchors to it, and the code the link points at says where
+  the scenario runs. A `Feature:` or a `Scenario:` line is refused,
+  because the fact's own title is the feature and the heading is the
+  scenario.
+
+One fact, written out — the operator's sentence as the name, and one
+scenario under it:
+
+```markdown
+# Trains lose the signal
+
+The carriage drops the network for minutes at a time, so a reader on the
+move works from what the device already holds.
+
+## What kills this
+
+Trackside coverage that never drops.
+
+## Scenarios
+
+### The reader opens the app with no network
+
+Given the device has no network
+When the reader opens the app
+Then the last synced view appears
+```
 
 Write the fact **without the nouns of the model**. The condition is
 about the world, so the world's words are the right ones, and `check`

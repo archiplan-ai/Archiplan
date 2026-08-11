@@ -11,11 +11,18 @@
 //! are carried with the line they sit on and resolve against the model and the
 //! other facts in the compiler. The `Scenarios` block is carried as text and
 //! an offset — the grammar parses it, not this reader.
+//!
+//! A section is what stands under its heading, and that includes the deeper
+//! headings [`super::md`] lifted out of it. `Scenarios` is written as `### `
+//! headings over step lines, so a section rebuilt from its prose alone would
+//! arrive empty and the grammar would never see a scenario. Each such heading
+//! is put back as the line it was, at the line it was, so a location the
+//! grammar reports is still the line in the fact file.
 
 use std::path::Path;
 
 use super::DocDiagnostic;
-use super::md::{Heading, MdDoc};
+use super::md::MdDoc;
 use super::schema::{frontmatter, list, name_checks};
 
 /// A run of prose lifted out of the file: its text, with the blank lines the
@@ -130,21 +137,41 @@ pub fn parse(
         ),
         // Absence and emptiness are both legal here: what is not known yet is
         // recorded when it is known.
-        open_questions: open_questions.and_then(|h| block(&h.content)),
+        open_questions: open_questions.and_then(|at| block(&lines_of(doc, at))),
     }
 }
 
+/// Everything a section holds, as the lines it was written as: its own prose,
+/// and every deeper heading under it with the prose under that. `at` indexes
+/// [`MdDoc::headings`], and the section ends at the first heading no deeper
+/// than its own.
+///
+/// The structural reader keeps a heading as level and text, so the line is
+/// written back from those two; the file line it came from rides with it, and
+/// [`block`] puts the blank lines between them back. A section holding no
+/// deeper heading yields exactly the prose the reader gave.
+fn lines_of(doc: &MdDoc, at: usize) -> Vec<(usize, String)> {
+    let head = &doc.headings[at];
+    let mut out = head.content.clone();
+    for h in &doc.headings[at + 1..] {
+        if h.level <= head.level {
+            break;
+        }
+        out.push((h.line, format!("{} {}", "#".repeat(h.level), h.text)));
+        out.extend(h.content.iter().cloned());
+    }
+    out
+}
+
 /// The recognized sections in canonical order, each `None` when the file does
-/// not hold it. A section out of order or a second copy of one is reported
-/// here; any other heading is the author's own and passes untouched.
-fn sections<'a>(
-    doc: &'a MdDoc,
-    file: &str,
-    diags: &mut Vec<DocDiagnostic>,
-) -> [Option<&'a Heading>; 3] {
-    let mut found: [Option<&Heading>; 3] = [None, None, None];
+/// not hold it, and each carried as its index in [`MdDoc::headings`] — the
+/// section is the heading and everything under it, and [`lines_of`] needs the
+/// place to read on from. A section out of order or a second copy of one is
+/// reported here; any other heading is the author's own and passes untouched.
+fn sections(doc: &MdDoc, file: &str, diags: &mut Vec<DocDiagnostic>) -> [Option<usize>; 3] {
+    let mut found: [Option<usize>; 3] = [None, None, None];
     let mut reached = 0;
-    for h in &doc.headings {
+    for (at, h) in doc.headings.iter().enumerate() {
         let Some(i) = (h.level == 2)
             .then(|| SECTIONS.iter().position(|s| *s == h.text))
             .flatten()
@@ -170,7 +197,7 @@ fn sections<'a>(
             ));
         }
         reached = reached.max(i + 1);
-        found[i] = Some(h);
+        found[i] = Some(at);
     }
     found
 }
@@ -178,14 +205,14 @@ fn sections<'a>(
 /// A section the schema requires: its absence is reported at the name, its
 /// emptiness at its own heading, and neither state carries prose.
 fn required(
-    section: Option<&Heading>,
+    section: Option<usize>,
     heading: &str,
     holds: &str,
     doc: &MdDoc,
     file: &str,
     diags: &mut Vec<DocDiagnostic>,
 ) -> Option<Block> {
-    let Some(h) = section else {
+    let Some(at) = section else {
         diags.push(DocDiagnostic::new(
             "E_DOC",
             format!("a world fact holds `## {heading}`: {holds}"),
@@ -194,13 +221,13 @@ fn required(
         ));
         return None;
     };
-    let prose = block(&h.content);
+    let prose = block(&lines_of(doc, at));
     if prose.is_none() {
         diags.push(DocDiagnostic::new(
             "E_DOC",
             format!("`{heading}` holds nothing: {holds}"),
             file,
-            h.line,
+            doc.headings[at].line,
         ));
     }
     prose
@@ -283,7 +310,7 @@ fn source_entry(entry: &str) -> Option<Source> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::md;
+    use super::super::{gherkin, md};
     use super::*;
     use std::fs;
     use std::path::PathBuf;
@@ -306,11 +333,17 @@ Trackside coverage that never drops.
 
 ## Scenarios
 
-Feature: Offline open
-  Scenario: the app opens with no network
-    Given the device has no network
-    When the user opens the app
-    Then the last synced view appears
+### the app opens with no network
+
+Given the device has no network
+When the user opens the app
+Then the last synced view appears
+
+### the queue drains on reconnect
+
+Given a queued write
+When the network returns
+Then the write reaches the server
 ";
 
     const SLUG: &str = "users-open-the-app-on-a-train";
@@ -404,16 +437,146 @@ Feature: Offline open
         // The scenario block is carried, not parsed: its text and the line it
         // opens on, so the grammar can map a location back onto the file.
         let block = w.scenarios.as_ref().unwrap();
-        assert_eq!(block.line, line_of(&text, "Feature: Offline open"));
-        assert!(block.text.starts_with("Feature: Offline open\n"));
-        assert!(block.text.contains("    Then the last synced view appears\n"));
+        assert_eq!(block.line, line_of(&text, "### the app opens"));
+        assert!(block.text.starts_with("### the app opens with no network\n"));
+        assert!(block.text.contains("Then the last synced view appears\n"));
         // The blank line inside the block keeps the following lines in place.
         assert_eq!(
             block.line + block.text.lines().count() - 1,
-            line_of(&text, "Then the last synced view appears")
+            line_of(&text, "Then the write reaches the server")
         );
         assert!(w.open_questions.is_none());
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The `Scenarios` section reaches the grammar whole
+    /// (`archi/requirements/world-facts/a-world-fact-carries-its-scenarios.md`).
+    /// The structural reader lifts every `###` line into a heading of its own,
+    /// so the section arrives with its sub-headings taken out of it; the
+    /// reader puts them back, at the lines they stood on, and the grammar
+    /// walks the section the author wrote.
+    #[test]
+    fn the_scenarios_section_carries_its_headings_and_steps_to_the_grammar() {
+        let root = temp_root();
+        let text = fact(HEADER, BODY);
+        let (w, diags) = read(&root, &text);
+        assert_eq!(rendered(&diags), Vec::<String>::new());
+        let w = w.unwrap();
+        let block = w.scenarios.as_ref().expect("the section is not empty");
+        // Every heading and every step line stands in the block, and stands
+        // at the line it holds in the file.
+        for phrase in [
+            "### the app opens with no network",
+            "Given the device has no network",
+            "When the user opens the app",
+            "Then the last synced view appears",
+            "### the queue drains on reconnect",
+            "Given a queued write",
+            "When the network returns",
+            "Then the write reaches the server",
+        ] {
+            let inside = block
+                .text
+                .lines()
+                .position(|l| l == phrase)
+                .unwrap_or_else(|| panic!("the block holds `{phrase}`"));
+            assert_eq!(block.line + inside, line_of(&text, phrase), "on `{phrase}`");
+        }
+        // The grammar is called on it, and it reads the two scenarios whole.
+        let mut diags = Vec::new();
+        let parsed = gherkin::parse(block, &w.file, &mut diags).expect("the grammar reads it");
+        assert_eq!(rendered(&diags), Vec::<String>::new());
+        let names: Vec<&str> = parsed.scenarios.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "the app opens with no network",
+                "the queue drains on reconnect"
+            ]
+        );
+        assert_eq!(parsed.scenarios[0].line, line_of(&text, "### the app opens"));
+        assert_eq!(parsed.scenarios[0].steps.len(), 3);
+        assert_eq!(parsed.scenarios[1].steps.len(), 3);
+        assert_eq!(
+            parsed.scenarios[0].steps[0].line,
+            line_of(&text, "Given the device")
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A section ends where the next `##` opens: the headings the reader puts
+    /// back are the ones that stood under `Scenarios`, and no other.
+    #[test]
+    fn a_heading_after_the_section_stays_out_of_the_block() {
+        let root = temp_root();
+        let text = fact(
+            HEADER,
+            &format!("{BODY}\n## Open questions\n\n### How long is a tunnel?\n\nNobody timed one.\n"),
+        );
+        let (w, diags) = read(&root, &text);
+        assert_eq!(rendered(&diags), Vec::<String>::new());
+        let w = w.unwrap();
+        let block = w.scenarios.as_ref().unwrap();
+        assert!(!block.text.contains("tunnel"), "{}", block.text);
+        assert_eq!(
+            block.line + block.text.lines().count() - 1,
+            line_of(&text, "Then the write reaches the server")
+        );
+        // The open questions keep their own sub-heading, at its own line.
+        let open = w.open_questions.as_ref().unwrap();
+        assert_eq!(open.line, line_of(&text, "### How long is a tunnel?"));
+        assert!(open.text.contains("Nobody timed one."));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The shape the standing facts are written in: the `### ` heading is the
+    /// scenario and the fact's own title is the feature, so no `Feature:` and
+    /// no `Scenario:` line is left under `archi/world/`.
+    #[test]
+    fn no_fact_under_archi_world_holds_a_feature_or_a_scenario_line() {
+        let dir = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../archi/world"));
+        let mut left: Vec<String> = Vec::new();
+        for entry in fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                continue;
+            }
+            for (i, line) in fs::read_to_string(&path).unwrap().lines().enumerate() {
+                let line = line.trim_start();
+                if line.starts_with("Feature:") || line.starts_with("Scenario:") {
+                    left.push(format!("{}:{}", path.display(), i + 1));
+                }
+            }
+        }
+        assert_eq!(left, Vec::<String>::new());
+    }
+
+    /// The member a scenario runs in, read off the anchor its link carries —
+    /// the whole rule, and the only place it is written
+    /// (`archi/requirements/world-facts/a-scenario-runs-where-its-link-points.md`).
+    fn runner(anchor: &crate::links::Anchor) -> &str {
+        anchor.repo.as_deref().unwrap_or(crate::members::HOME)
+    }
+
+    /// A scenario carries no declaration of where it runs: the anchor's member
+    /// prefix says so.
+    #[test]
+    fn an_anchor_s_member_prefix_names_where_its_scenario_runs() {
+        let anchor = crate::links::Anchor::parse("backend//tests/walk.rs#opens").unwrap();
+        assert_eq!(anchor.repo.as_deref(), Some("backend"));
+        assert_eq!(runner(&anchor), "backend");
+        // The scan key the member prefix produces names the same member.
+        assert_eq!(anchor.qualified_file(), "backend//tests/walk.rs");
+    }
+
+    /// A bare anchor runs in the project's own repository — the home member,
+    /// whose name is the empty one and whose key stays unqualified.
+    #[test]
+    fn a_bare_anchor_runs_in_the_project_s_own_repository() {
+        let anchor = crate::links::Anchor::parse("tests/walk.rs#opens").unwrap();
+        assert_eq!(anchor.repo, None);
+        assert_eq!(runner(&anchor), crate::members::HOME);
+        assert_eq!(anchor.qualified_file(), "tests/walk.rs");
     }
 
     #[test]
@@ -458,10 +621,7 @@ Feature: Offline open
         // An empty `Scenarios`.
         let text = fact(
             HEADER,
-            &without(
-                BODY,
-                &["Feature:", "Scenario:", "Given ", "When ", "Then "],
-            ),
+            &without(BODY, &["### the ", "Given ", "When ", "Then "]),
         );
         let (w, diags) = read(&root, &text);
         assert_eq!(only(&diags), ("E_DOC", line_of(&text, "## Scenarios")));

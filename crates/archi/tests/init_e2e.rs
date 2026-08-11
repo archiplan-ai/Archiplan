@@ -10,7 +10,8 @@
 //! requirements, and `archi-migrate-world` installs beside the other skills so
 //! a project that stands without a wing can gain one. The planning skill moved
 //! with the behaviour too: it collects its closing block from the world and
-//! asks for none of it.
+//! asks for none of it. Both skills that ask for a scenario teach its shape —
+//! a heading and its step lines — and the block stays inside its budget.
 
 mod util;
 
@@ -469,6 +470,103 @@ fn the_briefing_says_what_help_does_not() {
     fs::remove_dir_all(&root).unwrap();
 }
 
+/// A scenario is a heading and its steps
+/// (`archi/requirements/world-facts/the-grammar-is-a-named-subset.md`), so the
+/// two skills that ask a person to write one teach that shape: `### <name>`
+/// opens the scenario, four keywords open its step lines, and `Feature:` and
+/// `Scenario:` appear only as the lines the check refuses. The block teaches
+/// none of it. It stands at nineteen lines against a budget of twenty
+/// (`the-briefing-says-what-help-does-not`), and a grammar does not fit in the
+/// one line that is left — the skills carry it, where the writer reads it.
+#[test]
+fn the_skills_teach_the_scenario_shape_and_the_block_stays_short() {
+    let root = temp_dir();
+    ok_in(&root, &["init", "."]);
+    let workflow = fs::read_to_string(root.join(".claude/skills/archi/SKILL.md")).unwrap();
+    let migration =
+        fs::read_to_string(root.join(".claude/skills/archi-migrate-world/SKILL.md")).unwrap();
+
+    // Installed byte-equal to the embedded copies: what the suite reads is what
+    // a project gets.
+    assert_eq!(workflow, SKILL_ARCHI, "the workflow skill drifted on install");
+    assert_eq!(migration, SKILL_MIGRATE_WORLD, "the migration skill drifted on install");
+
+    // The prose is hard-wrapped, so every sentence is read over its line breaks.
+    fn flat(text: &str) -> String {
+        text.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    // The workflow skill says what a scenario is.
+    let workflow_flat = flat(&workflow);
+    for phrase in ["`### <name>`", "`Given`, `When`, `Then` and `And`", "the whole vocabulary"] {
+        assert!(workflow_flat.contains(phrase), "the workflow skill misses `{phrase}`");
+    }
+
+    let installed = [("archi", workflow.as_str()), ("archi-migrate-world", migration.as_str())];
+    for (name, text) in installed {
+        // Not a subset of that grammar any more, and the tag went with it.
+        assert!(!text.contains("Gherkin"), "{name} still calls the grammar Gherkin");
+        assert!(!text.contains("@runs"), "{name} still carries the retired runs tag");
+
+        // No line writes either replaced keyword. Prose quotes a keyword in
+        // backticks; bare at the head of a line it is an example, which is the
+        // old shape offered as the thing to copy.
+        for line in text.lines() {
+            let head = line.trim_start_matches(|c: char| matches!(c, '-' | '*' | '>' | ' '));
+            assert!(
+                !head.starts_with("Feature:") && !head.starts_with("Scenario:"),
+                "{name} writes the old shape: {line}"
+            );
+        }
+
+        // Named in prose, each is named as refused.
+        let sentences = flat(text);
+        for sentence in sentences.split(". ") {
+            if !sentence.contains("Feature:") && !sentence.contains("Scenario:") {
+                continue;
+            }
+            assert!(
+                ["refus", "never", "not ", "no longer", "replaced"]
+                    .iter()
+                    .any(|deny| sentence.contains(deny)),
+                "{name} asks for the old shape: {sentence}"
+            );
+        }
+    }
+
+    // The migration skill shows one fact written out, and its scenario carries
+    // the shape the skill just described.
+    let example = migration
+        .split("```")
+        .skip(1)
+        .step_by(2)
+        .find(|b| b.contains("## Scenarios"))
+        .expect("the migration skill shows an example fact");
+    let lines: Vec<&str> = example.lines().map(str::trim).collect();
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.strip_prefix("### ").is_some_and(|n| !n.is_empty())),
+        "the example names no scenario:\n{example}"
+    );
+    for keyword in ["Given ", "When ", "Then "] {
+        assert!(
+            lines.iter().any(|l| l.starts_with(keyword)),
+            "the example misses `{keyword}`:\n{example}"
+        );
+    }
+
+    // The block took none of the grammar, and its budget is why.
+    let block = block_of(&root);
+    let count = block.lines().count();
+    assert!(count < 20, "the block is {count} lines:\n{block}");
+    for spelled in ["### ", "Given", "Scenarios"] {
+        assert!(!block.contains(spelled), "the block spells `{spelled}` out:\n{block}");
+    }
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
 /// The migration skill asks the way the first real run taught it to
 /// (`archi/requirements/world-facts/a-skill-migrates-a-standing-project-into-the-wing.md`):
 /// by offering shapes instead of open questions, by asking a second time when
@@ -617,9 +715,9 @@ fn a_migrated_fact_rests_on_its_origin_file_and_reports_nothing() {
         condition: "The carriage drops the network for minutes at a time, so a reader on the move \
                     works from what the device already holds.",
         killer: "Trackside coverage that never drops.",
-        scenarios: "Feature: Offline open\n  \
-                    Scenario: the app opens with no network\n    \
-                    Given the device has no network\n    When the reader opens the app\n    \
+        scenarios: "### The app opens with no network\n\n\
+                    Given the device has no network\n\
+                    When the reader opens the app\n\
                     Then the last synced view appears\n",
     }
     .write(&root, "trains-lose-the-signal", "Trains lose the signal");
@@ -710,9 +808,9 @@ fn a_pre_wing_project_upgrades_stays_green_and_takes_its_first_fact() {
         condition: "The carriage drops the network for minutes at a time, so a reader on the \
                     move works from what the device already holds.",
         killer: "Trackside coverage that never drops.",
-        scenarios: "Feature: Offline open\n  \
-                    Scenario: the app opens with no network\n    \
-                    Given the device has no network\n    When the reader opens the app\n    \
+        scenarios: "### The app opens with no network\n\n\
+                    Given the device has no network\n\
+                    When the reader opens the app\n\
                     Then the last synced view appears\n",
     }
     .write(&root, "trains-lose-the-signal", "Trains lose the signal");

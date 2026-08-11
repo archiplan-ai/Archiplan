@@ -446,6 +446,12 @@ fn starter(name: &str) -> String {
 /// is left is the rule to use the tool, what this tree is, the check loop, the
 /// files a fan-out owes, and the rule that keeps a fact out of the model's
 /// words — under twenty lines, counted by the suite.
+///
+/// The scenario shape stays out for that reason. The block stands at nineteen
+/// lines, so the grammar — a `### ` heading, four step keywords, the two
+/// keywords the check refuses — has one line to fit in and does not. It stands
+/// where a person writes a scenario instead: the workflow skill's world step
+/// and the migration skill, both of which the reader has open at that moment.
 fn claude_block(src: &str) -> String {
     format!(
         "{FENCE_OPEN}\n\

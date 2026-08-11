@@ -24,18 +24,18 @@ reader can answer "why" from the code alone, the written reasons are duplication
 
 ## Scenarios
 
-Feature: The reasons behind a shape outlive the person who chose it
+### Somebody asks why months after the choice
 
-  Scenario: Somebody asks why months after the choice
-    Given a shape whose reasons were recorded when it was chosen
-    When a reader who was not there asks why it is this way
-    Then the record answers with the trade and what it cost
-    And nobody has to ask the person who made the choice
+Given a shape whose reasons were recorded when it was chosen
+When a reader who was not there asks why it is this way
+Then the record answers with the trade and what it cost
+And nobody has to ask the person who made the choice
 
-  Scenario: The person who made the choice has forgotten
-    Given a shape chosen a year ago by a person still here
-    When that person cannot recall what they traded
-    Then the record answers in their place
+### The person who made the choice has forgotten
+
+Given a shape chosen a year ago by a person still here
+When that person cannot recall what they traded
+Then the record answers in their place
 
 ## Open questions
 
