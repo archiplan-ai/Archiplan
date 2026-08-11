@@ -332,27 +332,41 @@ fn world_facts(root: &Path) -> Vec<super::world::WorldDoc> {
 /// header keys are born empty — `sources: []` is the recorded hypothesis
 /// state — and the optional `Open questions` is not born at all. The
 /// prose slots stay empty and the schema's own E_DOC diagnostics hold
-/// them until an author fills them
+/// them until an author fills them. A repeated mint converges as `req add`
+/// and `stress add` converge — the skeleton it would write is already on
+/// disk, so it says so and succeeds
 /// (`archi/requirements/world-facts/one-verb-mints-the-world-fact.md`).
 pub fn world_add(root: &Path, title: &str) -> Result<PathBuf, String> {
     let slug = slug_of(title)?;
     let dir = world_dir(root);
     let path = dir.join(format!("{slug}.md"));
-    // One fact per slug. Unlike a requirement, a fact has no batch that
-    // replays its mint, so a standing file is a wall, not a convergence.
-    if path.exists() {
-        return Err(format!(
-            "{} stands — one fact per slug; continue editing it, or mint another title",
-            rel(root, &path)
-        ));
-    }
-    // The wing arrives with the file: no verb requires `archi/world/`
-    // (`archi/requirements/world-facts/the-wing-arrives-without-noise.md`).
-    fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     let text = format!(
         "---\ncovers: []\nsources: []\nuses: []\n---\n\n\
          # {title}\n\n## What kills this\n\n## Scenarios\n"
     );
+    // A replayed line converges on the untouched skeleton — the exact bytes
+    // this mint writes, never a guess at emptiness. One byte apart is
+    // authored content, and authored content is a wall: it is what no verb
+    // overwrites (refusals-name-the-continuation).
+    if let Ok(standing) = fs::read_to_string(&path) {
+        return if standing == text {
+            println!(
+                "already minted — {} stands; write the condition, what kills it and \
+                 its scenarios",
+                rel(root, &path)
+            );
+            Ok(path)
+        } else {
+            Err(format!(
+                "{} stands and has moved past its skeleton — it is not re-mintable; \
+                 continue editing it",
+                rel(root, &path)
+            ))
+        };
+    }
+    // The wing arrives with the file: no verb requires `archi/world/`
+    // (`archi/requirements/world-facts/the-wing-arrives-without-noise.md`).
+    fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     fs::write(&path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
     Ok(path)
 }
@@ -705,16 +719,54 @@ mod tests {
         fs::remove_dir_all(&root).unwrap();
     }
 
+    /// The replayed mint converges on the untouched skeleton, exactly as
+    /// `req add` and `stress add` do: it says so, writes nothing, and
+    /// succeeds.
     #[test]
-    fn a_second_mint_names_the_standing_file() {
+    fn a_second_mint_on_the_untouched_skeleton_converges() {
         let root = temp_root();
-        world_add(&root, TITLE).unwrap();
+        let path = world_add(&root, TITLE).unwrap();
+        let minted = fs::read_to_string(&path).unwrap();
+        // A stamp no write survives: a re-written file, byte-identical or
+        // not, carries a new modification time.
+        let stamp = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(stamp))
+            .unwrap();
+
+        assert_eq!(world_add(&root, TITLE).unwrap(), path);
+        assert_eq!(fs::read_to_string(&path).unwrap(), minted);
+        assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), stamp);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// One authored byte makes the file a record, and a record is what no
+    /// verb overwrites — a stripped trailing newline included.
+    #[test]
+    fn a_second_mint_on_written_prose_names_the_standing_file() {
+        let root = temp_root();
+        let path = world_add(&root, TITLE).unwrap();
+        let minted = fs::read_to_string(&path).unwrap();
+        let authored = minted.replace(
+            "# The train has no signal\n",
+            "# The train has no signal\n\nThe carriage drops the network.\n",
+        );
+        fs::write(&path, &authored).unwrap();
+
         let e = world_add(&root, TITLE).unwrap_err();
         assert!(e.contains("archi/world/the-train-has-no-signal.md"), "{e}");
         // The refusal left the standing file as it was.
-        assert!(fs::read_to_string(root.join("archi/world/the-train-has-no-signal.md"))
-            .unwrap()
-            .contains("# The train has no signal"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), authored);
+
+        // The comparison is the bytes: a skeleton an editor stripped the
+        // last newline from is not the skeleton the mint writes.
+        fs::write(&path, minted.trim_end()).unwrap();
+        let e = world_add(&root, TITLE).unwrap_err();
+        assert!(e.contains("archi/world/the-train-has-no-signal.md"), "{e}");
+        assert_eq!(fs::read_to_string(&path).unwrap(), minted.trim_end());
         fs::remove_dir_all(&root).unwrap();
     }
 
