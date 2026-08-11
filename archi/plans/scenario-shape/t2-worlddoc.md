@@ -1,0 +1,43 @@
+---
+node: WorldDoc
+owns: [a-world-fact-carries-its-scenarios, a-scenario-runs-where-its-link-points]
+---
+
+# t2 — WorldDoc
+
+the four standing facts move to the new shape
+
+## Spec
+
+- `WorldDoc`
+- `Data type_of WorldDoc`
+
+## Inputs
+
+- from t1 — the reader that decides what the four facts must look like
+
+## Outputs
+
+- archi/world/a-design-written-apart-from-the-code-falls-behind-it.md
+- archi/world/an-assistant-guesses-which-files-answer-a-written-obligation.md
+- archi/world/why-a-design-was-chosen-lives-in-one-person-s-memory.md
+- archi/world/work-runs-in-several-directions-at-once-and-more-than-one-person-joins-it.md
+
+## Stack
+
+- each `## Scenarios` block becomes `### <name>` plus its step lines
+- the names stay byte-identical, because six links address them and a rename unresolves those
+
+## Verifications
+
+### a-world-fact-carries-its-scenarios
+
+- test — check_e2e: all four facts parse under the new reader with no diagnostic
+- test — check_e2e: `archi check` on this tree exits 0 and reports the same four facts
+- test — grep assertion: no `Feature:` and no `Scenario:` line remains under `archi/world/`
+
+### a-scenario-runs-where-its-link-points
+
+- test — unit test: an anchor carrying a member prefix reports that member as the scenario's runner
+- test — unit test: a bare anchor reports the project's own repository
+- test — grep assertion: no `@runs:` remains anywhere in the tree
