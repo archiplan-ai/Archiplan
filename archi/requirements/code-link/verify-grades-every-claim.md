@@ -11,13 +11,12 @@ deferred:
 resolves and the watched hash matches. Drifted: the anchor resolves but the watched hash
 moved — review whether spec or code is authoritative, then re-pin or fix. Moved: the
 anchor is gone and a heuristic candidate exists elsewhere — `repin --to` rewrites the
-projection while the birth record stays untouched; evidence auto-follows at reduced
-confidence. Missing: nothing resolves — broken for an asserted link, restore the code or
-retire; decay for evidence. CanonicalizerMismatch: the ruler changed — rehash before
-trusting any comparison (`hash-contract-is-versioned`). Unreachable: the member's
-checkout is absent — upstream of Missing and never a decay (`absence-is-not-drift`). CI
-reads the grades as exit codes: Missing and CanonicalizerMismatch fail, Drifted fails
-only on asserted literal links, evidence states never fail. Spec-side drift mirrors it: a
+projection while the birth record stays untouched. Missing: nothing resolves — the link is
+broken, so restore the code or retire it. CanonicalizerMismatch: the ruler changed — rehash
+before trusting any comparison (`hash-contract-is-versioned`). Unreachable: the member's
+checkout is absent — upstream of Missing and graded as no observation at all
+(`absence-is-not-drift`). CI reads the grades as exit codes: Missing and
+CanonicalizerMismatch fail, and Drifted fails on literal links. Spec-side drift mirrors it: a
 SpecRef resolves at its pin by construction but may not at Working — the rename that
 orphaned it is locatable in the version chain, so migration is mechanical or the link
 retires with its element.
@@ -35,4 +34,3 @@ codes).
 
 - test — links::add_verify_and_the_drift_grades
 - test — links::moves_are_candidates_and_deletions_are_missing
-- test — links::evidence_confirms_decays_and_prunes

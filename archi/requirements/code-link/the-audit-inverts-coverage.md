@@ -9,13 +9,11 @@ deferred:
 
 With deltas as the input, coverage inverts from "which links exist" to "what is
 unaccounted for". `link audit` reports the hunks since the delta source claimed by no
-task and no link (`unaccounted_delta` — code motion with no architectural account), the
-spec elements in the active plan's scope with no asserted link and no live evidence
-(`unlinked_spec_ref`), and the evidence links whose confidence fell below the floor
-(`decayed_evidence` — confirm or retire, `--prune` retiring in bulk). Confidence itself
-accrues as tasks carrying the same spec_ref touch the same symbol and erodes as the
-symbol is rewritten without reconfirmation — observed as journal events, derived at read,
-never stored. The delta source is the latest version's commit provenance or an explicit
+task and no link (`unaccounted_delta` — code motion with no architectural account) and the
+spec elements in the active plan's scope that no link answers (`unlinked_spec_ref`). Those
+two are the whole report: a link stands or it is retired, so there is no third grade to
+sweep for (`a-link-stands-asserted-or-it-does-not-stand`). The delta source is the latest
+version's commit provenance or an explicit
 `--since`; without either the audit says so instead of guessing
 (`provenance-anchors-post-hoc` names the recovery). All of it advisory, like every
 finding.
@@ -29,9 +27,7 @@ shape the stress matrix wears.
 
 ## Satisfy
 
-`Links.Grader` (the audit sweep: per-source deltas, plan-scope coverage, confidence
-folds).
+`Links.Grader` (the audit sweep: per-source deltas and plan-scope coverage).
 
 - test — links::audit_sweeps_scope_coverage_and_dark_deltas
 - test — links::audit_scopes_unlinked_refs_from_the_active_plan
-- test — links::confidence_accrues_by_touch_and_erodes_by_decay

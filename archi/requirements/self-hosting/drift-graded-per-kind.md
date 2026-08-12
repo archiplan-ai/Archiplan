@@ -20,8 +20,7 @@ this repository.
 ## Satisfy
 
 `Links` recomputes projections on verify and grades each link Clean, Drifted, Moved or Missing
-against the watched hash — body for literal, interface for indirect — with evidence links never
-failing the gate.
+against the watched hash — body for literal, interface for indirect.
 
 - test — reformat a linked fn body: both kinds verify Clean; rewrite its internals: literal drifts, indirect holds
 - test — delete a linked item: verify grades Missing and exits non-zero for the asserted link

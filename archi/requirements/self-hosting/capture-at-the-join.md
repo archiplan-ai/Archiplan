@@ -20,7 +20,7 @@ git-free, so squashes and shallow clones cannot break attribution.
 ## Satisfy
 
 `Planner` records the index when a wave opens and refuses to advance until every active task's
-spec_refs carry asserted coverage; `Links` mints the wave's delta into evidence links that a
-decision — confirm — raises to asserted. Evidence never gates.
+spec_refs carry asserted coverage; `Links` mints what each task's declaration file names, and
+what it names lands asserted (`the-writer-declares-what-the-code-answers`).
 
 - test — plan_e2e::the_plan_loop_produces_the_links_its_gate_demands drives the full loop end to end

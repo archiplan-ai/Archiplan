@@ -9,8 +9,8 @@ deferred:
 
 A declared link whose code side moved refuses the wave that moved it. The refusal names the
 link, the symbol and the two ways out: repin the pair, or declare the symbol again. Links
-that were never declared — captured evidence and hand-authored rows — keep grading exactly
-as they do today, so drift stays advisory everywhere it already was.
+that were never declared — the inferred rows the journal carries as history, and hand-authored
+rows — keep grading exactly as they do today, so drift stays advisory everywhere it already was.
 
 ## System Context
 

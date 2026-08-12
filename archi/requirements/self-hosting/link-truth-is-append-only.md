@@ -7,10 +7,10 @@ deferred:
 
 # Link truth is append-only
 
-The link journal is the single truth of traceability, and it only grows: add, confirm, repin,
-retire, touch and decay are events; the live link set is the fold of the event stream, and
-confidence is derived from it — recomputed, never stored. Any question about how a link came to
-its standing has an answer in the record.
+The link journal is the single truth of traceability, and it only grows: add, repin, retire and
+touch are events, and the live link set is the fold of the event stream. Events an older binary
+wrote and this one no longer makes are read and skipped, never an error. Any question about how
+a link came to its standing has an answer in the record.
 
 ## System Context
 
@@ -23,4 +23,4 @@ like any other append-mostly file.
 the graders and the plan's coverage gate, and never rewrites a line once appended.
 
 - test — retire a link and re-add its spec ref: the fold shows a fresh id and the tombstone stays in the record
-- test — replay a journal into a fresh fold: standing and confidence recompute identically from the events alone
+- test — replay a journal into a fresh fold: the live set recomputes identically from the events alone, retired event kinds included
