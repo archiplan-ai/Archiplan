@@ -19,6 +19,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// installed copy drifted from it, and `plan` asks what rule it still carries.
 pub const SKILL_PLAN: &str = include_str!("../../../../skills/archi-plan.md");
 
+/// One text on one line. Skill prose and the binary's own message strings are
+/// both hard-wrapped, so a sentence is read over its line breaks: what a text
+/// says must not depend on where a line ends. Two families read it — `init`
+/// over the installed skills, `plan` over a refusal — so it stands here.
+pub fn flat(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
 /// A fresh scratch directory, canonicalized so paths agree with git's own

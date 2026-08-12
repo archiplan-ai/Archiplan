@@ -32,7 +32,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use util::SKILL_PLAN;
+use util::{SKILL_PLAN, flat};
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
@@ -98,13 +98,6 @@ fn world_skills(root: &Path) -> (String, String) {
     assert_eq!(workflow, SKILL_ARCHI, "the workflow skill drifted on install");
     assert_eq!(migration, SKILL_MIGRATE_WORLD, "the migration skill drifted on install");
     (workflow, migration)
-}
-
-/// One skill's prose on one line. The text is hard-wrapped, so every sentence
-/// is read over its line breaks: what a skill says must not depend on where a
-/// line ends.
-fn flat(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// The implement skill read off an initialized tree, pinned byte-equal to the

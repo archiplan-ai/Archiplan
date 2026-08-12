@@ -576,7 +576,7 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     // candidate to review
     // (`archi/requirements/planning/the-gate-refusal-names-the-repair-that-stands.md`).
     // Flattened, so a hard wrap in the source string cannot hide a phrase.
-    let flat = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+    let flat = util::flat(&stderr);
     assert!(
         flat.contains(
             "archi link add \"Auth.creds wire Store.inn\" <file#symbol> --kind indirect"
@@ -1349,7 +1349,7 @@ fn an_empty_block_over_a_declared_internal_node_closes_without_a_refusal() {
 #[test]
 fn the_planning_skill_no_longer_forbids_a_wrapped_bullet() {
     // The prose is hard-wrapped: a sentence is read over its line breaks.
-    let flat = util::SKILL_PLAN.split_whitespace().collect::<Vec<_>>().join(" ");
+    let flat = util::flat(util::SKILL_PLAN);
     assert!(!flat.contains("one bullet on one line"), "{flat}");
     assert!(!flat.contains("bullets do not wrap"), "{flat}");
     assert!(!flat.contains("continuation line carries no"), "{flat}");
