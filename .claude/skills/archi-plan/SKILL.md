@@ -233,10 +233,6 @@ persist rows
 - `## Verifications` — one `### <slug>` subhead per owned requirement,
   with proof bullets under it, as described below.
 
-A bullet may run onto further lines: the section splits at the lines that
-open with `- `, so a bullet section carries bullets and nothing else — a
-paragraph left under them joins the last bullet.
-
 ### Curate the requirements
 
 The derived matched set is the candidate list. It is always fresh and
