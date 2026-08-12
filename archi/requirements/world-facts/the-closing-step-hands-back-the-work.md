@@ -24,7 +24,7 @@ exact ref string with its spaces — and prints a list of identifiers instead. T
 then opens three fact files and cross-reads the journal to rebuild what the tool already
 computed, and hand-quotes a name with spaces in it.
 
-This is the one moment where the wing meets the operator at full force, and it is the
+This is the one moment where the world meets the operator at full force, and it is the
 moment the tool is least helpful.
 
 ## Satisfy

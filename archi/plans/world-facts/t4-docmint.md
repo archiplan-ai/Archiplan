@@ -1,6 +1,6 @@
 ---
 node: DocMint
-owns: [one-verb-mints-the-world-fact, removal-names-the-code-it-strands, retirement-refuses-a-plan-in-flight, the-refusal-is-an-ordered-continuation, the-wing-arrives-without-noise]
+owns: [one-verb-mints-the-world-fact, removal-names-the-code-it-strands, retirement-refuses-a-plan-in-flight, the-refusal-is-an-ordered-continuation, the-world-arrives-without-noise]
 ---
 
 # t4 — DocMint
@@ -52,7 +52,7 @@ mint and retire a fact, pre-flight what stands on it
 - test — world_e2e: a fact blocked by a plan, a link and a dependant prints three ordered commands
 - test — world_e2e: each printed command runs as written and clears its blocker
 
-### the-wing-arrives-without-noise
+### the-world-arrives-without-noise
 
 - test — world_e2e: `world add` on a tree with no `archi/world/` creates the folder and writes the file
 - test — check_e2e: a tree with no `archi/world/` passes check with no world finding

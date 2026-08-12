@@ -580,14 +580,14 @@ Then the write reaches the server
     /// record standing directly in `archi/world/` has no kind at all. Every
     /// standing fact lives under `facts/` and nothing is left beside them.
     ///
-    /// The number of facts is not written here: the wing grows as the project
+    /// The number of facts is not written here: the world grows as the project
     /// records more conditions, so a count would fail on the next fact rather
     /// than on a record in the wrong place, which is what this test is for.
     #[test]
     fn no_record_stands_directly_under_archi_world() {
         let loose = md_files(&project_root().join("archi/world"));
         assert_eq!(loose, Vec::<PathBuf>::new());
-        assert!(!standing_facts().is_empty(), "the wing stands");
+        assert!(!standing_facts().is_empty(), "the world stands");
     }
 
     /// Every `sources` entry the tree holds names a file inside the world
@@ -617,7 +617,7 @@ Then the write reaches the server
     }
 
     /// The standing facts rest on nothing anybody recorded, and each one says
-    /// so — the state the wing counts
+    /// so — the state the world counts
     /// (`archi/requirements/world-facts/an-ungrounded-fact-says-so.md`). Each
     /// is also read in the shape the schema now holds, so a fact left in the
     /// retired one fails here as well.

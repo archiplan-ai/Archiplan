@@ -17,7 +17,7 @@ changes what it returns.
 The two verbs answer different questions and an operator has no way to know that from
 either one. `covers` is exact and blind to wording; the phrase scan reads the fact's own
 vocabulary, which by the content rule excludes the nouns of the model. So a search about a
-node returns nothing about the fact conditioning it, and the operator concludes the wing is
+node returns nothing about the fact conditioning it, and the operator concludes the world is
 empty rather than that they used the wrong door. `refusals-name-the-continuation` already
 holds this shape for refusals; an empty answer is the same situation with a different exit
 code.

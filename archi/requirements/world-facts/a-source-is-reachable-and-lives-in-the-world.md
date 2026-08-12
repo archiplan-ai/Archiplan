@@ -24,7 +24,7 @@ evidence, not evidence.
 
 A source that cannot be reached is not a source. So the material comes into the world or the
 field stays empty, and an empty field says the true thing: nobody has grounded this yet. That
-is not a defect to hide; `world_ungrounded` reports it, and it is the wing's own measure of
+is not a defect to hide; `world_ungrounded` reports it, and it is the world's own measure of
 how much of it rests on somebody having looked.
 
 The cost is real and is taken deliberately: an interview that lives in a drive is transcribed

@@ -157,7 +157,7 @@ impl Fact<'_> {
 }
 
 /// The nodes of a fixture's model that no fact of it reaches, declared
-/// internal beside the wing so `version save` mints
+/// internal beside the world so `version save` mints
 /// (`archi/requirements/world-facts/the-save-refuses-an-unconditioned-element.md`).
 ///
 /// A test writes the one fact its point needs, and the gate on the save asks

@@ -1,11 +1,11 @@
 ---
 node: DocsCompiler
-owns: [a-fact-may-stand-before-the-model-does, an-ungrounded-fact-says-so, the-fact-speaks-the-world-and-check-says-when-it-does-not, one-fact-reports-one-finding, the-wing-reports-what-stands-in-the-air, the-check-counts-the-wing, coverage-reaches-down-the-graph]
+owns: [a-fact-may-stand-before-the-model-does, an-ungrounded-fact-says-so, the-fact-speaks-the-world-and-check-says-when-it-does-not, one-fact-reports-one-finding, the-world-reports-what-stands-in-the-air, the-check-counts-the-world, coverage-reaches-down-the-graph]
 ---
 
 # t3 — DocsCompiler
 
-load the wing, cross-check it, report its states
+load the world, cross-check it, report its states
 
 ## Spec
 
@@ -58,12 +58,12 @@ load the wing, cross-check it, report its states
 - test — a fact holding three states reports one `world_state` line naming all three
 - test — a healthy fact reports nothing
 
-### the-wing-reports-what-stands-in-the-air
+### the-world-reports-what-stands-in-the-air
 
 - test — a `uses` cycle of two facts raises a located error naming both
 - test — a chain of four facts reports `world_chain_deep` and a chain of three does not
 
-### the-check-counts-the-wing
+### the-check-counts-the-world
 
 - test — a tree with seven facts, two without sources, prints both numbers
 - test — a tree with no world facts prints no line

@@ -6,5 +6,5 @@
 - An operator retires a fact that a dependant, a link and an open plan all hold, and is handed the commands that clear each one in order. Runs on cargo test (world_e2e — no infrastructure).
 - A plan closes on the scenarios of the facts covering its nodes, reports what moved since it was authored, and refuses the final latch while a scenario carries no link to code. Runs on cargo test (plan_e2e — no infrastructure).
 - An operator searches by phrase, finds nothing, and is told the traversal that answers exactly. Runs on cargo test (search_e2e — no infrastructure).
-- A project written before the wing upgrades, keeps a green check, and fills its wing by running the migration skill against its own intents and plan stories. Runs on cargo test (init_e2e — no infrastructure).
+- A project written before the world upgrades, keeps a green check, and fills its world by running the migration skill against its own intents and plan stories. Runs on cargo test (init_e2e — no infrastructure).
 - A fact is written before the model reaches it, and check names the elements no recorded behavior arrives at without failing the tree. Runs on cargo test (check_e2e — no infrastructure).

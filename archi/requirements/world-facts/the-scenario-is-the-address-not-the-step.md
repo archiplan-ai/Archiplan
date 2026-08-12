@@ -7,7 +7,7 @@ deferred:
 
 # The scenario is the address, not the step
 
-A link into the wing addresses a scenario: `<fact-slug>#<scenario name>`. Steps are not
+A link into the world addresses a scenario: `<fact-slug>#<scenario name>`. Steps are not
 addressable, and the step text is never the reference. Renaming a scenario breaks the
 address, and that break is a located error the
 operator repairs with `link repin`.

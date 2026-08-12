@@ -15,7 +15,7 @@ condition on the node's behavior is not the task's to waive.
 
 ## System Context
 
-The wing's scenarios are the only artifact in the spec that a run can decide, and
+The world's scenarios are the only artifact in the spec that a run can decide, and
 until now nothing brought them to the place where runs happen. The plan is that place:
 it pins a version, it holds the tasks, and its waves are where an implementer reads
 what the node has to do. A task that lists its covering facts puts the condition and

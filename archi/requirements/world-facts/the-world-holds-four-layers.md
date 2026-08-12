@@ -19,7 +19,7 @@ names the four by path.
 
 ## System Context
 
-The wing began as one folder of strict records, and the strictness is what makes a fact
+The world began as one folder of strict records, and the strictness is what makes a fact
 worth its place: a condition, an opposing observation that would end it, and behaviour that
 follows. That same strictness is why nobody writes one on the way past. Material arrives
 loose — a thing somebody noticed, a claim they mean to test, a transcript — and with one
@@ -37,7 +37,7 @@ reaching outside the world.
 Refusing the fifth folder is what makes the other three sentences true. A rule that reads
 the four by name and walks past everything else does not hold four layers — it holds four
 layers and an unbounded remainder that no rule describes. The loose file at the top was
-already refused, so the top of the wing was closed and one level down was open: a folder
+already refused, so the top of the world was closed and one level down was open: a folder
 somebody made in a hurry took files, kept them out of every reading, and reported nothing.
 The cost is not disorder for its own sake. It is that a source resolves against the world,
 so material parked outside the four is material a fact cannot name, sitting in the one

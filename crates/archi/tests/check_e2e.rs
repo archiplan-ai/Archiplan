@@ -215,15 +215,15 @@ fn findings_stay_advisory_and_do_not_withhold_the_read() {
     fs::remove_dir_all(&root).unwrap();
 }
 
-/// A fact written before the model reaches it: the wing says which fact
+/// A fact written before the model reaches it: the world says which fact
 /// covers nothing yet and which elements no recorded behavior arrives at,
-/// and none of it fails the tree — the wing's states are advisory like every
+/// and none of it fails the tree — the world's states are advisory like every
 /// finding, and the read still closes the check
 /// (`archi/requirements/world-facts/a-fact-may-stand-before-the-model-does.md`,
 /// `archi/requirements/world-facts/coverage-reaches-down-the-graph.md`,
-/// `archi/requirements/world-facts/the-check-counts-the-wing.md`).
+/// `archi/requirements/world-facts/the-check-counts-the-world.md`).
 #[test]
-fn the_wing_names_what_it_never_reaches_and_the_tree_stands() {
+fn the_world_names_what_it_never_reaches_and_the_tree_stands() {
     let root = temp_project(COUPLED);
     // One fact on the hotspot, and one recorded before the model reached it.
     fact(
@@ -266,7 +266,7 @@ fn the_wing_names_what_it_never_reaches_and_the_tree_stands() {
         "{out}"
     );
     assert!(!out.contains("world fact `trains-lose-the-signal`"), "{out}");
-    // None of it withholds the read, and the wing closes on its own count.
+    // None of it withholds the read, and the world closes on its own count.
     assert!(out.contains("nkp — N=6 · E=4"), "{out}");
     assert!(out.contains("world — 2 facts · 0 ungrounded"), "{out}");
 
@@ -320,7 +320,7 @@ fn the_coverage_list_names_no_data_element() {
 }
 
 /// The floor under the coverage list: with every element either conditioned,
-/// classified `Data`, or declared internal beside the wing, the list is empty
+/// classified `Data`, or declared internal beside the world, the list is empty
 /// and the check still passes
 /// (`archi/requirements/world-facts/an-internal-element-says-so.md`).
 #[test]
@@ -353,7 +353,7 @@ fn a_declared_element_empties_the_coverage_list() {
     fs::remove_dir_all(&root).unwrap();
 }
 
-/// The wing in four layers: the strict record under `facts/`, a claim and an
+/// The world in four layers: the strict record under `facts/`, a claim and an
 /// observation the schema never touches, and raw material nothing opens. The
 /// tree stands, and the closing line counts the facts alone
 /// (`archi/requirements/world-facts/the-world-holds-four-layers.md`).
@@ -405,7 +405,7 @@ fn this_tree() -> PathBuf {
 /// `archi/world/facts/`, which is where the count the check prints comes from.
 fn standing_facts() -> Vec<String> {
     let mut out: Vec<String> = fs::read_dir(this_tree().join("archi/world/facts"))
-        .expect("the wing stands")
+        .expect("the world stands")
         .flatten()
         .map(|e| e.path())
         .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("md"))
@@ -415,13 +415,13 @@ fn standing_facts() -> Vec<String> {
     out
 }
 
-/// This tree's own wing: every fact it holds is ungrounded. The migration
+/// This tree's own world: every fact it holds is ungrounded. The migration
 /// wrote the intent each was lifted from into `sources`, the world may no
 /// longer reach the spec, and the empty field says the true thing — nobody
 /// has grounded these yet
 /// (`archi/requirements/world-facts/a-source-is-reachable-and-lives-in-the-world.md`).
 ///
-/// The count is read off the tree rather than written here: the wing grows
+/// The count is read off the tree rather than written here: the world grows
 /// as the project records more conditions, and a number in this file would
 /// fail on the next fact instead of on a grounded one. The named slugs stay
 /// as the floor — each was migrated ungrounded and must still say so.
@@ -486,7 +486,7 @@ fn the_rewritten_facts_parse_clean_and_the_check_exits_zero() {
         })
         .unwrap_or_default();
     assert_eq!(located, Vec::<&str>::new(), "{json}");
-    assert!(!standing_facts().is_empty(), "the wing stands");
+    assert!(!standing_facts().is_empty(), "the world stands");
 }
 
 /// The scenarios this tree anchored in code survive the rewrite: every link
@@ -500,7 +500,7 @@ fn the_scenario_links_stay_clean() {
     let root = this_tree();
     let out = ok(&root, &["link", "verify"]);
 
-    // The rows the wing owns: the spec side opens with a standing fact's slug
+    // The rows the world owns: the spec side opens with a standing fact's slug
     // and a `#`. Every one of them is clean.
     let slugs = standing_facts();
     let scenario_rows: Vec<&str> = out

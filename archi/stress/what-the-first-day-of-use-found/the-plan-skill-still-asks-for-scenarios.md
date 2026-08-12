@@ -5,7 +5,7 @@ outcome: breaking
 
 # The plan skill still asks for scenarios
 
-Author a plan through `/archi-plan` after the wing landed. The skill still says to walk
+Author a plan through `/archi-plan` after the world landed. The skill still says to walk
 the architecture as a user and write one bullet per flow into `scenarios.md`. The author
 does it — six sentences, carefully written. Then `plan scenarios list` answers with the
 block collected from the world facts, and the hand-written file is read by nobody, ever.

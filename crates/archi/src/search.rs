@@ -2,7 +2,7 @@
 //! model elements with their identity prose, intents, requirements,
 //! stressors, sessions, decisions and the world facts
 //! (`archi/requirements/agent-retrieval/`,
-//! `archi/requirements/world-facts/search-reaches-the-new-wing.md`).
+//! `archi/requirements/world-facts/search-reaches-the-new-world.md`).
 //!
 //! The scan keeps no persisted derivative of the corpus: every query walks
 //! the live doc tree and the compiled model it was handed, so a text edit
@@ -293,15 +293,15 @@ fn fill_doc_text(root: &Path, card: &mut Card) -> bool {
     true
 }
 
-/// The world wing's strict records: one file under `archi/world/facts/` is
+/// The world's strict records: one file under `archi/world/facts/` is
 /// one fact, and the corpus reads the layer the checker reads, through the
 /// one function that says where a fact lives — search and `check` can never
 /// disagree about where to look
 /// (`archi/requirements/world-facts/the-world-holds-four-layers.md`). The
 /// three loose layers hold no fact and stay out of the corpus.
 ///
-/// A tree with no wing is an empty one — the scan neither needs the directory
-/// nor makes it (the-wing-arrives-without-noise).
+/// A tree with no world is an empty one — the scan neither needs the directory
+/// nor makes it (the-world-arrives-without-noise).
 fn world_files(root: &Path) -> Vec<PathBuf> {
     docs::sorted_entries(&docs::mint::facts_dir(root))
         .into_iter()
@@ -313,7 +313,7 @@ fn world_files(root: &Path) -> Vec<PathBuf> {
 /// workaround under it.
 /// The `Scenarios` block stays out and so do the header's lists — a step and a
 /// covered element are addressed by `covers`, never by phrase, so the reach is
-/// real and the yield is bounded (search-reaches-the-new-wing). The lists ride
+/// real and the yield is bounded (search-reaches-the-new-world). The lists ride
 /// the refs, where the next command starts (cards-carry-the-next-hop).
 fn world_card(root: &Path, path: &Path) -> Card {
     let file = rel(root, path);
@@ -503,8 +503,8 @@ fn corpus(root: &Path, model: Option<&Model>) -> Vec<Card> {
         cards.push(c);
     }
 
-    // The world wing rides the same scan: one card per fact, out of the same
-    // reader `check` uses (search-reaches-the-new-wing).
+    // The world rides the same scan: one card per fact, out of the same
+    // reader `check` uses (search-reaches-the-new-world).
     for path in world_files(root) {
         cards.push(world_card(root, &path));
     }
@@ -959,7 +959,7 @@ mod tests {
         );
     }
 
-    /// One fact of the world wing, in the layer the strict record lives in
+    /// One fact of the world, in the layer the strict record lives in
     /// (`archi/requirements/world-facts/the-world-holds-four-layers.md`): the
     /// condition, what people do instead, and the scenarios it dictates —
     /// whose steps the card does not hold. `trackside` stands in the
@@ -1223,7 +1223,7 @@ mod tests {
     }
 
     #[test]
-    fn search_reaches_the_new_wing() {
+    fn search_reaches_the_new_world() {
         let root = temp_project();
         full_kb(&root);
         world_fact(&root);
@@ -1293,24 +1293,24 @@ mod tests {
     }
 
     #[test]
-    fn a_tree_with_no_wing_answers_as_it_did() {
+    fn a_tree_with_no_world_answers_as_it_did() {
         let root = temp_project();
         full_kb(&root);
         let r = run(&root, "rate limiting", &[], 20);
         assert!(!kinds_of(&r).contains("world"));
         assert!(run(&root, "trackside", &[Kind::World], 10).hits.is_empty());
         // The scan neither needs the directory nor makes it — neither the
-        // wing nor the layer inside it.
+        // world nor the layer inside it.
         assert!(!root.join("archi/world").exists());
         assert!(!docs::mint::facts_dir(&root).exists());
         fs::remove_dir_all(&root).unwrap();
     }
 
     /// The corpus reads the layer the checker reads: a fact under `facts/`
-    /// is a card, and a file left in the wing's root is no fact and no card —
+    /// is a card, and a file left in the world's root is no fact and no card —
     /// the folder is what says what a file is
     /// (`archi/requirements/world-facts/the-world-holds-four-layers.md`,
-    /// `search-reaches-the-new-wing`). Two answers to "where does a fact
+    /// `search-reaches-the-new-world`). Two answers to "where does a fact
     /// live" is a tool that disagrees with itself, so this reads the one
     /// function the mint and the walk read.
     #[test]
@@ -1324,7 +1324,7 @@ mod tests {
         );
 
         // The three loose layers hold no fact, and neither does the root of
-        // the wing: none of them reaches the corpus.
+        // the world: none of them reaches the corpus.
         for at in [
             "archi/world/a-loose-file.md",
             "archi/world/notes/a-rider-said-the-app-froze.md",

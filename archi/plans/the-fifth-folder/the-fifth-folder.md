@@ -1,7 +1,7 @@
 # the-fifth-folder
 
-The wing declares four layers and the rule reads exactly those four by name, so a folder
-nobody declared takes files and reports nothing. The top of the wing is closed — a loose
+The world declares four layers and the rule reads exactly those four by name, so a folder
+nobody declared takes files and reports nothing. The top of the world is closed — a loose
 `.md` directly under `archi/world/` is already a located error — and one level down is
 open. This closes it at any depth, with the message the loose file already raises.
 

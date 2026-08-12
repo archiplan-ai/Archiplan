@@ -254,7 +254,7 @@ fn the_record_folder_authors_by_editing_files() {
 
     // `use` mints the folder: the charter skeleton and the lifecycle in
     // state.json — no plan.json is ever born again, and no `scenarios.md`:
-    // the plan authors no stories, it collects them from the wing.
+    // the plan authors no stories, it collects them from the world.
     let out = ok(&root, &["plan", "use", "mvp"]);
     assert!(out.contains("created plan `mvp` @ v0001"), "{out}");
     let dir = root.join("archi/plans/mvp");
@@ -462,7 +462,7 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     ok(&root, &["plan", "task", "add", "Auth"]);
 
     // Authoring is a text edit of the record files: outputs scope
-    // capture, inputs shape waves. The stories are the wing's.
+    // capture, inputs shape waves. The stories are the world's.
     write_record(
         &root,
         "archi/plans/mvp/t1-store.md",
@@ -603,7 +603,7 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     assert!(!out.contains("a user logs in end to end"), "{out}");
     assert_eq!(state_json(&root, "mvp")["cleanup_displayed"], true);
 
-    // The next call brings the block, collected from the wing: the fact
+    // The next call brings the block, collected from the world: the fact
     // covering t2's node dictates the story this plan closes on.
     let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("all waves closed — scenarios:"), "{out}");
@@ -760,7 +760,7 @@ fn a_legacy_state_json_never_regresses_into_the_cleanup_stage() {
 
     // Waves closed but the scenarios never displayed: the cleanup stage
     // appears, latches, then the close. The plan is one from before the
-    // wing — no fact covers its node, so it closes with no block, and the
+    // world — no fact covers its node, so it closes with no block, and the
     // `scenarios.md` it was written with is read by nobody.
     write_record(&root, "archi/plans/mvp/state.json", &legacy_state(""));
     let out = ok(&root, &["plan", "next"]);
@@ -967,14 +967,14 @@ fn a_task_carries_the_facts_that_cover_its_node() {
     fs::remove_dir_all(&root).unwrap();
 }
 
-/// The close collects the block from the wing as it stands: one entry per
+/// The close collects the block from the world as it stands: one entry per
 /// fact covering a node the plan holds a task for, the mark of what lies
 /// outside beside it, and the drift above it
 /// (`archi/requirements/world-facts/the-plan-closes-on-the-world-s-scenarios.md`,
 /// `archi/requirements/world-facts/the-block-marks-what-lies-outside-the-plan.md`,
-/// `archi/requirements/world-facts/the-close-re-reads-the-wing-and-says-what-moved.md`).
+/// `archi/requirements/world-facts/the-close-re-reads-the-world-and-says-what-moved.md`).
 #[test]
-fn the_close_collects_the_wing_and_marks_what_lies_outside() {
+fn the_close_collects_the_world_and_marks_what_lies_outside() {
     let root = temp_project();
     fs::write(root.join("archi/src/extra.arch"), "def node Ledger\n").unwrap();
     // One fact over both of the plan's nodes, and one reaching past the
@@ -1006,7 +1006,7 @@ fn the_close_collects_the_wing_and_marks_what_lies_outside() {
     let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("the cleanup wave"), "{out}");
 
-    // The wing moves under the plan between the pin and the close: the
+    // The world moves under the plan between the pin and the close: the
     // fingerprint the tasks carried no longer matches.
     put_fact(
         &root,
@@ -1142,15 +1142,15 @@ fn the_close_gates_on_anchored_scenarios() {
     fs::remove_dir_all(&root).unwrap();
 }
 
-/// On a tree that holds a wing, a plan minted after it cannot close on
+/// On a tree that holds a world, a plan minted after it cannot close on
 /// nothing: the empty block refuses the final latch and names the reason, and
 /// one fact covering a node the plan holds a task for closes the same plan
 /// (`archi/requirements/world-facts/a-plan-s-own-scenarios-block-retires.md`).
 #[test]
-fn a_post_wing_plan_on_a_tree_with_a_wing_refuses_until_a_fact_covers_a_node() {
+fn a_post_world_plan_on_a_tree_with_a_world_refuses_until_a_fact_covers_a_node() {
     let root = temp_project();
-    // The tree opted into the wing — one fact stands, over a node this plan
-    // holds no task for. There is a wing to be behind on.
+    // The tree opted into the world — one fact stands, over a node this plan
+    // holds no task for. There is a world to be behind on.
     put_fact(
         &root,
         "tunnels-run-long",
@@ -1220,20 +1220,20 @@ fn a_post_wing_plan_on_a_tree_with_a_wing_refuses_until_a_fact_covers_a_node() {
     fs::remove_dir_all(&root).unwrap();
 }
 
-/// A tree that holds no world fact at all has not opted into the wing, and a
-/// plan on it is not behind on one: the refusal needs a wing to refuse
-/// against, so the empty block closes exactly as a pre-wing plan's does
+/// A tree that holds no world fact at all has not opted into the world, and a
+/// plan on it is not behind on one: the refusal needs a world to refuse
+/// against, so the empty block closes exactly as a pre-world plan's does
 /// (`archi/requirements/world-facts/a-plan-s-own-scenarios-block-retires.md`,
-/// `archi/requirements/world-facts/the-wing-arrives-without-noise.md`).
+/// `archi/requirements/world-facts/the-world-arrives-without-noise.md`).
 #[test]
-fn a_post_wing_plan_on_a_tree_with_no_wing_closes_without_a_refusal() {
+fn a_post_world_plan_on_a_tree_with_no_world_closes_without_a_refusal() {
     let root = temp_project();
     ok(&root, &["version", "save", "-m", "first"]);
     ok(&root, &["plan", "use", "mvp"]);
 
-    // The plan carries the mark of the wing; the tree carries no wing —
+    // The plan carries the mark of the world; the tree carries no world —
     // `archi/world/` was never created, and no verb creates it here.
-    assert_eq!(state_json(&root, "mvp")["minted_after_the_wing"], true);
+    assert_eq!(state_json(&root, "mvp")["minted_after_the_world"], true);
     assert!(!root.join("archi/world").exists());
 
     ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
@@ -1243,7 +1243,7 @@ fn a_post_wing_plan_on_a_tree_with_no_wing_closes_without_a_refusal() {
     let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("the cleanup wave"), "{out}");
 
-    // Nothing to be behind on: the close asks the wing nothing and latches.
+    // Nothing to be behind on: the close asks the world nothing and latches.
     let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("DONE"), "{out}");
     assert!(!out.contains("no world fact covers any node"), "{out}");
@@ -1521,11 +1521,11 @@ fn plan_verify_prints_the_scenario_states_while_a_wave_is_still_open() {
     fs::remove_dir_all(&root).unwrap();
 }
 
-/// A plan from before the wing carries no mark, closes with no block, and
+/// A plan from before the world carries no mark, closes with no block, and
 /// keeps the `scenarios.md` it was written with — history is left exactly
 /// as it is (`archi/decisions/the-old-plans-are-left-alone.md`).
 #[test]
-fn a_pre_wing_plan_closes_with_no_block_and_keeps_its_old_one() {
+fn a_pre_world_plan_closes_with_no_block_and_keeps_its_old_one() {
     let root = temp_project();
     put_fact(
         &root,
@@ -1547,7 +1547,7 @@ fn a_pre_wing_plan_closes_with_no_block_and_keeps_its_old_one() {
     );
 
     // The lifecycle file an older binary wrote: waves closed, no mark of
-    // the wing on it — the plan is what it was written as.
+    // the world on it — the plan is what it was written as.
     let created = state_json(&root, "old")["created"]
         .as_str()
         .unwrap()

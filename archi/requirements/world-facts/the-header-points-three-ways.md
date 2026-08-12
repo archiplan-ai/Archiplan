@@ -17,7 +17,7 @@ the hypothesis state.
 
 ## System Context
 
-The three fields are the whole coupling of the wing — down into the model, out into
+The three fields are the whole coupling of the world — down into the model, out into
 the raw material, sideways into the other facts — and each one is checkable, which
 is why there is no fourth. `covers` is also the only reliable bridge from the
 vocabulary of the world to the vocabulary of the model: a fact is written without

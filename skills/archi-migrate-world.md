@@ -1,6 +1,6 @@
 ---
 name: archi-migrate-world
-description: Give a standing archiplan project its world facts — read the world prose its intents already hold, the story blocks its old plans authored and the suites it already runs, interview one candidate at a time by offering concrete options, and write a fact only where a person can name the workaround. Use when a project modeled before the wing must record the outside conditions its spec assumes.
+description: Give a standing archiplan project its world facts — read the world prose its intents already hold, the story blocks its old plans authored and the suites it already runs, interview one candidate at a time by offering concrete options, and write a fact only where a person can name the workaround. Use when a project modeled before the world must record the outside conditions its spec assumes.
 ---
 
 > **Skill freshness — the first step.** In an initialized project, run
@@ -9,9 +9,9 @@ description: Give a standing archiplan project its world facts — read the worl
 > `updated` or `created`, the text you follow is stale. Read that file
 > again, follow it, and only then continue. `ok` means continue.
 
-# Migrate a standing project into the wing
+# Migrate a standing project into the world
 
-A project modeled before the wing already claims things about the world.
+A project modeled before the world already claims things about the world.
 The claims sit in the opening prose of its intents, in the free-text
 story blocks its old plans authored, and under the tests its suites
 already name. No verb reads them there, and nothing in the repository
@@ -19,13 +19,13 @@ can make them false. This skill moves the ones a person can stand behind
 into `archi/world/`, one at a time, by interview.
 
 It deletes nothing. The intent keeps its paragraph, the old plan keeps
-its stories, and the wing stands beside them. The run returns two
+its stories, and the world stands beside them. The run returns two
 things: the facts that landed, and a brief of what did not map and why.
 
 Judgement is the whole job here, and judgement is why this is a skill
 and not a converter. Naming the condition under a story is a person's
 call. A converter would have written fluent facts nobody observed, which
-is worse than an empty wing, because an invented fact reads exactly like
+is worse than an empty world, because an invented fact reads exactly like
 an observed one.
 
 ## 1. Read what the project already claims
@@ -34,7 +34,7 @@ Run these in the project. They give the candidate list and what already
 stands:
 
 ```sh
-archi world ls                       # the wing today; often empty
+archi world ls                       # the world today; often empty
 archi search <phrase> --kind intent  # the world prose, by phrase
 ls archi/requirements/*/             # the intents, one folder each
 ls archi/plans/*/scenarios.md        # the story blocks, if the tree has old plans
@@ -85,7 +85,7 @@ for is a wish, and only a wish: it belongs in no file. When the operator
 cannot name one, this skill writes nothing for that candidate. It goes
 in the brief with the sentence it came from, and you move to the next
 one. Do not soften the question, do not answer it from the prose, and
-do not mint a skeleton "to fill in later". An empty wing is an honest
+do not mint a skeleton "to fill in later". An empty world is an honest
 state. A fact nobody observed is not.
 
 The same answer is what can end the fact later, so nobody is asked to
@@ -115,7 +115,7 @@ Ask for the workaround a second time with shapes — name two things
 people could be doing instead and one that would only dent the trouble,
 and ask which of them the operator sees. Two outcomes follow and both
 are right. The second ask names a real workaround, the candidate becomes
-a fact, and the wing gains a condition somebody can watch. Or it
+a fact, and the world gains a condition somebody can watch. Or it
 confirms a premise that truly cannot fail here — and a premise is not a
 world fact: it stays in the intent that already holds it, and the brief
 says so. Neither outcome is the mistake. The mistake is stopping at the
@@ -130,7 +130,7 @@ archi world add "<the fact in one line>"
 ```
 
 The verb mints `archi/world/facts/<slug>.md` with the three lists empty
-and the headings in place. `facts/` is the strict layer of the wing, and
+and the headings in place. `facts/` is the strict layer of the world, and
 it is the only one this skill writes into. You write the prose:
 
 - **The name** is the fact in one line, as the operator said it.
@@ -221,14 +221,14 @@ Run `archi check` and report what it said, verbatim in substance:
 - Errors block. An unresolved `covers` entry, a `sources` entry that
   reaches no file or points outside `archi/world/`, or a scenario
   outside the grammar is a fact that is not finished. Fix it now.
-- The closing line counts the wing: `world — <n> facts · <m>
+- The closing line counts the world: `world — <n> facts · <m>
   ungrounded`. A migration raises `m` by one for every fact it writes,
   because prose is not an observation. That number is the measure of
-  how much of the wing still waits for somebody to look, and it is a
+  how much of the world still waits for somebody to look, and it is a
   worklist, not a defect to hide.
 - Findings are the worklist, never a reason to stop.
 
-Read the wing back the way a reader will: `archi world ls`, and `archi
+Read the world back the way a reader will: `archi world ls`, and `archi
 world ls --covers <element>` from a node to the conditions that rule it.
 
 Then write `world-migration-brief.md` at the project root and tell the

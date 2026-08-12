@@ -4,11 +4,11 @@
 //! broken run, the briefing lands verbatim, and the commands around init keep
 //! their contracts.
 //!
-//! The skills carry the wing (`archi/requirements/world-facts/`): the `world`
+//! The skills carry the world (`archi/requirements/world-facts/`): the `world`
 //! verb and the no-model-nouns rule stand in the workflow skill, the workflow
 //! captures the world before it derives requirements, and
 //! `archi-migrate-world` installs beside the other skills so a project that
-//! stands without a wing can gain one. The planning skill moved with the
+//! stands without a world can gain one. The planning skill moved with the
 //! behaviour too: it collects its closing block from the world and asks for
 //! none of it. Both skills that ask for a scenario teach its shape — a heading
 //! and its step lines. The same two skills carry the four folders of the world
@@ -302,7 +302,7 @@ fn the_verbs_around_init_keep_their_contracts() {
 }
 
 #[test]
-fn the_briefing_carries_the_wing() {
+fn the_briefing_carries_the_world() {
     let root = temp_dir();
     ok_in(&root, &["init", "."]);
 
@@ -540,7 +540,7 @@ fn the_skills_describe_the_four_layers_and_the_source_rule() {
             "{folder} is named without what it holds (`{holds}`): {window}"
         );
     }
-    // And what a file directly under the wing is: nothing the reader may write.
+    // And what a file directly under the world is: nothing the reader may write.
     assert!(
         workflow_flat.contains("in no layer"),
         "the workflow skill never says a file outside the four folders is refused"
@@ -722,7 +722,7 @@ fn the_skills_ask_for_the_workaround_and_not_for_the_killer() {
 }
 
 /// The migration skill asks the way the first real run taught it to
-/// (`archi/requirements/world-facts/a-skill-migrates-a-standing-project-into-the-wing.md`):
+/// (`archi/requirements/world-facts/a-skill-migrates-a-standing-project-into-the-world.md`):
 /// by offering shapes instead of open questions, by asking a second time when
 /// the answer sounds like an axiom, and by reading the suites the project
 /// already runs for candidates.
@@ -761,11 +761,11 @@ fn the_migration_skill_learns_to_ask() {
 }
 
 #[test]
-fn a_pre_wing_project_syncs_into_the_wing() {
+fn a_pre_world_project_syncs_into_the_world() {
     let root = temp_dir();
     ok_in(&root, &["init", "."]);
 
-    // A project scaffolded before the wing: its block and its workflow skill
+    // A project scaffolded before the world: its block and its workflow skill
     // predate the verb, and the migration skill was never installed.
     fs::write(
         root.join("CLAUDE.md"),
@@ -823,7 +823,7 @@ fn the_migration_skill_installs_and_names_its_gate() {
     // stops a fact being written, the state a migrated fact is left in, the one
     // place material may be carried into, the brief it hands back, and the
     // check it closes on
-    // (archi/requirements/world-facts/a-skill-migrates-a-standing-project-into-the-wing.md).
+    // (archi/requirements/world-facts/a-skill-migrates-a-standing-project-into-the-world.md).
     for phrase in [
         "archi world add",
         "workaround",
@@ -842,12 +842,12 @@ fn the_migration_skill_installs_and_names_its_gate() {
     fs::remove_dir_all(&root).unwrap();
 }
 
-/// A migrated fact rests on nothing anybody observed, and the wing says so
+/// A migrated fact rests on nothing anybody observed, and the world says so
 /// (`archi/requirements/world-facts/a-source-is-reachable-and-lives-in-the-world.md`).
 ///
 /// This test asserted the opposite and is rewritten, not relaxed. It pinned the
 /// rule the migration skill used to teach: write the intent a claim was lifted
-/// from into `sources`, and the wing counts the fact grounded and reports
+/// from into `sources`, and the world counts the fact grounded and reports
 /// nothing. The quiet was the defect. The spec is what the world conditions, so
 /// a fact grounded in a requirement grounds itself in what it explains, and
 /// `sources` now reaches only into `archi/world/`. What the requirement behind
@@ -855,7 +855,7 @@ fn the_migration_skill_installs_and_names_its_gate() {
 /// what it asks for still, and it is met now by the count telling the truth
 /// instead of by the field being filled.
 #[test]
-fn a_migrated_fact_carries_no_source_and_the_wing_says_so() {
+fn a_migrated_fact_carries_no_source_and_the_world_says_so() {
     let root = temp_dir();
     ok_in(&root, &["init", "."]);
     fs::write(
@@ -895,7 +895,7 @@ fn a_migrated_fact_carries_no_source_and_the_wing_says_so() {
     assert!(said.contains("lies outside"), "{said}");
 
     // The honest shape: the same record with an empty field. It lands clean,
-    // and the one thing the wing says about it is the one thing that is true —
+    // and the one thing the world says about it is the one thing that is true —
     // nobody has been to look yet.
     fact("").write(&root, "trains-lose-the-signal", "Trains lose the signal");
     let check = ok_in(&root, &["check"]);
@@ -909,18 +909,18 @@ fn a_migrated_fact_carries_no_source_and_the_wing_says_so() {
 }
 
 /// The machine-provable half of the migration, walked as one flow: a project
-/// that stands from before the wing checks green with no wing at all, the
+/// that stands from before the world checks green with no world at all, the
 /// upgrade hands it the verb and the procedure without moving the check by a
 /// byte, and the first fact written the way the skill prescribes lands clean
-/// (`archi/requirements/world-facts/a-skill-migrates-a-standing-project-into-the-wing.md`,
-/// `archi/requirements/world-facts/the-wing-arrives-without-noise.md`).
+/// (`archi/requirements/world-facts/a-skill-migrates-a-standing-project-into-the-world.md`,
+/// `archi/requirements/world-facts/the-world-arrives-without-noise.md`).
 ///
 /// Running the procedure is not machine-provable: the skill is a text a
 /// person or an agent reads, and no test can read an intent and decide which
 /// of its claims is a condition of the world. What the test proves is the
 /// ground the reader stands on before and after.
 #[test]
-fn a_pre_wing_project_upgrades_stays_green_and_takes_its_first_fact() {
+fn a_pre_world_project_upgrades_stays_green_and_takes_its_first_fact() {
     let root = temp_dir();
     ok_in(&root, &["init", "."]);
     fs::write(
@@ -937,7 +937,7 @@ fn a_pre_wing_project_upgrades_stays_green_and_takes_its_first_fact() {
     )
     .unwrap();
 
-    // The project as it stood before the wing: the old block, the old
+    // The project as it stood before the world: the old block, the old
     // workflow skill, no migration skill — and no `archi/world/` at all.
     fs::write(
         root.join("CLAUDE.md"),
@@ -952,7 +952,7 @@ fn a_pre_wing_project_upgrades_stays_green_and_takes_its_first_fact() {
     fs::remove_dir_all(root.join(".claude/skills/archi-migrate-world")).unwrap();
     assert!(!root.join("archi/world").exists());
 
-    // It checks green, and the wing it never opted into says nothing.
+    // It checks green, and the world it never opted into says nothing.
     let before = ok_in(&root, &["check"]);
     assert!(!before.contains("world"), "{before}");
 
@@ -972,7 +972,7 @@ fn a_pre_wing_project_upgrades_stays_green_and_takes_its_first_fact() {
     // The first fact, written as the skill prescribes: the condition, what
     // people do instead, its scenarios, the node it conditions — and no source,
     // because the claim was lifted from prose and nobody has been to look. It
-    // lands clean, and the wing is born counted and honest about what it rests
+    // lands clean, and the world is born counted and honest about what it rests
     // on.
     util::Fact {
         covers: "AuthService",

@@ -12,7 +12,7 @@ because the fact's title is the feature and the heading is the scenario.
 
 Round one met a feature file that blocked the check and answered by reading the whole
 language, so that a file brought from elsewhere would parse unedited. That was one
-property bought with the largest single piece of implementation the wing carries — a
+property bought with the largest single piece of implementation the world carries — a
 parser with tables, outlines and their substitution rules — and six more rounds of
 accumulation made the price the wrong one. The first author of a fact already faces more
 work than anything else in this repository asks of them, and the parser sits on the critical

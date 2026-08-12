@@ -21,7 +21,7 @@ one element would lie about its scope. A world fact does not pin a scenario to o
 element — `covers` is a list, and a fact that conditions four nodes names four. The
 scope survives, and what the plan gains is a block that was written once, kept beyond
 the plan, and parsed by a grammar. The stories stop being authored per plan and start
-being collected from the wing.
+being collected from the world.
 
 ## Satisfy
 

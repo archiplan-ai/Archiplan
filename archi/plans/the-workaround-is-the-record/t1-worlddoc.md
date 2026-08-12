@@ -30,7 +30,7 @@ the workaround takes the killer's slot, and the four facts move with the shape
 
 - `## What people do instead` joins the required sections beside the conditioning paragraph and `## Scenarios`
 - `## What kills this` earns a named refusal rather than being read as an unknown heading: it is what this replaced
-- the shape and the four files land in one task, because a check that outran its records would empty the wing between commits
+- the shape and the four files land in one task, because a check that outran its records would empty the world between commits
 - each fact keeps its slug and its scenario names byte-identical — six links address them
 - two more places write the shape and must flip with the reader: the mint's skeleton, or `world add` creates a file the checker refuses, and the shared test fixture, or fifteen suites go red
 

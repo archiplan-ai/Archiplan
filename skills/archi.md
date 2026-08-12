@@ -200,7 +200,7 @@ once.
 3. **Capture the world.** The conditions outside the system that make
    the behavior necessary are records of their own under `archi/world/`.
    They come before the requirements, because a condition from outside
-   decides which claims are requirements at all. The wing is four
+   decides which claims are requirements at all. The world is four
    folders, and the folder a file sits in is what that file is:
 
    - `archi/world/facts/` holds the strict record: the condition, the
@@ -259,7 +259,7 @@ once.
    `archi world rm <slug>` retires one, and it refuses while a plan or a
    code-link stands on it. `archi world ls [--covers <element>]` is the
    traversal from a node to the conditions that rule it. A project that
-   stands without a wing gains one through the `archi-migrate-world`
+   stands without a world gains one through the `archi-migrate-world`
    skill.
 4. **Derive requirements.** One claim is one file, and the command makes it:
 

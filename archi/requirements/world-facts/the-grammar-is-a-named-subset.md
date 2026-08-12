@@ -20,7 +20,7 @@ twice.
 Round one met this pressure and answered it by reading the whole language, which bought
 one property — a foreign file parses unedited — for the price of a real parser with
 tables, outlines and their substitution rules. Seven rounds of accumulation later that
-price is the wrong one: the wing already asks more of its first author than anything else
+price is the wrong one: the world already asks more of its first author than anything else
 in this repository, and the parser is the largest single piece of work in it. The subset
 is small enough to hold in a head and to implement once. Tags stay, because
 `a-scenario-names-where-it-runs` puts the runner on one, and a tag line costs nothing to

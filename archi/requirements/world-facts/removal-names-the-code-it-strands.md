@@ -14,10 +14,10 @@ existing `link rm --spec`, then runs the removal again.
 
 ## System Context
 
-Deletion is the purpose of the wing, so it runs often, and every run that leaves a
+Deletion is the purpose of the world, so it runs often, and every run that leaves a
 link pointing at a scenario that no longer exists teaches the operator to skim
 `link verify`. A grade that cries over correct code is worse than no grade. The
-pre-flight is the same move the wing already makes for `uses` — name the blast
+pre-flight is the same move the world already makes for `uses` — name the blast
 radius before the file goes — extended to the second thing that can depend on a
 fact. It refuses rather than cascades: a link is a recorded human assertion, and no
 verb retires one on the operator's behalf.

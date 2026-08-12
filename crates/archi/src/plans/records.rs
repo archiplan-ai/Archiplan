@@ -15,9 +15,9 @@
 //! never curated
 //! (`archi/requirements/world-facts/a-task-carries-the-facts-that-cover-its-node.md`).
 //!
-//! A `scenarios.md` a pre-wing plan was written with is read by nobody,
+//! A `scenarios.md` a pre-world plan was written with is read by nobody,
 //! written by nobody and deleted by nobody: the stories live in the world
-//! wing now and history is left exactly as it is
+//! now and history is left exactly as it is
 //! (`archi/requirements/world-facts/a-plan-s-own-scenarios-block-retires.md`,
 //! `archi/decisions/the-old-plans-are-left-alone.md`).
 //!
@@ -108,13 +108,13 @@ struct StateFile {
     scenarios_displayed: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     scenarios_closed: bool,
-    // The mark of the wing: the mint stamps it, nothing else moves it, and
-    // a plan written before the wing carries no such field and parses as
+    // The mark of the world: the mint stamps it, nothing else moves it, and
+    // a plan written before the world carries no such field and parses as
     // what it is — which is what decides whether an empty closing block may
     // close the plan
     // (`archi/requirements/world-facts/a-plan-s-own-scenarios-block-retires.md`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    minted_after_the_wing: bool,
+    minted_after_the_world: bool,
 }
 
 /// Persist the lifecycle fields of a record plan — the only write any
@@ -129,7 +129,7 @@ pub(crate) fn write_state(root: &Path, plan: &Plan) -> Result<(), String> {
         cleanup_displayed: plan.cleanup_displayed,
         scenarios_displayed: plan.scenarios_displayed,
         scenarios_closed: plan.scenarios_closed,
-        minted_after_the_wing: plan.minted_after_the_wing,
+        minted_after_the_world: plan.minted_after_the_world,
     };
     let path = state_path(root, &plan.name);
     let mut text =
@@ -187,7 +187,7 @@ pub(crate) fn render_charter(plan: &Plan) -> String {
 }
 
 /// The `facts` frontmatter line: the covering facts as `<slug>@<digest>`.
-/// It rides only when the wing reaches the node, so a project without one
+/// It rides only when the world reaches the node, so a project without one
 /// sees no new line in its task files.
 fn facts_line(facts: &[CoveringFact]) -> String {
     let entries: Vec<String> = facts.iter().map(CoveringFact::render).collect();
@@ -582,14 +582,14 @@ pub(crate) fn load(root: &Path, name: &str) -> Result<Plan, String> {
         cleanup_displayed: state.cleanup_displayed,
         scenarios_displayed: state.scenarios_displayed,
         scenarios_closed: state.scenarios_closed,
-        minted_after_the_wing: state.minted_after_the_wing,
+        minted_after_the_world: state.minted_after_the_world,
         tasks: by_ordinal.into_values().map(|(_, t)| t).collect(),
     })
 }
 
 /// Mint a fresh record plan: the charter skeleton plus the lifecycle file
 /// — every prose slot empty for the author to fill. No `scenarios.md`: the
-/// plan authors no stories, it collects them from the wing at its close.
+/// plan authors no stories, it collects them from the world at its close.
 pub(crate) fn mint(
     root: &Path,
     name: &str,
@@ -612,7 +612,7 @@ pub(crate) fn mint(
         cleanup_displayed: false,
         scenarios_displayed: false,
         scenarios_closed: false,
-        minted_after_the_wing: true,
+        minted_after_the_world: true,
         tasks: Vec::new(),
     };
     let dir = plan_dir(root, name);
@@ -727,7 +727,7 @@ mod tests {
             cleanup_displayed: false,
             scenarios_displayed: false,
             scenarios_closed: false,
-            minted_after_the_wing: true,
+            minted_after_the_world: true,
             tasks: Vec::new(),
         }
     }
@@ -837,7 +837,7 @@ mod tests {
         assert!(!bare.contains("facts:"), "{bare}");
         assert!(bare.contains("hand-written tail"), "{bare}");
 
-        // A file that carries no line yet gets one — the wing reaching a
+        // A file that carries no line yet gets one — the world reaching a
         // node it did not reach before.
         write_facts(&root, "mvp", "t1", &moved).unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), after);
@@ -873,11 +873,11 @@ mod tests {
     #[test]
     fn state_json_refuses_drift() {
         // The latch-less shape an old binary wrote parses — the latches
-        // default unflipped; a flipped cleanup latch parses too. The wing
-        // mark defaults with them: a plan from before the wing is one.
+        // default unflipped; a flipped cleanup latch parses too. The world
+        // mark defaults with them: a plan from before the world is one.
         let ok = r#"{"state":"draft","closed_waves":0,"version":"v0001","created":"now"}"#;
         assert!(serde_json::from_str::<StateFile>(ok).is_ok());
-        assert!(!serde_json::from_str::<StateFile>(ok).unwrap().minted_after_the_wing);
+        assert!(!serde_json::from_str::<StateFile>(ok).unwrap().minted_after_the_world);
         let latched = r#"{"state":"started","closed_waves":1,"version":"v0001","created":"now","cleanup_displayed":true}"#;
         assert!(serde_json::from_str::<StateFile>(latched).unwrap().cleanup_displayed);
         let unknown = r#"{"state":"draft","closed_waves":0,"version":"v0001","created":"now","extra":1}"#;
@@ -893,8 +893,8 @@ mod tests {
         let plan = mint(&root, "mvp", "v0001".into(), None, "now".into()).unwrap();
         assert_eq!(load(&root, "mvp").unwrap(), plan);
 
-        // The mint stamps the wing and writes no story block of its own.
-        assert!(plan.minted_after_the_wing);
+        // The mint stamps the world and writes no story block of its own.
+        assert!(plan.minted_after_the_world);
         assert!(!plan_dir(&root, "mvp").join("scenarios.md").exists());
 
         let mut task = task();

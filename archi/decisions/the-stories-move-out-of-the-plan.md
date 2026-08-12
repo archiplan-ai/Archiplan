@@ -1,5 +1,5 @@
 ---
-links: [two-things-are-called-a-scenario, the-wing-replaced-something-that-worked, the-plan-closes-on-the-world-s-scenarios, scenarios-close-the-plan, Planner]
+links: [two-things-are-called-a-scenario, the-world-replaced-something-that-worked, the-plan-closes-on-the-world-s-scenarios, scenarios-close-the-plan, Planner]
 prefer: [correctness]
 over: [simplicity]
 ---
@@ -12,7 +12,7 @@ its tasks name, and keeps only the ceremony: print the block, latch, close.
 The plan's stories were free text on the plan envelope, and free text is cheap to write
 and impossible to check. They were also written per plan and died with it, so the same
 behavior was restated by every plan that touched it, each time in new words and each
-time unverified. Moving them to the wing costs the ease: a Gherkin block written against
+time unverified. Moving them to the world costs the ease: a Gherkin block written against
 a recorded condition is more work than a sentence, and a plan can no longer invent a
 story at the moment it needs one.
 

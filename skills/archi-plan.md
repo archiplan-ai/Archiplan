@@ -302,13 +302,13 @@ An **empty** block means that no world fact covers any node this plan
 builds. That is spec work, and it is **not a blank to fill**: go to
 `/archi`, capture the condition the product stands on, give it its
 scenarios and its `covers`, then come back. Never invent a story to close
-the gap. A plan minted after the world wing does not close on nothing.
+the gap. A plan minted after the world does not close on nothing.
 
 The close gates on the block: every collected scenario has to carry a
 link to code before the plan closes. `archi` runs nothing — the link
 proves that the edge a runner executes exists.
 
-A plan authored before the world wing carries a `scenarios.md` no verb
+A plan authored before the world carries a `scenarios.md` no verb
 reads. It is not the closing block, nothing you author goes into it, and
 no command removes it.
 

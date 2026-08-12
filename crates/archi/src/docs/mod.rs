@@ -226,7 +226,7 @@ pub struct DocReport {
     pub diagnostics: Vec<DocDiagnostic>,
     /// Advisory findings.
     pub findings: Vec<DocFinding>,
-    /// The world wing's own advisory findings and its count line — they
+    /// The world's own advisory findings and its count line — they
     /// carry their own kinds, they count the `facts/` layer alone, and a tree
     /// with no `archi/world/` carries neither
     /// (`archi/requirements/world-facts/`).
@@ -256,7 +256,7 @@ pub(crate) fn load(root: &Path, model: &Model) -> (Tree, DocReport) {
     let mut diags = Vec::new();
     let tree = discover(root, &mut diags);
     let findings = cross_check(root, model, &tree, &mut diags);
-    // The wing rides the same pass: its two open references resolve here,
+    // The world rides the same pass: its two open references resolve here,
     // against the model and against the other facts, and its reports are
     // advisory beside the others (`archi/requirements/world-facts/`). It
     // reads the tree for one more file — the declaration of what is internal
@@ -506,7 +506,7 @@ fn discover(root: &Path, diags: &mut Vec<DocDiagnostic>) -> Tree {
         }
     }
 
-    // The world wing is four areas, and the folder a file sits in is what
+    // The world is four areas, and the folder a file sits in is what
     // says how the file is read: the strict record under `facts/`, a claim
     // and an observation under `hypotheses/` and `notes/` with a name and
     // their prose, raw material under `resources/` that nothing opens
@@ -514,9 +514,9 @@ fn discover(root: &Path, diags: &mut Vec<DocDiagnostic>) -> Tree {
     // the facts reach the tree — the loose layers are read where they stand,
     // and a `sources` entry resolves against them
     // (`archi/requirements/world-facts/a-source-is-reachable-and-lives-in-the-world.md`).
-    // The whole wing is optional: a tree without `archi/world/` holds no fact
+    // The whole world is optional: a tree without `archi/world/` holds no fact
     // and never grows the folder here
-    // (`archi/requirements/world-facts/the-wing-arrives-without-noise.md`).
+    // (`archi/requirements/world-facts/the-world-arrives-without-noise.md`).
     tree.world = world_check::discover(root, diags);
 
     tree

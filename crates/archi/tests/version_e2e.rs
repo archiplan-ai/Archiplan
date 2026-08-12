@@ -4,7 +4,7 @@
 //! version minted; the bare no-op is a success and genuine failures stay
 //! loud (`archi/requirements/self-hosting/unchanged-saves-close-rounds.md`).
 //!
-//! The save is also the gate on the world wing: a tree that holds a fact and
+//! The save is also the gate on the world: a tree that holds a fact and
 //! still carries an element no fact reaches saves nothing, and the refusal
 //! names every element and both exits
 //! (`archi/requirements/world-facts/the-save-refuses-an-unconditioned-element.md`).
@@ -135,13 +135,13 @@ fn changed_save_still_mints_and_closes_at_the_minted_id() {
     assert_eq!(version_count(&root), 2);
 }
 
-/// The model with one node nothing reaches — the element the wing has
+/// The model with one node nothing reaches — the element the world has
 /// something to say about.
 const WITH_ISLAND: &str = "def node Island\n";
 
 /// One world fact under `archi/world/facts/`, covering what the caller
 /// names — the shared skeleton ([`util::Fact`]) with this family's words in
-/// it. Its schema is the wing's; the gate reads its `covers` alone.
+/// it. Its schema is the world's; the gate reads its `covers` alone.
 fn world_fact(root: &Path, covers: &str) {
     util::Fact {
         covers,
@@ -227,21 +227,21 @@ fn declaring_the_element_internal_clears_the_refusal() {
 }
 
 /// The threshold: a project that has written no fact is not behind on the
-/// wing, and its archive is byte for byte what it was before the gate
-/// existed (`the-wing-arrives-without-noise`).
+/// world, and its archive is byte for byte what it was before the gate
+/// existed (`the-world-arrives-without-noise`).
 #[test]
 fn a_tree_with_no_world_facts_saves_byte_identically() {
     let bare = temp_project();
-    let winged = temp_project();
-    for root in [&bare, &winged] {
+    let with_world = temp_project();
+    for root in [&bare, &with_world] {
         fs::write(
             root.join("archi/src/model.arch"),
             format!("{MODEL}{WITH_ISLAND}"),
         )
         .unwrap();
     }
-    // A wing folder with no fact in it is still no fact.
-    let notes = winged.join("archi/world/notes");
+    // A world folder with no fact in it is still no fact.
+    let notes = with_world.join("archi/world/notes");
     fs::create_dir_all(&notes).unwrap();
     fs::write(
         notes.join("the-guard-walked-the-platform.md"),
@@ -249,17 +249,17 @@ fn a_tree_with_no_world_facts_saves_byte_identically() {
     )
     .unwrap();
 
-    for root in [&bare, &winged] {
+    for root in [&bare, &with_world] {
         let out = ok(root, &["version", "save", "-m", "first"]);
         assert!(out.contains("saved v0001"), "{out}");
     }
     assert_eq!(
         fs::read(bare.join("archi/versions/v0001.arch")).unwrap(),
-        fs::read(winged.join("archi/versions/v0001.arch")).unwrap(),
-        "the wing changes no archived byte"
+        fs::read(with_world.join("archi/versions/v0001.arch")).unwrap(),
+        "the world changes no archived byte"
     );
     fs::remove_dir_all(&bare).unwrap();
-    fs::remove_dir_all(&winged).unwrap();
+    fs::remove_dir_all(&with_world).unwrap();
 }
 
 #[test]

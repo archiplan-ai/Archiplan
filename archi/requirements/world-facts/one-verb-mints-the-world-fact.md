@@ -20,7 +20,7 @@ that is content no verb overwrites.
 
 Requirements and stressors already work this way: the command makes the skeleton and
 the machine fields, the person writes the text, and `check` holds the empty slots
-until the prose lands. The world wing joins that convention rather than inventing a
+until the prose lands. The world joins that convention rather than inventing a
 second one, so an operator who knows `req add` needs nothing new. A refusal that
 names the dependants is what makes deletion safe: the `uses` chain is exactly the
 blast radius, and the operator sees it before the file goes.

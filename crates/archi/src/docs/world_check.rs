@@ -1,4 +1,4 @@
-//! The world wing's pass over the doc tree
+//! The world's pass over the doc tree
 //! (`archi/requirements/world-facts/`): discovery under `archi/world/`, the
 //! two references the record leaves to the compiler — `covers` against the
 //! compiled model, `uses` against the other facts — the `uses` graph, and the
@@ -8,7 +8,7 @@
 //! that fact holds at once
 //! (`archi/requirements/world-facts/one-fact-reports-one-finding.md`), the
 //! `uses` graph carries the ring and the deep chain
-//! (`archi/requirements/world-facts/the-wing-reports-what-stands-in-the-air.md`),
+//! (`archi/requirements/world-facts/the-world-reports-what-stands-in-the-air.md`),
 //! and the model carries what no fact reaches
 //! (`archi/requirements/world-facts/coverage-reaches-down-the-graph.md`) —
 //! minus what its type puts outside the question and what `.worldignore`
@@ -16,8 +16,8 @@
 //! (`archi/requirements/world-facts/an-internal-element-says-so.md`).
 //! Nothing here blocks except an unresolved reference and a ring, and a tree
 //! with no `archi/world/` folder reports nothing at all — a project that has
-//! not opted into the wing is not behind on it
-//! (`archi/requirements/world-facts/the-wing-arrives-without-noise.md`).
+//! not opted into the world is not behind on it
+//! (`archi/requirements/world-facts/the-world-arrives-without-noise.md`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -41,7 +41,7 @@ const CHAIN_MAX: usize = 3;
 /// (`archi/requirements/world-facts/coverage-reaches-down-the-graph.md`).
 const DATA: &str = "Data";
 
-/// The declaration of what is internal, beside the wing it quiets
+/// The declaration of what is internal, beside the world it quiets
 /// (`archi/requirements/world-facts/an-internal-element-says-so.md`).
 const IGNORE: &str = ".worldignore";
 
@@ -67,7 +67,7 @@ const LAYERS: [&str; 4] = [FACTS, HYPOTHESES, NOTES, RESOURCES];
 /// carries the dash, so the space around it is free.
 const REASON: char = '—';
 
-/// One world fact as the wing holds it: the record the reader parsed and the
+/// One world fact as the world holds it: the record the reader parsed and the
 /// scenarios the grammar accepted.
 pub(crate) struct WorldFact {
     /// The record — the three lists, the paragraph, the workaround.
@@ -76,15 +76,15 @@ pub(crate) struct WorldFact {
     pub(crate) scenarios: Option<ScenarioBlock>,
 }
 
-/// The wing keyed by what it covers — the one question the planner, the
+/// The world keyed by what it covers — the one question the planner, the
 /// links and the query surface ask of it: which facts condition this
 /// element.
-pub(crate) struct Wing<'a> {
+pub(crate) struct World<'a> {
     facts: &'a [WorldFact],
     by_element: BTreeMap<&'a str, Vec<usize>>,
 }
 
-impl<'a> Wing<'a> {
+impl<'a> World<'a> {
     /// The facts naming `element` in `covers`, in slug order.
     pub(crate) fn covering(&self, element: &str) -> Vec<&'a WorldFact> {
         self.by_element
@@ -99,7 +99,7 @@ impl<'a> Wing<'a> {
     }
 }
 
-/// A state a fact holds, or a decay of the wing around it. Kinds are
+/// A state a fact holds, or a decay of the world around it. Kinds are
 /// append-only, like the doc findings beside them.
 #[derive(Serialize)]
 #[serde(tag = "kind")]
@@ -146,9 +146,9 @@ impl fmt::Display for WorldFinding {
     }
 }
 
-/// The wing in two numbers — how many facts stand and how many rest on
+/// The world in two numbers — how many facts stand and how many rest on
 /// nothing recorded
-/// (`archi/requirements/world-facts/the-check-counts-the-wing.md`).
+/// (`archi/requirements/world-facts/the-check-counts-the-world.md`).
 #[derive(Serialize)]
 pub struct WorldCount {
     /// The facts that loaded.
@@ -167,8 +167,8 @@ impl fmt::Display for WorldCount {
     }
 }
 
-/// What the wing's pass reports: its advisory findings and its count line.
-/// A tree with no wing carries neither.
+/// What the world's pass reports: its advisory findings and its count line.
+/// A tree with no world carries neither.
 #[derive(Default)]
 pub struct WorldReport {
     /// Advisory, never blocking.
@@ -188,7 +188,7 @@ pub struct WorldReport {
 ///
 /// Nothing here creates a folder, and a tree holding none of the four says
 /// nothing at all — a project that has not opted into a layer is not behind
-/// on it (`archi/requirements/world-facts/the-wing-arrives-without-noise.md`).
+/// on it (`archi/requirements/world-facts/the-world-arrives-without-noise.md`).
 pub(crate) fn discover(root: &Path, diags: &mut Vec<DocDiagnostic>) -> Vec<WorldFact> {
     let base = root.join(WORLD);
     if !base.is_dir() {
@@ -220,7 +220,7 @@ fn layer_files(base: &Path, layer: &str) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Every document under the wing that no layer holds: a file loose at the
+/// Every document under the world that no layer holds: a file loose at the
 /// top, and every `.md` under a folder that is not one of [`LAYERS`], at any
 /// depth. The fifth folder is why the walk descends — a rule that reads the
 /// four by name and steps past the rest holds four layers and a remainder no
@@ -259,7 +259,7 @@ fn documents_under(dir: &Path, out: &mut Vec<PathBuf>) {
 
 /// The refusal the placement rule raises, wherever the walk found the file:
 /// the four layers by path, and the document by the path it sits at under
-/// the wing. It is built in one place, so the loose file at the top and the
+/// the world. It is built in one place, so the loose file at the top and the
 /// document in a fifth folder can never name different layers
 /// (`archi/requirements/world-facts/the-world-holds-four-layers.md`).
 fn no_layer(root: &Path, base: &Path, path: &Path) -> DocDiagnostic {
@@ -283,7 +283,7 @@ fn no_layer(root: &Path, base: &Path, path: &Path) -> DocDiagnostic {
 /// One file of a loose layer. It needs a name and its prose, and the reader
 /// already locates a file that carries no name; this locates one that carries
 /// no prose under it. Nothing else is asked of it, and nothing is kept: the
-/// wing reads these layers so a fact's `sources` has something to resolve
+/// world reads these layers so a fact's `sources` has something to resolve
 /// against (`archi/requirements/world-facts/the-world-holds-four-layers.md`).
 fn loose(root: &Path, path: &Path, diags: &mut Vec<DocDiagnostic>) {
     let Some((file, doc)) = read_doc(root, path, diags) else {
@@ -303,7 +303,7 @@ fn loose(root: &Path, path: &Path, diags: &mut Vec<DocDiagnostic>) {
 /// over the `Scenarios` block. `None` when nothing readable stands there —
 /// [`discover`] skips such a file, and a reader after one fact has none.
 ///
-/// It is the one reader: the wing walks the folder through it and a link
+/// It is the one reader: the world walks the folder through it and a link
 /// reads a single slug through it, so the two can never read one file into
 /// two different stories.
 pub(crate) fn read_fact(
@@ -323,23 +323,23 @@ pub(crate) fn read_fact(
     })
 }
 
-/// The wing of a loaded tree, keyed by what its facts cover.
-pub(crate) fn serve_world(tree: &Tree) -> Wing<'_> {
+/// The world of a loaded tree, keyed by what its facts cover.
+pub(crate) fn serve_world(tree: &Tree) -> World<'_> {
     let mut by_element: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
     for (i, f) in tree.world.iter().enumerate() {
         for e in f.doc.covers.iter().flat_map(|(v, _)| v) {
             by_element.entry(e.as_str()).or_default().push(i);
         }
     }
-    Wing {
+    World {
         facts: &tree.world,
         by_element,
     }
 }
 
-/// Cross-check the wing: the two references the record left open, the shape
+/// Cross-check the world: the two references the record left open, the shape
 /// of the `uses` graph, the state of every fact, and the reach of the whole
-/// wing over the model. An empty wing is checked by saying nothing — the
+/// world over the model. An empty world is checked by saying nothing — the
 /// declaration file beside it is read only where there is coverage to quiet.
 pub(crate) fn check(
     root: &Path,
@@ -478,7 +478,7 @@ fn in_name(slug: &str, name: &str) -> bool {
 
 /// The reports the shape of the `uses` graph carries: the ring, which
 /// blocks, and the chain that outgrew a reading, which does not
-/// (`archi/requirements/world-facts/the-wing-reports-what-stands-in-the-air.md`).
+/// (`archi/requirements/world-facts/the-world-reports-what-stands-in-the-air.md`).
 fn graph(facts: &[WorldFact], findings: &mut Vec<WorldFinding>, diags: &mut Vec<DocDiagnostic>) {
     let slugs: BTreeSet<&str> = facts.iter().map(|f| f.doc.slug.as_str()).collect();
     let adj: BTreeMap<&str, Vec<&str>> = facts
@@ -512,7 +512,7 @@ fn graph(facts: &[WorldFact], findings: &mut Vec<WorldFinding>, diags: &mut Vec<
             fact.doc.uses.as_ref().map_or(fact.doc.line, |(_, l)| *l),
         ));
     }
-    // A ring has no longest chain, and the wing already knows about it.
+    // A ring has no longest chain, and the world already knows about it.
     if !rings.is_empty() {
         return;
     }
@@ -605,7 +605,7 @@ fn chain_under<'a>(
     chain
 }
 
-/// What the wing reaches, and what it leaves standing alone. A node is
+/// What the world reaches, and what it leaves standing alone. A node is
 /// covered when a fact names it, when a declared connection edge carries the
 /// coverage into it, or when it sits inside a covered node — scenarios run
 /// from the surface inward, so a fact on an outer service carries most of a
@@ -662,9 +662,9 @@ fn unreached(
     // The seeds: what the facts name. A port entry seeds the node that
     // declares it — a condition on the interface is a condition on what
     // stands behind it. An entry naming neither was already reported.
-    let wing = serve_world(tree);
+    let world = serve_world(tree);
     let mut frontier: Vec<&str> = Vec::new();
-    for e in wing.elements() {
+    for e in world.elements() {
         if nodes.contains(e) {
             frontier.push(e);
         } else if let Some((owner, _)) = e.rsplit_once('.')
@@ -699,9 +699,9 @@ fn unreached(
 /// `archi version save` refuses on
 /// (`archi/requirements/world-facts/the-save-refuses-an-unconditioned-element.md`).
 ///
-/// It reads the `facts/` layer alone, because the wing's threshold is a fact:
+/// It reads the `facts/` layer alone, because the world's threshold is a fact:
 /// a project that has written none saves exactly as it did before the gate
-/// existed (`archi/requirements/world-facts/the-wing-arrives-without-noise.md`).
+/// existed (`archi/requirements/world-facts/the-world-arrives-without-noise.md`).
 /// What the read locates on the way — a loose file, a broken declaration — is
 /// `check`'s to report and is dropped here: the save says one thing, and the
 /// operator who wants the rest runs `archi check`.
@@ -732,7 +732,7 @@ fn data_elements(model: &Model) -> BTreeSet<String> {
 }
 
 /// The elements a person declared internal, read from [`IGNORE`] beside the
-/// wing. One line is one element path, then [`REASON`], then why nothing
+/// world. One line is one element path, then [`REASON`], then why nothing
 /// outside reaches it; blank lines and `#` comments are skipped, and a tree
 /// with no file declares nothing.
 ///
@@ -1001,7 +1001,7 @@ Then the view arrives late
         );
     }
 
-    /// The declaration file beside the wing, written whole.
+    /// The declaration file beside the world, written whole.
     fn ignore(root: &Path, text: &str) {
         put(root, &format!("archi/world/{IGNORE}"), text);
     }
@@ -1106,7 +1106,7 @@ Then the view arrives late
             "",
         );
         let report = check_at(&root);
-        // The empty block is the reader's error; the state is the wing's.
+        // The empty block is the reader's error; the state is the world's.
         assert_eq!(
             report
                 .diagnostics
@@ -1210,7 +1210,7 @@ Then the view arrives late
     }
 
     /// A ring holds nothing up: a located error naming it
-    /// (`the-wing-reports-what-stands-in-the-air`).
+    /// (`the-world-reports-what-stands-in-the-air`).
     #[test]
     fn a_uses_ring_is_a_located_error() {
         let root = temp_project();
@@ -1361,7 +1361,7 @@ Then the view arrives late
         fs::remove_dir_all(&root).unwrap();
     }
 
-    /// The declaration beside the wing: one line names an element and why
+    /// The declaration beside the world: one line names an element and why
     /// nothing outside reaches it, and the element leaves the list. A tree
     /// with no file behaves exactly as it does today
     /// (`an-internal-element-says-so`).
@@ -1478,7 +1478,7 @@ Then the view arrives late
     /// `check`'s finding and the save's refusal are one computation read
     /// twice: the finding renders what [`unreached`] returns and the save
     /// refuses on it, so the two can never disagree about an element — on a
-    /// bare wing, under a cover, and under a declaration
+    /// bare world, under a cover, and under a declaration
     /// (`the-save-refuses-an-unconditioned-element`).
     #[test]
     fn the_finding_and_the_refusal_read_one_set() {
@@ -1507,13 +1507,13 @@ Then the view arrives late
         fs::remove_dir_all(&root).unwrap();
     }
 
-    /// A tree with no fact reaches nothing and refuses nothing: the wing's
-    /// threshold, at the save (`the-wing-arrives-without-noise`).
+    /// A tree with no fact reaches nothing and refuses nothing: the world's
+    /// threshold, at the save (`the-world-arrives-without-noise`).
     #[test]
     fn a_tree_with_no_fact_hands_the_save_nothing() {
         let root = temp_project();
         assert_eq!(save_set(&root), Vec::<String>::new());
-        // A wing folder with only a note in it is still no fact.
+        // A world folder with only a note in it is still no fact.
         note(&root);
         assert_eq!(save_set(&root), Vec::<String>::new());
         fs::remove_dir_all(&root).unwrap();
@@ -1757,7 +1757,7 @@ Then the view arrives late
     }
 
     /// Raw material is listed so a source can resolve against it, and opened
-    /// by nothing: whatever it holds, the wing says nothing about it
+    /// by nothing: whatever it holds, the world says nothing about it
     /// (`the-world-holds-four-layers`).
     #[test]
     fn a_resource_is_never_parsed_and_never_reported() {
@@ -1844,9 +1844,9 @@ Then the view arrives late
         fs::remove_dir_all(&root).unwrap();
     }
 
-    /// A wing folder holding none of the four layers behaves exactly as a
-    /// tree with no wing does: nothing reported, nothing created
-    /// (`the-world-holds-four-layers`, `the-wing-arrives-without-noise`).
+    /// A world folder holding none of the four layers behaves exactly as a
+    /// tree with no world does: nothing reported, nothing created
+    /// (`the-world-holds-four-layers`, `the-world-arrives-without-noise`).
     #[test]
     fn a_tree_with_none_of_the_four_folders_reports_nothing() {
         let root = temp_project();
@@ -2013,10 +2013,10 @@ Then the view arrives late
         fs::remove_dir_all(&root).unwrap();
     }
 
-    /// A project that has not opted into the wing is not behind on it: no
+    /// A project that has not opted into the world is not behind on it: no
     /// coverage report, no count, nothing at all.
     #[test]
-    fn an_empty_wing_says_nothing_at_all() {
+    fn an_empty_world_says_nothing_at_all() {
         let root = temp_project();
         let report = check_at(&root);
         assert!(report.world.findings.is_empty());
@@ -2025,10 +2025,10 @@ Then the view arrives late
         fs::remove_dir_all(&root).unwrap();
     }
 
-    /// The closing line counts the wing and its ungrounded half
-    /// (`the-check-counts-the-wing`).
+    /// The closing line counts the world and its ungrounded half
+    /// (`the-check-counts-the-world`).
     #[test]
-    fn the_count_names_the_wing_and_its_ungrounded_half() {
+    fn the_count_names_the_world_and_its_ungrounded_half() {
         let root = temp_project();
         for i in 1..=7 {
             let slug = format!("fact-number-{i}");
@@ -2084,7 +2084,7 @@ Then the view arrives late
 
     /// The surface later tasks read: which facts cover this element.
     #[test]
-    fn the_wing_is_served_keyed_by_what_it_covers() {
+    fn the_world_is_served_keyed_by_what_it_covers() {
         let root = temp_project();
         healthy(&root, "riders-lose-the-signal", "Riders lose the signal");
         fact(
@@ -2099,23 +2099,23 @@ Then the view arrives late
             .unwrap_or_else(|f| panic!("test model failed to compile:\n{}", f.render()))
             .workspace;
         let (tree, _) = load(&root, ws.model());
-        let wing = serve_world(&tree);
+        let world = serve_world(&tree);
         assert_eq!(
-            wing.covering("Gate")
+            world.covering("Gate")
                 .iter()
                 .map(|f| f.doc.slug.as_str())
                 .collect::<Vec<_>>(),
             ["riders-lose-the-signal", "tunnels-run-long"]
         );
         assert_eq!(
-            wing.covering("Engine")
+            world.covering("Engine")
                 .iter()
                 .map(|f| f.doc.slug.as_str())
                 .collect::<Vec<_>>(),
             ["tunnels-run-long"]
         );
-        assert!(wing.covering("Island").is_empty());
-        assert_eq!(wing.elements().collect::<Vec<_>>(), ["Engine", "Gate"]);
+        assert!(world.covering("Island").is_empty());
+        assert_eq!(world.elements().collect::<Vec<_>>(), ["Engine", "Gate"]);
         fs::remove_dir_all(&root).unwrap();
     }
 }

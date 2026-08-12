@@ -492,7 +492,7 @@ pub fn save(root: &Path, model: &Model, note: &str) -> Result<Saved, String> {
     })
 }
 
-/// The wing's gate on the save: a tree that holds at least one world fact
+/// The world's gate on the save: a tree that holds at least one world fact
 /// and still carries an element no fact reaches mints nothing
 /// (`archi/requirements/world-facts/the-save-refuses-an-unconditioned-element.md`).
 ///

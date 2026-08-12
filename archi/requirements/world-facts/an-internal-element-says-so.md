@@ -18,7 +18,7 @@ Data-classified elements are excluded by their type and never belong in the file
 Coverage without a floor is a finding that never empties, and a finding that never empties
 stops being read — `the-findings-crowd-the-worklist` already showed that shape. Requirements
 have `deferred: <reason>` for exactly this: a claim that stands open, on the record, with the
-reason attached. The wing had no equivalent, so an element that will never carry a condition
+reason attached. The world had no equivalent, so an element that will never carry a condition
 had no honest way to leave the list, and the only way to silence it was to invent a fact
 about it.
 
@@ -30,7 +30,7 @@ argue with it.
 
 ## Satisfy
 
-`DocsCompiler` (reads the file beside the wing, resolves each entry against the compiled
+`DocsCompiler` (reads the file beside the world, resolves each entry against the compiled
 model, errors on an unresolved entry and on a missing reason, and suppresses
 `world_unreached` for the named elements).
 

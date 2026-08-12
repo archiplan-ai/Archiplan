@@ -32,8 +32,8 @@ a lexer, a canonicalizer, a registry — machinery no condition outside will eve
 argue with. So the gate has two exits and neither is a lie: name the condition, or name the
 element as internal.
 
-It bites only where the wing already stands. A project that has not written its first fact
-saves exactly as before, which is the same threshold every other rule in the wing uses.
+It bites only where the world already stands. A project that has not written its first fact
+saves exactly as before, which is the same threshold every other rule in the world uses.
 
 ## Satisfy
 

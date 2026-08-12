@@ -14,10 +14,10 @@ cascades, and no verb retires a link or closes a plan on the operator's behalf.
 
 ## System Context
 
-Deletion is the operation the wing exists for, and a refusal that lists three blockers
+Deletion is the operation the world exists for, and a refusal that lists three blockers
 without saying how to clear them makes deletion the most expensive thing an operator can
 attempt. The rational response to an expensive deletion is to keep the false fact and work
-around it, which turns the wing into the accumulating pile it was built to give deletion
+around it, which turns the world into the accumulating pile it was built to give deletion
 pressure to. Naming the continuation costs a few lines of rendering and it is already the
 contract every refusal in this tool holds. `removal-names-the-code-it-strands` settled that
 nothing cascades — a link is a recorded human assertion — and that stands: the operator

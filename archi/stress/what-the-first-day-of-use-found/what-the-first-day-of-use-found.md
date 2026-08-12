@@ -8,7 +8,7 @@ version-hash: sha256:ddf9f797cd43c5ee71d3450aad37a8d4988eb38da4a73bc114ee5d1dc15
 
 Every round before this one pressed the design by imagination: pick a stakeholder the
 happy path ignores, and ask what breaks. This round presses nothing. It records what
-already broke, on the first day the wing was used for real work — four facts written by
+already broke, on the first day the world was used for real work — four facts written by
 interview, one plan authored and run to DONE, one migration begun.
 
 That changes what the verdicts mean. A stressor here has already happened, so none of

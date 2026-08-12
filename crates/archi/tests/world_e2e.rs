@@ -1,8 +1,8 @@
 //! End to end through the real binary: the `world` verb
 //! (`archi/requirements/world-facts/`). `add` and `rm` mutate, so they meet
 //! the same seat rule and the same exit codes as `req add|rm`; `ls` reads
-//! and answers anywhere. `--covers <element>` is the traversal the wing is
-//! reached by (`archi/decisions/the-wing-is-reached-by-traversal.md`), and
+//! and answers anywhere. `--covers <element>` is the traversal the world is
+//! reached by (`archi/decisions/the-world-is-reached-by-traversal.md`), and
 //! an empty answer on either retrieval path names the other one.
 
 mod util;
@@ -194,7 +194,7 @@ fn the_check_holds_the_minted_fact_until_it_is_whole() {
     assert!(err.contains("`Scenarios` holds nothing"), "{err}");
 
     // The prose lands, but the three lists point at nothing: an element no
-    // model declares, a file no layer of the world holds, a fact no wing
+    // model declares, a file no layer of the world holds, a fact no world
     // holds.
     fact(
         &wt,
@@ -276,7 +276,7 @@ fn the_held_removal_hands_back_the_commands_that_clear_it() {
         ],
     );
     // And a plan in flight carries it: the task on the node the fact covers.
-    // The save now gates on the wing's reach, and `Island` is the node these
+    // The save now gates on the world's reach, and `Island` is the node these
     // two facts never touch — it is declared internal so the gate lets this
     // test get to the plan it is about.
     declare_internal(&wt, &["Island"]);
@@ -326,7 +326,7 @@ fn the_held_removal_hands_back_the_commands_that_clear_it() {
     ok(&wt, &["world", "rm", "trains-lose-the-signal"]);
     assert!(!wt.join("archi/world/facts/trains-lose-the-signal.md").exists());
     // Nothing cascaded: the dependant retired by its own printed line, and
-    // the wing is what those lines left behind.
+    // the world is what those lines left behind.
     assert_eq!(ok(&wt, &["world", "ls"]), "");
 }
 
@@ -361,7 +361,7 @@ fn the_world_verb_refuses_like_the_others() {
     assert!(!primary.join("archi/world").exists());
 
     // `ls` reads: it answers in the same unbound checkout, exit zero, and a
-    // tree with no wing prints nothing.
+    // tree with no world prints nothing.
     assert_eq!(ok(&primary, &["world", "ls"]), "");
 }
 
@@ -460,14 +460,14 @@ fn the_verb_mints_and_retires_from_the_bound_seat() {
     );
 }
 
-/// The wing arrives with the file: a tree that holds no `archi/world/` at all
+/// The world arrives with the file: a tree that holds no `archi/world/` at all
 /// takes its first fact, and the mint makes the layer and the folder over it
-/// on the way (`archi/requirements/world-facts/the-wing-arrives-without-noise.md`,
+/// on the way (`archi/requirements/world-facts/the-world-arrives-without-noise.md`,
 /// `archi/requirements/world-facts/the-world-holds-four-layers.md`).
 #[test]
 fn the_first_mint_creates_the_layer_and_its_parent() {
     let (_primary, wt) = temp_project();
-    assert!(!wt.join("archi/world").exists(), "the tree opens with no wing");
+    assert!(!wt.join("archi/world").exists(), "the tree opens with no world");
 
     ok(&wt, &["world", "add", "Trains lose the signal"]);
     assert!(wt.join("archi/world/facts").is_dir());
@@ -475,7 +475,7 @@ fn the_first_mint_creates_the_layer_and_its_parent() {
         wt.join("archi/world/facts/trains-lose-the-signal.md")
             .is_file()
     );
-    // Nothing stands in the wing's root: the folder is what says how a file
+    // Nothing stands in the world's root: the folder is what says how a file
     // is read, so the mint leaves no file outside a layer.
     let loose: Vec<String> = fs::read_dir(wt.join("archi/world"))
         .unwrap()
@@ -539,7 +539,7 @@ fn the_replayed_mint_converges_like_req_add() {
     );
 }
 
-/// `world ls` lists the wing, and `--covers` walks the bridge
+/// `world ls` lists the world, and `--covers` walks the bridge
 /// (`one-verb-walks-the-bridge`).
 #[test]
 fn one_verb_walks_the_bridge() {
@@ -718,15 +718,15 @@ fn a_document_under_a_fifth_folder_is_refused_by_path() {
 /// strict record, the two loose layers, and raw material still opened by
 /// nothing. A folder outside the four that holds no document says nothing —
 /// the rule locates a file, and there is no file to locate — and a tree with
-/// no wing at all is as silent as it always was
+/// no world at all is as silent as it always was
 /// (`archi/requirements/world-facts/the-world-holds-four-layers.md`,
-/// `archi/requirements/world-facts/the-wing-arrives-without-noise.md`).
+/// `archi/requirements/world-facts/the-world-arrives-without-noise.md`).
 #[test]
 fn the_four_layers_pass_and_a_folder_with_no_document_says_nothing() {
     let (_primary, wt) = temp_project();
 
     // No `archi/world/` at all: the walk has nothing to walk.
-    assert!(!wt.join("archi/world").exists(), "the tree opens with no wing");
+    assert!(!wt.join("archi/world").exists(), "the tree opens with no world");
     let (code, out, err) = run(&wt, &["check"]);
     assert_eq!(code, Some(0), "{out}{err}");
     assert!(!err.contains("archi/world"), "{err}");
@@ -768,10 +768,10 @@ fn the_four_layers_pass_and_a_folder_with_no_document_says_nothing() {
     assert!(out.contains("world — 1 facts"), "{out}");
 }
 
-/// The check prints what the wing's pass computed: its advisory lines and
-/// its closing count (`the-check-counts-the-wing`).
+/// The check prints what the world's pass computed: its advisory lines and
+/// its closing count (`the-check-counts-the-world`).
 #[test]
-fn the_check_prints_the_wings_report() {
+fn the_check_prints_the_world_report() {
     let (_primary, wt) = temp_project();
     three_facts(&wt);
 
@@ -793,7 +793,7 @@ fn the_check_prints_the_wings_report() {
     assert!(kinds.contains(&"world_unreached"), "{out}");
     assert!(kinds.contains(&"world_state"), "{out}");
 
-    // A tree with no wing says nothing new — the count is not born.
+    // A tree with no world says nothing new — the count is not born.
     fs::remove_dir_all(wt.join("archi/world")).unwrap();
     let (_code, out, _err) = run(&wt, &["check"]);
     assert!(!out.contains("world —"), "{out}");

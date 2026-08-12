@@ -534,7 +534,7 @@ fn run_check(args: &Args) -> ExitCode {
             addressing::of_doc_finding(f).stamp(&mut v);
             v
         }));
-        // The wing's own advisory lines ride the same list, carrying their
+        // The world's own advisory lines ride the same list, carrying their
         // own kinds (archi/requirements/world-facts/).
         all.extend(
             doc.world
@@ -566,9 +566,9 @@ fn run_check(args: &Args) -> ExitCode {
             envelope["status"] = json!("error");
             envelope["docs"] = serde_json::to_value(&doc.diagnostics).expect("serializes");
         }
-        // The wing in two numbers; a tree with no `archi/world/` carries no
+        // The world in two numbers; a tree with no `archi/world/` carries no
         // count and the key is not born
-        // (archi/requirements/world-facts/the-check-counts-the-wing.md).
+        // (archi/requirements/world-facts/the-check-counts-the-world.md).
         if let Some(count) = &doc.world.count {
             envelope["world"] = serde_json::to_value(count).expect("serializes");
         }
@@ -613,8 +613,8 @@ fn run_check(args: &Args) -> ExitCode {
         if let Some(report) = &nkp {
             print!("{}", render_nkp_summary(report));
         }
-        // The wing closes on its count, beside the landscape read; a tree
-        // with no wing closes on neither.
+        // The world closes on its count, beside the landscape read; a tree
+        // with no world closes on neither.
         if let Some(count) = &doc.world.count {
             println!("{count}");
         }
@@ -1895,10 +1895,10 @@ fn run_query(args: &Args) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// An answer with the wing attached: the value the engine composed, and
+/// An answer with the world attached: the value the engine composed, and
 /// beside it — never inside it — the facts that condition what it names. An
-/// empty wing writes no key at all, so a tree without one answers byte for
-/// byte as it did before the wing existed.
+/// empty world writes no key at all, so a tree without one answers byte for
+/// byte as it did before the world existed.
 #[derive(Serialize)]
 struct WithWorld<'a, T: Serialize> {
     #[serde(flatten)]
@@ -1911,9 +1911,9 @@ struct WithWorld<'a, T: Serialize> {
 /// slug order (`archi/requirements/world-facts/the-read-envelope-carries-the-conditions.md`).
 /// The usual reader of this surface is an agent that did not know to ask, so
 /// the conditions arrive with the slice instead of waiting behind
-/// `archi world ls --covers` (`archi/decisions/the-wing-is-reached-by-traversal.md`).
+/// `archi world ls --covers` (`archi/decisions/the-world-is-reached-by-traversal.md`).
 ///
-/// Only the wing is read: the one question asked of it — which facts
+/// Only the world is read: the one question asked of it — which facts
 /// condition this element — needs no other doc primitive, and a tree with no
 /// `archi/world/` folder walks nothing. The facts are read live, as
 /// `world ls` reads them, and a malformed one is skipped here and reported
@@ -1927,13 +1927,13 @@ fn covering_facts(root: &Path, results: &[Outcome]) -> Vec<Value> {
         world: docs::world_check::discover(root, &mut Vec::new()),
         ..docs::Tree::default()
     };
-    let wing = docs::world_check::serve_world(&tree);
+    let world = docs::world_check::serve_world(&tree);
     let mut by_slug: std::collections::BTreeMap<&str, &docs::world_check::WorldFact> =
         std::collections::BTreeMap::new();
     // A fact covering two elements of one slice lands on its slug twice and
     // rides once.
     for element in &named {
-        for fact in wing.covering(element) {
+        for fact in world.covering(element) {
             by_slug.insert(fact.doc.slug.as_str(), fact);
         }
     }
@@ -2084,10 +2084,10 @@ fn run_search(args: &Args) -> ExitCode {
         &kinds,
         limit,
     );
-    // An empty answer over the wing names the other retrieval path: a world
+    // An empty answer over the world names the other retrieval path: a world
     // fact is written without the nouns of the model, so a phrase about the
     // architecture is the wrong door — the `covers` traversal is the right
-    // one (archi/decisions/the-wing-is-reached-by-traversal.md,
+    // one (archi/decisions/the-world-is-reached-by-traversal.md,
     // archi/requirements/world-facts/each-retrieval-path-names-the-other.md).
     let note = (report.hits.is_empty() && kinds.contains(&search::Kind::World)).then_some(
         "a world fact is reached from the element it conditions: \
@@ -2652,7 +2652,7 @@ fn run_stress(args: &Args) -> ExitCode {
     }
 }
 
-/// `archi world add|rm|ls` — the wing's verb, beside `req` and `stress`.
+/// `archi world add|rm|ls` — the world's verb, beside `req` and `stress`.
 /// `add` and `rm` mint and retire the record, so they meet the seat rule at
 /// the router like every other mutation and refuse with its exit code;
 /// `ls` reads and answers anywhere
@@ -2695,9 +2695,9 @@ fn run_world(args: &Args) -> ExitCode {
     }
 }
 
-/// `archi world ls` — the traversal the wing is reached by: one block per
+/// `archi world ls` — the traversal the world is reached by: one block per
 /// standing fact, narrowed by `--covers <element>` to the facts that
-/// condition one node (`archi/decisions/the-wing-is-reached-by-traversal.md`,
+/// condition one node (`archi/decisions/the-world-is-reached-by-traversal.md`,
 /// `archi/requirements/world-facts/one-verb-walks-the-bridge.md`). The
 /// listing reads the live tree and resolves nothing against a pin.
 fn run_world_ls(args: &Args, root: &Path) -> ExitCode {
@@ -2719,9 +2719,9 @@ fn run_world_ls(args: &Args, root: &Path) -> ExitCode {
         return ExitCode::from(1);
     }
     let (tree, _) = docs::load(root, model);
-    let wing = docs::world_check::serve_world(&tree);
+    let world = docs::world_check::serve_world(&tree);
     let facts: Vec<&docs::world_check::WorldFact> = match args.covers.as_deref() {
-        Some(element) => wing.covering(element),
+        Some(element) => world.covering(element),
         None => tree.world.iter().collect(),
     };
     // The other retrieval path, named exactly when this one came back empty

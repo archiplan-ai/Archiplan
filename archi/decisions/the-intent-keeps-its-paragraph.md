@@ -10,10 +10,10 @@ An intent still opens with prose about the problem in the world, and nothing sto
 about people and their days from living there. The world facts stand beside that, not in
 place of it.
 
-The founding argument for the wing was that such claims stand in intents forever because
+The founding argument for the world was that such claims stand in intents forever because
 nothing there can make them false, and this decision leaves that leak open. The cheap path
-costs a sentence and no verb; the wing costs a file, three resolved lists and a scenario.
-Where both are available the cheap one wins, so the wing will hold the claims somebody
+costs a sentence and no verb; the world costs a file, three resolved lists and a scenario.
+Where both are available the cheap one wins, so the world will hold the claims somebody
 chose to formalize and the intents will keep the rest.
 
 We take it because the alternative is worse in a way that is easy to underrate: forbidding

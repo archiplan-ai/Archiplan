@@ -80,7 +80,7 @@ any task anywhere names the slug in `owns:`. It reads no plan state — a comple
 the slug exactly as a draft one does. So once any plan has ever owned a requirement, that
 requirement can only be retired by editing the record of work that already finished.
 
-Seen on `the-briefing-says-what-help-does-not`: four holders, `quiet-the-wing`,
+Seen on `the-briefing-says-what-help-does-not`: four holders, `quiet-the-world`,
 `scenario-shape`, `world-layers` and `the-workaround-is-the-record` — all completed, none
 building anything.
 

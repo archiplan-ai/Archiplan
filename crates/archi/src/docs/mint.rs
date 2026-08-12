@@ -315,13 +315,13 @@ pub fn stress_rm(root: &Path, slug: &str) -> Result<PathBuf, String> {
 /// about what a fact is.
 ///
 /// It is not required to exist: a tree that never minted a fact carries no
-/// wing (`archi/requirements/world-facts/the-wing-arrives-without-noise.md`).
+/// world (`archi/requirements/world-facts/the-world-arrives-without-noise.md`).
 pub fn facts_dir(root: &Path) -> PathBuf {
     root.join(WORLD).join("facts")
 }
 
-/// Every world fact on disk, by slug — the wing's own walk, which the
-/// removal reads for the records alone. A tree with no wing yields none —
+/// Every world fact on disk, by slug — the world's own walk, which the
+/// removal reads for the records alone. A tree with no world yields none —
 /// the folder arrives with the first mint, and no read makes it. A file
 /// the structural reader cannot open is skipped, and every diagnostic the
 /// walk raises is dropped: a broken record is a `check` finding, not a hold
@@ -370,9 +370,9 @@ pub fn world_add(root: &Path, title: &str) -> Result<PathBuf, String> {
             ))
         };
     }
-    // The wing arrives with the file: no verb requires `archi/world/facts/`,
+    // The world arrives with the file: no verb requires `archi/world/facts/`,
     // and the layer and the folder over it are made together
-    // (`archi/requirements/world-facts/the-wing-arrives-without-noise.md`).
+    // (`archi/requirements/world-facts/the-world-arrives-without-noise.md`).
     fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     fs::write(&path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
     Ok(path)
@@ -817,11 +817,11 @@ mod tests {
 
     /// The first mint makes the layer and the folder over it in one call: a
     /// tree that holds no `archi/world/` at all takes its first fact
-    /// (`archi/requirements/world-facts/the-wing-arrives-without-noise.md`).
+    /// (`archi/requirements/world-facts/the-world-arrives-without-noise.md`).
     #[test]
-    fn the_wing_arrives_with_the_first_mint() {
+    fn the_world_arrives_with_the_first_mint() {
         let root = temp_root();
-        // A tree with no wing reads as no facts, and no verb makes the folder.
+        // A tree with no world reads as no facts, and no verb makes the folder.
         assert!(world_facts(&root).is_empty());
         assert!(!root.join(WORLD).exists());
         assert!(!facts_dir(&root).exists());
@@ -830,7 +830,7 @@ mod tests {
         assert!(root.join(WORLD).is_dir());
         assert!(facts_dir(&root).is_dir());
         assert!(facts_dir(&root).join("the-train-has-no-signal.md").is_file());
-        // The walk that reads the wing finds it where the mint put it.
+        // The walk that reads the world finds it where the mint put it.
         let slugs: Vec<String> = world_facts(&root).into_iter().map(|f| f.slug).collect();
         assert_eq!(slugs, [SLUG]);
         fs::remove_dir_all(&root).unwrap();

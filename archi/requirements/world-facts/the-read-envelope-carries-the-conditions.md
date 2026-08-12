@@ -1,6 +1,6 @@
 ---
 kind: functional
-origin: stressor(the-read-envelope-skips-the-wing)
+origin: stressor(the-read-envelope-skips-the-world)
 satisfied-by: [Query, Cli]
 deferred:
 ---
@@ -13,10 +13,10 @@ the conditioning statement and the scenarios, beside the model slice. `archi rea
 
 ## System Context
 
-The wing exists so that whoever writes the code knows why the behavior is what it is, and
+The world exists so that whoever writes the code knows why the behavior is what it is, and
 the usual reader is an agent working from the read surface. An agent that asks about a
 node and receives nodes and edges will write against the happy path exactly as it did
-before the wing existed — the conditioning would be written by agents and read by nobody.
+before the world existed — the conditioning would be written by agents and read by nobody.
 `world ls --covers` answers the same question for a person with a node in hand; the
 envelope answers it for the reader who did not know to ask.
 
@@ -30,4 +30,4 @@ rendering, so the facts ride that one form under their own key).
 - test — a slice naming an uncovered element carries the slice alone
 - test — the JSON envelope carries the facts under their own key
 - test — a fact covering two elements of one slice appears once
-- test — a tree with no wing answers exactly as it did before
+- test — a tree with no world answers exactly as it did before

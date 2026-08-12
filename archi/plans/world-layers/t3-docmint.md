@@ -1,6 +1,6 @@
 ---
 node: DocMint
-owns: [one-verb-mints-the-world-fact, the-wing-arrives-without-noise]
+owns: [one-verb-mints-the-world-fact, the-world-arrives-without-noise]
 facts: [why-a-design-was-chosen-lives-in-one-person-s-memory@e3b0c4]
 ---
 
@@ -41,7 +41,7 @@ world add mints into facts
 - test — world_e2e: a repeated `world add` on the untouched skeleton still converges
 - test — world_e2e: `world rm` retires a fact from its new home
 
-### the-wing-arrives-without-noise
+### the-world-arrives-without-noise
 
 - test — world_e2e: `world add` on a tree with no `archi/world/` creates `facts/` and its parent
 - test — check_e2e: a tree with no `archi/world/` passes check with no world finding

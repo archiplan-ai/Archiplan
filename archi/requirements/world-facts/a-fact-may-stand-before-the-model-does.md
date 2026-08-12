@@ -17,12 +17,12 @@ unreferenced, and never a healthy fact.
 
 ## System Context
 
-The chain this wing serves runs from the world into the model, so on a new project the
+The chain this world serves runs from the world into the model, so on a new project the
 conditions are known first and there is nothing to cover. A tool that demands elements
 before the first fact inverts its own design: the author builds the model from intuition
 and back-fills facts over what they already made, which is a justification layer, not a
 condition. Requirements already work the right way here — `satisfied-by` stays open and
-`unsatisfied_requirement` is a finding and not an error — and the wing joins that pattern
+`unsatisfied_requirement` is a finding and not an error — and the world joins that pattern
 instead of inventing a stricter one.
 
 ## Satisfy

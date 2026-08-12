@@ -19,7 +19,7 @@ builds, and a skill fills the record in on a project that has none.
 - `WorldDoc` realizes `crates/archi/src/docs/world.rs` plus the shared schema types
 - `Gherkin` — the scenario grammar: parse the block, then hold it to the named subset
 - `Gherkin` realizes `crates/archi/src/docs/gherkin.rs` over the gherkin crate
-- `DocsCompiler` — loads the wing, cross-checks it against the model, reports its states
+- `DocsCompiler` — loads the world, cross-checks it against the model, reports its states
 - `DocsCompiler` realizes `crates/archi/src/docs/mod.rs` and `crates/archi/src/docs/schema.rs`
 - `DocMint` — mints and retires a fact, and pre-flights everything that stands on it
 - `DocMint` realizes `crates/archi/src/docs/mint.rs`

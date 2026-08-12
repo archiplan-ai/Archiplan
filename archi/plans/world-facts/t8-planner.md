@@ -1,6 +1,6 @@
 ---
 node: Planner
-owns: [a-task-carries-the-facts-that-cover-its-node, the-plan-closes-on-the-world-s-scenarios, the-close-re-reads-the-wing-and-says-what-moved, the-block-marks-what-lies-outside-the-plan, the-close-gates-on-anchored-scenarios, a-plan-s-own-scenarios-block-retires]
+owns: [a-task-carries-the-facts-that-cover-its-node, the-plan-closes-on-the-world-s-scenarios, the-close-re-reads-the-world-and-says-what-moved, the-block-marks-what-lies-outside-the-plan, the-close-gates-on-anchored-scenarios, a-plan-s-own-scenarios-block-retires]
 ---
 
 # t8 — Planner
@@ -45,7 +45,7 @@ the plan carries and closes on covering facts
 - test — plan_e2e: a fact covering two of the plan's nodes prints once, not twice
 - test — plan_e2e: `plan scenarios list` and the close step read the same set
 
-### the-close-re-reads-the-wing-and-says-what-moved
+### the-close-re-reads-the-world-and-says-what-moved
 
 - test — plan_e2e: a fact retired since authoring is named as drift at close
 - test — plan_e2e: a fact whose scenarios changed since authoring is named as drift
@@ -64,6 +64,6 @@ the plan carries and closes on covering facts
 
 ### a-plan-s-own-scenarios-block-retires
 
-- test — plan_e2e: a pre-wing plan closes with no block and raises no finding
-- test — plan_e2e: a post-wing plan with an empty collected block refuses the final latch
+- test — plan_e2e: a pre-world plan closes with no block and raises no finding
+- test — plan_e2e: a post-world plan with an empty collected block refuses the final latch
 - test — plan_e2e: no verb writes or deletes `scenarios.md`

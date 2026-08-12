@@ -21,7 +21,7 @@ own.
 End-to-end verification needs a home that is execution-shaped: the spec's verification
 bullets prove single claims, while a scenario walks a path through many. The latch pair
 is ordered — closed without displayed is a structural error a verb will refuse. The
-block was free text on the plan envelope until the world wing landed. It was decoupled
+block was free text on the plan envelope until the world landed. It was decoupled
 from the spec because pinning a story to one element would have lied about its scope,
 and a world fact keeps that property: `covers` is a list, so a scenario that walks four
 nodes names four. This claim owns the ceremony and the latches; it no longer owns where

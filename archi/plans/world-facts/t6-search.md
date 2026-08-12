@@ -1,6 +1,6 @@
 ---
 node: Search
-owns: [search-reaches-the-new-wing]
+owns: [search-reaches-the-new-world]
 ---
 
 # t6 — Search
@@ -29,7 +29,7 @@ world facts in the ranked corpus
 
 ## Verifications
 
-### search-reaches-the-new-wing
+### search-reaches-the-new-world
 
 - test — search_e2e: a phrase from a fact's name returns that fact with its slug and path
 - test — search_e2e: `--kind world` returns world facts only

@@ -933,7 +933,7 @@ fn scenario_names(block: &docs::world::Block) -> Vec<(String, usize)> {
 /// for the whole block. `None` for the result when no file holds the fact.
 ///
 /// The file is read through [`docs::world_check::read_fact`], the reader the
-/// wing walks its own folder with, so a link and a check hold one fact one
+/// world walks its own folder with, so a link and a check hold one fact one
 /// way. A block the grammar refuses digests as an empty story, and `archi
 /// check` reports that form error where form errors belong.
 fn fact_digest(root: &Path, slug: &str, scenario: Option<&str>) -> Option<String> {

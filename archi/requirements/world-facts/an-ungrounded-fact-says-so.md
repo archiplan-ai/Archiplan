@@ -14,12 +14,12 @@ observed nothing. The finding names the fact and never blocks.
 
 ## System Context
 
-The wing was designed on the assumption that a person saw something and wrote it down,
+The world was designed on the assumption that a person saw something and wrote it down,
 and the usual author is an agent. An agent asked for a condition about the world returns
 a fluent one on demand: the shape is right, `covers` resolves, the scenario parses, and
-nothing distinguishes it from an observation. `the-wing-checks-form-and-never-truth`
+nothing distinguishes it from an observation. `the-world-checks-form-and-never-truth`
 accepted that no command decides truth, and that acceptance only holds while the tree can
-at least say which facts nobody grounded. The count from `the-check-counts-the-wing`
+at least say which facts nobody grounded. The count from `the-check-counts-the-world`
 reports the aggregate; this finding names them one by one.
 
 ## Satisfy

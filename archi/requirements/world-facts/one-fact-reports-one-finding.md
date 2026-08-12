@@ -9,16 +9,16 @@ deferred:
 
 A fact reports at most one line. `world_state` names the fact once and lists every state
 it holds — ungrounded, uncovered, speaks-the-model, orphan — in one place. The graph-shaped
-reports stay separate, because they are about the wing and not about a fact: the `uses`
+reports stay separate, because they are about the world and not about a fact: the `uses`
 cycle error and `world_chain_deep`.
 
 ## System Context
 
 Findings are the worklist in this tool, and a worklist is read while it is short. One
 honest early fact — observed in a conversation with no locator, written before the model
-reached it — held three of the six kinds the wing grew over five rounds, on a tree where
+reached it — held three of the six kinds the world grew over five rounds, on a tree where
 nothing was wrong. An operator meeting three lines per healthy file learns that world
-findings are noise, and `world_ungrounded` is the one signal standing between the wing and
+findings are noise, and `world_ungrounded` is the one signal standing between the world and
 a fluent invention. Collapsing to a line per fact keeps every state and costs the reader
 one glance instead of three.
 

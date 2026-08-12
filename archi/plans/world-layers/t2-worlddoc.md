@@ -23,7 +23,7 @@ the four standing facts move into facts and lose their borrowed sources
 
 ## Stack
 
-- this task and t1 land in one wave on purpose: the reader learns the new home and the files arrive there in the same commit, or the wing is empty in between
+- this task and t1 land in one wave on purpose: the reader learns the new home and the files arrive there in the same commit, or the world is empty in between
 - the four files move from `archi/world/` into `archi/world/facts/`, contents otherwise untouched
 - each `sources` list empties: every entry named an intent, which the world may no longer reach
 - slugs and scenario names stay byte-identical, because six links address them

@@ -15,7 +15,7 @@ is a question of the wrong kind. Of the rest, an element that `archi/world/.worl
 as internal is not reported either — `an-internal-element-says-so` owns that file. On a tree
 holding at least one fact, `check` reports `world_unreached` for every element still outside
 the set. On a tree with no facts it reports nothing at all, because a project that has not
-opted into the wing is not behind on it.
+opted into the world is not behind on it.
 
 ## System Context
 
@@ -23,7 +23,7 @@ Scenarios run from the surface inward, so covering the few nodes a person touche
 coverage through the edges already declared: two facts on the outermost services reach most
 of a model. That is why a rule demanding a fact per node was refused — it would name every
 lexer and canonizer in the tree and be muted on the first day, which
-`the-wing-arrives-without-noise` settled. Reachability names something different: an element
+`the-world-arrives-without-noise` settled. Reachability names something different: an element
 that no recorded behavior can arrive at.
 
 The finding belongs to `check` and not to the plan. Incompleteness is the normal state of
@@ -37,7 +37,7 @@ after a task, which spends the pin on a document that never enters it.
 
 `DocsCompiler` (computes the covered set from the facts' `covers` by forward reachability
 over connection edges and by containment, then emits `world_unreached` per element outside
-it; silent when the wing is empty).
+it; silent when the world is empty).
 
 - test — an element a fact names directly is not reported
 - test — an element reachable from a covered element is not reported

@@ -89,10 +89,10 @@ fn strings(value: &Value) -> Vec<&str> {
         .collect()
 }
 
-/// The second half of the wing fixture's model: a datum of its own, so the
+/// The second half of the world fixture's model: a datum of its own, so the
 /// carrier filter can compose a slice of elements no fact covers, and an
 /// island no such slice ever names.
-const WING_MODEL: &str = "\
+const WORLD_MODEL: &str = "\
 def node Ledger:
   port post
 def node Vault:
@@ -123,12 +123,12 @@ fn fact(root: &Path, slug: &str, title: &str, covers: &str, condition: &str) {
     .write(root, slug, title);
 }
 
-/// A project on both halves of the model, with the wing when `wing` says so:
+/// A project on both halves of the model, with the world when `world` says so:
 /// one fact on a node the carrier slice names, one on two of its nodes at
 /// once, one on a port it names, and one on the island it never reaches.
-fn wing_project(wing: bool) -> PathBuf {
+fn world_project(world: bool) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
-        "archi-read-wing-{}-{}",
+        "archi-read-world-{}-{}",
         std::process::id(),
         NEXT.fetch_add(1, Ordering::SeqCst)
     ));
@@ -136,10 +136,10 @@ fn wing_project(wing: bool) -> PathBuf {
     fs::write(dir.join("archi.toml"), "[project]\nname = \"t\"\n").unwrap();
     fs::write(
         dir.join("archi/src/model.arch"),
-        format!("{MODEL}{WING_MODEL}"),
+        format!("{MODEL}{WORLD_MODEL}"),
     )
     .unwrap();
-    if wing {
+    if world {
         fact(
             &dir,
             "riders-lose-the-signal",
@@ -177,7 +177,7 @@ fn wing_project(wing: bool) -> PathBuf {
 /// elements the composed slice names, each once, under their own key.
 #[test]
 fn the_read_envelope_carries_the_conditions() {
-    let root = wing_project(true);
+    let root = world_project(true);
 
     // The slice names `Orders`, `Billing` and the port `Billing.book`; the
     // facts on those ride with it, in slug order. The fact on the island the
@@ -258,40 +258,40 @@ fn the_read_envelope_carries_the_conditions() {
     fs::remove_dir_all(&root).unwrap();
 }
 
-/// A slice no fact covers carries the slice alone, and a tree with no wing
-/// answers exactly as it did before the wing existed — byte for byte, from
+/// A slice no fact covers carries the slice alone, and a tree with no world
+/// answers exactly as it did before the world existed — byte for byte, from
 /// `query` and from `read` both.
 #[test]
 fn a_slice_no_fact_covers_carries_the_slice_alone() {
-    let winged = wing_project(true);
-    let bare = wing_project(false);
+    let with_world = world_project(true);
+    let bare = world_project(false);
 
     // `Ledger`, `Vault` and `LedgerId`: three elements, no fact on any of
-    // them. The wing writes no key, and no byte separates the two trees.
-    let (code, with_wing, _) = run(&winged, &["query", "--carrier", "LedgerId"], None);
-    assert_eq!(code, 0, "{with_wing}");
+    // them. The world writes no key, and no byte separates the two trees.
+    let (code, world_out, _) = run(&with_world, &["query", "--carrier", "LedgerId"], None);
+    assert_eq!(code, 0, "{world_out}");
     assert_eq!(
-        node_ids(&json(&with_wing)),
+        node_ids(&json(&world_out)),
         ["Ledger", "LedgerId", "Vault"],
-        "{with_wing}"
+        "{world_out}"
     );
-    assert!(json(&with_wing)["world"].is_null(), "{with_wing}");
-    let (_, no_wing, _) = run(&bare, &["query", "--carrier", "LedgerId"], None);
-    assert_eq!(with_wing, no_wing);
+    assert!(json(&world_out)["world"].is_null(), "{world_out}");
+    let (_, bare_out, _) = run(&bare, &["query", "--carrier", "LedgerId"], None);
+    assert_eq!(world_out, bare_out);
 
     // The read envelope over the same slice, byte for byte.
     let request = r#"{"statements":[{"stmt":"query","carriers":["LedgerId"]},{"stmt":"check"}]}"#;
-    let (code, with_wing, _) = run(&winged, &["read", "-"], Some(request));
-    assert_eq!(code, 0, "{with_wing}");
-    let (_, no_wing, _) = run(&bare, &["read", "-"], Some(request));
-    assert_eq!(with_wing, no_wing);
+    let (code, world_out, _) = run(&with_world, &["read", "-"], Some(request));
+    assert_eq!(code, 0, "{world_out}");
+    let (_, bare_out, _) = run(&bare, &["read", "-"], Some(request));
+    assert_eq!(world_out, bare_out);
 
     // A tree with no `archi/world/` says nothing new about any slice.
     let (code, out, _) = run(&bare, &["query", "--carrier", "OrderId"], None);
     assert_eq!(code, 0, "{out}");
     assert!(json(&out)["world"].is_null(), "{out}");
 
-    fs::remove_dir_all(&winged).unwrap();
+    fs::remove_dir_all(&with_world).unwrap();
     fs::remove_dir_all(&bare).unwrap();
 }
 

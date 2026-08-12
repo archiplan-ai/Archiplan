@@ -14,7 +14,7 @@ quoting a name with spaces in it.
 
 ## Attractor
 
-The step that closes the plan is the one place the wing meets the operator at full force,
+The step that closes the plan is the one place the world meets the operator at full force,
 and it hands them a list of identifiers. Work that the tool already knows — which
 scenarios are anchored, which drifted, what the exact ref string is — is left for a person
 to reconstruct. `the-refusal-is-an-ordered-continuation` settled this shape for removal:
@@ -26,4 +26,4 @@ treatment.
 The closing step renders what it already knows: derived `the-closing-step-hands-back-the-work`.
 The Gherkin whole, the link state per scenario, and a runnable `link add` with the ref
 quoted. Same shape as `the-refusal-is-an-ordered-continuation`, applied to the one moment
-the wing meets the operator at full force.
+the world meets the operator at full force.
