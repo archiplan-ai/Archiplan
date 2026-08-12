@@ -388,6 +388,13 @@ fn the_record_folder_authors_by_editing_files() {
     assert!(out.contains("wave 1 in flight: t1"), "{out}");
     assert!(ok(&root, &["plan", "status"]).contains("(started)"));
     assert_eq!(state_json(&root, "mvp")["state"], "started");
+    // While the portion runs, what it must satisfy is still readable with
+    // it: the brief names the obligation and the proof, not only in draft
+    // (`archi/world/facts/an-assistant-handed-the-whole-of-a-job-does-part-of-it.md`,
+    // "What a portion was for is readable while the portion runs").
+    let brief = ok(&root, &["plan", "task", "show", "t1"]);
+    assert!(brief.contains("store-encrypted (owned"), "{brief}");
+    assert!(brief.contains("verify: test — rows encrypted at rest"), "{brief}");
     let (_, err) = fails(&root, &["plan", "task", "add", "Gate"]);
     assert!(err.contains("tasks are cut in draft"), "{err}");
     let (_, err) = fails(&root, &["plan", "task", "rm", "t2"]);
@@ -518,6 +525,11 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     assert!(out.contains("wave 1 in flight: t1"), "{out}");
     let out = ok(&root, &["plan", "current-wave"]);
     assert!(out.contains("t1 Store — persist rows"), "{out}");
+    // Only the portion in flight is described. t2 is cut and waiting, and
+    // the wave in flight says nothing about it
+    // (`archi/world/facts/an-assistant-handed-the-whole-of-a-job-does-part-of-it.md`,
+    // "Work arrives in portions and the next does not open early").
+    assert!(!out.contains("t2"), "the next portion is not described yet: {out}");
 
     // Close wave 1: the edit under t1's output moves a symbol t1 claims, and
     // the wave refuses while nothing declares it. Nothing was captured — the
