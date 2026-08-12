@@ -438,67 +438,39 @@ fn starter(name: &str) -> String {
 }
 
 /// The CLAUDE.md block, fence included; `src` names the manifest's layout.
-///
-/// It carries only what an agent gets nowhere else
-/// (`the-briefing-says-what-help-does-not`): `archi --help` prints every verb
-/// with its flags and the harness lists the installed skills, so a copy of
-/// either here is a copy that goes stale and teaches the reader to skim. What
-/// is left is the rule to use the tool, what this tree is, the check loop, the
-/// files a fan-out owes, and the rule that keeps a fact out of the model's
-/// words — under twenty lines, counted by the suite.
-///
-/// The scenario shape stays out for that reason. The block stands at nineteen
-/// lines, so the grammar — a `### ` heading, four step keywords, the two
-/// keywords the check refuses — has one line to fit in and does not. It stands
-/// where a person writes a scenario instead: the workflow skill's world step
-/// and the migration skill, both of which the reader has open at that moment.
-///
-/// The four layers of the world and the source rule stay out on the same
-/// count. The block wraps near eighty-five columns, and the four folder names
-/// alone fill two lines there. Saying what each holds — the strict record, the
-/// claim not settled, what was seen, the raw material — fills two more, and the
-/// source rule needs three: an entry is a path under `archi/world/`, and the
-/// two shapes it refuses, a path into the spec and an external locator, read as
-/// arbitrary to a reader who is not told why. That is seven lines against the
-/// one that is free.
-///
-/// The budget is not the whole argument. An agent meets the folders only when
-/// it writes into the world, and at that moment it is inside the workflow
-/// skill's world step or inside the migration skill, where both rules stand in
-/// full. What is left here is the one line about the world that holds wherever
-/// the reader is: a fact speaks the world's words, not the model's.
-///
-/// The workaround section and the rule that a fact names no person stay out on
-/// that argument alone — the count would have taken them. The world bullet
-/// ends at thirty-six columns, so `names no person and quotes nobody` fits on
-/// the line that is already there and the block stays at nineteen. It stays
-/// out because it holds at one moment only, the moment somebody writes a fact,
-/// and that reader has one of the two skills open. Both say what `## What
-/// people do instead` is for — the gate, and the observable that can kill the
-/// fact — and both say where a person and their words go instead: `sources`,
-/// and a file under `archi/world/resources/`. Neither fits here, and the
-/// suite keeps them out by name: a prohibition whose alternative has no room
-/// is a rule the reader works around.
 fn claude_block(src: &str) -> String {
     format!(
         "{FENCE_OPEN}\n\
          ## Archiplan\n\
          \n\
-         For any architecture work — systems, components, requirements, specs, plans — use the\n\
-         `archi` CLI and its skills; never design in chat. The spec is text under `archi/`, the\n\
-         model is `.arch` source under `{src}/`, and lifecycle state moves only through `archi`\n\
-         commands — never hand-edit `archi/versions/`, the link journal, or `closed:` stamps.\n\
+         For any architecture-related work — modeling systems, components,\n\
+         relationships, requirements, specs, plans — use the `archi` CLI and its\n\
+         skills; never design ad hoc in chat. `archi --help` lists the commands.\n\
          \n\
-         - After any model or doc edit run `archi check`: errors block, findings are the\n\
-         \x20 worklist.\n\
-         - Spec work delegated to subagents or workflows returns as FILES under `archi/` —\n\
-         \x20 paths, not payloads. A finding that is not a file on disk does not exist.\n\
-         - A world fact is stated without the nouns of the model: a fact that speaks the\n\
-         \x20 model is a requirement in costume.\n\
+         This repository is modeled with archiplan: the spec is text under `archi/`,\n\
+         the model is `.arch` source under `{src}/`, and lifecycle state moves only\n\
+         through `archi` commands — never hand-edit `archi/versions/`, the link journal,\n\
+         or `closed:` stamps.\n\
          \n\
-         No silent assumptions: state what you assume, surface the tradeoffs. Minimal design\n\
-         that solves the problem — no speculative features. For any prose about architecture,\n\
-         use ASD-STE100 Simplified Technical English.\n\
+         - After any model or doc edit run `archi check`: errors block, findings are\n\
+         \x20 the worklist.\n\
+         - Find anything by phrase: `archi search <phrase>` — ranked hits across\n\
+         \x20 elements, intents, requirements, stressors, sessions and decisions,\n\
+         \x20 each with its address.\n\
+         - Spec work delegated to subagents or workflows returns as FILES written\n\
+         \x20 under `archi/` (paths, not payloads): a finding that is not a file on\n\
+         \x20 disk does not exist, and every fan-out is gated by `archi check` plus\n\
+         \x20 a count of the files it claims to have written.\n\
+         - The spec workflow (model, stress, version) is the `archi` skill in\n\
+         \x20 `.claude/skills/archi/`; authoring a plan is `archi-plan`; executing\n\
+         \x20 it in waves is `archi-implement`; closing a worktree is\n\
+         \x20 `archi-finish-worktree`; merging parallel spec work is `archi-merge`,\n\
+         \x20 and moving a project off the old fractal client is\n\
+         \x20 `archi-migrate-fractal`.\n\
+         \n\
+         No silent assumptions: state what you assume, surface the tradeoffs.\n\
+         Minimal design that solves the problem — no speculative features.\n\
+         For any prose text you're writing about architecture, use ASD-STE100 Simplified Technical English.\n\
          {FENCE_CLOSE}"
     )
 }

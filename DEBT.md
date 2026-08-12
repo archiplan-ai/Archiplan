@@ -73,6 +73,35 @@ requirement asks for.
 What a round would have to decide: nothing about design — these are defects against a
 requirement already standing. They need a task, not a verdict.
 
+## A closed plan holds a requirement it will never build
+
+`crates/archi/src/docs/mint.rs:129-141`. `req_rm` walks `all_plans(root)` and refuses while
+any task anywhere names the slug in `owns:`. It reads no plan state — a completed plan holds
+the slug exactly as a draft one does. So once any plan has ever owned a requirement, that
+requirement can only be retired by editing the record of work that already finished.
+
+Seen on `the-briefing-says-what-help-does-not`: four holders, `quiet-the-wing`,
+`scenario-shape`, `world-layers` and `the-workaround-is-the-record` — all completed, none
+building anything.
+
+What the refusal is protecting against is real for a live plan: retire a slug a wave is
+about to prove and the wave loses its contract. A closed plan has no contract left. Its
+`owns:` is a record of what it owned while it ran, and a record that must be rewritten
+before the tree can move is not a record.
+
+Measured, the hold is also nearly empty. Deleting the file with the holders left alone
+leaves `archi check` at exit 0 with no finding; only `archi plan verify`, pointed by hand at
+one of those closed plans, reports `owns ... which the reverse lookup does not match —
+structurally broken`. No flow runs `plan verify` on a completed plan. So the refusal blocks
+a safe removal on the strength of a check nobody performs.
+
+The operator's call on this tree was to delete the requirement and leave the four plans as
+they stand.
+
+What a round would have to decide: whether a plan's hold on a slug ends when the plan
+closes, and if it does, what `plan verify` should say when it is aimed at a closed plan that
+names a retired slug — a note about history, or nothing at all.
+
 ## The test fixture may not survive being run in parallel
 
 `crates/archi/tests/util/mod.rs:105`. Reported by the cleanup sweep of this unit and **not
