@@ -511,7 +511,7 @@ once.
    Never commit unasked.
 8. **Plan.** Use the `archi-plan` skill. It authors the charter with a
    user-polled stack and its infrastructure, the tasks per node, the
-   requirement ownership, the named verifications and the scenarios.
+   requirement ownership and the named verifications.
    `plan use` refuses on an unsaved model, so save first. To execute the
    plan, use the `archi-implement` skill.
 9. **Steady state.** Run `archi check` and `archi link verify` in CI. Run

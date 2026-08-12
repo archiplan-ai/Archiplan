@@ -374,22 +374,24 @@ fn the_planning_skill_collects_its_scenarios_and_authors_none() {
         assert!(!flat.contains(gone), "the skill still says `{gone}`");
     }
 
-    // Where the block comes from, and who authors it: nobody.
+    // Where the block comes from. The skill says it positively — it names
+    // the source and the command, and does not tell the reader what not to
+    // do with a mechanism it has already described.
     for phrase in [
         "collected",
         "world fact",
         "holds a task for",
-        "writes none of it",
         "archi plan scenarios list",
     ] {
         assert!(flat.contains(phrase), "the skill misses `{phrase}`");
     }
 
-    // An empty block is spec work, not a blank to fill.
+    // An empty block is spec work: the skill sends the reader to capture the
+    // condition, and the block fills itself from it.
     for phrase in [
         "no world fact covers any node this plan builds",
         "spec work",
-        "not a blank to fill",
+        "fills itself",
         "/archi",
     ] {
         assert!(flat.contains(phrase), "the skill misses `{phrase}`");

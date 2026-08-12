@@ -35,10 +35,9 @@ when the answer is a choice.
 ## Scope — what this skill does and does not do
 
 This skill authors the **implementation plan**: the charter, the tasks,
-the requirement ownership and the verifications. It authors **no**
-scenarios — the closing block is collected from the world facts. It does
-**not** edit the spec, which is the work of `/archi`. It does **not**
-write or edit application code or tests, which is the work of
+the requirement ownership and the verifications. The closing block of
+scenarios is collected from the world facts. The spec is the work of
+`/archi`, and application code and tests are the work of
 `/archi-implement`. Its only write surface is the plan.
 
 ## Step 0 — The worktree (precondition)
@@ -283,12 +282,11 @@ An owned slug with no proof is a `plan verify` error.
 - End-to-end coverage is no task of its own. It arrives at the close, from
   the world.
 
-### Scenarios — collected from the world, authored by nobody
+### Scenarios — collected from the world
 
-The closing block is **collected**, never written. It holds the scenarios
-of every world fact whose `covers` reaches a node this plan holds a task
-for, each fact once. The author writes none of it. `archi plan next`
-prints the block after the last wave, as the closing step of the implement
+The closing block holds the scenarios of every world fact whose `covers`
+reaches a node this plan holds a task for, each fact once. `archi plan
+next` prints it after the last wave, as the closing step of the implement
 stage, and one command reads it back on demand:
 
 ```
@@ -299,18 +297,17 @@ archi plan scenarios list
 node, so the block is readable task by task while you author.
 
 An **empty** block means that no world fact covers any node this plan
-builds. That is spec work, and it is **not a blank to fill**: go to
-`/archi`, capture the condition the product stands on, give it its
-scenarios and its `covers`, then come back. Never invent a story to close
-the gap. A plan minted after the world does not close on nothing.
+builds. That is spec work: go to `/archi`, capture the condition the
+product stands on, give it its scenarios and its `covers`, then come
+back with a block that fills itself.
 
 The close gates on the block: every collected scenario has to carry a
 link to code before the plan closes. `archi` runs nothing — the link
 proves that the edge a runner executes exists.
 
-A plan authored before the world carries a `scenarios.md` no verb
-reads. It is not the closing block, nothing you author goes into it, and
-no command removes it.
+A plan authored before the world carries a `scenarios.md` that no verb
+reads and no command removes. It is a record of how that plan was
+written, and the closing block stands beside it.
 
 ## Step 5 — Verify and present
 
@@ -342,9 +339,9 @@ archi plan task show <task_id>     # any brief the user wants to inspect
 - **Verifications pull the work.** Each one is an observable check, named
   in the user's own frameworks. The implementation takes the shape that
   the check asks for.
-- **Scenarios are collected, never authored.** The closing block comes
-  from the world facts that cover the plan's nodes. An empty block is
-  spec work, not a blank to fill.
+- **Scenarios are collected.** The closing block comes from the world
+  facts that cover the plan's nodes. An empty block sends you to
+  `/archi` to capture the condition it would have come from.
 - **Ask. Never assume.** Every stack and infrastructure choice goes
   through the poll tool.
 - **Commands create and retire. Files carry the content.** Creation, removal
