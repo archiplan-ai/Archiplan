@@ -1583,7 +1583,7 @@ fn gate_declared_drift(
     let candidates: Vec<links::Link> = links::ls(root, None, false)?
         .into_iter()
         .filter(|l| l.rule == links::Rule::Declared && l.spec.version.is_none())
-        .filter(|l| moved.contains(&links::qualify(l.anchor.repo.as_deref(), &l.anchor.file)))
+        .filter(|l| moved.contains(&l.anchor.qualified_file()))
         .collect();
     if candidates.is_empty() {
         return Ok(());
@@ -2805,11 +2805,11 @@ mod tests {
             "pub fn login() -> bool { true }\npub fn inn_wire_probe() -> bool { true }\n",
         );
 
-        // The symbol the delta moved sits in a file t1 claims, so the wave
-        // refuses before it ever reaches the coverage gate.
+        // t1 is in flight and wrote no declaration file, so the wave refuses
+        // before it ever reaches the coverage gate.
         let outcome = next(&root, ws.model()).unwrap();
         let Step::Blocked(why) = &outcome.step else {
-            panic!("the undeclared symbol gates");
+            panic!("the absent declaration file gates");
         };
         assert!(why.contains("t1 — write"), "{why}");
 

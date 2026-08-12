@@ -647,18 +647,17 @@ pub(crate) fn capture_wave(
     {
         match read_declarations(root, plan_name, wave, &task.id)? {
             None => {
-                out.absent
-                    .push((task.id.clone(), declares_rel(plan_name, wave, &task.id)));
+                let path = declares_rel(plan_name, wave, &task.id);
                 out.notes.push(format!(
-                    "`{}` declares nothing: `{}` is absent — no link is minted for its delta",
-                    task.id,
-                    declares_rel(plan_name, wave, &task.id)
+                    "`{}` declares nothing: `{path}` is absent — no link is minted for its delta",
+                    task.id
                 ));
+                out.absent.push((task.id.clone(), path));
             }
             Some(file) => {
+                // The file it read already holds the path it read it from.
                 if file.declares.is_empty() {
-                    out.empty
-                        .push((task.id.clone(), declares_rel(plan_name, wave, &task.id)));
+                    out.empty.push((task.id.clone(), file.path.clone()));
                 }
                 for link in mint_declarations(root, model, &file, &task.id, &live)? {
                     out.minted.push(link.clone());

@@ -546,13 +546,15 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     // the record. The other pressed ref is an edge, and an edge is never a
     // declaration's to name, so it is hand-authored — which is what the
     // refusal printed.
-    write_record(
+    declares(
         &root,
-        "archi/plans/mvp/waves/w01.t1.declares.toml",
-        "[[declares]]\n\
-         symbol = \"code/store.rs#Store::put\"\n\
-         answers = \"Store\"\n\
-         proved_by = \"code/store_test.rs#a_row_is_persisted\"\n",
+        1,
+        "t1",
+        &[[
+            "code/store.rs#Store::put",
+            "Store",
+            "code/store_test.rs#a_row_is_persisted",
+        ]],
     );
     let (stdout, stderr) = fails(&root, &["plan", "next"]);
     assert_eq!(captured_ids(&stdout).len(), 1, "{stdout}");
@@ -582,13 +584,15 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
         "pub fn login(u: &str) -> bool { !u.is_empty() }\n",
     )
     .unwrap();
-    write_record(
+    declares(
         &root,
-        "archi/plans/mvp/waves/w02.t2.declares.toml",
-        "[[declares]]\n\
-         symbol = \"code/auth.rs#login\"\n\
-         answers = \"req:service-hardening\"\n\
-         proved_by = \"code/auth_test.rs#a_login_without_a_name_is_refused\"\n",
+        2,
+        "t2",
+        &[[
+            "code/auth.rs#login",
+            "req:service-hardening",
+            "code/auth_test.rs#a_login_without_a_name_is_refused",
+        ]],
     );
     let out = ok(&root, &["plan", "next"]);
     assert_eq!(captured_ids(&out).len(), 1, "the declaration mints its pair: {out}");
@@ -1573,11 +1577,9 @@ fn a_pre_wing_plan_closes_with_no_block_and_keeps_its_old_one() {
 
 // ---- the declaration gates ---------------------------------------------------
 //
-// A wave does not close while a task in flight declared nothing, while a
-// symbol the wave moved is named by no declaration of a task that claims its
-// file, or while a declared claim the wave moved still stands on the code as
-// it was (`archi/requirements/planning/an-undeclared-change-refuses-the-wave.md`,
-// `archi/requirements/planning/every-task-that-touched-a-symbol-declares-it.md`,
+// A wave does not close while a task in flight declared nothing, or while a
+// declared claim the wave moved still stands on the code as it was
+// (`archi/requirements/planning/an-undeclared-change-refuses-the-wave.md`,
 // `archi/requirements/code-link/a-drifted-declaration-refuses-the-wave-that-moved-it.md`).
 
 /// The tests the declarations below name. The file is written before the
@@ -1611,6 +1613,26 @@ const STORE_PUT_MOVED: &str = "pub struct Store;\nimpl Store {\n    \
 /// plan `mvp`.
 fn declares_rel(wave: usize, task: &str) -> String {
     format!("archi/plans/mvp/waves/w{wave:02}.{task}.declares.toml")
+}
+
+/// The t1 Store record the tests below drive. Its `Spec` names the node
+/// alone — [`T1_STORE_CURATED`] carries the incoming edge beside it — so the
+/// declaration gates are what these tests meet, and no edge ref presses the
+/// coverage gate in front of them.
+const T1_STORE_GATED: &str =
+    "---\nnode: Store\nowns: [store-encrypted]\n---\n\n# t1 — Store\n\npersist rows\n\n\
+     ## Spec\n\n- `Store`\n\n## Inputs\n\n## Outputs\n\n- code/store.rs\n\n## Stack\n\n\
+     ## Verifications\n\n### store-encrypted\n\n- test — proves store-encrypted\n";
+
+/// The t2 Auth record beside it. `outputs` is the block under `## Outputs`,
+/// which is the whole of what varies: one test has t2 claim the file t1 wrote.
+fn t2_auth_gated(outputs: &str) -> String {
+    format!(
+        "---\nnode: Auth\nowns: [service-hardening]\n---\n\n# t2 — Auth\n\nguard the door\n\n\
+         ## Spec\n\n- `Auth`\n- `Service type_of Auth`\n\n## Inputs\n\n\
+         - from t1 — the store api\n\n## Outputs\n\n{outputs}\n## Stack\n\n## Verifications\n\n\
+         ### service-hardening\n\n- test — proves service-hardening\n"
+    )
 }
 
 /// The one declaration a `Store` task writes when its own work is not the
@@ -1683,20 +1705,11 @@ fn a_wave_refuses_until_every_task_in_flight_has_declared() {
     ok(&root, &["plan", "use", "mvp"]);
     ok(&root, &["plan", "task", "add", "Store"]);
     ok(&root, &["plan", "task", "add", "Auth"]);
-    write_record(
-        &root,
-        "archi/plans/mvp/t1-store.md",
-        "---\nnode: Store\nowns: [store-encrypted]\n---\n\n# t1 — Store\n\npersist rows\n\n\
-         ## Spec\n\n- `Store`\n\n## Inputs\n\n## Outputs\n\n- code/store.rs\n\n## Stack\n\n\
-         ## Verifications\n\n### store-encrypted\n\n- test — proves store-encrypted\n",
-    );
+    write_record(&root, "archi/plans/mvp/t1-store.md", T1_STORE_GATED);
     write_record(
         &root,
         "archi/plans/mvp/t2-auth.md",
-        "---\nnode: Auth\nowns: [service-hardening]\n---\n\n# t2 — Auth\n\nguard the door\n\n\
-         ## Spec\n\n- `Auth`\n- `Service type_of Auth`\n\n## Inputs\n\n- from t1 — the store api\n\n\
-         ## Outputs\n\n- code/auth.rs\n\n## Stack\n\n## Verifications\n\n\
-         ### service-hardening\n\n- test — proves service-hardening\n",
+        &t2_auth_gated("- code/auth.rs\n"),
     );
     ok(&root, &["plan", "start"]);
 
@@ -1757,20 +1770,11 @@ fn a_wave_that_moves_a_declared_symbol_refuses_until_the_pair_is_repinned() {
     ok(&root, &["plan", "task", "add", "Store"]);
     ok(&root, &["plan", "task", "add", "Auth"]);
     ok(&root, &["plan", "task", "add", "Gate"]);
-    write_record(
-        &root,
-        "archi/plans/mvp/t1-store.md",
-        "---\nnode: Store\nowns: [store-encrypted]\n---\n\n# t1 — Store\n\npersist rows\n\n\
-         ## Spec\n\n- `Store`\n\n## Inputs\n\n## Outputs\n\n- code/store.rs\n\n## Stack\n\n\
-         ## Verifications\n\n### store-encrypted\n\n- test — proves store-encrypted\n",
-    );
+    write_record(&root, "archi/plans/mvp/t1-store.md", T1_STORE_GATED);
     write_record(
         &root,
         "archi/plans/mvp/t2-auth.md",
-        "---\nnode: Auth\nowns: [service-hardening]\n---\n\n# t2 — Auth\n\nguard the door\n\n\
-         ## Spec\n\n- `Auth`\n- `Service type_of Auth`\n\n## Inputs\n\n- from t1 — the store api\n\n\
-         ## Outputs\n\n- code/auth.rs\n\n## Stack\n\n## Verifications\n\n\
-         ### service-hardening\n\n- test — proves service-hardening\n",
+        &t2_auth_gated("- code/auth.rs\n"),
     );
     write_record(
         &root,
@@ -1862,20 +1866,11 @@ fn the_second_exit_retires_the_stale_pair_and_the_declaration_mints_it_anew() {
     ok(&root, &["plan", "use", "mvp"]);
     ok(&root, &["plan", "task", "add", "Store"]);
     ok(&root, &["plan", "task", "add", "Auth"]);
-    write_record(
-        &root,
-        "archi/plans/mvp/t1-store.md",
-        "---\nnode: Store\nowns: [store-encrypted]\n---\n\n# t1 — Store\n\npersist rows\n\n\
-         ## Spec\n\n- `Store`\n\n## Inputs\n\n## Outputs\n\n- code/store.rs\n\n## Stack\n\n\
-         ## Verifications\n\n### store-encrypted\n\n- test — proves store-encrypted\n",
-    );
+    write_record(&root, "archi/plans/mvp/t1-store.md", T1_STORE_GATED);
     write_record(
         &root,
         "archi/plans/mvp/t2-auth.md",
-        "---\nnode: Auth\nowns: [service-hardening]\n---\n\n# t2 — Auth\n\nguard the door\n\n\
-         ## Spec\n\n- `Auth`\n- `Service type_of Auth`\n\n## Inputs\n\n- from t1 — the store api\n\n\
-         ## Outputs\n\n- code/auth.rs\n- code/store.rs\n\n## Stack\n\n## Verifications\n\n\
-         ### service-hardening\n\n- test — proves service-hardening\n",
+        &t2_auth_gated("- code/auth.rs\n- code/store.rs\n"),
     );
     ok(&root, &["plan", "start"]);
 
