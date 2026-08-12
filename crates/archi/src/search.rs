@@ -1123,12 +1123,17 @@ mod tests {
         root
     }
 
-    fn score_of(r: &SearchReport, slug: &str) -> f64 {
+    /// The hit a slug names. A miss is a wrong report, not a wrong
+    /// assertion, so it names what it did find.
+    fn card_of<'a>(r: &'a SearchReport, slug: &str) -> &'a Hit {
         r.hits
             .iter()
             .find(|h| h.slug == slug)
             .unwrap_or_else(|| panic!("`{slug}` is not in {:?}", slugs_of(r)))
-            .score
+    }
+
+    fn score_of(r: &SearchReport, slug: &str) -> f64 {
+        card_of(r, slug).score
     }
 
     /// Scores ride out rounded to three decimals; a weight ratio holds to
@@ -1191,7 +1196,7 @@ mod tests {
             close(2.0 * ledger, score_of(&r, "Surveyor")),
             "body {ledger} against a summary is not one to two"
         );
-        let card = r.hits.iter().find(|h| h.slug == "Ledger").unwrap();
+        let card = card_of(&r, "Ledger");
         assert_eq!(
             card.refs.definition.as_deref(),
             Some("the estate's book of debts"),
@@ -1206,7 +1211,7 @@ mod tests {
     fn a_node_with_no_ports_and_no_definition_scores_on_its_name_alone() {
         let root = ports_project();
         let r = run(&root, "quokka", &[Kind::Element], 10);
-        let bare = r.hits.iter().find(|h| h.slug == "Quokka").unwrap();
+        let bare = card_of(&r, "Quokka");
         assert!(
             close(2.0 * bare.score, 3.0 * score_of(&r, "Surveyor")),
             "a bare name scores {}, a summary {}",
@@ -1227,7 +1232,7 @@ mod tests {
     fn the_card_of_a_definitionless_node_shows_its_port_prose() {
         let root = ports_project();
         let r = run(&root, "quokka", &[Kind::Element], 10);
-        let card = r.hits.iter().find(|h| h.slug == "Cartographer").unwrap();
+        let card = card_of(&r, "Cartographer");
         assert_eq!(card.refs.definition, None);
         assert_eq!(card.snippet, "survey charts the quokka runs after dark");
         assert!(
