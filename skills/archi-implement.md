@@ -142,6 +142,14 @@ b. **context7.** When `mcp__context7__*` tools are exposed, query them
 c. Implement until the tests are green, **inside the declared `outputs`
    of the task**. Capture attributes deltas through them, and code
    outside them lands as unaccounted.
+d. **Run only the tests the task's own change can break** — the suites
+   covering its declared outputs, and the unit tests. Never the whole
+   suite: that is yours after the wave, and the cleanup wave's own
+   contract. A task agent that runs everything on every red-green turn
+   pays the full cost each time and finds nothing its own suites would
+   not have caught; the breakage a narrow view cannot see is exactly
+   what your run after the wave is for. Name the commands in the prompt,
+   with their cost, so the sub-agent has no reason to widen.
 
 When every task in the wave is done, **commit the work of the wave
 first**. Capture stamps every new link with the commit of the clean tree
@@ -227,7 +235,8 @@ because sub-agents do not inherit the conversation context. Include the
 working directory of the worktree, and the member worktree path when the
 outputs of the task live in a member repo. Include the task id, its
 `archi plan task show` brief verbatim, and the per-task contract: TDD,
-context7 when available, and implementation inside the declared outputs.
+context7 when available, implementation inside the declared outputs, and
+the named test commands that cover them — never the whole suite.
 Every sub-agent prompt forbids branch creation and branch switching —
 sub-agents write code on the branches the worktrees already stand on,
 and edit member code only in the member worktree paths that
@@ -250,6 +259,11 @@ Sub-agents cannot prompt for permission on their own.
   and only from a clean tree.
 - **TDD always.** Failing tests come first, and the verifications in the
   brief are the contract.
+- **Each actor runs its own scope.** A task agent runs the suites over
+  its declared outputs. You run the whole suite after the wave, and
+  again after the landing merge. The cleanup wave runs the whole suite
+  because it moves code across the unit. Widening the narrow actor buys
+  nothing and costs the full suite every turn.
 - **Capture seals each wave.** A wave does not advance until every
   pressed ref is covered. Confirm and prune the candidates. Never skip
   the gate.
