@@ -14,6 +14,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+/// The planning skill as the binary carries it — the source `sync-skills`
+/// installs from. Two families read the same bytes: `init` asks whether the
+/// installed copy drifted from it, and `plan` asks what rule it still carries.
+pub const SKILL_PLAN: &str = include_str!("../../../../skills/archi-plan.md");
+
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
 /// A fresh scratch directory, canonicalized so paths agree with git's own

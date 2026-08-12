@@ -25,12 +25,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use util::SKILL_PLAN;
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
-/// This binary's embedded briefing sources, for byte-equality checks.
+/// This binary's embedded briefing sources, for byte-equality checks. The
+/// planning skill is read by a second family as well, so it stands in the
+/// shared fixture module ([`util::SKILL_PLAN`]).
 const SKILL_ARCHI: &str = include_str!("../../../skills/archi.md");
-const SKILL_PLAN: &str = include_str!("../../../skills/archi-plan.md");
 const SKILL_MERGE: &str = include_str!("../../../skills/archi-merge.md");
 const SKILL_MIGRATE: &str = include_str!("../../../skills/archi-migrate-fractal.md");
 const SKILL_MIGRATE_WORLD: &str = include_str!("../../../skills/archi-migrate-world.md");

@@ -25,10 +25,6 @@ const MODEL: &str = "def conn wire := * -> *\n\
                      Auth.creds wire Store.inn\n\
                      Service type_of Auth\n";
 
-/// The planning skill as the binary carries it — the copy `sync-skills`
-/// installs, read here for the rule it must no longer carry.
-const SKILL_PLAN: &str = include_str!("../../../skills/archi-plan.md");
-
 fn temp_project() -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "archi-plan-e2e-{}-{}",
@@ -1326,7 +1322,7 @@ fn an_empty_block_over_a_declared_internal_node_closes_without_a_refusal() {
 #[test]
 fn the_planning_skill_no_longer_forbids_a_wrapped_bullet() {
     // The prose is hard-wrapped: a sentence is read over its line breaks.
-    let flat = SKILL_PLAN.split_whitespace().collect::<Vec<_>>().join(" ");
+    let flat = util::SKILL_PLAN.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(!flat.contains("one bullet on one line"), "{flat}");
     assert!(!flat.contains("bullets do not wrap"), "{flat}");
     assert!(!flat.contains("continuation line carries no"), "{flat}");
