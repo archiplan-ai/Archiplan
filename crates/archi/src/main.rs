@@ -29,6 +29,7 @@
 //! archi link audit [--scope <path>] [--since <rev>] [--prune] [--json]
 //! archi plan use <name> | repin | show [<name>] [--json] | verify [--json]
 //! archi plan task add <node> [--desc <text>] | rm <id>
+//! archi plan task <id> link add --symbol <a> --answers <ref> --proved-by <a>
 //! archi plan start | next | current-wave | close | reset
 //! archi read  [<request.json> | -] [--at <id>]
 //! archi query [--scope <path>]... [--type <path>]... [--kind <k>]... [--view <v>]...
@@ -126,6 +127,8 @@ const USAGE: &str = "usage:
   archi plan use <name> | repin | show [<name>] [--json] | verify [--json] | list | status [--project <dir>]
   archi plan task add <node> [--desc <text>] | rm <id> | show <id> [--project <dir>]
   archi plan task req suggest <id> | req-list <id> [--project <dir>]
+  archi plan task <id> link add --symbol <file#symbol> --answers <node, port or req:slug>
+              --proved-by <test file#test fn> [--project <dir>]
   archi plan scenarios list [--project <dir>]
   archi plan start | next | current-wave | close | reset [--project <dir>]
   archi read [<request.json> | -] [--at <id>] [--project <dir>]
@@ -202,6 +205,12 @@ struct Args {
     plan_flag: Option<String>,
     status_flag: Option<String>,
     no_fetch: bool,
+    // The three names one declaration entry carries — `plan task <id> link
+    // add` takes all three and refuses without any of them
+    // (`archi/requirements/code-link/a-verb-writes-the-declaration.md`).
+    symbol: Option<String>,
+    answers: Option<String>,
+    proved_by: Option<String>,
     positional: Vec<String>,
 }
 
@@ -274,6 +283,9 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         plan_flag: None,
         status_flag: None,
         no_fetch: false,
+        symbol: None,
+        answers: None,
+        proved_by: None,
         positional: Vec::new(),
     };
     let mut it = argv.iter().peekable();
@@ -348,6 +360,9 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--into" => args.into = Some(value(&mut it, "--into")?),
             "--keep" => args.keep = Some(value(&mut it, "--keep")?),
             "--task" => args.task = Some(value(&mut it, "--task")?),
+            "--symbol" => args.symbol = Some(value(&mut it, "--symbol")?),
+            "--answers" => args.answers = Some(value(&mut it, "--answers")?),
+            "--proved-by" => args.proved_by = Some(value(&mut it, "--proved-by")?),
             "--repo" => args.repo = Some(value(&mut it, "--repo")?),
             "--desc" => args.desc = Some(value(&mut it, "--desc")?),
             // `link` reads the singular `--kind literal|indirect`; the
@@ -2261,6 +2276,37 @@ fn run_plan(args: &Args) -> ExitCode {
                 Err(e) => fail(e),
             }
         }
+        // The declaration verb: one entry appended to the in-flight task's
+        // file, all three names resolved first. Nobody types TOML, so TOML
+        // cannot be malformed
+        // (`archi/requirements/code-link/a-verb-writes-the-declaration.md`).
+        (Some("task"), [id, link, add]) if link == "link" && add == "add" => {
+            let (Some(symbol), Some(answers), Some(proved_by)) = (
+                args.symbol.as_deref(),
+                args.answers.as_deref(),
+                args.proved_by.as_deref(),
+            ) else {
+                return usage_err(
+                    "`plan task <id> link add` takes all three: --symbol <file#symbol> \
+                     --answers <node, port or req:slug> --proved-by <test file#test fn>",
+                );
+            };
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            match links::capture::declare(&root, ws.model(), id, symbol, answers, proved_by) {
+                Ok(links::capture::Declaration::Appended(path)) => {
+                    println!("declared in {path}: {symbol} answers {answers}, proved by {proved_by}");
+                    ExitCode::SUCCESS
+                }
+                Ok(links::capture::Declaration::Stands(path)) => {
+                    println!("the entry stands in {path} — nothing appended");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
         (Some("verify"), []) => {
             let ws = match live_model() {
                 Ok(ws) => ws,
@@ -2476,7 +2522,8 @@ fn run_plan(args: &Args) -> ExitCode {
         },
         _ => usage_err(
             "`plan` takes: use <name> | repin | show | verify | list | status | scenarios list | \
-             task add|rm|show|req suggest|req-list | start | next | current-wave | close | reset",
+             task add|rm|show|req suggest|req-list|<id> link add | start | next | current-wave | \
+             close | reset",
         ),
     }
 }
@@ -3283,9 +3330,13 @@ fn guarded_route(args: &Args) -> Option<PlanHint<'_>> {
         "plan" => match sub(0) {
             Some("use") => Some(args.positional.get(1).map_or(PlanHint::None, |n| PlanHint::Named(n))),
             Some("repin" | "start" | "next" | "close" | "reset") => Some(PlanHint::Active),
-            // Of `task`, only the mints mutate; content edits are file
-            // edits, outside any command. Everything else under plan reads.
+            // Of `task`, the mints mutate, and so does the declaration verb —
+            // it writes the wave's own state. Prose edits are file edits,
+            // outside any command. Everything else under plan reads.
             Some("task") if matches!(sub(1), Some("add" | "rm")) => Some(PlanHint::Active),
+            Some("task") if matches!((sub(2), sub(3)), (Some("link"), Some("add"))) => {
+                Some(PlanHint::Active)
+            }
             _ => None,
         },
         _ => None,

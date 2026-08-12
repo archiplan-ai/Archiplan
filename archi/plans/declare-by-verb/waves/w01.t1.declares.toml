@@ -1,0 +1,50 @@
+# `t1` accounts for its work here: for every symbol it changed, what
+# that code answers and the test that proves it. One entry closes the
+# wave; what the file holds is the writer's to decide.
+#
+# Nobody types this file. The verb writes it, and it resolves all three
+# names before it writes:
+#
+#   archi plan task t1 link add --symbol "<file>#<symbol>" --answers "<node, port or req:slug>" --proved-by "<test file>#<test fn>"
+#
+# Each entry lands as one table of this shape:
+#
+#   [[declares]]
+#   symbol = "<file>#<symbol>"
+#   answers = "<node, port or req:slug>"
+#   proved_by = "<test file>#<test fn>"
+
+[[declares]]
+symbol = "crates/archi/src/links/capture.rs#open_declarations"
+answers = "req:the-wave-opens-a-declaration-file-for-every-task"
+proved_by = "crates/archi/tests/plan_e2e.rs#the_wave_open_writes_an_empty_declaration_file_for_every_task_in_flight"
+
+[[declares]]
+symbol = "crates/archi/src/links/capture.rs#template"
+answers = "req:the-wave-opens-a-declaration-file-for-every-task"
+proved_by = "crates/archi/src/links/capture.rs#the_template_is_the_shape_the_reader_accepts"
+
+[[declares]]
+symbol = "crates/archi/src/plans/mod.rs#gate_declarations"
+answers = "req:the-wave-opens-a-declaration-file-for-every-task"
+proved_by = "crates/archi/tests/plan_e2e.rs#a_wave_whose_files_were_never_written_still_refuses_the_absent_one"
+
+[[declares]]
+symbol = "crates/archi/src/links/capture.rs#declare"
+answers = "req:a-verb-writes-the-declaration"
+proved_by = "crates/archi/tests/plan_e2e.rs#the_verb_appends_one_entry_and_the_wave_closes_on_it"
+
+[[declares]]
+symbol = "crates/archi/src/links/capture.rs#resolve_answers"
+answers = "req:a-verb-writes-the-declaration"
+proved_by = "crates/archi/tests/plan_e2e.rs#the_verb_refuses_a_name_that_resolves_to_nothing_and_writes_nothing"
+
+[[declares]]
+symbol = "crates/archi/src/links/capture.rs#wave_in_flight"
+answers = "req:a-verb-writes-the-declaration"
+proved_by = "crates/archi/tests/plan_e2e.rs#the_verb_refuses_outside_a_started_wave_and_names_the_step_that_opens_one"
+
+[[declares]]
+symbol = "crates/archi/src/main.rs#run_plan"
+answers = "req:a-verb-writes-the-declaration"
+proved_by = "crates/archi/tests/plan_e2e.rs#a_repeated_entry_stands_and_appends_no_second_copy"

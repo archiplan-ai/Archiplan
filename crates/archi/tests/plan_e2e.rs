@@ -528,7 +528,7 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     )
     .unwrap();
     let (stdout, stderr) = fails(&root, &["plan", "next"]);
-    assert!(stderr.contains("t1 — write"), "{stderr}");
+    assert!(stderr.contains("names nothing"), "{stderr}");
     assert!(captured_ids(&stdout).is_empty(), "{stdout}");
     assert!(stdout.contains("w01.t1.declares.toml"), "{stdout}");
 
@@ -1793,22 +1793,22 @@ fn a_wave_refuses_until_every_task_in_flight_has_declared() {
     fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
     fs::write(root.join("code/orphan.rs"), "pub fn stray() -> u8 { 7 }\n").unwrap();
 
-    // No file: the refusal names the task, the path it owes and the command
-    // that follows.
+    // The file the open wrote parses and declares nothing: that accounts for
+    // nothing, and the refusal names the task, the path and the command that
+    // follows.
     let (stdout, err) = fails(&root, &["plan", "next"]);
-    assert!(err.contains("t1 — write"), "names the task: {err}");
-    assert!(err.contains(&declares_rel(1, "t1")), "names the path: {err}");
-    assert!(err.contains("re-run `archi plan next`"), "names the next command: {err}");
-    assert!(stdout.contains("leftover code/orphan.rs#stray"), "{stdout}");
-
-    // A file that parses and declares nothing accounts for nothing: the same
-    // refusal, naming the same task, the same path and the same command.
-    declares(&root, 1, "t1", &[]);
-    let (_, err) = fails(&root, &["plan", "next"]);
     assert!(err.contains("names nothing"), "{err}");
     assert!(err.contains("t1"), "names the task: {err}");
     assert!(err.contains(&declares_rel(1, "t1")), "names the path: {err}");
     assert!(err.contains("re-run `archi plan next`"), "names the next command: {err}");
+    assert!(stdout.contains("leftover code/orphan.rs#stray"), "{stdout}");
+
+    // A file that parses and declares nothing the writer's own way — the empty
+    // list — refuses exactly the same.
+    declares(&root, 1, "t1", &[]);
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains("names nothing"), "{err}");
+    assert!(err.contains(&declares_rel(1, "t1")), "names the path: {err}");
 
     // One entry closes the wave, whatever else the delta moved: two symbols
     // moved under t1's output and the file names one of them.
@@ -1817,9 +1817,11 @@ fn a_wave_refuses_until_every_task_in_flight_has_declared() {
     assert!(out.contains("wave 1 closed — in flight: t2"), "{out}");
     assert!(out.contains("leftover code/orphan.rs#stray"), "{out}");
 
-    // The same gate on the next wave, and the same one line answers it.
+    // The same gate on the next wave, on the file that wave's open wrote, and
+    // the same one line answers it.
     let (_, err) = fails(&root, &["plan", "next"]);
-    assert!(err.contains("t2 — write"), "{err}");
+    assert!(err.contains("names nothing"), "{err}");
+    assert!(err.contains(&declares_rel(2, "t2")), "{err}");
     declares(&root, 2, "t2", &[AUTH_ENTRY]);
     let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("the cleanup wave"), "{out}");
@@ -1980,6 +1982,294 @@ fn the_second_exit_retires_the_stale_pair_and_the_declaration_mints_it_anew() {
         .collect();
     assert_eq!(put.len(), 1, "the retired pair came back once:\n{rows}");
     assert!(put[0].contains("captured(t2)") && put[0].contains("declared"), "{rows}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+// The declaration file is opened by the wave and filled by a verb: nobody
+// types it, so the format is not a surface a writer can get wrong
+// (`archi/requirements/planning/the-wave-opens-a-declaration-file-for-every-task.md`,
+// `archi/requirements/code-link/a-verb-writes-the-declaration.md`).
+
+/// The t2 Auth record with nothing coming in: t1 and t2 open together, so
+/// one wave puts two tasks in flight and the open owes a file to each.
+const T2_AUTH_SOLO: &str =
+    "---\nnode: Auth\nowns: [service-hardening]\n---\n\n# t2 — Auth\n\nguard the door\n\n\
+     ## Spec\n\n- `Auth`\n- `Service type_of Auth`\n\n## Inputs\n\n## Outputs\n\n\
+     - code/auth.rs\n\n## Stack\n\n## Verifications\n\n### service-hardening\n\n\
+     - test — proves service-hardening\n";
+
+/// Mint the plan and start it with t1 and t2 both in wave 1.
+fn started_two_task_plan() -> PathBuf {
+    let root = temp_project();
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Store"]);
+    ok(&root, &["plan", "task", "add", "Auth"]);
+    write_record(&root, "archi/plans/mvp/t1-store.md", T1_STORE_GATED);
+    write_record(&root, "archi/plans/mvp/t2-auth.md", T2_AUTH_SOLO);
+    let out = ok(&root, &["plan", "start"]);
+    assert!(out.contains("wave 1 in flight: t1, t2"), "{out}");
+    root
+}
+
+/// The `[[declares]]` tables one file holds — the entries, blind to the
+/// comments the template carries.
+fn entries(root: &Path, wave: usize, task: &str) -> usize {
+    fs::read_to_string(root.join(declares_rel(wave, task)))
+        .unwrap()
+        .matches("\n[[declares]]")
+        .count()
+}
+
+/// One `plan task <id> link add` invocation.
+fn declare_verb<'a>(task: &'a str, symbol: &'a str, answers: &'a str, proof: &'a str) -> Vec<&'a str> {
+    vec![
+        "plan", "task", task, "link", "add",
+        "--symbol", symbol,
+        "--answers", answers,
+        "--proved-by", proof,
+    ]
+}
+
+/// Opening a wave writes one empty declaration file per task it puts in
+/// flight, beside the index it already writes: the shape as comments and no
+/// entry, so the close meets a file that declares nothing instead of an
+/// absent one. `plan reset` clears them with the rest of the wave's state
+/// (`archi/requirements/planning/the-wave-opens-a-declaration-file-for-every-task.md`).
+#[test]
+fn the_wave_open_writes_an_empty_declaration_file_for_every_task_in_flight() {
+    let root = started_two_task_plan();
+
+    // One file per task in flight, beside the index the open already writes.
+    let waves = root.join("archi/plans/mvp/waves");
+    assert!(waves.join("w01.index.json").exists());
+    for task in ["t1", "t2"] {
+        let text = fs::read_to_string(root.join(declares_rel(1, task))).unwrap();
+        // The shape is in the file, and every line of it is a comment: the
+        // file declares nothing.
+        assert!(text.contains("[[declares]]"), "{task}: {text}");
+        assert!(text.contains("symbol") && text.contains("answers"), "{task}: {text}");
+        assert!(text.contains("proved_by"), "{task}: {text}");
+        assert!(
+            text.lines().all(|l| l.trim().is_empty() || l.starts_with('#')),
+            "{task} declares nothing: {text}"
+        );
+        // And it names the verb that fills it.
+        assert!(
+            text.contains(&format!("archi plan task {task} link add")),
+            "{task}: {text}"
+        );
+        assert_eq!(entries(&root, 1, task), 0, "{task}: {text}");
+    }
+
+    // The close meets a file that declares nothing — one refusal, not two.
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains("names nothing"), "{err}");
+    assert!(!err.contains("is absent"), "the file is there: {err}");
+    assert!(err.contains(&declares_rel(1, "t1")), "{err}");
+    assert!(err.contains(&declares_rel(1, "t2")), "{err}");
+
+    // `plan reset` takes the files with the rest of the wave's state.
+    ok(&root, &["plan", "reset"]);
+    assert!(!root.join(declares_rel(1, "t1")).exists());
+    assert!(!root.join(declares_rel(1, "t2")).exists());
+    assert!(!waves.exists());
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// A wave opened before the open wrote the files has none of them, and the
+/// absent file still refuses the close and still says it is absent — the arm
+/// stays for exactly that wave
+/// (`archi/requirements/planning/the-wave-opens-a-declaration-file-for-every-task.md`).
+#[test]
+fn a_wave_whose_files_were_never_written_still_refuses_the_absent_one() {
+    let root = started_two_task_plan();
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+
+    // The wave as an older binary left it: no file for t1.
+    fs::remove_file(root.join(declares_rel(1, "t1"))).unwrap();
+    let (stdout, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains("is absent"), "{err}");
+    assert!(err.contains(&declares_rel(1, "t1")), "{err}");
+    assert!(err.contains("re-run `archi plan next`"), "{err}");
+    assert!(stdout.contains("is absent"), "capture says so too: {stdout}");
+    // The file beside it is there and declares nothing: both refusals, each
+    // saying which situation it is.
+    assert!(err.contains("names nothing"), "{err}");
+    assert!(err.contains(&declares_rel(1, "t2")), "{err}");
+
+    // The verb writes the absent file rather than demanding one first.
+    ok(&root, &declare_verb("t1", "code/store.rs#Store::put", "Store", PROOF));
+    assert_eq!(entries(&root, 1, "t1"), 1);
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The verb appends one entry to the task's file, and the wave closes on it:
+/// the writer never types TOML, so TOML cannot be malformed
+/// (`archi/requirements/code-link/a-verb-writes-the-declaration.md`).
+#[test]
+fn the_verb_appends_one_entry_and_the_wave_closes_on_it() {
+    let root = started_two_task_plan();
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+    fs::write(
+        root.join("code/auth.rs"),
+        "pub fn login(u: &str) -> bool { !u.is_empty() }\n",
+    )
+    .unwrap();
+
+    let out = ok(&root, &declare_verb("t1", "code/store.rs#Store::put", "Store", PROOF));
+    assert!(out.contains("code/store.rs#Store::put"), "{out}");
+    assert!(out.contains(&declares_rel(1, "t1")), "names the file: {out}");
+    assert_eq!(entries(&root, 1, "t1"), 1);
+
+    // The requirement form resolves the same way.
+    ok(&root, &declare_verb("t2", "code/auth.rs#login", "req:service-hardening", AUTH_PROOF));
+    assert_eq!(entries(&root, 1, "t2"), 1);
+
+    let out = ok(&root, &["plan", "next"]);
+    assert_eq!(captured_ids(&out).len(), 2, "each entry minted its pair: {out}");
+    assert!(out.contains("the cleanup wave"), "{out}");
+    let rows = ok(&root, &["link", "ls"]);
+    assert!(rows.contains("proved by code/tests.rs#a_row_is_persisted"), "{rows}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The verb resolves all three names before it writes, and a name that
+/// resolves to nothing refuses — saying which of the three failed and what it
+/// looked for — with nothing appended
+/// (`archi/requirements/code-link/a-verb-writes-the-declaration.md`).
+#[test]
+fn the_verb_refuses_a_name_that_resolves_to_nothing_and_writes_nothing() {
+    let root = started_two_task_plan();
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+    let before = fs::read_to_string(root.join(declares_rel(1, "t1"))).unwrap();
+
+    // The symbol: the tree holds no such item.
+    let (_, err) = fails(
+        &root,
+        &declare_verb("t1", "code/store.rs#Store::wipe", "Store", PROOF),
+    );
+    assert!(err.contains("--symbol"), "names which of the three: {err}");
+    assert!(err.contains("Store::wipe"), "names what it looked for: {err}");
+    assert!(!err.contains("--answers") && !err.contains("--proved-by"), "{err}");
+
+    // The test: the same, on the third argument.
+    let (_, err) = fails(
+        &root,
+        &declare_verb("t1", "code/store.rs#Store::put", "Store", "code/tests.rs#no_such_test"),
+    );
+    assert!(err.contains("--proved-by"), "names which of the three: {err}");
+    assert!(err.contains("no_such_test"), "names what it looked for: {err}");
+
+    // The ref: neither an element nor a requirement.
+    let (_, err) = fails(
+        &root,
+        &declare_verb("t1", "code/store.rs#Store::put", "Nope", PROOF),
+    );
+    assert!(err.contains("--answers"), "names which of the three: {err}");
+    assert!(err.contains("Nope"), "names what it looked for: {err}");
+    let (_, err) = fails(
+        &root,
+        &declare_verb("t1", "code/store.rs#Store::put", "req:no-such-req", PROOF),
+    );
+    assert!(err.contains("--answers"), "{err}");
+    assert!(err.contains("no-such-req"), "{err}");
+
+    // Every argument is required.
+    let (_, err) = fails(
+        &root,
+        &["plan", "task", "t1", "link", "add", "--symbol", "code/store.rs#Store::put"],
+    );
+    assert!(err.contains("--answers") && err.contains("--proved-by"), "{err}");
+
+    // Nothing was written by any of them.
+    assert_eq!(
+        fs::read_to_string(root.join(declares_rel(1, "t1"))).unwrap(),
+        before
+    );
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// A repeated identical entry is the same claim, not a second one: it appends
+/// no copy, says the entry stands and exits 0, so a batch does not stop on it
+/// (`archi/requirements/code-link/a-verb-writes-the-declaration.md`).
+#[test]
+fn a_repeated_entry_stands_and_appends_no_second_copy() {
+    let root = started_two_task_plan();
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+
+    ok(&root, &declare_verb("t1", "code/store.rs#Store::put", "Store", PROOF));
+    let out = ok(&root, &declare_verb("t1", "code/store.rs#Store::put", "Store", PROOF));
+    assert!(out.contains("stands"), "{out}");
+    assert_eq!(entries(&root, 1, "t1"), 1);
+
+    // A second entry over the same symbol that differs in one name is another
+    // claim, and it lands.
+    ok(&root, &declare_verb("t1", "code/store.rs#Store::get", "Store", PROOF));
+    assert_eq!(entries(&root, 1, "t1"), 2);
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// Several entries land in one `archi batch -`, which fails at the first
+/// refusal and leaves the entries before it in place
+/// (`archi/requirements/code-link/a-verb-writes-the-declaration.md`).
+#[test]
+fn several_entries_land_in_one_batch_and_a_refusal_leaves_the_earlier_ones() {
+    let root = started_two_task_plan();
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+
+    let script = format!(
+        "# t1 accounts for what it moved\n\
+         plan task t1 link add --symbol \"code/store.rs#Store::put\" --answers \"Store\" --proved-by \"{PROOF}\"\n\
+         plan task t1 link add --symbol \"code/store.rs#Store::get\" --answers \"Store\" --proved-by \"{PROOF}\"\n\
+         plan task t1 link add --symbol \"code/store.rs#Store::wipe\" --answers \"Store\" --proved-by \"{PROOF}\"\n\
+         plan task t1 link add --symbol \"code/store.rs#Store\" --answers \"Store\" --proved-by \"{PROOF}\"\n"
+    );
+    let (success, out, err) = run_stdin(&root, &["batch"], &script);
+    assert!(!success, "{out}");
+    assert!(err.contains("batch stopped at line 4"), "{err}");
+    assert!(err.contains("--symbol"), "{err}");
+    assert_eq!(entries(&root, 1, "t1"), 2, "the lines before it stand");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The verb refuses outside a started wave, naming the lifecycle step that
+/// opens one: there is no file to append to until a wave opens it
+/// (`archi/requirements/code-link/a-verb-writes-the-declaration.md`).
+#[test]
+fn the_verb_refuses_outside_a_started_wave_and_names_the_step_that_opens_one() {
+    let root = temp_project();
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Store"]);
+    ok(&root, &["plan", "task", "add", "Auth"]);
+    write_record(&root, "archi/plans/mvp/t1-store.md", T1_STORE_GATED);
+    write_record(&root, "archi/plans/mvp/t2-auth.md", T2_AUTH_SOLO);
+
+    // Draft: no wave, no file.
+    let (_, err) = fails(
+        &root,
+        &declare_verb("t1", "code/store.rs#Store::put", "Store", PROOF),
+    );
+    assert!(err.contains("archi plan start"), "names the step: {err}");
+    assert!(!root.join(declares_rel(1, "t1")).exists());
+
+    // Started: a task the wave does not hold has no file of this wave either.
+    ok(&root, &["plan", "start"]);
+    let (_, err) = fails(
+        &root,
+        &declare_verb("t9", "code/store.rs#Store::put", "Store", PROOF),
+    );
+    assert!(err.contains("t9"), "{err}");
+    assert!(err.contains("in flight"), "{err}");
 
     fs::remove_dir_all(&root).unwrap();
 }

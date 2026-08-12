@@ -298,14 +298,123 @@ fn declares_rel(plan: &str, wave: usize, task: &str) -> String {
 }
 
 /// The file's shape: one array of tables, each naming the changed symbol,
-/// what it answers and the test that proves it. Every field is required and
-/// no unknown key is tolerated — an optional field is the beginning of a file
-/// that always parses
+/// what it answers and the test that proves it. Every field of an entry is
+/// required and no unknown key is tolerated — an optional field is the
+/// beginning of a file that always parses
 /// (`archi/requirements/planning/the-declaration-refusal-repairs-without-guessing.md`).
+///
+/// The array itself defaults to empty, because the wave open writes the file
+/// before any entry exists: a template of comments holds no `declares` key and
+/// still parses, as a file that declares nothing
+/// (`archi/requirements/planning/the-wave-opens-a-declaration-file-for-every-task.md`).
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Declarations {
+    #[serde(default)]
     declares: Vec<Declared>,
+}
+
+// ---- the shape, written once ------------------------------------------------
+
+/// The array-of-tables key, and the three keys one entry carries.
+/// [`Declared`] deserializes exactly these and tolerates no other, so the
+/// template the wave open writes, the entry the verb appends and the shape a
+/// refusal prints are one list read three times — the format cannot drift from
+/// what the reader accepts, because one side writes what the other reads
+/// (`archi/requirements/code-link/a-verb-writes-the-declaration.md`).
+const TABLE: &str = "declares";
+const SYMBOL: &str = "symbol";
+const ANSWERS: &str = "answers";
+const PROVED_BY: &str = "proved_by";
+
+/// What each key names, as the template and the refusals spell it.
+const SYMBOL_HINT: &str = "<file>#<symbol>";
+const ANSWERS_HINT: &str = "<node, port or req:slug>";
+const PROVED_BY_HINT: &str = "<test file>#<test fn>";
+
+/// One entry as TOML: the table header and the three keys, each value written
+/// by the `toml` crate so the writer never has to think about quoting. The
+/// template and the verb both come through here.
+fn entry_table(values: [&str; 3]) -> String {
+    let mut out = format!("[[{TABLE}]]\n");
+    for (key, value) in [SYMBOL, ANSWERS, PROVED_BY].into_iter().zip(values) {
+        out.push_str(&format!(
+            "{key} = {}\n",
+            toml::Value::String(value.to_string())
+        ));
+    }
+    out
+}
+
+/// One entry's shape, keys and hints — indented for a refusal that prints it.
+pub(crate) fn declaration_shape(indent: &str) -> String {
+    entry_table([SYMBOL_HINT, ANSWERS_HINT, PROVED_BY_HINT])
+        .lines()
+        .map(|l| format!("{indent}{l}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The one command that appends an entry to a task's file, as the template
+/// prints it and every refusal names it.
+pub(crate) fn declare_command(task: &str) -> String {
+    format!(
+        "archi plan task {task} link add --symbol \"{SYMBOL_HINT}\" \
+         --answers \"{ANSWERS_HINT}\" --proved-by \"{PROVED_BY_HINT}\""
+    )
+}
+
+/// The empty declaration file a wave open writes for one task in flight: the
+/// shape as comments and no entry. The shape lives in the file rather than in
+/// a skill or a prompt, because a prompt is retyped every wave and drifts from
+/// the parser while this cannot — the same code writes the template and reads
+/// it back
+/// (`archi/requirements/planning/the-wave-opens-a-declaration-file-for-every-task.md`).
+fn template(task: &str) -> String {
+    let mut out = format!(
+        "# `{task}` accounts for its work here: for every symbol it changed, what\n\
+         # that code answers and the test that proves it. One entry closes the\n\
+         # wave; what the file holds is the writer's to decide.\n\
+         #\n\
+         # Nobody types this file. The verb writes it, and it resolves all three\n\
+         # names before it writes:\n\
+         #\n\
+         #   {}\n\
+         #\n\
+         # Each entry lands as one table of this shape:\n\
+         #\n",
+        declare_command(task)
+    );
+    for line in entry_table([SYMBOL_HINT, ANSWERS_HINT, PROVED_BY_HINT]).lines() {
+        out.push_str(&format!("#   {line}\n"));
+    }
+    out
+}
+
+/// Open one wave's declaration files: one empty file per task the wave puts in
+/// flight, beside the index the open already writes. So the close never meets
+/// an absent file — it meets one that declares nothing, which is one refusal
+/// instead of two. Create-only: a file that already stands is the writer's,
+/// and re-opening never writes over what it says
+/// (`archi/requirements/planning/the-wave-opens-a-declaration-file-for-every-task.md`).
+pub(crate) fn open_declarations(
+    root: &Path,
+    plan: &str,
+    wave: usize,
+    tasks: &[String],
+) -> Result<(), String> {
+    for task in tasks {
+        let rel = declares_rel(plan, wave, task);
+        let path = root.join(&rel);
+        if path.exists() {
+            continue;
+        }
+        let dir = path.parent().expect("the declaration has a directory");
+        fs::create_dir_all(dir).map_err(|e| format!("cannot create `{}`: {e}", dir.display()))?;
+        fs::write(&path, template(task))
+            .map_err(|e| format!("cannot write `{rel}`: {e}"))?;
+    }
+    Ok(())
 }
 
 /// One declaration. Each field is read spanned, so a name that parses and
@@ -523,6 +632,170 @@ fn mint_declarations(
     Ok(minted)
 }
 
+// ---- the verb that writes one -------------------------------------------------
+
+/// What one `archi plan task <id> link add` did: the file it is about, and
+/// whether an entry was appended to it.
+pub enum Declaration {
+    /// The entry was appended to this file.
+    Appended(String),
+    /// The file already holds this entry, so nothing was written. The verb
+    /// exits 0 on it, so `archi batch -` does not stop on a claim that stands
+    /// (`archi/requirements/code-link/a-verb-writes-the-declaration.md`).
+    Stands(String),
+}
+
+/// The plan and the wave a task is in flight in. A declaration lands in the
+/// file the wave open wrote, so outside a started wave there is no file to
+/// append to — and the refusal names the lifecycle step that opens one
+/// (`archi/requirements/code-link/a-verb-writes-the-declaration.md`).
+fn wave_in_flight(root: &Path, model: &Model, task: &str) -> Result<(String, usize), String> {
+    let plan = plans::load_active(root)?;
+    match plan.state {
+        plans::PlanState::Draft => {
+            return Err(format!(
+                "plan `{}` is draft — `archi plan start` opens wave 1 and writes the file an \
+                 entry lands in",
+                plan.name
+            ));
+        }
+        plans::PlanState::Completed => {
+            return Err(format!(
+                "plan `{}` is completed — `archi plan reset` runs it again",
+                plan.name
+            ));
+        }
+        plans::PlanState::Started => {}
+    }
+    let report = plans::verify_plan(root, model, &plan)?;
+    if !report.errors.is_empty() {
+        return Err(format!(
+            "the plan is structurally broken — `archi plan verify`:\n  {}",
+            report.errors.join("\n  ")
+        ));
+    }
+    let waves = &report.derived.waves;
+    if plan.closed_waves >= waves.len() {
+        return Err(format!(
+            "plan `{}` has no wave in flight — every wave closed",
+            plan.name
+        ));
+    }
+    let wave = plan.closed_waves + 1;
+    let ids = &waves[wave - 1];
+    if !ids.iter().any(|id| id == task) {
+        return Err(format!(
+            "`{task}` is not in wave {wave} — in flight: {}",
+            ids.join(", ")
+        ));
+    }
+    Ok((plan.name, wave))
+}
+
+/// One anchor argument, resolved against the tree. Every refusal names the
+/// flag it came from and what the resolution looked for, because the actor who
+/// can fix it is reading this line and not a parser's line number.
+fn resolve_named(roots: &super::Roots, flag: &str, text: &str) -> Result<Anchor, String> {
+    let refuse = |e: String| format!("{flag} `{text}`: {e}");
+    let anchor = Anchor::parse(text).map_err(refuse)?;
+    let member_root = roots.require(&anchor.repo).map_err(refuse)?;
+    super::resolve_anchor(&member_root, &anchor).map_err(refuse)?;
+    Ok(anchor)
+}
+
+/// The `--answers` argument, resolved against the model and the requirement
+/// set — the same resolution the mint runs, asked before the write instead of
+/// after it.
+fn resolve_answers(root: &Path, model: &Model, answers: &str) -> Result<(), String> {
+    let refuse = |e: String| format!("--answers `{answers}`: {e}");
+    let spec = SpecRef::parse(answers).map_err(refuse)?;
+    if let Some((source, target)) = edge_ends(model).get(&spec.path) {
+        return Err(refuse(format!(
+            "`{}` is an edge — an edge is a caller, and the code behind a port does not know its \
+             callers; name the end this symbol answers: `{source}` or `{target}`",
+            spec.path
+        )));
+    }
+    let mut slots = super::Slots::new(root);
+    let resolves = match &spec.version {
+        None => super::resolves_now(root, model, &mut slots, &spec)?,
+        Some(_) => slots.resolves_pinned(&spec)?,
+    };
+    if resolves {
+        return Ok(());
+    }
+    Err(refuse(match (spec.requirement(), spec.scenario()) {
+        (Some(slug), _) => super::requirement_refusal(slug),
+        (None, Some((slug, _))) => super::scenario_refusal(root, slug, &spec.path),
+        (None, None) => {
+            let slot = spec.version.as_deref().unwrap_or("the live model");
+            format!("`{}` names no element of {slot} (E_MODEL_REF)", spec.path)
+        }
+    }))
+}
+
+/// `archi plan task <id> link add --symbol <anchor> --answers <ref>
+/// --proved-by <anchor>`: append one entry to that task's declaration file.
+///
+/// All three names resolve before anything is written — the symbol and the
+/// test against the tree, the ref against the model and the requirement set —
+/// so a refusal reaches the actor who can fix it in the same breath as the
+/// mistake, and a partial write never happens. The entry is written as TOML by
+/// the tool ([`entry_table`]), so nobody types the format and the format
+/// cannot drift from what [`read_declarations`] accepts
+/// (`archi/requirements/code-link/a-verb-writes-the-declaration.md`).
+pub fn declare(
+    root: &Path,
+    model: &Model,
+    task: &str,
+    symbol: &str,
+    answers: &str,
+    proved_by: &str,
+) -> Result<Declaration, String> {
+    let (plan, wave) = wave_in_flight(root, model, task)?;
+
+    let roots = super::Roots::resolve(root)?;
+    resolve_named(&roots, "--symbol", symbol)?;
+    let test = resolve_named(&roots, "--proved-by", proved_by)?;
+    if test.symbol.is_none() {
+        return Err(format!(
+            "--proved-by `{proved_by}`: it names a file and no symbol — `--proved-by` names the \
+             test itself, as `{PROVED_BY_HINT}`"
+        ));
+    }
+    resolve_answers(root, model, answers)?;
+
+    let rel = declares_rel(&plan, wave, task);
+    let path = root.join(&rel);
+    // A wave opened before the open wrote the files has none: the verb writes
+    // the template under the entry rather than demanding the file first.
+    let mut text = match fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => template(task),
+        Err(e) => return Err(format!("cannot read `{rel}`: {e}")),
+    };
+    let parsed: Declarations = toml::from_str(&text)
+        .map_err(|e| format!("`{rel}` does not parse: {}", e.message()))?;
+    // A repeated identical entry is the same claim, not a second one.
+    let stands = parsed.declares.iter().any(|d| {
+        d.symbol.get_ref() == symbol
+            && d.answers.get_ref() == answers
+            && d.proved_by.get_ref() == proved_by
+    });
+    if stands {
+        return Ok(Declaration::Stands(rel));
+    }
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
+    text.push('\n');
+    text.push_str(&entry_table([symbol, answers, proved_by]));
+    let dir = path.parent().expect("the declaration has a directory");
+    fs::create_dir_all(dir).map_err(|e| format!("cannot create `{}`: {e}", dir.display()))?;
+    fs::write(&path, text).map_err(|e| format!("cannot write `{rel}`: {e}"))?;
+    Ok(Declaration::Appended(rel))
+}
+
 // ---- capture -----------------------------------------------------------------
 
 /// One suppressed pair: a (spec_ref, changed item) pair the signal test
@@ -657,6 +930,11 @@ pub(crate) fn capture_wave(
             Some(file) => {
                 // The file it read already holds the path it read it from.
                 if file.declares.is_empty() {
+                    out.notes.push(format!(
+                        "`{}` declares nothing: `{}` names no entry — no link is minted for its \
+                         delta",
+                        task.id, file.path
+                    ));
                     out.empty.push((task.id.clone(), file.path.clone()));
                 }
                 for link in mint_declarations(root, model, &file, &task.id, &live)? {
@@ -1166,6 +1444,60 @@ mod tests {
             .suppressed
             .iter()
             .any(|s| s.task == "t2" && s.spec_ref == "Store" && s.item == "code/schema.sql"));
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The template and the parser are one code path: the file the wave open
+    /// writes parses, and declares nothing; the shape it carries as comments,
+    /// uncommented, is exactly one entry the reader accepts — every key
+    /// present, no key it refuses. A key that moved on either side fails here
+    /// (`archi/requirements/planning/the-wave-opens-a-declaration-file-for-every-task.md`).
+    #[test]
+    fn the_template_is_the_shape_the_reader_accepts() {
+        let root = temp_project();
+        fs::create_dir_all(plans::plan_dir(&root, "p")).unwrap();
+        open_declarations(&root, "p", 1, &["t1".to_string(), "t2".to_string()]).unwrap();
+
+        for task in ["t1", "t2"] {
+            let file = read_declarations(&root, "p", 1, task)
+                .unwrap()
+                .expect("the open wrote it");
+            assert!(file.declares.is_empty(), "it declares nothing: {}", file.text);
+            assert_eq!(file.path, declares_rel("p", 1, task));
+            assert!(
+                file.text.contains(&declare_command(task)),
+                "it names the verb that fills it: {}",
+                file.text
+            );
+
+            // The commented shape, uncommented, is one entry.
+            let uncommented: String = file
+                .text
+                .lines()
+                .filter_map(|l| l.strip_prefix("#   "))
+                .skip_while(|l| !l.starts_with("[["))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let parsed: Declarations = toml::from_str(&uncommented)
+                .unwrap_or_else(|e| panic!("the shape parses:\n{uncommented}\n{e}"));
+            assert_eq!(parsed.declares.len(), 1, "{uncommented}");
+            let one = &parsed.declares[0];
+            assert_eq!(one.symbol.get_ref(), SYMBOL_HINT);
+            assert_eq!(one.answers.get_ref(), ANSWERS_HINT);
+            assert_eq!(one.proved_by.get_ref(), PROVED_BY_HINT);
+        }
+
+        // Create-only: a re-open never writes over what a file says.
+        let entry = entry_table(["code/store.rs#Store::put", "Store", "code/t.rs#t"]);
+        let path = root.join(declares_rel("p", 1, "t1"));
+        fs::write(&path, &entry).unwrap();
+        open_declarations(&root, "p", 1, &["t1".to_string()]).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), entry);
+        // And what the tool writes is what the reader reads back.
+        let file = read_declarations(&root, "p", 1, "t1").unwrap().unwrap();
+        assert_eq!(file.declares.len(), 1);
+        assert_eq!(file.declares[0].symbol.get_ref(), "code/store.rs#Store::put");
 
         fs::remove_dir_all(&root).unwrap();
     }

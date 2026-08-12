@@ -1576,19 +1576,31 @@ fn gate_declarations(
     if !capture.absent.is_empty() || !capture.empty.is_empty() {
         let mut msg =
             String::from("the wave cannot close while a task in flight has declared nothing:");
+        // Two situations, not two rules: the wave open writes the file, so an
+        // absent one means a wave opened before it did. Both say which, and
+        // both take the same verb
+        // (`archi/requirements/planning/the-wave-opens-a-declaration-file-for-every-task.md`).
         for (task, path) in &capture.absent {
-            msg.push_str(&format!("\n  {task} — write `{path}`"));
+            msg.push_str(&format!(
+                "\n  {task} — `{path}` is absent: this wave opened before the open wrote it"
+            ));
         }
         for (task, path) in &capture.empty {
             msg.push_str(&format!("\n  {task} — `{path}` names nothing"));
         }
         msg.push_str(
-            "\neach task in flight writes one file, naming what it changed, what that code \
-             answers and the test that proves it:\n  \
-             [[declares]]\n  symbol = \"<file>#<symbol>\"\n  \
-             answers = \"<node, port or req:slug>\"\n  \
-             proved_by = \"<test file>#<test fn>\"\n\
-             what the file holds is the writer's to decide: one entry closes the wave. Then \
+            "\neach task in flight accounts for what it changed, what that code answers and the \
+             test that proves it — one entry per claim, appended by the verb:\n",
+        );
+        for (task, _) in capture.absent.iter().chain(&capture.empty) {
+            msg.push_str(&format!("  {}\n", links::capture::declare_command(task)));
+        }
+        msg.push_str(&format!(
+            "each entry lands as one table of this shape:\n{}\n",
+            links::capture::declaration_shape("  ")
+        ));
+        msg.push_str(
+            "what the file holds is the writer's to decide: one entry closes the wave. Then \
              re-run `archi plan next`",
         );
         return Err(msg);
@@ -1719,6 +1731,7 @@ pub fn start(root: &Path, model: &Model) -> Result<(Plan, Vec<String>), String> 
     let report = verify_plan(root, model, &plan)?;
     gate_structure(&report)?;
     links::capture::write_index(root, &plan.name, 1)?;
+    links::capture::open_declarations(root, &plan.name, 1, &report.derived.waves[0])?;
     plan.state = PlanState::Started;
     plan.closed_waves = 0;
     save_state(root, &plan)?;
@@ -1878,6 +1891,7 @@ pub fn next(root: &Path, model: &Model) -> Result<NextOutcome, String> {
     plan.closed_waves = wave;
     let step = if plan.closed_waves < waves.len() {
         links::capture::write_index(root, &plan.name, wave + 1)?;
+        links::capture::open_declarations(root, &plan.name, wave + 1, &waves[wave])?;
         Step::Wave {
             closed: wave,
             next_tasks: waves[wave].clone(),
@@ -2842,13 +2856,15 @@ mod tests {
             "pub fn login() -> bool { true }\npub fn inn_wire_probe() -> bool { true }\n",
         );
 
-        // t1 is in flight and wrote no declaration file, so the wave refuses
-        // before it ever reaches the coverage gate.
+        // t1 is in flight and the file the open wrote for it declares
+        // nothing, so the wave refuses before it ever reaches the coverage
+        // gate.
         let outcome = next(&root, ws.model()).unwrap();
         let Step::Blocked(why) = &outcome.step else {
-            panic!("the absent declaration file gates");
+            panic!("the empty declaration file gates");
         };
-        assert!(why.contains("t1 — write"), "{why}");
+        assert!(why.contains("names nothing"), "{why}");
+        assert!(why.contains("archi plan task t1 link add"), "{why}");
 
         // The writer declares it against the requirement behind the node.
         // The pressed ref is an edge, and an edge is never a declaration's to
