@@ -104,15 +104,19 @@ diffs.
 archi plan next
 ```
 
-Capture rescans the recorded set, and the candidates come back qualified:
+Capture reads each in-flight task's declaration file and mints what it names, qualified by
+member:
 
 ```
-captured l0102-a5efbf  indirect evidence captured(t3) Gateway.Valve ← backend//src/api/valve.rs#Valve::admit
+captured l0102-a5efbf  indirect asserted captured(t3) declared Gateway.Valve ← backend//src/api/valve.rs#Valve::admit  proved by backend//tests/valve.rs#admit_refuses_a_closed_port
 ```
 
-Review as ever — `link ls --evidence`, `link confirm` the load-bearing, `link rm` the
-drive-bys, re-run `plan next`. The coverage gate, signal test and wave discipline are all
-unchanged; the member qualifier is identity, never signal.
+The declaration is the task agent's own last act, one
+`archi plan task <id> link add --symbol --answers --proved-by` per symbol it defends. A
+member-qualified path works in every one of the three names. A ref the delta presses that
+no link covers holds the wave open, and the refusal prints the `archi link add` line that
+closes it. The coverage gate and the wave discipline are unchanged; the member qualifier is
+identity, never signal.
 
 **6. Land it — one commit per touched repository.**
 
