@@ -174,8 +174,14 @@ fn the_standing_journal_takes_its_rule_from_its_origin_with_no_migration() {
             claims += 1;
         }
     }
-    assert!(guesses > 2000, "every standing guess printed: {guesses}");
-    assert!(claims > 100, "every standing claim printed: {claims}");
+    // The size of the corpus is asserted at the head of this test, against
+    // the journal itself. What stands live is curated by hand, and a count
+    // written down here says nothing about what this test is about: both
+    // kinds print, and each row reads the rule its origin recorded.
+    assert!(
+        guesses > 0 && claims > 0,
+        "both kinds printed: {guesses} guesses, {claims} claims"
+    );
 
     // The rows a person reviewed hardest — a link onto a scenario of a world
     // fact, the only spec side that holds a `#` — were all minted by hand,
