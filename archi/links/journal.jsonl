@@ -4922,3 +4922,8 @@
 {"event":"repin","id":"l1994-c3021c","at":"2026-08-12T09:07:20Z","anchor":{"file":"crates/archi/src/docs/world_check.rs","symbol":"World"},"pins":{"canonicalizer":"rust-tok-v1","interface":"sha256:9a32b63707baf4bda943b3602b7dba126d233c25095fdfbb5d7546dd3496b4a3","body":"sha256:9a32b63707baf4bda943b3602b7dba126d233c25095fdfbb5d7546dd3496b4a3"}}
 {"event":"repin","id":"l1995-8e81a3","at":"2026-08-12T09:07:21Z","anchor":{"file":"crates/archi/src/docs/world_check.rs","symbol":"World"},"pins":{"canonicalizer":"rust-tok-v1","interface":"sha256:9a32b63707baf4bda943b3602b7dba126d233c25095fdfbb5d7546dd3496b4a3","body":"sha256:9a32b63707baf4bda943b3602b7dba126d233c25095fdfbb5d7546dd3496b4a3"}}
 {"event":"repin","id":"l1996-d303b0","at":"2026-08-12T09:07:21Z","anchor":{"file":"crates/archi/src/docs/world_check.rs","symbol":"World"},"pins":{"canonicalizer":"rust-tok-v1","interface":"sha256:9a32b63707baf4bda943b3602b7dba126d233c25095fdfbb5d7546dd3496b4a3","body":"sha256:9a32b63707baf4bda943b3602b7dba126d233c25095fdfbb5d7546dd3496b4a3"}}
+{"event":"decay","id":"l2673-78d82f","task":"t1","at":"2026-08-12T12:31:21Z"}
+{"event":"decay","id":"l2674-641090","task":"t1","at":"2026-08-12T12:31:21Z"}
+{"event":"decay","id":"l2675-efeb6e","task":"t1","at":"2026-08-12T12:31:21Z"}
+{"event":"decay","id":"l2676-ea5193","task":"t1","at":"2026-08-12T12:31:21Z"}
+{"event":"decay","id":"l2678-95b309","task":"t1","at":"2026-08-12T12:31:21Z"}
