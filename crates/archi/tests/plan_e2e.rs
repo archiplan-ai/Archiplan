@@ -25,6 +25,10 @@ const MODEL: &str = "def conn wire := * -> *\n\
                      Auth.creds wire Store.inn\n\
                      Service type_of Auth\n";
 
+/// The planning skill as the binary carries it — the copy `sync-skills`
+/// installs, read here for the rule it must no longer carry.
+const SKILL_PLAN: &str = include_str!("../../../skills/archi-plan.md");
+
 fn temp_project() -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "archi-plan-e2e-{}-{}",
@@ -1177,9 +1181,13 @@ fn a_post_world_plan_on_a_tree_with_a_world_refuses_until_a_fact_covers_a_node()
     declares(&root, 1, "t1", &[STORE_ENTRY]);
     ok(&root, &["plan", "next"]);
 
-    // No fact covers the node the plan holds a task for: the close refuses.
+    // No fact covers the node the plan holds a task for, and that node owes
+    // a condition — it is no payload and nobody declared it internal — so the
+    // close refuses and names the node, not the plan
+    // (`the-empty-block-asks-only-where-a-condition-is-owed`).
     let (_, err) = fails(&root, &["plan", "next"]);
-    assert!(err.contains("no world fact covers any node"), "{err}");
+    assert!(err.contains("no world fact covers `Store`"), "{err}");
+    assert!(!err.contains("mvp"), "{err}");
     assert_eq!(state_json(&root, "mvp")["state"], "started");
 
     // The same plan closes once one covering fact stands — and the plan's
@@ -1246,11 +1254,82 @@ fn a_post_world_plan_on_a_tree_with_no_world_closes_without_a_refusal() {
     // Nothing to be behind on: the close asks the world nothing and latches.
     let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("DONE"), "{out}");
-    assert!(!out.contains("no world fact covers any node"), "{out}");
+    assert!(!out.contains("no world fact covers"), "{out}");
     assert_eq!(state_json(&root, "mvp")["state"], "completed");
     assert!(!root.join("archi/world").exists());
 
     fs::remove_dir_all(&root).unwrap();
+}
+
+/// A plan whose every task node is carried data owes no condition: `Data`
+/// leaves the coverage question by type, and the empty block that follows
+/// says nothing — the advice it used to give was to write a condition about
+/// a payload
+/// (`archi/requirements/planning/the-empty-block-asks-only-where-a-condition-is-owed.md`).
+#[test]
+fn an_empty_block_over_a_data_node_closes_without_a_refusal() {
+    let root = temp_project();
+    let model = fs::read_to_string(root.join("archi/src/model.arch")).unwrap();
+    fs::write(
+        root.join("archi/src/model.arch"),
+        format!("{model}Data type_of Store\n"),
+    )
+    .unwrap();
+    // The tree holds a world, over a node this plan holds no task for.
+    put_fact(&root, "tunnels-run-long", "Tunnels run long", "Auth", &["the tunnel ends"]);
+    declare_internal(&root, &["Gate"]);
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
+    curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
+    ok(&root, &["plan", "start"]);
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
+    ok(&root, &["plan", "next"]);
+
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("DONE"), "{out}");
+    assert!(!out.contains("no world fact covers"), "{out}");
+    assert_eq!(state_json(&root, "mvp")["state"], "completed");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The same for a task node a person declared internal: `.worldignore` is
+/// the other half of the exclusion `version save` already reads, and the two
+/// gates read it the one way
+/// (`archi/requirements/planning/the-empty-block-asks-only-where-a-condition-is-owed.md`).
+#[test]
+fn an_empty_block_over_a_declared_internal_node_closes_without_a_refusal() {
+    let root = temp_project();
+    put_fact(&root, "tunnels-run-long", "Tunnels run long", "Auth", &["the tunnel ends"]);
+    declare_internal(&root, &["Gate", "Store"]);
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
+    curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
+    ok(&root, &["plan", "start"]);
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
+    ok(&root, &["plan", "next"]);
+
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("DONE"), "{out}");
+    assert!(!out.contains("no world fact covers"), "{out}");
+    assert_eq!(state_json(&root, "mvp")["state"], "completed");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The workaround the fold retires: the planning skill told the author not
+/// to wrap a bullet, because the parser read one line at a time. The rule
+/// goes with the defect
+/// (`archi/requirements/planning/a-record-bullet-may-wrap.md`).
+#[test]
+fn the_planning_skill_no_longer_forbids_a_wrapped_bullet() {
+    // The prose is hard-wrapped: a sentence is read over its line breaks.
+    let flat = SKILL_PLAN.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(!flat.contains("one bullet on one line"), "{flat}");
+    assert!(!flat.contains("bullets do not wrap"), "{flat}");
+    assert!(!flat.contains("continuation line carries no"), "{flat}");
 }
 
 /// The closing step hands back the work it already did: every collected

@@ -259,6 +259,42 @@ fn bullet<'a>(label: &str, line: usize, raw: &'a str, shape: &str) -> Result<&'a
         .ok_or_else(|| shape_err(label, line, shape))
 }
 
+/// Fold one line of a bullet section into the bullet standing open, and hand
+/// back the bullet that line closed. A bullet section is read whole: it
+/// splits at the lines that open with `- `, and every other line continues
+/// the piece the last such line opened, its own break and any blank line
+/// around it collapsing to a single space. There is no rule about which bare
+/// line continues and which does not — that rule is what refused a wrapped
+/// bullet in the first place
+/// (`archi/requirements/planning/a-record-bullet-may-wrap.md`).
+///
+/// The piece keeps the line it opened on, so a refusal names the line the
+/// author wrote the bullet on and never a continuation. A section opening on
+/// a bare line hands that line back as a bullet with no prefix, which refuses
+/// exactly where it always did; a paragraph left *under* the bullets joins
+/// the last one instead, which the requirement states and accepts.
+fn fold_bullet(
+    open: &mut Option<(usize, String)>,
+    line: usize,
+    raw: &str,
+) -> Option<(usize, String)> {
+    if raw.starts_with("- ") {
+        return open.replace((line, raw.trim_end().to_string()));
+    }
+    let text = raw.trim();
+    if text.is_empty() {
+        return None;
+    }
+    match open {
+        Some((_, bullet)) => {
+            bullet.push(' ');
+            bullet.push_str(text);
+        }
+        None => *open = Some((line, raw.trim_end().to_string())),
+    }
+    None
+}
+
 /// Prose slot: raw lines joined verbatim, leading and trailing blank
 /// lines dropped — paragraph breaks inside survive the round trip.
 fn join_prose(lines: &[&str]) -> String {
@@ -270,6 +306,48 @@ fn join_prose(lines: &[&str]) -> String {
         lines.pop();
     }
     lines.join("\n")
+}
+
+/// One folded bullet of the charter, under the section it stands in.
+fn charter_bullet(
+    label: &str,
+    section: &str,
+    line: usize,
+    raw: &str,
+    stack: &mut Vec<TechChoice>,
+    summary: &mut Vec<SummaryLine>,
+    mapping: &mut Vec<StackMapping>,
+) -> Result<(), String> {
+    if section == "Stack" {
+        let b = bullet(label, line, raw, "stack bullets are `- <tech> — <provenance>`")?;
+        let (tech, provenance) = b.split_once(" — ").unwrap_or((b, ""));
+        stack.push(TechChoice {
+            tech: tech.trim().to_string(),
+            provenance: provenance.trim().to_string(),
+        });
+        return Ok(());
+    }
+    let b = bullet(
+        label,
+        line,
+        raw,
+        "architecture bullets are `- `<node>` — <role>` or `- `<node>` realizes <tech>`",
+    )?;
+    let (node, rest) = backticked(b).ok_or_else(|| {
+        shape_err(label, line, "architecture bullets open with a backticked node")
+    })?;
+    if let Some(role) = rest.strip_prefix(" — ") {
+        summary.push(SummaryLine { node, role: role.trim().to_string() });
+    } else if let Some(tech) = rest.strip_prefix(" realizes ") {
+        mapping.push(StackMapping { tech: tech.trim().to_string(), node });
+    } else {
+        return Err(shape_err(
+            label,
+            line,
+            "after the node comes `— <role>` or `realizes <tech>`",
+        ));
+    }
+    Ok(())
 }
 
 /// The charter's fields: problem prose, then `## Stack` and
@@ -284,6 +362,9 @@ fn parse_charter(
     let mut mapping = Vec::new();
     let mut seen_h1 = false;
     let mut section: Option<&str> = None;
+    // The bullet standing open, if any: a heading ends the section, and the
+    // section is what the fold reads whole ([`fold_bullet`]).
+    let mut open: Option<(usize, String)> = None;
     for (i, raw) in text.lines().enumerate() {
         let line = i + 1;
         if !seen_h1 {
@@ -297,6 +378,10 @@ fn parse_charter(
             return Err(shape_err(label, line, "a charter opens with `# <name>`"));
         }
         if let Some(heading) = raw.trim_end().strip_prefix("## ") {
+            if let Some((at, folded)) = open.take() {
+                let sec = section.expect("a bullet stands inside a section");
+                charter_bullet(label, sec, at, &folded, &mut stack, &mut summary, &mut mapping)?;
+            }
             section = match heading.trim() {
                 "Stack" => Some("Stack"),
                 "Architecture" => Some("Architecture"),
@@ -311,38 +396,16 @@ fn parse_charter(
         }
         match section {
             None => problem_lines.push(raw),
-            Some(_) if raw.trim().is_empty() => {}
-            Some("Stack") => {
-                let b = bullet(label, line, raw, "stack bullets are `- <tech> — <provenance>`")?;
-                let (tech, provenance) = b.split_once(" — ").unwrap_or((b, ""));
-                stack.push(TechChoice {
-                    tech: tech.trim().to_string(),
-                    provenance: provenance.trim().to_string(),
-                });
-            }
-            Some(_) => {
-                let b = bullet(
-                    label,
-                    line,
-                    raw,
-                    "architecture bullets are `- `<node>` — <role>` or `- `<node>` realizes <tech>`",
-                )?;
-                let (node, rest) = backticked(b).ok_or_else(|| {
-                    shape_err(label, line, "architecture bullets open with a backticked node")
-                })?;
-                if let Some(role) = rest.strip_prefix(" — ") {
-                    summary.push(SummaryLine { node, role: role.trim().to_string() });
-                } else if let Some(tech) = rest.strip_prefix(" realizes ") {
-                    mapping.push(StackMapping { tech: tech.trim().to_string(), node });
-                } else {
-                    return Err(shape_err(
-                        label,
-                        line,
-                        "after the node comes `— <role>` or `realizes <tech>`",
-                    ));
+            Some(sec) => {
+                if let Some((at, folded)) = fold_bullet(&mut open, line, raw) {
+                    charter_bullet(label, sec, at, &folded, &mut stack, &mut summary, &mut mapping)?;
                 }
             }
         }
+    }
+    if let Some((at, folded)) = open.take() {
+        let sec = section.expect("a bullet stands inside a section");
+        charter_bullet(label, sec, at, &folded, &mut stack, &mut summary, &mut mapping)?;
     }
     if !seen_h1 {
         return Err(format!("`{label}`: a charter opens with `# <name>`"));
@@ -355,6 +418,53 @@ fn backticked(text: &str) -> Option<(String, &str)> {
     let rest = text.strip_prefix('`')?;
     let close = rest.find('`')?;
     Some((rest[..close].to_string(), &rest[close + 1..]))
+}
+
+/// One folded bullet of a task file, under the section it stands in — and,
+/// in `Verifications`, under the `### <slug>` it rides.
+fn task_bullet(
+    label: &str,
+    section: &str,
+    slug: Option<&String>,
+    (line, raw): (usize, &str),
+    task: &mut Task,
+    stack_lines: &mut Vec<String>,
+) -> Result<(), String> {
+    match section {
+        "Spec" => {
+            let b = bullet(label, line, raw, "spec bullets are `- `<ref>``")?;
+            let (r, rest) = backticked(b)
+                .ok_or_else(|| shape_err(label, line, "spec refs are backtick-wrapped"))?;
+            if !rest.trim().is_empty() {
+                return Err(shape_err(label, line, "spec bullets carry one ref and nothing else"));
+            }
+            task.spec_refs.push(r);
+        }
+        "Inputs" => {
+            let b = bullet(label, line, raw, "input bullets are `- from <task> — <note>`")?;
+            let b = b.strip_prefix("from ").ok_or_else(|| {
+                shape_err(label, line, "input bullets are `- from <task> — <note>`")
+            })?;
+            let (from, note) = b.split_once(" — ").unwrap_or((b, ""));
+            task.inputs.insert(from.trim().to_string(), note.trim().to_string());
+        }
+        "Outputs" => {
+            let b = bullet(label, line, raw, "output bullets are `- <path>`")?;
+            task.outputs.push(b.to_string());
+        }
+        "Stack" => {
+            let b = bullet(label, line, raw, "stack bullets are `- <detail>`")?;
+            stack_lines.push(b.to_string());
+        }
+        _ => {
+            let b = bullet(label, line, raw, "verifications ride under a `### <slug>`")?;
+            let Some(slug) = slug else {
+                return Err(shape_err(label, line, "verifications ride under a `### <slug>`"));
+            };
+            task.verifications.get_mut(slug).expect("opened above").push(b.to_string());
+        }
+    }
+    Ok(())
 }
 
 /// One task file. The id arrives from the file name — the `t<N>-` prefix
@@ -442,6 +552,9 @@ fn parse_task(label: &str, id: &str, text: &str) -> Result<Task, String> {
     let mut seen_h1 = false;
     let mut section: Option<&str> = None;
     let mut slug: Option<String> = None;
+    // The bullet standing open: a heading — `## ` or the `### <slug>` of a
+    // verification — ends the section the fold reads whole ([`fold_bullet`]).
+    let mut open: Option<(usize, String)> = None;
     for (i, raw) in lines.iter().enumerate().skip(body_at) {
         let line = i + 1;
         if !seen_h1 {
@@ -455,6 +568,10 @@ fn parse_task(label: &str, id: &str, text: &str) -> Result<Task, String> {
             return Err(shape_err(label, line, "a task file opens with `# t<N> — <node>`"));
         }
         if let Some(heading) = raw.trim_end().strip_prefix("## ") {
+            if let Some((at, folded)) = open.take() {
+                let sec = section.expect("a bullet stands inside a section");
+                task_bullet(label, sec, slug.as_ref(), (at, &folded), &mut task, &mut stack_lines)?;
+            }
             let heading = heading.trim();
             section = match heading {
                 "Spec" | "Inputs" | "Outputs" | "Stack" | "Verifications" => Some(heading),
@@ -471,6 +588,16 @@ fn parse_task(label: &str, id: &str, text: &str) -> Result<Task, String> {
         if section == Some("Verifications")
             && let Some(head) = raw.trim_end().strip_prefix("### ")
         {
+            if let Some((at, folded)) = open.take() {
+                task_bullet(
+                    label,
+                    "Verifications",
+                    slug.as_ref(),
+                    (at, &folded),
+                    &mut task,
+                    &mut stack_lines,
+                )?;
+            }
             let head = head.trim().to_string();
             // Owns is the curation; a proof for a requirement the task
             // never owned is structural, not advisory — own it first.
@@ -486,40 +613,23 @@ fn parse_task(label: &str, id: &str, text: &str) -> Result<Task, String> {
         }
         match section {
             None => desc_lines.push(raw),
-            Some(_) if raw.trim().is_empty() => {}
-            Some("Spec") => {
-                let b = bullet(label, line, raw, "spec bullets are `- `<ref>``")?;
-                let (r, rest) = backticked(b)
-                    .ok_or_else(|| shape_err(label, line, "spec refs are backtick-wrapped"))?;
-                if !rest.trim().is_empty() {
-                    return Err(shape_err(label, line, "spec bullets carry one ref and nothing else"));
+            Some(sec) => {
+                if let Some((at, folded)) = fold_bullet(&mut open, line, raw) {
+                    task_bullet(
+                        label,
+                        sec,
+                        slug.as_ref(),
+                        (at, &folded),
+                        &mut task,
+                        &mut stack_lines,
+                    )?;
                 }
-                task.spec_refs.push(r);
-            }
-            Some("Inputs") => {
-                let b = bullet(label, line, raw, "input bullets are `- from <task> — <note>`")?;
-                let b = b.strip_prefix("from ").ok_or_else(|| {
-                    shape_err(label, line, "input bullets are `- from <task> — <note>`")
-                })?;
-                let (from, note) = b.split_once(" — ").unwrap_or((b, ""));
-                task.inputs.insert(from.trim().to_string(), note.trim().to_string());
-            }
-            Some("Outputs") => {
-                let b = bullet(label, line, raw, "output bullets are `- <path>`")?;
-                task.outputs.push(b.to_string());
-            }
-            Some("Stack") => {
-                let b = bullet(label, line, raw, "stack bullets are `- <detail>`")?;
-                stack_lines.push(b.to_string());
-            }
-            Some(_) => {
-                let b = bullet(label, line, raw, "verifications ride under a `### <slug>`")?;
-                let Some(slug) = &slug else {
-                    return Err(shape_err(label, line, "verifications ride under a `### <slug>`"));
-                };
-                task.verifications.get_mut(slug).expect("opened above").push(b.to_string());
             }
         }
+    }
+    if let Some((at, folded)) = open.take() {
+        let sec = section.expect("a bullet stands inside a section");
+        task_bullet(label, sec, slug.as_ref(), (at, &folded), &mut task, &mut stack_lines)?;
     }
     if !seen_h1 {
         return Err(format!("`{label}`: a task file opens with `# t<N> — <node>`"));
@@ -843,6 +953,135 @@ mod tests {
         assert_eq!(fs::read_to_string(&path).unwrap(), after);
 
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A charter bullet may run onto further lines, wrapped where the
+    /// author's editor wrapped it: the section splits at the lines that open
+    /// with `- ` and each piece collapses to one line
+    /// (`archi/requirements/planning/a-record-bullet-may-wrap.md`).
+    #[test]
+    fn a_charter_bullet_may_wrap() {
+        let text = "# mvp\n\nthe problem\nover two lines\n\n\
+                    ## Stack\n\n\
+                    - Rust —\n  user choice\n\n\
+                    - sqlite\n\n\
+                    ## Architecture\n\n\
+                    - `Store` — keeps\n  the rows\n\
+                    - `Store` realizes\n  sqlite\n";
+        let (problem, stack, summary, mapping) = parse_charter("c", text).unwrap();
+        // Prose keeps its line breaks; the bullets lose theirs.
+        assert_eq!(problem, "the problem\nover two lines");
+        assert_eq!(
+            stack,
+            vec![
+                TechChoice { tech: "Rust".into(), provenance: "user choice".into() },
+                TechChoice { tech: "sqlite".into(), provenance: String::new() },
+            ]
+        );
+        assert_eq!(
+            summary,
+            vec![SummaryLine { node: "Store".into(), role: "keeps the rows".into() }]
+        );
+        assert_eq!(mapping, vec![StackMapping { tech: "sqlite".into(), node: "Store".into() }]);
+
+        // A section that opens on prose still refuses, at the line the piece
+        // opened on and not at the line that continues it.
+        let err = parse_charter("c", "# mvp\n\n## Stack\n\nprose\n  and more prose\n").unwrap_err();
+        assert!(err.contains("line 5"), "{err}");
+    }
+
+    /// The same fold in every bullet section a task file carries, over two
+    /// lines, over three, and over a blank line inside one bullet
+    /// (`archi/requirements/planning/a-record-bullet-may-wrap.md`).
+    #[test]
+    fn every_bullet_section_of_a_task_may_wrap() {
+        let text = "---\nnode: Store\nowns: [store-encrypted]\n---\n\n\
+                    # t1 — Store\n\n\
+                    persist rows\nover two lines\n\n\
+                    ## Spec\n\n\
+                    - `Auth.creds wire\n  Store.inn`\n\n\
+                    - `Store`\n\n\
+                    ## Inputs\n\n\
+                    - from t2 — the store api\n  the gate calls\n\n\
+                    ## Outputs\n\n\
+                    - crates/archi/src/plans/records.rs,\n  crates/archi/src/plans/mod.rs\n\n\
+                    ## Stack\n\n\
+                    - axum 0.7, the\n\n  tower layer\n\n  it rides on\n\n\
+                    ## Verifications\n\n\
+                    ### store-encrypted\n\n\
+                    - test — a row written\n  through the gate\n  comes back sealed\n";
+        let task = parse_task("t", "t1", text).unwrap();
+        assert_eq!(task.description, "persist rows\nover two lines");
+        assert_eq!(task.spec_refs, ["Auth.creds wire Store.inn", "Store"]);
+        assert_eq!(task.inputs["t2"], "the store api the gate calls");
+        // The outputs section is opaque strings to the parser: the fold is
+        // what this bullet proves, not the shape of a path.
+        assert_eq!(
+            task.outputs,
+            ["crates/archi/src/plans/records.rs, crates/archi/src/plans/mod.rs"]
+        );
+        assert_eq!(task.stack_details, "axum 0.7, the tower layer it rides on");
+        assert_eq!(
+            task.verifications["store-encrypted"],
+            ["test — a row written through the gate comes back sealed"]
+        );
+
+        // A blank line between bullets changes nothing, and a bullet
+        // refused is refused at the line it opened on.
+        let spaced = text.replace("- `Store`\n", "\n- `Store`\n\n");
+        assert_eq!(parse_task("t", "t1", &spaced).unwrap(), task);
+        let bad = text.replace("- `Auth.creds wire\n", "- Auth.creds wire\n");
+        let err = parse_task("t", "t1", &bad).unwrap_err();
+        assert!(err.contains("line 13"), "{err}");
+        assert!(err.contains("backtick-wrapped"), "{err}");
+    }
+
+    /// The fold changes nothing about the records this repository stands on:
+    /// every bullet the parser produces from them is one line of its own file
+    /// (`archi/requirements/planning/a-record-bullet-may-wrap.md`).
+    #[test]
+    fn every_record_standing_in_this_repository_parses_as_it_did() {
+        let plans = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../archi/plans");
+        let mut read = 0;
+        for plan in fs::read_dir(&plans).unwrap().filter_map(Result::ok) {
+            let name = plan.file_name().to_string_lossy().into_owned();
+            if !plan.path().is_dir() {
+                continue;
+            }
+            for entry in fs::read_dir(plan.path()).unwrap().filter_map(Result::ok) {
+                let file = entry.file_name().to_string_lossy().into_owned();
+                if !file.ends_with(".md") {
+                    continue;
+                }
+                let label = format!("archi/plans/{name}/{file}");
+                let text = fs::read_to_string(entry.path()).unwrap();
+                let rendered = if let Some(ord) = task_ordinal(&file) {
+                    let task = parse_task(&label, &format!("t{ord}"), &text)
+                        .unwrap_or_else(|e| panic!("{e}"));
+                    render_task(&task)
+                } else if file == format!("{name}.md") {
+                    let (problem, stack, summary, mapping) =
+                        parse_charter(&label, &text).unwrap_or_else(|e| panic!("{e}"));
+                    let mut plan = empty_plan(&name);
+                    plan.problem = problem;
+                    plan.technology_stack = stack;
+                    plan.architecture_summary = summary;
+                    plan.stack_mapping = mapping;
+                    render_charter(&plan)
+                } else {
+                    // A `scenarios.md` an old plan was written with is read
+                    // by nobody, here as anywhere else.
+                    continue;
+                };
+                let lines: std::collections::BTreeSet<&str> =
+                    text.lines().map(str::trim_end).collect();
+                for bullet in rendered.lines().filter(|l| l.starts_with("- ")) {
+                    assert!(lines.contains(bullet), "`{label}` folded `{bullet}`");
+                }
+                read += 1;
+            }
+        }
+        assert!(read > 40, "the records were not read: {read} files");
     }
 
     #[test]

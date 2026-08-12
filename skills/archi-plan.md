@@ -233,8 +233,9 @@ persist rows
 - `## Verifications` — one `### <slug>` subhead per owned requirement,
   with proof bullets under it, as described below.
 
-A record bullet is one bullet on one line. The bullets do not wrap: a
-continuation line carries no `- `, and the record refuses to parse.
+A bullet may run onto further lines: the section splits at the lines that
+open with `- `, so a bullet section carries bullets and nothing else — a
+paragraph left under them joins the last bullet.
 
 ### Curate the requirements
 

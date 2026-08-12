@@ -29,7 +29,10 @@ a bullet may wrap, and an empty block asks only where a condition is owed
 ## Stack
 
 - `bullet()` at `crates/archi/src/plans/records.rs:256` strips `- ` from one line and refuses anything else; the line loops that call it sit around lines 287, 371, 445 and 650, and each mixes bullet sections with prose sections
-- the fold applies to bullet sections alone — a bare line in a prose section is prose and stays one line, exactly as today
+- the fold applies to bullet sections alone — a bare line in a prose
+  section is prose and stays one line,
+
+  exactly as today
 - a section's bullets are its lines split at every line opening with `- `; each piece collapses its line breaks and blank lines to single spaces
 - the line number carried into `shape_err` stays the line the bullet opened on, so a refusal never points at a continuation
 - `EMPTY_BLOCK` at `crates/archi/src/plans/mod.rs:1031` fires on emptiness alone; the owing set is the task nodes minus the `Data`-classified and minus the `.worldignore` entries, which is the same exclusion `world_check::unreached` already computes for `version save`

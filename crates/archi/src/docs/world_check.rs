@@ -627,8 +627,7 @@ fn unreached(
     tree: &Tree,
     diags: &mut Vec<DocDiagnostic>,
 ) -> Vec<String> {
-    let carried = data_elements(model);
-    let declared = internal(root, model, &carried, diags);
+    let excluded = outside_the_question(root, model, diags);
     let dump = model.dump();
     let mut nodes: BTreeSet<&str> = BTreeSet::new();
     let mut directed: BTreeMap<&str, bool> = BTreeMap::new();
@@ -690,9 +689,30 @@ fn unreached(
     }
     nodes
         .iter()
-        .filter(|n| !covered.contains(*n) && !carried.contains(**n) && !declared.contains(**n))
+        .filter(|n| !covered.contains(*n) && !excluded.contains(**n))
         .map(|n| (*n).to_string())
         .collect()
+}
+
+/// What the coverage question does not apply to: what the model classifies
+/// as [`DATA`], which the question is of the wrong kind for, and what a
+/// person declared internal in [`IGNORE`]
+/// (`archi/requirements/world-facts/an-internal-element-says-so.md`).
+///
+/// It is one reading with two readers — [`unreached`], which asks what the
+/// world leaves standing, and the plan's close, which asks whether an empty
+/// closing block owes a condition at all. Two readings of what needs
+/// covering had disagreed, and the close sent an author to record a
+/// condition about a payload
+/// (`archi/requirements/planning/the-empty-block-asks-only-where-a-condition-is-owed.md`).
+pub(crate) fn outside_the_question(
+    root: &Path,
+    model: &Model,
+    diags: &mut Vec<DocDiagnostic>,
+) -> BTreeSet<String> {
+    let carried = data_elements(model);
+    let declared = internal(root, model, &carried, diags);
+    carried.into_iter().chain(declared).collect()
 }
 
 /// The same set, off a tree the caller has not loaded — what

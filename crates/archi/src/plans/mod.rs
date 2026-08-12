@@ -1024,14 +1024,43 @@ fn tree_holds_a_world(root: &Path) -> bool {
     !world_check::discover(root, &mut Vec::new()).is_empty()
 }
 
+/// The nodes of a plan that still owe a condition: its task nodes, less what
+/// the coverage question does not apply to — what the model classifies as
+/// `Data` and what `archi/world/.worldignore` declares internal. The
+/// exclusion is the one `version save` already refuses under
+/// ([`world_check::outside_the_question`]), read here so one rule serves both
+/// gates: a payload can never take a fact, and the close that asked for one
+/// asked for the opposite of the design
+/// (`archi/requirements/planning/the-empty-block-asks-only-where-a-condition-is-owed.md`).
+///
+/// What a `.worldignore` line gets wrong is `check`'s to report and is
+/// dropped here, exactly as the save drops it: this gate says one thing.
+fn owing_nodes(root: &Path, model: &Model, plan: &Plan) -> Vec<String> {
+    let outside = world_check::outside_the_question(root, model, &mut Vec::new());
+    let owing: BTreeSet<&str> = plan
+        .tasks
+        .iter()
+        .map(|t| t.node.as_str())
+        .filter(|n| !outside.contains(*n))
+        .collect();
+    owing.into_iter().map(str::to_string).collect()
+}
+
 /// The refusal a plan minted after the world meets when nothing in the world
-/// conditions what it built
-/// (`archi/requirements/world-facts/a-plan-s-own-scenarios-block-retires.md`).
-const EMPTY_BLOCK: &str =
-    "no world fact covers any node this plan holds a task for: the closing block is empty, \
-     and a plan minted after the world does not close on nothing — record the condition \
-     under one of its nodes (`archi world add \"<title>\"`, then `covers:`), or `archi plan \
-     close` to close it by hand";
+/// conditions what it built and a node it built on owes a condition. It names
+/// those nodes: the plan is not where the author acts, the node is
+/// (`archi/requirements/world-facts/a-plan-s-own-scenarios-block-retires.md`,
+/// `archi/requirements/planning/the-empty-block-asks-only-where-a-condition-is-owed.md`).
+fn empty_block(owing: &[String]) -> String {
+    let nodes: Vec<String> = owing.iter().map(|n| format!("`{n}`")).collect();
+    format!(
+        "no world fact covers {}: the closing block is empty, and a plan minted after the \
+         world does not close on a node that owes a condition — record the condition under \
+         one of them (`archi world add \"<title>\"`, then `covers:`), or `archi plan close` \
+         to close it by hand",
+        nodes.join(", ")
+    )
+}
 
 // ---- the derived view: reverse lookup and waves ------------------------------
 
@@ -1778,10 +1807,15 @@ pub fn next(root: &Path, model: &Model) -> Result<NextOutcome, String> {
             // covers anything the plan built. A plan from before the world may
             // do that, and so may any plan on a tree that holds no fact at
             // all: the refusal needs a world to refuse against, and a project
-            // that has not opted in is not behind on one.
+            // that has not opted in is not behind on one. Nor does a plan
+            // whose every task node stands outside the coverage question:
+            // there was never a condition to record.
             let step = if report.block.is_empty() {
                 if plan.minted_after_the_world && tree_holds_a_world(root) {
-                    return Err(EMPTY_BLOCK.into());
+                    let owing = owing_nodes(root, model, &plan);
+                    if !owing.is_empty() {
+                        return Err(empty_block(&owing));
+                    }
                 }
                 plan.state = PlanState::Completed;
                 Step::Done
@@ -2718,7 +2752,10 @@ mod tests {
         let outcome = next(&root, ws.model()).unwrap();
         assert!(matches!(outcome.step, Step::Cleanup));
         let err = next(&root, ws.model()).err().unwrap();
-        assert!(err.contains("no world fact covers any node"), "{err}");
+        // The refusal names the nodes that owe a condition, not the plan
+        // (`the-empty-block-asks-only-where-a-condition-is-owed`).
+        assert!(err.contains("no world fact covers `Auth`, `Store`"), "{err}");
+        assert!(!err.contains("mvp"), "{err}");
         assert_eq!(active(&root).state, PlanState::Started);
 
         fs::remove_dir_all(&root).unwrap();
