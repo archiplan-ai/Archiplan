@@ -45,6 +45,9 @@ fn temp_project() -> PathBuf {
     )
     .unwrap();
     fs::write(dir.join("code/auth.rs"), "pub fn login() -> bool { true }\n").unwrap();
+    // The tests a declaration names. They stand before any wave opens, so
+    // they sit in every wave-open index and are never a change of their own.
+    fs::write(dir.join("code/tests.rs"), TESTS_RS).unwrap();
     put_requirement(&dir, "store-encrypted", "Store encrypted", "Store");
     put_requirement(&dir, "service-hardening", "Service hardening", "Service");
     util::worktree(&dir)
@@ -697,7 +700,7 @@ fn a_legacy_plan_json_reads_forever_and_its_lifecycle_verbs_advance_it() {
     // a record folder.
     let out = ok(&root, &["plan", "start"]);
     assert!(out.contains("wave 1 in flight: t1"), "{out}");
-    declares_nothing(&root, 1, &["t1"]);
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
     let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("the cleanup wave"), "{out}");
     let out = ok(&root, &["plan", "next"]);
@@ -994,7 +997,8 @@ fn the_close_collects_the_wing_and_marks_what_lies_outside() {
     curate(&root, "archi/plans/mvp/t2-auth.md", "service-hardening", "code/auth.rs");
 
     ok(&root, &["plan", "start"]);
-    declares_nothing(&root, 1, &["t1", "t2"]);
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
+    declares(&root, 1, "t2", &[AUTH_ENTRY]);
     let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("the cleanup wave"), "{out}");
 
@@ -1082,7 +1086,7 @@ fn the_close_gates_on_anchored_scenarios() {
     ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
     curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
     ok(&root, &["plan", "start"]);
-    declares_nothing(&root, 1, &["t1"]);
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
     ok(&root, &["plan", "next"]);
     let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("riders-lose-the-signal#the app opens with no network"), "{out}");
@@ -1124,7 +1128,7 @@ fn the_close_gates_on_anchored_scenarios() {
     ok(&root, &["plan", "start"]);
     // The reset took the waves folder with it, declarations and all: the
     // second run of the ceremony writes the formality again.
-    declares_nothing(&root, 1, &["t1"]);
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
     ok(&root, &["plan", "next"]);
     ok(&root, &["plan", "next"]);
     let out = ok(&root, &["plan", "next"]);
@@ -1166,7 +1170,7 @@ fn a_post_wing_plan_on_a_tree_with_a_wing_refuses_until_a_fact_covers_a_node() {
     ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
     curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
     ok(&root, &["plan", "start"]);
-    declares_nothing(&root, 1, &["t1"]);
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
     ok(&root, &["plan", "next"]);
 
     // No fact covers the node the plan holds a task for: the close refuses.
@@ -1231,7 +1235,7 @@ fn a_post_wing_plan_on_a_tree_with_no_wing_closes_without_a_refusal() {
     ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
     curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
     ok(&root, &["plan", "start"]);
-    declares_nothing(&root, 1, &["t1"]);
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
     let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("the cleanup wave"), "{out}");
 
@@ -1301,7 +1305,8 @@ fn the_closing_step_prints_the_gherkin_the_state_and_the_command() {
         ],
     );
     ok(&root, &["plan", "start"]);
-    declares_nothing(&root, 1, &["t1", "t2"]);
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
+    declares(&root, 1, "t2", &[AUTH_ENTRY]);
     ok(&root, &["plan", "next"]);
     let out = ok(&root, &["plan", "next"]);
 
@@ -1395,7 +1400,7 @@ fn the_printed_link_add_line_anchors_the_scenario_through_a_real_shell() {
     ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
     curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
     ok(&root, &["plan", "start"]);
-    declares_nothing(&root, 1, &["t1"]);
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
     ok(&root, &["plan", "next"]);
     let out = ok(&root, &["plan", "next"]);
 
@@ -1608,10 +1613,16 @@ fn declares_rel(wave: usize, task: &str) -> String {
     format!("archi/plans/mvp/waves/w{wave:02}.{task}.declares.toml")
 }
 
+/// The one declaration a `Store` task writes when its own work is not the
+/// subject of the test: one pair, which is all the gate asks for.
+const STORE_ENTRY: [&str; 3] = ["code/store.rs#Store::put", "Store", PROOF];
+
+/// The same for an `Auth` task.
+const AUTH_ENTRY: [&str; 3] = ["code/auth.rs#login", "Auth", AUTH_PROOF];
+
 /// Write one task's declaration file, as its sub-agent does before it
-/// returns: one `[[declares]]` table per symbol it changed. A task that
-/// changed nothing writes the empty list — the file is the formality, and
-/// what it names is the gate that matters.
+/// returns: one `[[declares]]` table per pair it accounts for. An empty
+/// list writes the file that names nothing, which the wave refuses.
 fn declares(root: &Path, wave: usize, task: &str, entries: &[[&str; 3]]) {
     let mut text = String::new();
     for [symbol, answers, proved_by] in entries {
@@ -1626,14 +1637,6 @@ fn declares(root: &Path, wave: usize, task: &str, entries: &[[&str; 3]]) {
     let path = root.join(declares_rel(wave, task));
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(path, text).unwrap();
-}
-
-/// The formality every task of a wave performs before it closes: its
-/// declaration file, naming nothing, because nothing under its outputs moved.
-fn declares_nothing(root: &Path, wave: usize, tasks: &[&str]) {
-    for task in tasks {
-        declares(root, wave, task, &[]);
-    }
 }
 
 /// The id of the one live link whose row holds `row`.
@@ -1668,15 +1671,14 @@ fn unstamp_rule(root: &Path, id: &str) {
     fs::write(&path, format!("{}\n", aged.join("\n"))).unwrap();
 }
 
-/// The delta says what moved; the declaration says what it answers. The wave
-/// refuses while a task in flight wrote no declaration file, and while a
-/// symbol it moved is named in none — and a changed file no task claims stays
-/// the leftover note it always was
+/// The gate is the file and nothing else. A task in flight accounts for its
+/// work by writing one; a file that names nothing accounts for nothing and
+/// refuses the same way. What the file holds is the writer's to decide — one
+/// entry closes the wave, whatever else the delta moved
 /// (`archi/requirements/planning/an-undeclared-change-refuses-the-wave.md`).
 #[test]
-fn a_wave_refuses_until_every_changed_symbol_a_task_claims_is_declared() {
+fn a_wave_refuses_until_every_task_in_flight_has_declared() {
     let root = temp_project();
-    fs::write(root.join("code/tests.rs"), TESTS_RS).unwrap();
     ok(&root, &["version", "save", "-m", "first"]);
     ok(&root, &["plan", "use", "mvp"]);
     ok(&root, &["plan", "task", "add", "Store"]);
@@ -1703,149 +1705,42 @@ fn a_wave_refuses_until_every_changed_symbol_a_task_claims_is_declared() {
     fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
     fs::write(root.join("code/orphan.rs"), "pub fn stray() -> u8 { 7 }\n").unwrap();
 
-    // Nothing declared: the wave refuses, naming the task and the file it owes.
+    // No file: the refusal names the task, the path it owes and the command
+    // that follows.
     let (stdout, err) = fails(&root, &["plan", "next"]);
     assert!(err.contains("t1 — write"), "names the task: {err}");
-    assert!(err.contains(&declares_rel(1, "t1")), "names the file: {err}");
-    assert!(err.contains("archi plan next"), "names the continuation: {err}");
+    assert!(err.contains(&declares_rel(1, "t1")), "names the path: {err}");
+    assert!(err.contains("re-run `archi plan next`"), "names the next command: {err}");
     assert!(stdout.contains("leftover code/orphan.rs#stray"), "{stdout}");
 
-    // One symbol declared and one not: the refusal names the second alone,
-    // with the task whose outputs claim its file.
-    declares(&root, 1, "t1", &[["code/store.rs#Store::put", "Store", PROOF]]);
-    let (stdout, err) = fails(&root, &["plan", "next"]);
-    assert!(err.contains("code/store.rs#Store::get — owed by t1"), "{err}");
-    assert!(!err.contains("Store::put"), "the declared symbol is left alone: {err}");
-    assert!(!err.contains("orphan"), "no task claims it, so nothing owes it: {err}");
-    assert!(err.contains(&declares_rel(1, "t1")), "names the file to edit: {err}");
-    assert_eq!(captured_ids(&stdout).len(), 1, "the declared pair minted: {stdout}");
+    // A file that parses and declares nothing accounts for nothing: the same
+    // refusal, naming the same task, the same path and the same command.
+    declares(&root, 1, "t1", &[]);
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains("names nothing"), "{err}");
+    assert!(err.contains("t1"), "names the task: {err}");
+    assert!(err.contains(&declares_rel(1, "t1")), "names the path: {err}");
+    assert!(err.contains("re-run `archi plan next`"), "names the next command: {err}");
 
-    // Declaring the missing symbol clears the refusal and the wave closes;
-    // the file nobody claims is still a leftover and still owes nothing.
-    declares(
-        &root,
-        1,
-        "t1",
-        &[
-            ["code/store.rs#Store::put", "Store", PROOF],
-            ["code/store.rs#Store::get", "Store", PROOF],
-        ],
-    );
+    // One entry closes the wave, whatever else the delta moved: two symbols
+    // moved under t1's output and the file names one of them.
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
     let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("wave 1 closed — in flight: t2"), "{out}");
     assert!(out.contains("leftover code/orphan.rs#stray"), "{out}");
 
-    // Wave 2 moves nothing: no symbol is owed, and the file itself is all
-    // that stands between the wave and its close.
+    // The same gate on the next wave, and the same one line answers it.
     let (_, err) = fails(&root, &["plan", "next"]);
     assert!(err.contains("t2 — write"), "{err}");
-    assert!(!err.contains("owed by"), "an empty delta owes no symbol: {err}");
-    declares(&root, 2, "t2", &[]);
+    declares(&root, 2, "t2", &[AUTH_ENTRY]);
     let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("the cleanup wave"), "{out}");
 
-    fs::remove_dir_all(&root).unwrap();
-}
-
-/// A symbol two in-flight tasks claim is owed by both of them, and each
-/// declaration mints its own pair on it — so the one symbol carries two
-/// claims and the reverse view names the task behind each
-/// (`archi/requirements/planning/every-task-that-touched-a-symbol-declares-it.md`).
-#[test]
-fn a_symbol_two_tasks_claim_is_owed_by_both_and_carries_two_pairs() {
-    let root = temp_project();
-    fs::write(root.join("code/tests.rs"), TESTS_RS).unwrap();
-    ok(&root, &["version", "save", "-m", "first"]);
-    ok(&root, &["plan", "use", "mvp"]);
-    ok(&root, &["plan", "task", "add", "Store"]);
-    ok(&root, &["plan", "task", "add", "Auth"]);
-    // Neither task inputs the other, so both open in wave 1 — and both claim
-    // `code/store.rs`.
-    write_record(
-        &root,
-        "archi/plans/mvp/t1-store.md",
-        "---\nnode: Store\nowns: [store-encrypted]\n---\n\n# t1 — Store\n\npersist rows\n\n\
-         ## Spec\n\n- `Store`\n\n## Inputs\n\n## Outputs\n\n- code/store.rs\n\n## Stack\n\n\
-         ## Verifications\n\n### store-encrypted\n\n- test — proves store-encrypted\n",
-    );
-    write_record(
-        &root,
-        "archi/plans/mvp/t2-auth.md",
-        "---\nnode: Auth\nowns: [service-hardening]\n---\n\n# t2 — Auth\n\nguard the door\n\n\
-         ## Spec\n\n- `Auth`\n- `Service type_of Auth`\n\n## Inputs\n\n\
-         ## Outputs\n\n- code/auth.rs\n- code/store.rs\n\n## Stack\n\n## Verifications\n\n\
-         ### service-hardening\n\n- test — proves service-hardening\n",
-    );
-    let out = ok(&root, &["plan", "start"]);
-    assert!(out.contains("wave 1 in flight: t1, t2"), "{out}");
-
-    // One symbol both tasks claim moves, and one only t2 claims.
-    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
-    fs::write(
-        root.join("code/auth.rs"),
-        "pub fn login(u: &str) -> bool { !u.is_empty() }\n",
-    )
-    .unwrap();
-
-    // Neither task wrote a file: the refusal names both.
-    let (_, err) = fails(&root, &["plan", "next"]);
-    assert!(err.contains("t1 — write") && err.contains("t2 — write"), "{err}");
-
-    // Both files stand and name nothing: the shared symbol is named once,
-    // with both tasks; the symbol only t2 claims is owed by t2 alone.
-    declares(&root, 1, "t1", &[]);
-    declares(&root, 1, "t2", &[]);
-    let (_, err) = fails(&root, &["plan", "next"]);
-    assert_eq!(
-        err.matches("code/store.rs#Store::put").count(),
-        1,
-        "the symbol is named once: {err}"
-    );
-    assert!(err.contains("code/store.rs#Store::put — owed by t1, t2"), "{err}");
-    assert!(err.contains("code/auth.rs#login — owed by t2"), "{err}");
-
-    // One of the two declaring is not enough: the refusal names the other.
-    declares(
-        &root,
-        1,
-        "t1",
-        &[
-            ["code/store.rs#Store::put", "Store", PROOF],
-            ["code/store.rs#Store::get", "Store", PROOF],
-        ],
-    );
-    let (_, err) = fails(&root, &["plan", "next"]);
-    assert!(err.contains("code/store.rs#Store::put — owed by t2"), "{err}");
-    assert!(!err.contains("owed by t1"), "t1 declared it: {err}");
-
-    // Both declaring closes the wave, and two pairs stand on the one symbol
-    // — each naming the task that declared it.
-    declares(
-        &root,
-        1,
-        "t2",
-        &[
-            ["code/store.rs#Store::put", "Auth", AUTH_PROOF],
-            ["code/store.rs#Store::get", "Auth", AUTH_PROOF],
-            ["code/auth.rs#login", "Auth", AUTH_PROOF],
-        ],
-    );
+    // Past the last wave no task is in flight, so no file is owed: the
+    // cleanup step and the close run with none on disk.
+    assert!(!root.join(declares_rel(3, "t1")).exists());
     let out = ok(&root, &["plan", "next"]);
-    assert!(out.contains("the cleanup wave"), "{out}");
-    let rows = ok(&root, &["link", "ls"]);
-    let pairs: Vec<&str> = rows
-        .lines()
-        .filter(|l| l.contains("← code/store.rs#Store::put"))
-        .collect();
-    assert_eq!(pairs.len(), 2, "two claims, not one duplicated:\n{rows}");
-    assert!(
-        pairs.iter().any(|l| l.contains("captured(t1)") && l.contains("Store ←")),
-        "{rows}"
-    );
-    assert!(
-        pairs.iter().any(|l| l.contains("captured(t2)") && l.contains("Auth ←")),
-        "{rows}"
-    );
+    assert!(out.contains("DONE"), "{out}");
 
     fs::remove_dir_all(&root).unwrap();
 }
@@ -1857,7 +1752,6 @@ fn a_symbol_two_tasks_claim_is_owed_by_both_and_carries_two_pairs() {
 #[test]
 fn a_wave_that_moves_a_declared_symbol_refuses_until_the_pair_is_repinned() {
     let root = temp_project();
-    fs::write(root.join("code/tests.rs"), TESTS_RS).unwrap();
     ok(&root, &["version", "save", "-m", "first"]);
     ok(&root, &["plan", "use", "mvp"]);
     ok(&root, &["plan", "task", "add", "Store"]);
@@ -1964,7 +1858,6 @@ fn a_wave_that_moves_a_declared_symbol_refuses_until_the_pair_is_repinned() {
 #[test]
 fn the_second_exit_retires_the_stale_pair_and_the_declaration_mints_it_anew() {
     let root = temp_project();
-    fs::write(root.join("code/tests.rs"), TESTS_RS).unwrap();
     ok(&root, &["version", "save", "-m", "first"]);
     ok(&root, &["plan", "use", "mvp"]);
     ok(&root, &["plan", "task", "add", "Store"]);

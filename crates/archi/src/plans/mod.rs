@@ -1526,64 +1526,42 @@ fn gate_structure(report: &PlanReport) -> Result<(), String> {
 }
 
 
-/// The declaration gates, in the order their refusals repair: the file
-/// first, then the symbols it did not name, then the claims the wave moved
-/// out from under. Each one leaves the wave open exactly as the coverage
-/// gate does, and each names what is wrong, the file to edit and the command
-/// that follows
+/// The declaration gates: the file a task in flight owes, then the claims the
+/// wave moved out from under. Each leaves the wave open exactly as the
+/// coverage gate does, and each names what is wrong, the file to edit and the
+/// command that follows
 /// (`archi/requirements/planning/an-undeclared-change-refuses-the-wave.md`,
-/// `archi/requirements/planning/every-task-that-touched-a-symbol-declares-it.md`,
+/// `archi/requirements/code-link/a-drifted-declaration-refuses-the-wave-that-moved-it.md`,
 /// `archi/requirements/planning/the-declaration-refusal-repairs-without-guessing.md`).
+///
+/// The gate is the file and nothing else. It was drawn wider once — every
+/// symbol of the wave's delta had to be named — and the reach is what killed
+/// it: a test answers no part of the spec and a fixture constant answers
+/// nothing at all, so the wider rule asked for a field that does not exist for
+/// most of what a wave moves. What the file holds is the writer's to decide.
 fn gate_declarations(
     root: &Path,
     model: &Model,
-    plan: &str,
-    wave: usize,
     capture: &links::capture::CaptureOutcome,
 ) -> Result<(), String> {
-    // The formality: one file per task in flight. An empty list satisfies it,
-    // and a task that changed nothing says so in one line rather than by
-    // silence.
-    if !capture.absent.is_empty() {
+    if !capture.absent.is_empty() || !capture.empty.is_empty() {
         let mut msg =
             String::from("the wave cannot close while a task in flight has declared nothing:");
         for (task, path) in &capture.absent {
             msg.push_str(&format!("\n  {task} — write `{path}`"));
         }
+        for (task, path) in &capture.empty {
+            msg.push_str(&format!("\n  {task} — `{path}` names nothing"));
+        }
         msg.push_str(
-            "\neach task in flight writes one file, naming for every symbol it changed what that \
-             symbol answers and the test that proves it:\n  \
+            "\neach task in flight writes one file, naming what it changed, what that code \
+             answers and the test that proves it:\n  \
              [[declares]]\n  symbol = \"<file>#<symbol>\"\n  \
              answers = \"<node, port or req:slug>\"\n  \
              proved_by = \"<test file>#<test fn>\"\n\
-             a task that changed nothing writes `declares = []`; then re-run `archi plan next`",
+             what the file holds is the writer's to decide: one entry closes the wave. Then \
+             re-run `archi plan next`",
         );
-        return Err(msg);
-    }
-
-    // The gate that matters: the delta already knows every symbol that moved,
-    // so a ref that shares no word with one cannot leave the checklist in
-    // silence — the symbol is owed by every task whose outputs claim its file.
-    if !capture.undeclared.is_empty() {
-        let mut msg = String::from("the wave moved symbols no declaration names:");
-        for u in &capture.undeclared {
-            msg.push_str(&format!("\n  {} — owed by {}", u.item, u.tasks.join(", ")));
-        }
-        msg.push_str(
-            "\nevery task whose outputs claim the file declares the symbol, each in its own file:",
-        );
-        let owing: BTreeSet<&str> = capture
-            .undeclared
-            .iter()
-            .flat_map(|u| u.tasks.iter().map(String::as_str))
-            .collect();
-        for task in owing {
-            msg.push_str(&format!(
-                "\n  {task} — `{}`",
-                links::capture::declares_rel(plan, wave, task)
-            ));
-        }
-        msg.push_str("\nthen re-run `archi plan next`");
         return Err(msg);
     }
 
@@ -1845,7 +1823,7 @@ pub fn next(root: &Path, model: &Model) -> Result<NextOutcome, String> {
         .filter(|t| waves[wave - 1].contains(&t.id))
         .collect();
     let capture = links::capture::capture_wave(root, model, &plan.name, wave, &in_flight, None)?;
-    if let Err(why) = gate_declarations(root, model, &plan.name, wave, &capture) {
+    if let Err(why) = gate_declarations(root, model, &capture) {
         return Ok(NextOutcome {
             capture: Some(capture),
             step: Step::Blocked(why),
@@ -2716,12 +2694,27 @@ mod tests {
             &["the tunnel ends"],
         );
         start(&root, ws.model()).unwrap();
-        // The reset took the waves folder with it, declarations and all, and
-        // the replay moves no code: each task's file names nothing.
-        put(&root, "archi/plans/mvp/waves/w01.t1.declares.toml", "declares = []\n");
+        // The reset took the waves folder with it, declarations and all, so
+        // each wave asks for its file again. Both name a pair the journal
+        // already holds, so the replay mints nothing.
+        put(
+            &root,
+            "archi/plans/mvp/waves/w01.t1.declares.toml",
+            "[[declares]]\n\
+             symbol = \"code/store.rs#Store::put\"\n\
+             answers = \"Store\"\n\
+             proved_by = \"code/store_test.rs#a_row_is_persisted\"\n",
+        );
         let outcome = next(&root, ws.model()).unwrap();
         assert!(matches!(outcome.step, Step::Wave { closed: 1, .. }));
-        put(&root, "archi/plans/mvp/waves/w02.t2.declares.toml", "declares = []\n");
+        put(
+            &root,
+            "archi/plans/mvp/waves/w02.t2.declares.toml",
+            "[[declares]]\n\
+             symbol = \"code/auth.rs\"\n\
+             answers = \"Auth\"\n\
+             proved_by = \"code/store_test.rs#a_row_is_persisted\"\n",
+        );
         let outcome = next(&root, ws.model()).unwrap();
         assert!(matches!(outcome.step, Step::Cleanup));
         let err = next(&root, ws.model()).err().unwrap();
@@ -3140,9 +3133,17 @@ mod tests {
         let (started, wave1) = start(&root, ws.model()).unwrap();
         assert_eq!(started.state, PlanState::Started);
         assert_eq!(wave1, vec!["t1".to_string()]);
-        // Nothing under the task's outputs moved, so nothing is owed — and
-        // the file that says so is the formality every wave asks for.
-        put(&root, "archi/plans/old/waves/w01.t1.declares.toml", "declares = []\n");
+        // The wave asks that the task in flight account for its work: one
+        // pair, whatever else the delta holds.
+        put(&root, "code/store_test.rs", "pub fn a_row_is_persisted() {\n    assert!(true);\n}\n");
+        put(
+            &root,
+            "archi/plans/old/waves/w01.t1.declares.toml",
+            "[[declares]]\n\
+             symbol = \"code/store.rs#Store::put\"\n\
+             answers = \"Store\"\n\
+             proved_by = \"code/store_test.rs#a_row_is_persisted\"\n",
+        );
         let outcome = next(&root, ws.model()).unwrap();
         assert!(matches!(outcome.step, Step::Cleanup));
         let outcome = next(&root, ws.model()).unwrap();
