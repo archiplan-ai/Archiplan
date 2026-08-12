@@ -14,7 +14,9 @@
 //! (`archi/requirements/world-facts/a-scenario-link-binds-two-hashes.md`).
 //!
 //! Storage is an append-only journal, `archi/links/journal.jsonl` — events
-//! `add`, `confirm`, `repin`, `retire`; the live link set is its fold. A
+//! `add`, `repin`, `retire`, and the `confirm`, `touch` and `decay` events
+//! older binaries wrote, which the fold still reads; the live link set is its
+//! fold. A
 //! commit sha in a birth record is provenance, never a dependency, exactly
 //! as in the version archive (`archi/requirements/versioning/keyframes-bound-the-archive.md`).
 
@@ -67,21 +69,37 @@ impl LinkKind {
     }
 }
 
-/// What the link may do: asserted links gate, evidence links inform.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+/// What the link may do. There is one standing: a link is a claim, it gates,
+/// and it verifies strictly
+/// (`archi/requirements/code-link/a-link-stands-asserted-or-it-does-not-stand.md`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Standing {
     /// A claim: participates in gates, verifies strictly.
     Asserted,
-    /// Accreted by capture; never fails a verify, retires when decayed.
-    Evidence,
+}
+
+/// The second standing left the tool; the rows it minted stay, because the
+/// journal is append-only truth and no migration rewrites it. A row that
+/// says `evidence` loads as the claim it now is, and it grades, lists and
+/// gates exactly like every other row. What it was born of still reads in
+/// `rule`, which is the record of how it was made.
+impl<'de> Deserialize<'de> for Standing {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Standing, D::Error> {
+        let word = String::deserialize(d)?;
+        match word.as_str() {
+            "asserted" | "evidence" => Ok(Standing::Asserted),
+            other => Err(serde::de::Error::custom(format!(
+                "`{other}` is not a link standing"
+            ))),
+        }
+    }
 }
 
 impl Standing {
     fn describe(self) -> &'static str {
         match self {
             Standing::Asserted => "asserted",
-            Standing::Evidence => "evidence",
         }
     }
 }
@@ -92,7 +110,7 @@ impl Standing {
 pub enum Origin {
     /// Minted by `archi link add` — asserted by construction.
     Authored,
-    /// Minted by task-close capture — lands as evidence.
+    /// Minted by task-close capture, from the declaration a writer wrote.
     Captured {
         /// The task whose delta produced it.
         task: String,
@@ -415,7 +433,9 @@ pub struct Link {
     pub anchor: Anchor,
     /// Which hash is watched.
     pub kind: LinkKind,
-    /// Asserted or evidence.
+    /// What the row may do. There is one standing, and a row that says the
+    /// retired one loads as this one
+    /// (`archi/requirements/code-link/a-link-stands-asserted-or-it-does-not-stand.md`).
     pub standing: Standing,
     /// Where the link came from.
     pub origin: Origin,
@@ -438,14 +458,10 @@ pub struct Link {
     pub birth: Birth,
     /// The projection's hashes.
     pub pins: Pins,
-    /// Tasks whose captures re-encountered this link — evidence confidence
-    /// accrues. Folded from `touch` events, one entry per task.
+    /// Tasks whose captures re-encountered this link. Folded from `touch`
+    /// events, one entry per task.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub touches: Vec<String>,
-    /// Tasks whose captures saw the anchored item change without carrying
-    /// the spec_ref — confidence decays. Folded from `decay` events.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub decays: Vec<String>,
 }
 
 /// A journaled row as it is read: [`Link`]'s shape, with the producing rule
@@ -470,8 +486,6 @@ struct Row {
     pins: Pins,
     #[serde(default)]
     touches: Vec<String>,
-    #[serde(default)]
-    decays: Vec<String>,
 }
 
 impl From<Row> for Link {
@@ -488,7 +502,6 @@ impl From<Row> for Link {
             birth: r.birth,
             pins: r.pins,
             touches: r.touches,
-            decays: r.decays,
         }
     }
 }
@@ -503,6 +516,8 @@ enum Event {
     Add {
         link: Link,
     },
+    /// Written by an older binary, when a reader raised a guess to a claim.
+    /// Every row is a claim now, so the fold reads it and applies nothing.
     Confirm {
         id: String,
         at: String,
@@ -527,6 +542,11 @@ enum Event {
         task: String,
         at: String,
     },
+    /// Written by an older binary, when a wave that rewrote an anchored item
+    /// without carrying its spec_ref eroded a guess. Nothing writes one now,
+    /// and the fold reads it to skip it: the journal is append-only, so the
+    /// events stand and the reader stays
+    /// (`archi/requirements/code-link/a-link-stands-asserted-or-it-does-not-stand.md`).
     Decay {
         id: String,
         task: String,
@@ -631,13 +651,19 @@ fn fold(events: Vec<Event>) -> Result<Folded, String> {
                 live.push(link);
                 adds += 1;
             }
-            Event::Confirm { id, .. } => match live.iter_mut().find(|l| l.id == id) {
-                Some(l) => l.standing = Standing::Asserted,
-                None if retired.iter().any(|l| l.id == id) => {
-                    absorbed.push(format!("`confirm` on retired `{id}` — absorbed"));
+            // The raise a `confirm` recorded is what every row stands at, so
+            // the event applies nothing. The journal is still read strictly:
+            // an id it never minted is corruption, and one landing on a
+            // tombstone is absorbed exactly as before.
+            Event::Confirm { id, .. } => {
+                if !live.iter().any(|l| l.id == id) {
+                    if retired.iter().any(|l| l.id == id) {
+                        absorbed.push(format!("`confirm` on retired `{id}` — absorbed"));
+                    } else {
+                        return Err(corrupt(&id, "confirm"));
+                    }
                 }
-                None => return Err(corrupt(&id, "confirm")),
-            },
+            }
             Event::Repin {
                 id,
                 anchor,
@@ -677,17 +703,10 @@ fn fold(events: Vec<Event>) -> Result<Folded, String> {
                 }
                 None => return Err(corrupt(&id, "touch")),
             },
-            Event::Decay { id, task, .. } => match live.iter_mut().find(|l| l.id == id) {
-                Some(l) => {
-                    if !l.decays.contains(&task) {
-                        l.decays.push(task);
-                    }
-                }
-                None if retired.iter().any(|l| l.id == id) => {
-                    absorbed.push(format!("`decay` on retired `{id}` — absorbed"));
-                }
-                None => return Err(corrupt(&id, "decay")),
-            },
+            // The erosion a `decay` recorded scores nothing now. The event is
+            // read and skipped — never an error, whatever id it names — so
+            // every journal an older binary wrote still folds.
+            Event::Decay { .. } => {}
         }
     }
     Ok(Folded {
@@ -1292,7 +1311,6 @@ pub(crate) fn mint(
         },
         pins,
         touches: Vec::new(),
-        decays: Vec::new(),
     };
     append(root, &[Event::Add { link: link.clone() }])?;
     Ok(link)
@@ -1319,41 +1337,18 @@ fn on_ref(live: Vec<Link>, filter: Option<&SpecRef>) -> Vec<Link> {
 /// authored. The inferred rows keep standing and keep grading; they are
 /// simply not evidence that anybody claimed this code answers this
 /// requirement (`archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`).
-pub fn ls(
-    root: &Path,
-    spec: Option<&str>,
-    evidence_only: bool,
-) -> Result<Vec<Link>, String> {
+///
+/// There is no standing to filter on: every live row is a claim, so the list
+/// is the whole live set under the ref
+/// (`archi/requirements/code-link/a-link-stands-asserted-or-it-does-not-stand.md`).
+pub fn ls(root: &Path, spec: Option<&str>) -> Result<Vec<Link>, String> {
     let folded = load(root)?;
     let filter = spec.map(SpecRef::parse).transpose()?;
     let reverse = filter.as_ref().is_some_and(|f| f.requirement().is_some());
     Ok(on_ref(folded.live, filter.as_ref())
         .into_iter()
         .filter(|l| !reverse || l.rule != Rule::Inferred)
-        .filter(|l| !evidence_only || l.standing == Standing::Evidence)
         .collect())
-}
-
-/// `archi link confirm`: raise an evidence link to asserted — a decision,
-/// recorded.
-pub fn confirm(root: &Path, id: &str) -> Result<Link, String> {
-    let folded = load(root)?;
-    let link = folded
-        .get(id)
-        .ok_or_else(|| format!("no live link `{id}`"))?;
-    if link.standing == Standing::Asserted {
-        return Err(format!("`{id}` is already asserted"));
-    }
-    append(
-        root,
-        &[Event::Confirm {
-            id: id.to_string(),
-            at: now(),
-        }],
-    )?;
-    let mut confirmed = link.clone();
-    confirmed.standing = Standing::Asserted;
-    Ok(confirmed)
 }
 
 /// `archi link rm`: retire links by id.
@@ -1493,7 +1488,7 @@ pub enum State {
     Missing,
     /// The anchor's member has no checkout here — a state of its own,
     /// upstream of Missing: the code is not gone, this machine cannot see
-    /// it. No observation, no decay, no prune
+    /// it. An absence is no observation, and nothing is read from it
     /// (`archi/requirements/multi-repo/absence-is-not-drift`).
     Unreachable {
         /// The member with no local root.
@@ -1531,27 +1526,6 @@ impl State {
     }
 }
 
-/// The floor below which evidence reads as decayed — confirm or retire
-/// (`archi/requirements/code-link/the-audit-inverts-coverage.md`).
-pub const CONFIDENCE_FLOOR: f64 = 0.25;
-
-/// Derived confidence of an evidence link — never stored. Born at 0.5;
-/// each task whose capture re-encountered it accrues, each task that
-/// rewrote the anchored item without carrying the spec_ref erodes, any
-/// projection drift erodes once, and a dead anchor zeroes.
-pub fn confidence(link: &Link, state: &State) -> f64 {
-    if matches!(state, State::Missing) {
-        return 0.0;
-    }
-    // An unreachable member is no observation at all: confidence holds
-    // exactly where the last actual read left it.
-    let unread = matches!(state, State::Unreachable { .. });
-    let drift = if matches!(state, State::Clean) || unread { 0.0 } else { -0.25 };
-    let accrued = 0.15 * link.touches.len() as f64;
-    let eroded = 0.25 * link.decays.len() as f64;
-    (0.5 + accrued - eroded + drift).clamp(0.0, 1.0)
-}
-
 /// One verified link.
 #[derive(Serialize)]
 pub struct Checked {
@@ -1560,10 +1534,11 @@ pub struct Checked {
     /// Its graded state.
     #[serde(flatten)]
     pub state: State,
-    /// Whether this state fails the verify: asserted links only — evidence
-    /// never fails. `Missing`, `CanonicalizerMismatch`, a Working-slot
-    /// `SpecDrifted` and `ScenarioDrifted` always fail; `Drifted` fails
-    /// literal links only. The spec side knows no literal/indirect split: a
+    /// Whether this state fails the verify. Every live row is a claim, so
+    /// every one of them can fail: `Missing`, `CanonicalizerMismatch`, a
+    /// Working-slot `SpecDrifted` and `ScenarioDrifted` always fail;
+    /// `Drifted` fails literal links only. The spec side knows no
+    /// literal/indirect split: a
     /// witness is one thing, and half of it moving moves all of it.
     pub failing: bool,
     /// Human context: what moved, what held.
@@ -1684,7 +1659,7 @@ fn check_link(
     if link.spec.version.is_some() && !slots.resolves_pinned(&link.spec)? {
         let state = State::SpecDrifted;
         return Ok(Checked {
-            failing: link.standing == Standing::Asserted,
+            failing: true,
             note: Some(format!(
                 "`{}` is not an element of {} — the journal disagrees with the sealed archive",
                 link.spec.path,
@@ -1697,7 +1672,7 @@ fn check_link(
     if link.spec.version.is_none() && !at_working {
         let state = State::SpecDrifted;
         return Ok(Checked {
-            failing: link.standing == Standing::Asserted,
+            failing: true,
             // A renamed scenario has no version chain to locate it — the
             // repair is naming the new name. A retired requirement has none
             // either: the slug is the identity, and it went.
@@ -1746,7 +1721,7 @@ fn check_projection(
     if !code::knows(&link.pins.canonicalizer) {
         let state = State::CanonicalizerMismatch;
         return Ok(Checked {
-            failing: link.standing == Standing::Asserted,
+            failing: true,
             note: Some(format!(
                 "stored canonicalizer `{}` is unknown to this verifier; rehash with `link repin`",
                 link.pins.canonicalizer
@@ -1793,8 +1768,7 @@ fn check_projection(
         Err(_) => {
             let (state, note) = scan_for_candidate(root, &member_root, &link);
             return Ok(Checked {
-                failing: link.standing == Standing::Asserted
-                    && matches!(state, State::Missing),
+                failing: matches!(state, State::Missing),
                 note: note.or(working_note),
                 link,
                 state,
@@ -1805,7 +1779,7 @@ fn check_projection(
     if canonical.canonicalizer != link.pins.canonicalizer {
         let state = State::CanonicalizerMismatch;
         return Ok(Checked {
-            failing: link.standing == Standing::Asserted,
+            failing: true,
             note: Some(format!(
                 "`{}` now canonicalizes as `{}`, pinned under `{}`",
                 link.anchor.file, canonical.canonicalizer, link.pins.canonicalizer
@@ -1823,8 +1797,7 @@ fn check_projection(
             [] => {
                 let (state, note) = scan_for_candidate(root, &member_root, &link);
                 return Ok(Checked {
-                    failing: link.standing == Standing::Asserted
-                        && matches!(state, State::Missing),
+                    failing: matches!(state, State::Missing),
                     note: note.or(working_note),
                     link,
                     state,
@@ -1835,7 +1808,7 @@ fn check_projection(
                 let lines: Vec<String> = many.iter().map(|i| i.start_line.to_string()).collect();
                 let state = State::Missing;
                 return Ok(Checked {
-                    failing: link.standing == Standing::Asserted,
+                    failing: true,
                     note: Some(format!(
                         "`{symbol}` is ambiguous in `{}` (lines {}); repin a qualified symbol",
                         link.anchor.file,
@@ -1864,9 +1837,7 @@ fn check_projection(
         working_note
     };
     Ok(Checked {
-        failing: link.standing == Standing::Asserted
-            && link.kind == LinkKind::Literal
-            && state == State::Drifted,
+        failing: link.kind == LinkKind::Literal && state == State::Drifted,
         note,
         link,
         state,
@@ -1926,7 +1897,7 @@ fn witness(mut checked: Checked, moved: bool) -> Checked {
         None => message,
     });
     if let Some(state) = state {
-        checked.failing = checked.link.standing == Standing::Asserted;
+        checked.failing = true;
         checked.state = state;
     }
     checked
@@ -2176,20 +2147,6 @@ pub enum AuditFinding {
         /// The node path.
         path: String,
     },
-    /// An evidence link whose derived confidence fell below the floor.
-    DecayedEvidence {
-        /// The link id.
-        id: String,
-        /// Its spec ref.
-        spec: String,
-        /// Its anchor.
-        anchor: String,
-        /// The derived confidence, below [`CONFIDENCE_FLOOR`].
-        confidence: f64,
-        /// Which rule produced the row — the reader decides what a decayed
-        /// guess is worth against a decayed claim.
-        rule: Rule,
-    },
 }
 
 impl fmt::Display for AuditFinding {
@@ -2210,19 +2167,6 @@ impl fmt::Display for AuditFinding {
             AuditFinding::UnlinkedSpecRef { path } => {
                 write!(f, "unlinked spec element: {path} — no asserted code-link")
             }
-            AuditFinding::DecayedEvidence {
-                id,
-                spec,
-                anchor,
-                confidence,
-                rule,
-            } => {
-                write!(
-                    f,
-                    "decayed evidence: {id} {rule} ({spec} ← {anchor}) — confidence \
-                     {confidence:.2} is below the floor; confirm or retire"
-                )
-            }
         }
     }
 }
@@ -2238,8 +2182,6 @@ pub struct AuditOptions {
     /// Audit only this member's delta (`home` for the project's own
     /// repository).
     pub repo: Option<String>,
-    /// Retire decayed evidence instead of only reporting it.
-    pub prune: bool,
 }
 
 /// The outcome of `archi link audit`.
@@ -2247,10 +2189,10 @@ pub struct AuditOptions {
 pub struct AuditReport {
     /// Live links.
     pub live: usize,
-    /// Of them, asserted.
+    /// Of them, asserted — which is all of them, and the tally says so
+    /// rather than leaving the reader to assume it
+    /// (`archi/requirements/code-link/a-link-stands-asserted-or-it-does-not-stand.md`).
     pub asserted: usize,
-    /// Of them, evidence.
-    pub evidence: usize,
     /// Of them, produced by inference from shared terms.
     pub inferred: usize,
     /// Of them, produced from a writer's declaration.
@@ -2261,11 +2203,11 @@ pub struct AuditReport {
     pub findings: Vec<AuditFinding>,
     /// What the audit could not cover, and why.
     pub notes: Vec<String>,
-    /// Evidence links `--prune` retired.
-    pub pruned: Vec<String>,
 }
 
-/// Aggregate hygiene: dark deltas, dark spec, decayed evidence.
+/// Aggregate hygiene: dark deltas and dark spec. The sweep reads and never
+/// writes — there is no row it grades and retires on its own
+/// (`archi/requirements/code-link/a-link-stands-asserted-or-it-does-not-stand.md`).
 pub fn audit(root: &Path, model: &Model, opts: &AuditOptions) -> Result<AuditReport, String> {
     let folded = load(root)?;
     let mut report = AuditReport {
@@ -2274,11 +2216,6 @@ pub fn audit(root: &Path, model: &Model, opts: &AuditOptions) -> Result<AuditRep
             .live
             .iter()
             .filter(|l| l.standing == Standing::Asserted)
-            .count(),
-        evidence: folded
-            .live
-            .iter()
-            .filter(|l| l.standing == Standing::Evidence)
             .count(),
         inferred: folded.live.iter().filter(|l| l.rule == Rule::Inferred).count(),
         declared: folded.live.iter().filter(|l| l.rule == Rule::Declared).count(),
@@ -2289,7 +2226,6 @@ pub fn audit(root: &Path, model: &Model, opts: &AuditOptions) -> Result<AuditRep
             .iter()
             .map(|n| format!("journal: {n}"))
             .collect(),
-        pruned: Vec::new(),
     };
 
     // Dark deltas, per member: every hunk since that member's delta source
@@ -2383,9 +2319,9 @@ pub fn audit(root: &Path, model: &Model, opts: &AuditOptions) -> Result<AuditRep
         }
     }
 
-    // Dark spec: elements of the audited scope with no asserted link and
-    // no live evidence. The scope is `--scope`'s subtree — or, by default,
-    // the active plan's task spec_refs.
+    // Dark spec: elements of the audited scope no live link claims. The
+    // scope is `--scope`'s subtree — or, by default, the active plan's task
+    // spec_refs.
     let dark = |path: &str| {
         !folded
             .live
@@ -2421,31 +2357,6 @@ pub fn audit(root: &Path, model: &Model, opts: &AuditOptions) -> Result<AuditRep
         }
     }
 
-    // Decayed evidence: derived confidence below the floor. An unreachable
-    // member is no observation — its links are neither graded nor pruned.
-    let mut slots = Slots::new(root);
-    let mut decayed = Vec::new();
-    for link in folded.live.iter().filter(|l| l.standing == Standing::Evidence) {
-        let checked = check_link(root, model, &roots, &mut slots, link.clone())?;
-        if matches!(checked.state, State::Unreachable { .. }) {
-            continue;
-        }
-        let confidence = confidence(link, &checked.state);
-        if confidence < CONFIDENCE_FLOOR {
-            decayed.push(link.id.clone());
-            report.findings.push(AuditFinding::DecayedEvidence {
-                id: link.id.clone(),
-                spec: link.spec.to_string(),
-                anchor: link.anchor.to_string(),
-                confidence,
-                rule: link.rule,
-            });
-        }
-    }
-    if opts.prune && !decayed.is_empty() {
-        retire(root, &decayed)?;
-        report.pruned = decayed;
-    }
     Ok(report)
 }
 
@@ -2653,13 +2564,8 @@ pub fn render_verify(report: &VerifyReport) -> String {
 /// The audit report as human lines.
 pub fn render_audit(report: &AuditReport) -> String {
     let mut out = format!(
-        "links: {} live ({} asserted, {} evidence; {} declared, {} inferred, {} authored)\n",
-        report.live,
-        report.asserted,
-        report.evidence,
-        report.declared,
-        report.inferred,
-        report.authored
+        "links: {} live ({} asserted; {} declared, {} inferred, {} authored)\n",
+        report.live, report.asserted, report.declared, report.inferred, report.authored
     );
     if report.findings.is_empty() {
         out.push_str("no findings\n");
@@ -2669,9 +2575,6 @@ pub fn render_audit(report: &AuditReport) -> String {
     }
     for n in &report.notes {
         out.push_str(&format!("note: {n}\n"));
-    }
-    for id in &report.pruned {
-        out.push_str(&format!("pruned {id}\n"));
     }
     out
 }
@@ -2835,10 +2738,10 @@ Then the view arrives late
         assert_eq!(state_of(&root, &ws, &ind.id), (State::Drifted, false));
 
         // Repin accepts the drift: the projection rewrites, birth stands.
-        let before = ls(&root, None, false).unwrap()[0].birth.clone();
+        let before = ls(&root, None).unwrap()[0].birth.clone();
         repin(&root, &lit.id, None).unwrap();
         assert_eq!(state_of(&root, &ws, &lit.id), (State::Clean, false));
-        assert_eq!(ls(&root, None, false).unwrap()[0].birth, before);
+        assert_eq!(ls(&root, None).unwrap()[0].birth, before);
 
         fs::remove_dir_all(&root).unwrap();
     }
@@ -2950,188 +2853,49 @@ Then the view arrives late
         fs::remove_dir_all(&root).unwrap();
     }
 
+    /// The fold reads what older binaries wrote and keeps the record exact:
+    /// a `touch` lands once per task, however often the line replays, and a
+    /// `decay` is read and skipped — never an error, whatever id it names.
+    /// The journal is append-only, so the events stand and the reader stays
+    /// (`archi/requirements/code-link/a-link-stands-asserted-or-it-does-not-stand.md`).
     #[test]
-    fn evidence_confirms_decays_and_prunes() {
+    fn the_fold_records_a_touch_once_per_task_and_skips_every_decay() {
         let root = temp_project();
         let ws = model_of(&root);
-        // A captured link, as task-close capture will mint it.
-        let resolved = resolve_anchor(
-            &root,
-            &Anchor::parse("code/auth.rs#Vault::persist").unwrap(),
-        )
-        .unwrap();
-        append(
-            &root,
-            &[Event::Add {
-                link: Link {
-                    id: "l0001".into(),
-                    spec: SpecRef::parse("Vault").unwrap(),
-                    anchor: Anchor::parse("code/auth.rs#Vault::persist").unwrap(),
-                    kind: LinkKind::Indirect,
-                    standing: Standing::Evidence,
-                    origin: Origin::Captured { task: "t1".into() },
-                    rule: Rule::Inferred,
-                    proves: None,
-                    birth: Birth {
-                        created: now(),
-                        commit: None,
-                        spans: vec![resolved.span.clone()],
-                    },
-                    pins: resolved.pins.clone(),
-                    touches: Vec::new(),
-                    decays: Vec::new(),
-                },
-            }],
-        )
-        .unwrap();
-
-        // Evidence never fails a verify, even drifted.
-        fs::write(
-            root.join("code/auth.rs"),
-            AUTH_RS.replace("persist(&mut self, hash: &[u8])", "persist(&mut self, h: u8)"),
-        )
-        .unwrap();
-        let (state, failing) = state_of(&root, &ws, "l0001");
-        assert_eq!(state, State::Drifted);
-        assert!(!failing);
-
-        // Confirm records the decision.
-        let confirmed = confirm(&root, "l0001").unwrap();
-        assert_eq!(confirmed.standing, Standing::Asserted);
-        assert!(confirm(&root, "l0001").is_err(), "already asserted");
-
-        // A second evidence link whose anchor dies decays; --prune retires.
-        append(
-            &root,
-            &[Event::Add {
-                link: Link {
-                    id: "l0002".into(),
-                    spec: SpecRef::parse("Auth").unwrap(),
-                    anchor: Anchor::parse("code/auth.rs#Vault::gone").unwrap(),
-                    kind: LinkKind::Indirect,
-                    standing: Standing::Evidence,
-                    origin: Origin::Captured { task: "t1".into() },
-                    rule: Rule::Inferred,
-                    proves: None,
-                    birth: Birth {
-                        created: now(),
-                        commit: None,
-                        spans: Vec::new(),
-                    },
-                    pins: resolved.pins,
-                    touches: Vec::new(),
-                    decays: Vec::new(),
-                },
-            }],
-        )
-        .unwrap();
-        let report = audit(
+        let link = add(
             &root,
             ws.model(),
-            &AuditOptions {
-                prune: true,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        assert!(
-            report
-                .findings
-                .iter()
-                .any(|f| matches!(f, AuditFinding::DecayedEvidence { id, .. } if id == "l0002")),
-        );
-        assert_eq!(report.pruned, vec!["l0002".to_string()]);
-        assert!(ls(&root, None, false).unwrap().iter().all(|l| l.id != "l0002"));
-
-        fs::remove_dir_all(&root).unwrap();
-    }
-
-    #[test]
-    fn confidence_accrues_by_touch_and_erodes_by_decay() {
-        let root = temp_project();
-        let ws = model_of(&root);
-        let resolved = resolve_anchor(
-            &root,
-            &Anchor::parse("code/auth.rs#Vault::persist").unwrap(),
-        )
-        .unwrap();
-        append(
-            &root,
-            &[Event::Add {
-                link: Link {
-                    id: "l0001".into(),
-                    spec: SpecRef::parse("Vault").unwrap(),
-                    anchor: Anchor::parse("code/auth.rs#Vault::persist").unwrap(),
-                    kind: LinkKind::Indirect,
-                    standing: Standing::Evidence,
-                    origin: Origin::Captured { task: "t1".into() },
-                    rule: Rule::Inferred,
-                    proves: None,
-                    birth: Birth {
-                        created: now(),
-                        commit: None,
-                        spans: vec![resolved.span],
-                    },
-                    pins: resolved.pins,
-                    touches: Vec::new(),
-                    decays: Vec::new(),
-                },
-            }],
+            "Vault",
+            "code/auth.rs#Vault::persist",
+            LinkKind::Indirect,
         )
         .unwrap();
 
-        // Born clean at 0.5 — above the floor, no finding.
-        let live = ls(&root, None, false).unwrap();
-        assert!((confidence(&live[0], &State::Clean) - 0.5).abs() < 1e-9);
-        let report = audit(&root, ws.model(), &AuditOptions::default()).unwrap();
-        assert!(
-            !report
-                .findings
-                .iter()
-                .any(|f| matches!(f, AuditFinding::DecayedEvidence { .. })),
-        );
-
-        // A touch accrues once per task; decays erode harder. The fold
-        // dedups replayed events.
         let at = now();
         let touch = |task: &str| Event::Touch {
-            id: "l0001".into(),
+            id: link.id.clone(),
             task: task.into(),
             at: at.clone(),
         };
-        let decay = |task: &str| Event::Decay {
-            id: "l0001".into(),
-            task: task.into(),
+        let decay = |id: &str| Event::Decay {
+            id: id.into(),
+            task: "t3".into(),
             at: at.clone(),
         };
-        append(&root, &[touch("t2"), touch("t2"), decay("t3"), decay("t4")]).unwrap();
-        let live = ls(&root, None, false).unwrap();
-        assert_eq!(live[0].touches, vec!["t2".to_string()]);
-        assert_eq!(
-            live[0].decays,
-            vec!["t3".to_string(), "t4".to_string()]
-        );
-        // 0.5 + 0.15 − 2·0.25 = 0.15: below the floor — flagged, prunable.
-        assert!((confidence(&live[0], &State::Clean) - 0.15).abs() < 1e-9);
-        let report = audit(
+        // The last decay names an id the journal never minted: the event is
+        // skipped, so the fold has nothing to refuse.
+        append(
             &root,
-            ws.model(),
-            &AuditOptions {
-                prune: true,
-                ..Default::default()
-            },
+            &[touch("t2"), touch("t2"), decay(&link.id), decay("l0404-ffffff")],
         )
         .unwrap();
-        assert!(
-            report.findings.iter().any(|f| matches!(
-                f,
-                AuditFinding::DecayedEvidence { id, confidence, .. }
-                    if id == "l0001" && (confidence - 0.15).abs() < 1e-9
-            )),
-            "{}",
-            render_audit(&report)
-        );
-        assert_eq!(report.pruned, vec!["l0001".to_string()]);
+
+        let live = ls(&root, None).unwrap();
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0].touches, vec!["t2".to_string()]);
+        assert_eq!(live[0].standing, Standing::Asserted);
+        // And it grades as it always did: the decay changed nothing.
+        assert_eq!(state_of(&root, &ws, &link.id), (State::Clean, false));
 
         fs::remove_dir_all(&root).unwrap();
     }
@@ -3162,8 +2926,9 @@ Then the view arrives late
             vec!["Auth.store wire Vault.inn".to_string(), "Vault".to_string()]
         );
 
-        // An asserted link lifts the node; live evidence lifts the edge —
-        // dark means no asserted link *and* no live evidence.
+        // A live link lifts the element it hangs on, whichever verb minted
+        // it: the hand-authored one lifts the node, and the row a past
+        // capture journaled lifts the edge.
         add(
             &root,
             ws.model(),
@@ -3185,7 +2950,7 @@ Then the view arrives late
                     spec: SpecRef::parse("Auth.store wire Vault.inn").unwrap(),
                     anchor: Anchor::parse("code/auth.rs#Vault::persist").unwrap(),
                     kind: LinkKind::Indirect,
-                    standing: Standing::Evidence,
+                    standing: Standing::Asserted,
                     origin: Origin::Captured { task: "t1".into() },
                     rule: Rule::Inferred,
                     proves: None,
@@ -3196,7 +2961,6 @@ Then the view arrives late
                     },
                     pins: resolved.pins,
                     touches: Vec::new(),
-                    decays: Vec::new(),
                 },
             }],
         )
@@ -3293,7 +3057,7 @@ Then the view arrives late
         add(&root, ws.model(), "Auth", "code/auth.rs", LinkKind::Literal).unwrap();
         retire(&root, &[first.id.clone()]).unwrap();
         assert!(retire(&root, &[first.id.clone()]).is_err(), "already retired");
-        let live = ls(&root, None, false).unwrap();
+        let live = ls(&root, None).unwrap();
         assert_eq!(live.len(), 1);
         // The sequence counts past retirements: never reused, still readable.
         let third = add(&root, ws.model(), "Vault", "code/auth.rs", LinkKind::Indirect).unwrap();
@@ -3553,10 +3317,10 @@ Then the view arrives late
         );
 
         // One repin binds both sides; the birth record stands.
-        let before = ls(&root, None, false).unwrap()[0].birth.clone();
+        let before = ls(&root, None).unwrap()[0].birth.clone();
         repin(&root, &l.id, None).unwrap();
         assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
-        assert_eq!(ls(&root, None, false).unwrap()[0].birth, before);
+        assert_eq!(ls(&root, None).unwrap()[0].birth, before);
 
         fs::remove_dir_all(&root).unwrap();
     }
@@ -3829,7 +3593,7 @@ Then the view arrives late
         .to_string();
         fs::create_dir_all(root.join("archi").join("links")).unwrap();
         fs::write(journal_path(&root), format!("{old}\n")).unwrap();
-        assert_eq!(ls(&root, None, false).unwrap().len(), 1, "the line replays");
+        assert_eq!(ls(&root, None).unwrap().len(), 1, "the line replays");
         assert_eq!(state_of(&root, &ws, "l0001"), (State::Clean, false));
 
         // The story moves and the link says nothing: it witnessed no story.
@@ -3891,11 +3655,11 @@ Then the view arrives late
 
         // `repin --spec` moves the link onto the new name; birth and the code
         // side stand — the name moved, the code did not.
-        let before = ls(&root, None, false).unwrap()[0].clone();
+        let before = ls(&root, None).unwrap()[0].clone();
         let moved = repin_spec(&root, &l.id, &format!("{FACT_SLUG}#{renamed}")).unwrap();
         assert_eq!(moved.spec.path, format!("{FACT_SLUG}#{renamed}"));
         assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
-        let after = ls(&root, None, false).unwrap()[0].clone();
+        let after = ls(&root, None).unwrap()[0].clone();
         assert_eq!(after.birth, before.birth);
         assert_eq!(after.anchor, before.anchor);
         // The code half of the witness stands, hash for hash. The scenario
@@ -4310,7 +4074,7 @@ Then the view arrives late
         }
         fs::write(&path, text).unwrap();
 
-        let rows = ls(&root, None, false).unwrap();
+        let rows = ls(&root, None).unwrap();
         let row = |id: &str| {
             rows.iter()
                 .find(|l| l.id == id)
@@ -4324,7 +4088,7 @@ Then the view arrives late
         // The reverse view: what a person stood behind, and not the guesses.
         // A row `link add` minted before the field existed is still what a
         // person stood behind, so it answers here too.
-        let view: Vec<&str> = ls(&root, Some(&req_ref(REQ_SLUG)), false)
+        let view: Vec<&str> = ls(&root, Some(&req_ref(REQ_SLUG)))
             .unwrap()
             .iter()
             .map(|l| l.id.as_str())
@@ -4347,7 +4111,7 @@ Then the view arrives late
         );
 
         // An element ref is not the reverse view: it lists what it always did.
-        let all = ls(&root, Some("Vault"), false).unwrap();
+        let all = ls(&root, Some("Vault")).unwrap();
         assert!(all.is_empty(), "no row hangs on `Vault` here");
 
         fs::remove_dir_all(&root).unwrap();
@@ -4394,17 +4158,6 @@ Then the view arrives late
         for word in ["declared", "inferred", "authored"] {
             assert!(head.contains(word), "{head}");
         }
-
-        // A finding that names a row says which rule made it.
-        let line = AuditFinding::DecayedEvidence {
-            id: "l0007-abcdef".into(),
-            spec: req_ref(REQ_SLUG),
-            anchor: "code/auth.rs#Vault::persist".into(),
-            confidence: 0.1,
-            rule: Rule::Inferred,
-        }
-        .to_string();
-        assert!(line.contains("inferred"), "{line}");
 
         fs::remove_dir_all(&root).unwrap();
     }

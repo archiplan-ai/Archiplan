@@ -11,9 +11,9 @@
 //! task claims are **leftovers**, reported rather than guessed at.
 //!
 //! Capture is idempotent: a pair the journal already holds is not minted
-//! twice. Re-encounters and unreconfirmed rewrites of the evidence rows the
-//! journal already carries journal as `touch` and `decay` events, once per
-//! task — the observations confidence is derived from.
+//! twice. A row another task re-encounters journals a `touch`, once per task
+//! — a record of who else met the pair, and nothing more
+//! (`archi/requirements/code-link/a-link-stands-asserted-or-it-does-not-stand.md`).
 //!
 //! The mint comes from the writer, not from the words: each in-flight task
 //! writes one **declaration file** beside the index, naming for every symbol
@@ -823,12 +823,9 @@ pub struct CaptureOutcome {
     /// Freshly minted links — what the in-flight tasks' declarations named,
     /// asserted and stamped `declared`.
     pub minted: Vec<Link>,
-    /// `(link id, task)`: a live evidence link re-encountered by another
-    /// task carrying the same spec_ref — confidence accrues.
+    /// `(link id, task)`: a live link re-encountered by another task
+    /// carrying the same spec_ref.
     pub touched: Vec<(String, String)>,
-    /// `(link id, task)`: the anchored item changed under a task that does
-    /// not carry the link's spec_ref — confidence decays.
-    pub decayed: Vec<(String, String)>,
     /// Changed items no in-flight task claims — code motion the plan does
     /// not account for.
     pub leftovers: Vec<Changed>,
@@ -871,7 +868,7 @@ fn claims_file(task: &Task, file: &str) -> bool {
 
 /// Capture a wave: mint the in-flight tasks' declarations, then diff the
 /// wave-open index against the current tree to say what the delta presses and
-/// what it leaves over; journal touches and decays. `only` restricts the mint
+/// what it leaves over; journal the touches. `only` restricts the mint
 /// and the press to one task (`link capture --task`) while the claim map
 /// still spans the whole wave.
 pub(crate) fn capture_wave(
@@ -912,8 +909,8 @@ pub(crate) fn capture_wave(
 
     let mut shared: BTreeSet<&str> = BTreeSet::new();
     let mut events: Vec<Event> = Vec::new();
-    // The working link set: the fold plus this batch's mints, so the decay
-    // pass sees same-run mints from overlapping tasks symmetrically.
+    // The working link set: the fold plus this batch's mints, so a task sees
+    // the rows its wave-mates minted in the same run.
     let mut live: Vec<Link> = folded.live.clone();
     let mut ref_term_cache: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
 
@@ -1013,11 +1010,12 @@ pub(crate) fn capture_wave(
                     l.spec.version.is_none() && l.spec.path == *spec_ref && l.anchor == anchor
                 });
                 if let Some(link) = existing {
-                    // A re-encounter from another task accrues confidence;
-                    // the same task re-running is a no-op.
-                    let re_encounter = link.standing == Standing::Evidence
-                        && !matches!(&link.origin, Origin::Captured { task: t } if *t == task.id)
-                        && !link.touches.contains(&task.id);
+                    // Another task met the pair: the journal records who,
+                    // once. The task that minted it, and the same task
+                    // re-running, are both a no-op.
+                    let re_encounter =
+                        !matches!(&link.origin, Origin::Captured { task: t } if *t == task.id)
+                            && !link.touches.contains(&task.id);
                     if re_encounter {
                         events.push(Event::Touch {
                             id: link.id.clone(),
@@ -1046,44 +1044,9 @@ pub(crate) fn capture_wave(
         }
     }
 
-    // Decay, after all mints: every claiming task presses on the evidence
-    // links anchored at its changed items whose spec_ref it does not carry
-    // — a rewrite without reconfirmation, observed exactly when it happens.
-    // Overlapping claims cross-press same-run mints: split confidence.
-    for change in &changes {
-        let (member, bare) = super::split_qualified(&change.file);
-        let anchor = Anchor {
-            repo: member.map(str::to_string),
-            file: bare.to_string(),
-            symbol: change.symbol.clone(),
-        };
-        for task in in_flight
-            .iter()
-            .filter(|t| claims_file(t, &change.file))
-            .filter(|t| only.is_none_or(|o| o == t.id))
-        {
-            for link in live.iter_mut().filter(|l| {
-                l.standing == Standing::Evidence
-                    && l.spec.version.is_none()
-                    && l.anchor == anchor
-            }) {
-                if task.spec_refs.contains(&link.spec.path) || link.decays.contains(&task.id) {
-                    continue;
-                }
-                events.push(Event::Decay {
-                    id: link.id.clone(),
-                    task: task.id.clone(),
-                    at: super::now(),
-                });
-                out.decayed.push((link.id.clone(), task.id.clone()));
-                link.decays.push(task.id.clone());
-            }
-        }
-    }
-
     for file in shared {
         out.notes.push(format!(
-            "`{file}` is claimed by several tasks — their captures split confidence"
+            "`{file}` is claimed by several tasks — each capture reads the whole file"
         ));
     }
     if !events.is_empty() {
@@ -1125,9 +1088,6 @@ pub fn render_capture(o: &CaptureOutcome) -> String {
     }
     for (id, task) in &o.touched {
         out.push_str(&format!("touched {id} (re-encountered under {task})\n"));
-    }
-    for (id, task) in &o.decayed {
-        out.push_str(&format!("decayed {id} (rewritten under {task} without its spec_ref)\n"));
     }
     for c in &o.leftovers {
         out.push_str(&format!("leftover {c} — no in-flight task claims it\n"));
@@ -1188,12 +1148,10 @@ mod tests {
             .workspace
     }
 
-    /// A standing evidence row, journaled as capture minted them while the
-    /// shared-term rule ruled. Thousands of them stand in this project's own
-    /// journal, and a wave that re-encounters or rewrites one still touches
-    /// or decays it — which is what these tests are about. Nothing mints
-    /// evidence anymore, so a test that needs one writes it.
-    fn seed_evidence(root: &Path, spec: &str, code: &str, task: &str) -> String {
+    /// A row a past capture journaled, written straight into the journal:
+    /// what a wave does when it meets one again is what these tests are
+    /// about, and no capture here mints it.
+    fn seed_row(root: &Path, spec: &str, code: &str, task: &str) -> String {
         let anchor = Anchor::parse(code).unwrap();
         let resolved = resolve_anchor(root, &anchor).unwrap();
         let link = Link {
@@ -1201,7 +1159,7 @@ mod tests {
             spec: SpecRef::parse(spec).unwrap(),
             anchor,
             kind: LinkKind::Indirect,
-            standing: Standing::Evidence,
+            standing: Standing::Asserted,
             origin: Origin::Captured {
                 task: task.to_string(),
             },
@@ -1214,7 +1172,6 @@ mod tests {
             },
             pins: resolved.pins,
             touches: Vec::new(),
-            decays: Vec::new(),
         };
         let id = link.id.clone();
         append(root, &[Event::Add { link }]).unwrap();
@@ -1237,7 +1194,7 @@ mod tests {
     }
 
     fn ls(root: &Path) -> Vec<Link> {
-        super::super::ls(root, None, false).unwrap()
+        super::super::ls(root, None).unwrap()
     }
 
     #[test]
@@ -1333,24 +1290,23 @@ mod tests {
         fs::remove_dir_all(&root).unwrap();
     }
 
-    /// The observations confidence is derived from still run over the
-    /// evidence rows the journal already holds: a task that rewrites the item
-    /// an evidence link is anchored at, without carrying its ref, decays it;
-    /// another task carrying it touches it; and each of those is journaled
-    /// once per task (`archi/requirements/self-hosting/capture-at-the-join.md`).
+    /// A wave that meets a standing row again records who met it: a task
+    /// carrying the row's ref, over the item it is anchored at, journals one
+    /// touch — once, whatever the wave re-runs. The task the row was minted
+    /// under records nothing, because it is not another reader
+    /// (`archi/requirements/self-hosting/capture-at-the-join.md`).
     #[test]
-    fn touches_and_decays_journal_once_per_task() {
+    fn a_touch_journals_once_per_task() {
         let root = temp_project();
         let ws = compiled(&root);
         fs::create_dir_all(plans::plan_dir(&root, "p")).unwrap();
         write_index(&root, "p", 1).unwrap();
 
-        // Two tasks claim the same file, and one standing evidence row per
-        // task is anchored at the symbol they both rewrite.
+        // Two tasks carry `Store` and claim the same file; the row standing
+        // on it was minted under `t1`.
         let t1 = task("t1", &["Store"], &["code/"]);
-        let t2 = task("t2", &["Rows"], &["code/"]);
-        let store_id = seed_evidence(&root, "Store", "code/store.rs#Store::put", "t1");
-        let rows_id = seed_evidence(&root, "Rows", "code/store.rs#Store::put", "t2");
+        let t2 = task("t2", &["Store"], &["code/"]);
+        let store_id = seed_row(&root, "Store", "code/store.rs#Store::put", "t1");
         fs::write(
             root.join("code/store.rs"),
             STORE_RS.replace("self.rows.push(row);", "self.rows.insert(0, row);"),
@@ -1358,26 +1314,26 @@ mod tests {
         .unwrap();
 
         let out = capture_wave(&root, ws.model(), "p", 1, &[&t1, &t2], None).unwrap();
-        // Each task presses on the other's row: split confidence.
         assert!(out.minted.is_empty(), "{}", render_capture(&out));
-        assert_eq!(out.decayed.len(), 2, "{}", render_capture(&out));
+        assert_eq!(
+            out.touched,
+            vec![(store_id.clone(), "t2".to_string())],
+            "{}",
+            render_capture(&out)
+        );
         assert!(out.notes.iter().any(|n| n.contains("claimed by several")), "{:?}", out.notes);
         let live = ls(&root);
         let store_link = live.iter().find(|l| l.id == store_id).unwrap();
-        let rows_link = live.iter().find(|l| l.id == rows_id).unwrap();
-        assert_eq!(store_link.decays, vec!["t2".to_string()]);
-        assert_eq!(rows_link.decays, vec!["t1".to_string()]);
+        assert_eq!(store_link.touches, vec!["t2".to_string()]);
 
-        // Re-runs never double-journal; a third task carrying `Store`
-        // touches the standing evidence, and decays the `Rows` link it does
-        // not carry.
+        // Re-runs never double-journal; a third task carrying `Store` is a
+        // reader of its own.
         let again = capture_wave(&root, ws.model(), "p", 1, &[&t1, &t2], None).unwrap();
-        assert!(again.minted.is_empty() && again.decayed.is_empty() && again.touched.is_empty());
+        assert!(again.minted.is_empty() && again.touched.is_empty());
         let t3 = task("t3", &["Store"], &["code/"]);
         let third = capture_wave(&root, ws.model(), "p", 1, &[&t1, &t2, &t3], None).unwrap();
         assert!(third.minted.is_empty(), "{}", render_capture(&third));
-        assert!(third.touched.iter().any(|(id, task)| id == &store_id && task == "t3"));
-        assert!(third.decayed.iter().any(|(id, task)| id == &rows_id && task == "t3"));
+        assert_eq!(third.touched, vec![(store_id, "t3".to_string())]);
 
         fs::remove_dir_all(&root).unwrap();
     }

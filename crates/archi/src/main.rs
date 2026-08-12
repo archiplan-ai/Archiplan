@@ -21,12 +21,12 @@
 //!   show <id> | diff <a|live> <b|live> | current
 //!             [--project <dir>]
 //! archi link add <spec[@ver]> <file[#symbol]> --kind literal|indirect
-//! archi link ls [--spec <ref>] [--evidence] [--json]
+//! archi link ls [--spec <ref>] [--json]
 //! archi link verify [--spec <ref>] [--since <rev>] [--json]
-//! archi link confirm <id> | rm <id>... | rm --spec <ref> --yes
+//! archi link rm <id>... | rm --spec <ref> --yes
 //! archi link repin <id> [--to <file[#symbol]>] [--spec <fact-slug>#<scenario name>]
 //! archi link capture --task <TASK> [--json]
-//! archi link audit [--scope <path>] [--since <rev>] [--prune] [--json]
+//! archi link audit [--scope <path>] [--since <rev>] [--json]
 //! archi plan use <name> | repin | show [<name>] [--json] | verify [--json]
 //! archi plan task add <node> [--desc <text>] | rm <id>
 //! archi plan task <id> link add --symbol <a> --answers <ref> --proved-by <a>
@@ -109,12 +109,12 @@ const USAGE: &str = "usage:
   archi stress add <title> --affects <A,B,...> [--project <dir>]
   archi stress rm <slug> [--project <dir>]
   archi link add <spec[@ver]> <file[#symbol]> --kind literal|indirect [--project <dir>]
-  archi link ls [--spec <ref>] [--evidence] [--json] [--project <dir>]
+  archi link ls [--spec <ref>] [--json] [--project <dir>]
   archi link verify [--spec <ref>] [--since [<member>=]<rev>] [--repo <member>] [--json] [--project <dir>]
-  archi link confirm <id> | rm <id>... | rm --spec <ref> --yes [--project <dir>]
+  archi link rm <id>... | rm --spec <ref> --yes [--project <dir>]
   archi link repin <id> [--to <file[#symbol]>] [--spec <fact-slug>#<scenario name>] [--project <dir>]
   archi link capture --task <TASK> [--json] [--project <dir>]
-  archi link audit [--scope <path>] [--since [<member>=]<rev>] [--repo <member>] [--prune] [--json] [--project <dir>]
+  archi link audit [--scope <path>] [--since [<member>=]<rev>] [--repo <member>] [--json] [--project <dir>]
   archi repo ls [--json] [--project <dir>]
   archi repo map <member> <dir> [--project <dir>]
   archi batch [-] [--project <dir>]   # commands from stdin, one per line, fail-fast
@@ -194,9 +194,7 @@ struct Args {
     carriers: Vec<String>,
     edge_types: Vec<String>,
     covers: Option<String>,
-    evidence: bool,
     yes: bool,
-    prune: bool,
     details: bool,
     max_nodes: Option<usize>,
     repos: Option<String>,
@@ -272,9 +270,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         carriers: Vec::new(),
         edge_types: Vec::new(),
         covers: None,
-        evidence: false,
         yes: false,
-        prune: false,
         details: false,
         max_nodes: None,
         repos: None,
@@ -336,13 +332,11 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--neutrality" => args.neutrality = Some(value(&mut it, "--neutrality")?),
             "--session" => args.session = Some(value(&mut it, "--session")?),
             "--since" => args.since = Some(value(&mut it, "--since")?),
-            "--evidence" => args.evidence = true,
             "--yes" => args.yes = true,
             "--intent" => args.intent = Some(value(&mut it, "--intent")?),
             "--origin" => args.origin = Some(value(&mut it, "--origin")?),
             "--deferred" => args.deferred = Some(value(&mut it, "--deferred")?),
             "--affects" => args.affects = Some(value(&mut it, "--affects")?),
-            "--prune" => args.prune = true,
             "--details" => args.details = true,
             "--max-nodes" => args.max_nodes = Some(int(value(&mut it, "--max-nodes")?, "--max-nodes")?),
             "--spec" => args.spec = Some(value(&mut it, "--spec")?),
@@ -1620,7 +1614,7 @@ fn run_link(args: &Args) -> ExitCode {
                 Err(e) => fail(e),
             }
         }
-        (Some("ls"), []) => match links::ls(&root, args.spec.as_deref(), args.evidence) {
+        (Some("ls"), []) => match links::ls(&root, args.spec.as_deref()) {
             Ok(live) => {
                 if args.json {
                     println!(
@@ -1667,13 +1661,6 @@ fn run_link(args: &Args) -> ExitCode {
                 Err(e) => fail(e),
             }
         }
-        (Some("confirm"), [id]) => match links::confirm(&root, id) {
-            Ok(l) => {
-                println!("asserted {}", links::render_link(&l));
-                ExitCode::SUCCESS
-            }
-            Err(e) => fail(e),
-        },
         (Some("rm"), []) if args.spec.is_some() => {
             if !args.yes {
                 return usage_err("`link rm --spec <ref>` retires in bulk: confirm with --yes");
@@ -1741,7 +1728,6 @@ fn run_link(args: &Args) -> ExitCode {
                 since: args.since.clone(),
                 scope: args.scope.clone(),
                 repo: args.repo.clone(),
-                prune: args.prune,
             };
             match links::audit(&root, ws.model(), &opts) {
                 Ok(report) => {
@@ -1759,7 +1745,7 @@ fn run_link(args: &Args) -> ExitCode {
             }
         }
         _ => usage_err(
-            "`link` takes: add <spec> <file[#symbol]> --kind <k> | ls | verify | confirm <id> | \
+            "`link` takes: add <spec> <file[#symbol]> --kind <k> | ls | verify | \
              rm <id>... | rm --spec <ref> --yes | \
              repin <id> [--to <ref>] [--spec <fact-slug>#<scenario name>] | \
              capture --task <t> | audit",
@@ -3317,11 +3303,9 @@ fn guarded_route(args: &Args) -> Option<PlanHint<'_>> {
     match args.command.as_str() {
         "version" if matches!(sub(0), Some("save" | "remint" | "anchor")) => Some(PlanHint::None),
         "session" if sub(0) == Some("fold") => Some(PlanHint::None),
-        "link" if matches!(sub(0), Some("add" | "confirm" | "rm" | "repin" | "capture")) => {
+        "link" if matches!(sub(0), Some("add" | "rm" | "repin" | "capture")) => {
             Some(PlanHint::None)
         }
-        // The audit reads — until `--prune` lets it retire journal entries.
-        "link" if sub(0) == Some("audit") && args.prune => Some(PlanHint::None),
         "repo" if sub(0) == Some("map") => Some(PlanHint::None),
         "req" if matches!(sub(0), Some("add" | "rm")) => Some(PlanHint::None),
         "stress" if matches!(sub(0), Some("open" | "add" | "rm")) => Some(PlanHint::None),

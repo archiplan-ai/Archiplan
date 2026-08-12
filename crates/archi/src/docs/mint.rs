@@ -440,7 +440,7 @@ fn scenario_of(spec: &str, slug: &str) -> bool {
 /// grouped by ref: one `link rm --spec` clears one group.
 fn stranded_links(root: &Path, slug: &str) -> Result<Vec<Stranded>, String> {
     let mut out: Vec<Stranded> = Vec::new();
-    for link in crate::links::ls(root, None, false)? {
+    for link in crate::links::ls(root, None)? {
         if !scenario_of(&link.spec.path, slug) {
             continue;
         }
@@ -879,7 +879,7 @@ mod tests {
         assert!(e.contains("crates/app/src/open.rs#open"), "{e}");
         assert!(e.contains("crates/app/src/sync.rs#Sync::last"), "{e}");
         // Nothing cascaded: both links are still live.
-        assert_eq!(crate::links::ls(&root, None, false).unwrap().len(), 2);
+        assert_eq!(crate::links::ls(&root, None).unwrap().len(), 2);
 
         // `link rm --spec` retires them, and the same removal proceeds.
         crate::links::retire_spec(&root, SCENARIO).unwrap();

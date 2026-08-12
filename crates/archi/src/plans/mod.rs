@@ -1621,7 +1621,7 @@ fn gate_declared_drift(
     model: &Model,
     moved: &BTreeSet<String>,
 ) -> Result<(), String> {
-    let candidates: Vec<links::Link> = links::ls(root, None, false)?
+    let candidates: Vec<links::Link> = links::ls(root, None)?
         .into_iter()
         .filter(|l| l.rule == links::Rule::Declared && l.spec.version.is_none())
         .filter(|l| moved.contains(&l.anchor.qualified_file()))
@@ -1680,7 +1680,7 @@ fn gate_coverage(
     in_flight: &[&Task],
     pressed: &BTreeMap<String, BTreeSet<String>>,
 ) -> Result<Vec<String>, String> {
-    let live = links::ls(root, None, false)?;
+    let live = links::ls(root, None)?;
     let covered = |r: &str| live.iter().any(|l| anchors(l) && l.spec.path == r);
     let mut gaps = Vec::new();
     let mut suggested = Vec::new();

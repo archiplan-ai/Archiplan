@@ -122,8 +122,12 @@ fn a_requirement_is_addressed_and_the_reverse_view_answers_from_it() {
 /// which rule produced it. It loads, grades and prints as it always did, and
 /// each of those rows reads the rule its origin already recorded: what
 /// capture minted under the shared-term rule reads inferred, and what `link
-/// add` minted reads authored. No migration was run, and none is needed
-/// (`archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`).
+/// add` minted reads authored. It also holds thousands of rows minted under
+/// the second standing, and the decay events the waves pressed onto them:
+/// they fold too, and every one of them stands asserted. No migration was
+/// run, and none is needed
+/// (`archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`,
+/// `archi/requirements/code-link/a-link-stands-asserted-or-it-does-not-stand.md`).
 #[test]
 fn the_standing_journal_takes_its_rule_from_its_origin_with_no_migration() {
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -194,6 +198,207 @@ fn the_standing_journal_takes_its_rule_from_its_origin_with_no_migration() {
         assert_eq!(rule_word(line), Some("authored"), "{line}");
     }
     assert!(!scenarios.is_empty(), "the world links are in the journal");
+
+    // The same journal holds what the second standing left behind: rows an
+    // older binary minted as evidence, and the decay events its waves pressed
+    // onto them. Both fold, and no row prints the word — a guess still reads
+    // as a guess in `rule`, and every live row stands asserted.
+    let words = |what: &str| text.lines().filter(|l| l.contains(what)).count();
+    assert!(
+        words("\"standing\":\"evidence\"") > 2000 && words("\"event\":\"decay\"") > 100,
+        "the standing journal holds the rows and the events this is about: {} rows, {} events",
+        words("\"standing\":\"evidence\""),
+        words("\"event\":\"decay\"")
+    );
+    for line in out.lines() {
+        assert!(line.contains("asserted"), "{line}");
+        assert!(!line.contains("evidence"), "{line}");
+    }
+}
+
+// ---- one standing --------------------------------------------------------
+//
+// A link is a claim or it is not a link. The second standing left with the
+// producer that minted it, and the machinery that served it left with it: no
+// verb promotes a guess, no score decays one and no sweep prunes one. The
+// rows stay, because the journal is append-only truth, and they load as the
+// claims they now are
+// (`archi/requirements/code-link/a-link-stands-asserted-or-it-does-not-stand.md`).
+
+/// The one live row of `root`, as `link ls` prints it.
+fn only_row(root: &Path) -> String {
+    let out = ok(root, &["link", "ls"]);
+    assert_eq!(out.lines().count(), 1, "one row stands here:\n{out}");
+    out.lines().next().expect("the row").to_string()
+}
+
+/// Rewrite the journal as an older binary wrote it: the row it holds was
+/// minted under the second standing, and a wave pressed a decay onto it. The
+/// mint is real — the pins are the ones `link add` computed — and only the
+/// word for the standing changes. Hands back the row's id.
+fn as_an_older_binary_wrote_it(root: &Path) -> String {
+    let id = only_row(root)
+        .split_whitespace()
+        .next()
+        .expect("the id opens the row")
+        .to_string();
+    let path = root.join("archi/links/journal.jsonl");
+    let text = fs::read_to_string(&path).expect("the journal");
+    assert!(text.contains("\"standing\":\"asserted\""), "{text}");
+    let older = format!(
+        "{}{{\"event\":\"decay\",\"id\":\"{id}\",\"task\":\"t9\",\"at\":\"2020-01-01T00:00:00Z\"}}\n",
+        text.replace("\"standing\":\"asserted\"", "\"standing\":\"evidence\"")
+    );
+    fs::write(&path, older).unwrap();
+    id
+}
+
+/// Every verb the second standing needed answers a usage error: nothing
+/// promotes a row, nothing filters for a guess and nothing prunes one. The
+/// help names none of them either
+/// (`archi/requirements/code-link/a-link-stands-asserted-or-it-does-not-stand.md`).
+#[test]
+fn the_verbs_that_served_the_second_standing_answer_a_usage_error() {
+    let (fixture, root) = bound("one-standing-surface");
+    ok(&root, &[
+        "link", "add", "Auth", "code/auth.rs#login", "--kind", "indirect",
+    ]);
+    let id = only_row(&root)
+        .split_whitespace()
+        .next()
+        .expect("the id")
+        .to_string();
+
+    for args in [
+        vec!["link", "confirm", id.as_str()],
+        vec!["link", "ls", "--evidence"],
+        vec!["link", "audit", "--prune"],
+    ] {
+        let (success, out, err) = util::run(&root, &args);
+        assert!(!success, "{args:?} is gone from the surface:\n{out}");
+        assert!(err.contains("usage:"), "{args:?} answers a usage error:\n{err}");
+    }
+
+    // The usage the reader is handed names none of the three.
+    let (_, _, err) = util::run(&root, &["link"]);
+    for gone in ["confirm", "--evidence", "--prune"] {
+        assert!(!err.contains(gone), "the usage still names `{gone}`:\n{err}");
+    }
+
+    // Nothing was written: the row stands exactly as it was minted.
+    assert!(only_row(&root).contains("asserted"), "{}", only_row(&root));
+
+    cleanup(&fixture);
+}
+
+/// The audit has two findings left — code no link claims, and spec no code
+/// answers — and it names nothing else: no score, no decayed guess, and
+/// nothing retired behind the reader's back
+/// (`archi/requirements/code-link/a-link-stands-asserted-or-it-does-not-stand.md`,
+/// `archi/requirements/code-link/the-audit-inverts-coverage.md`).
+#[test]
+fn the_audit_reports_dark_code_and_dark_spec_and_nothing_else() {
+    let (fixture, root) = bound("one-standing-audit");
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Auth"]);
+    ok(&root, &[
+        "link", "add", "Auth", "code/auth.rs#login", "--kind", "literal",
+    ]);
+
+    // The row is one an older binary minted, and its anchor is gone: the
+    // sweep that scored such a row would have called it decayed.
+    as_an_older_binary_wrote_it(&root);
+    fs::write(root.join("code/auth.rs"), "pub fn login() -> bool {\n    true\n}\n").unwrap();
+    fs::write(
+        root.join("code/rogue.rs"),
+        "pub fn rogue(n: u8) -> u8 {\n    n + 7\n}\n",
+    )
+    .unwrap();
+
+    let before = fs::read_to_string(root.join("archi/links/journal.jsonl")).unwrap();
+    let out = ok(&root, &["link", "audit"]);
+    assert!(out.contains("unaccounted delta: code/rogue.rs"), "{out}");
+    assert!(
+        out.contains("unlinked spec element: Gate.out wire Auth.inn"),
+        "{out}"
+    );
+    for word in ["evidence", "confidence", "decayed", "pruned"] {
+        assert!(!out.contains(word), "the audit says `{word}`:\n{out}");
+    }
+
+    // The sweep reads: the journal it read is the journal it leaves.
+    let after = fs::read_to_string(root.join("archi/links/journal.jsonl")).unwrap();
+    assert_eq!(before, after, "the audit retires nothing");
+
+    cleanup(&fixture);
+}
+
+/// A journal an older binary wrote still folds: the row minted under the
+/// second standing loads as the claim it now is, the decay event a wave
+/// pressed onto it is read and skipped, and the record itself is never
+/// rewritten to say so
+/// (`archi/requirements/code-link/a-link-stands-asserted-or-it-does-not-stand.md`,
+/// `archi/requirements/code-link/link-truth-is-append-only.md`).
+#[test]
+fn a_row_minted_as_evidence_loads_as_a_claim_and_its_decay_is_skipped() {
+    let (fixture, root) = bound("one-standing-fold");
+    ok(&root, &[
+        "link", "add", "Auth", "code/auth.rs#login", "--kind", "literal",
+    ]);
+    let id = as_an_older_binary_wrote_it(&root);
+
+    let row = only_row(&root);
+    assert!(row.starts_with(&id), "{row}");
+    assert!(row.contains("asserted"), "{row}");
+    assert!(!row.contains("evidence"), "{row}");
+
+    // The record still says what it always said: the fold maps the word on
+    // read, and no migration rewrites append-only truth.
+    let text = fs::read_to_string(root.join("archi/links/journal.jsonl")).unwrap();
+    assert!(text.contains("\"standing\":\"evidence\""), "{text}");
+    assert!(text.contains("\"event\":\"decay\""), "{text}");
+
+    // The machine answer says it too, and the row carries no erosion.
+    let rows: Value = serde_json::from_str(&ok(&root, &["link", "ls", "--json"])).unwrap();
+    assert_eq!(rows[0]["standing"], Value::from("asserted"), "{rows}");
+    assert!(rows[0].get("decays").is_none(), "{rows}");
+
+    cleanup(&fixture);
+}
+
+/// The row grades exactly as any claim grades: clean while the code holds,
+/// and failing the gate the moment the body it watches moves — where the
+/// second standing never failed a verify at all
+/// (`archi/requirements/code-link/a-link-stands-asserted-or-it-does-not-stand.md`,
+/// `archi/requirements/code-link/verify-grades-every-claim.md`).
+#[test]
+fn a_row_minted_as_evidence_grades_exactly_as_a_claim() {
+    let (fixture, root) = bound("one-standing-verify");
+    ok(&root, &[
+        "link", "add", "Auth", "code/auth.rs#login", "--kind", "literal",
+    ]);
+    as_an_older_binary_wrote_it(&root);
+
+    let out = ok(&root, &["link", "verify"]);
+    assert!(out.contains("clean"), "{out}");
+    assert!(!out.contains("[failing]"), "{out}");
+    assert!(
+        !out.contains("journal:"),
+        "the decay event is skipped, never absorbed with a note:\n{out}"
+    );
+
+    // The watched body moves: a claim fails the gate.
+    fs::write(
+        root.join("code/auth.rs"),
+        "pub fn login(user: &str) -> bool {\n    !user.trim().is_empty()\n}\n",
+    )
+    .unwrap();
+    let (success, out, err) = util::run(&root, &["link", "verify"]);
+    assert!(!success, "a claim fails the gate on drift:\n{out}{err}");
+    assert!(out.contains("drifted") && out.contains("[failing]"), "{out}");
+
+    cleanup(&fixture);
 }
 
 /// A claim the model makes and no code answers is named — promised and

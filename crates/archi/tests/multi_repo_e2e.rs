@@ -118,7 +118,7 @@ fn qualified_refs_run_the_whole_link_loop_across_members() {
 }
 
 #[test]
-fn absence_is_reported_never_decayed_and_fails_only_in_scope() {
+fn absence_is_reported_never_retired_and_fails_only_in_scope() {
     let ws = scratch("absence");
     let spec = ws.join("spec");
     let backend = ws.join("backend");
@@ -136,13 +136,12 @@ fn absence_is_reported_never_decayed_and_fails_only_in_scope() {
     assert!(out.contains("unreachable"), "{out}");
     assert!(out.contains("archi repo map backend"), "{out}");
 
-    // No decay observation is journaled by looking at nothing; audit
-    // neither grades nor prunes what it cannot see.
+    // Nothing is journaled by looking at nothing; audit neither grades nor
+    // retires what it cannot see.
     let journal = fs::read_to_string(spec.join("archi/links/journal.jsonl")).unwrap();
     assert!(!journal.contains("\"decay\""), "{journal}");
-    let (_, audit, _) = run(&spec, &["link", "audit", "--prune"]);
+    let (_, audit, _) = run(&spec, &["link", "audit"]);
     assert!(audit.contains("unreachable"), "{audit}");
-    assert!(!audit.contains("pruned"), "{audit}");
     let after = fs::read_to_string(spec.join("archi/links/journal.jsonl")).unwrap();
     assert!(!after.contains("\"retire\""), "{after}");
 
