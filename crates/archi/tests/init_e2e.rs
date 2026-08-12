@@ -525,10 +525,11 @@ fn the_skills_describe_the_four_layers_and_the_source_rule() {
 
     // The workflow skill names each folder and says what that folder holds.
     let workflow_flat = flat(&workflow);
+    // `hypotheses/` and `notes/` are folders the checker knows and the skill
+    // does not teach: nothing writes into them yet, so a reader told about
+    // them would be told about a shape with no verb behind it.
     for (folder, holds) in [
         ("`archi/world/facts/`", "the strict record"),
-        ("`archi/world/hypotheses/`", "means to settle"),
-        ("`archi/world/notes/`", "seen or heard"),
         ("`archi/world/resources/`", "raw material"),
     ] {
         let at = workflow_flat

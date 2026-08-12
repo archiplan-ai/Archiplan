@@ -200,21 +200,17 @@ once.
 3. **Capture the world.** The conditions outside the system that make
    the behavior necessary are records of their own under `archi/world/`.
    They come before the requirements, because a condition from outside
-   decides which claims are requirements at all. The world is four
-   folders, and the folder a file sits in is what that file is:
+   decides which claims are requirements at all. Two folders carry the
+   work, and the folder a file sits in is what that file is:
 
    - `archi/world/facts/` holds the strict record: the condition, the
      workaround, its scenarios and the three lists. `check` holds every
      one of them.
-   - `archi/world/hypotheses/` holds a claim somebody means to settle
-     and has not.
-   - `archi/world/notes/` holds what was seen or heard and is not yet
-     shaped into a fact or a hypothesis.
    - `archi/world/resources/` holds raw material — a transcript, a
      measurement, a thread. Nothing parses it. It is listed so a source
      can resolve against it.
 
-   A file in the loose three needs a name and the prose under it, and
+   A file under `resources/` needs a name and the prose under it, and
    nothing more. A `.md` directly under `archi/world/` sits in no layer,
    and `check` refuses it by name.
 

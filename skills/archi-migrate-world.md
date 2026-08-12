@@ -195,8 +195,8 @@ The header points three ways:
 - **`sources`** is empty on a migration run unless the operator hands
   material over, because a claim lifted from prose carries no source
   until somebody goes and looks. Each entry is a path from the project
-  root to a file under `archi/world/` — a note, a hypothesis or a
-  resource — and nothing else resolves. The intent the sentence came
+  root to a file under `archi/world/resources/` — and nothing else
+  resolves. The intent the sentence came
   from is not a source: the spec is what the world conditions, so a
   fact grounded in a requirement grounds itself in what it explains,
   and `check` refuses the path. A ticket id, a drive link or a
