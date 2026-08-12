@@ -231,6 +231,22 @@ once.
    falsification test, an observable and not a prediction — watch
    whether people still do it, and the day they stop, the fact is dead.
 
+   **Write the fact from what the operator already told you.** The task
+   they stated, the problem they described, the intent prose they wrote:
+   the condition and the workaround are usually in there, said in
+   passing, and lifting them costs the operator nothing. Draft the fact
+   from that first and put the draft in front of them. Ask only what the
+   task does not answer, and ask it by options — two or three concrete
+   candidates, never a bare open question. `AskUserQuestion` is the tool.
+
+   **Do not ask the workaround question about machinery.** It is
+   answerable only about a condition somebody lives with, so if the
+   subject is a component, a store or a protocol, the question lands as
+   nonsense and the operator is right to be annoyed. That is a signal
+   about the subject, not about the operator: go up until you reach the
+   condition the machinery serves, and ask there. Machinery no condition
+   outside will ever reach is what `.worldignore` is for.
+
    Write the fact in the world's own words,
    **without the nouns of the model** — a fact that speaks the model is
    a requirement in costume, and `check` says so. A fact also names no
@@ -251,6 +267,18 @@ once.
    `archi/world/resources/` first, or the field stays empty. An empty
    `sources` is the honest state of a claim nobody has observed, and
    `check` counts it as ungrounded.
+
+   `archi/world/.worldignore` is the other half of the coverage question.
+   It names the elements no condition outside will ever reach — a lexer,
+   a registry, a canonicalizer — one to a line, as
+   `<element> — why nothing outside reaches it`. `check` resolves every
+   entry against the model, so a rename breaks the line loudly, and an
+   entry with no reason is an error: the reason is a claim a reader can
+   argue with, which is what keeps the file from becoming a place to
+   silence things. Elements classified `Data` are excluded by their type
+   and never belong in it. `version save` refuses while an element is
+   neither covered by a fact nor named here, and those two are the whole
+   of the answer.
 
    `archi world rm <slug>` retires one, and it refuses while a plan or a
    code-link stands on it. `archi world ls [--covers <element>]` is the
