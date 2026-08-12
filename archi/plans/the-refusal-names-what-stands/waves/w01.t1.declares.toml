@@ -1,0 +1,25 @@
+# `t1` accounts for its work here: for every symbol it changed, what
+# that code answers and the test that proves it. One entry closes the
+# wave; what the file holds is the writer's to decide.
+#
+# Nobody types this file. The verb writes it, and it resolves all three
+# names before it writes:
+#
+#   archi plan task t1 link add --symbol "<file>#<symbol>" --answers "<node, port or req:slug>" --proved-by "<test file>#<test fn>"
+#
+# Each entry lands as one table of this shape:
+#
+#   [[declares]]
+#   symbol = "<file>#<symbol>"
+#   answers = "<node, port or req:slug>"
+#   proved_by = "<test file>#<test fn>"
+
+[[declares]]
+symbol = "crates/archi/src/plans/mod.rs#gate_coverage"
+answers = "req:the-gate-refusal-names-the-repair-that-stands"
+proved_by = "crates/archi/tests/plan_e2e.rs#the_plan_loop_produces_the_links_its_gate_demands"
+
+[[declares]]
+symbol = "crates/archi/src/plans/mod.rs#next"
+answers = "req:the-gate-refusal-names-the-repair-that-stands"
+proved_by = "crates/archi/tests/plan_e2e.rs#the_plan_loop_produces_the_links_its_gate_demands"

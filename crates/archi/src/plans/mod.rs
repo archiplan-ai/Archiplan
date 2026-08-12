@@ -1670,8 +1670,11 @@ fn gate_declared_drift(
 /// the closing capture pressed it — some claimed changed item of its task
 /// carries the ref's terms. Unpressed refs never block; the uncovered ones
 /// come back as suggested `link add` lines, since hand-authoring is the
-/// expected move for surface the delta did not touch. Evidence never
-/// gates, and an asserted link satisfies its ref however it was born.
+/// expected move for surface the delta did not touch. The refusal prints
+/// that same `link add` form for the refs that do gate — hand-authoring is
+/// the one repair that stands, so the two halves read as one voice.
+/// Evidence never gates, and an asserted link satisfies its ref however it
+/// was born.
 fn gate_coverage(
     root: &Path,
     in_flight: &[&Task],
@@ -1686,13 +1689,17 @@ fn gate_coverage(
             if covered(r) {
                 continue;
             }
+            // One repair, one form: what gates and what is voluntary differ
+            // in which half of the message carries the line, never in what
+            // the reader has to type.
+            let repair = format!(
+                "archi link add \"{r}\" <file#symbol> --kind indirect  # {}",
+                t.id
+            );
             if pressed.get(&t.id).is_some_and(|p| p.contains(r)) {
-                gaps.push(format!("{}: `{r}`", t.id));
+                gaps.push(repair);
             } else {
-                suggested.push(format!(
-                    "archi link add \"{r}\" <file#symbol> --kind indirect  # {}",
-                    t.id
-                ));
+                suggested.push(repair);
             }
         }
     }
@@ -1700,9 +1707,8 @@ fn gate_coverage(
         return Ok(suggested);
     }
     let mut msg = format!(
-        "asserted code-link coverage of the refs this delta presses is incomplete:\n  {}\n\
-         review the captured candidates (`archi link ls --evidence`), assert the load-bearing \
-         ones (`archi link confirm <id>`), then re-run `archi plan next`",
+        "asserted code-link coverage of the refs this delta presses is incomplete — \
+         hand-author the link each ref is missing:\n  {}\nthen re-run `archi plan next`",
         gaps.join("\n  ")
     );
     if !suggested.is_empty() {
@@ -1777,7 +1783,8 @@ pub struct NextOutcome {
 /// `archi plan next`: capture the closing wave's deltas into candidate
 /// links, then advance under the structural and coverage gates — the step
 /// that demands links is the step that produces them, and it is
-/// re-runnable: review (`link confirm`), then run it again.
+/// re-runnable: hand-author the link it names (`link add`), then run it
+/// again.
 pub fn next(root: &Path, model: &Model) -> Result<NextOutcome, String> {
     let mut plan = load_active(root)?;
     match plan.state {
@@ -2882,10 +2889,19 @@ mod tests {
             panic!("the pressed ref gates");
         };
         assert!(why.contains("coverage of the refs this delta presses"), "{why}");
-        assert!(why.contains("t1: `Gate.out wire Auth.inn`"), "{why}");
-        assert!(!why.contains("t1: `Auth`"), "unpressed refs never gap: {why}");
+        // Both halves print the one repair that stands, and the halves stay
+        // apart: what gates above the "not press" line, what is voluntary
+        // below it.
+        let (gating, voluntary) = why
+            .split_once("refs the delta does not press")
+            .expect("the refusal carries both halves");
+        assert!(
+            gating.contains("archi link add \"Gate.out wire Auth.inn\" <file#symbol> --kind indirect"),
+            "{why}"
+        );
+        assert!(!gating.contains("archi link add \"Auth\""), "unpressed refs never gap: {why}");
         assert!(why.contains("hand-author"), "{why}");
-        assert!(why.contains("archi link add \"Auth\""), "{why}");
+        assert!(voluntary.contains("archi link add \"Auth\""), "{why}");
         let capture = outcome.capture.expect("capture ran");
         assert_eq!(capture.minted.len(), 1, "{:?}", capture.minted);
         assert_eq!(capture.minted[0].spec.path, "req:service-hardening");

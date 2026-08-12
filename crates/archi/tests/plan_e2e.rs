@@ -571,6 +571,21 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     let (stdout, stderr) = fails(&root, &["plan", "next"]);
     assert_eq!(captured_ids(&stdout).len(), 1, "{stdout}");
     assert!(stderr.contains("coverage of the refs this delta presses is incomplete"), "{stderr}");
+    // The refusal names the one repair that stands — the ref it wants and the
+    // anchor that ref takes — and no review step, because capture proposes no
+    // candidate to review
+    // (`archi/requirements/planning/the-gate-refusal-names-the-repair-that-stands.md`).
+    // Flattened, so a hard wrap in the source string cannot hide a phrase.
+    let flat = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        flat.contains(
+            "archi link add \"Auth.creds wire Store.inn\" <file#symbol> --kind indirect"
+        ),
+        "the refusal names the repair, with the ref and its anchor: {stderr}"
+    );
+    assert!(!flat.contains("link ls --evidence"), "no candidate list to review: {stderr}");
+    assert!(!flat.contains("link confirm"), "nothing captured to raise: {stderr}");
+    // The repair as printed is the repair that works.
     ok(&root, &[
         "link", "add", "Auth.creds wire Store.inn", "code/store.rs#Store::put",
         "--kind", "indirect",
