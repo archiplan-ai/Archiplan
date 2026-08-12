@@ -822,6 +822,32 @@ fn resolves_now(
     }
 }
 
+/// Whether a ref resolves at the slot it names: the live one, or the version
+/// it is pinned to. [`mint`] asks it before it writes a row and the
+/// declaration verb asks it before it writes an entry, so neither side can
+/// drift from the other on what a name means.
+pub(crate) fn resolves_at_slot(root: &Path, model: &Model, spec: &SpecRef) -> Result<bool, String> {
+    let mut slots = Slots::new(root);
+    match &spec.version {
+        None => resolves_now(root, model, &mut slots, spec),
+        Some(_) => slots.resolves_pinned(spec),
+    }
+}
+
+/// Why a ref that did not resolve names nothing: a requirement the set does
+/// not hold, a scenario the fact does not carry, or a name no model holds.
+/// The mint and the declaration verb refuse in these same words.
+pub(crate) fn spec_refusal(root: &Path, spec: &SpecRef) -> String {
+    match (spec.requirement(), spec.scenario()) {
+        (Some(slug), _) => requirement_refusal(slug),
+        (None, Some((slug, _))) => scenario_refusal(root, slug, &spec.path),
+        (None, None) => {
+            let slot = spec.version.as_deref().unwrap_or("the live model");
+            format!("`{}` names no element of {slot} (E_MODEL_REF)", spec.path)
+        }
+    }
+}
+
 /// Why a requirement ref resolved to nothing: the slug names no file the
 /// requirement discovery found.
 fn requirement_refusal(slug: &str) -> String {
@@ -1238,20 +1264,8 @@ pub(crate) fn mint(
     proves: Option<Anchor>,
 ) -> Result<Link, String> {
     let spec = SpecRef::parse(spec_text)?;
-    let mut slots = Slots::new(root);
-    let resolves = match &spec.version {
-        None => resolves_now(root, model, &mut slots, &spec)?,
-        Some(_) => slots.resolves_pinned(&spec)?,
-    };
-    if !resolves {
-        return Err(match (spec.requirement(), spec.scenario()) {
-            (Some(slug), _) => requirement_refusal(slug),
-            (None, Some((slug, _))) => scenario_refusal(root, slug, &spec.path),
-            (None, None) => {
-                let slot = spec.version.as_deref().unwrap_or("the live model");
-                format!("`{}` names no element of {slot} (E_MODEL_REF)", spec.path)
-            }
-        });
+    if !resolves_at_slot(root, model, &spec)? {
+        return Err(spec_refusal(root, &spec));
     }
     let anchor = Anchor::parse(code_text)?;
     let roots = Roots::resolve(root)?;

@@ -527,6 +527,17 @@ fn edge_ends(model: &Model) -> BTreeMap<String, (String, String)> {
         .collect()
 }
 
+/// What an `answers` that named an edge is told: the two ends behind it. The
+/// reader of a file and the verb that writes one raise it in the same words,
+/// because it is the same mistake read at two moments.
+fn edge_refusal(path: &str, ends: &(String, String)) -> String {
+    let (source, target) = ends;
+    format!(
+        "`{path}` is an edge — an edge is a caller, and the code behind a port does not know its \
+         callers; name the end this symbol answers: `{source}` or `{target}`"
+    )
+}
+
 /// Mint one task's declarations: what the file names becomes an asserted
 /// link on the symbol that named it, stamped `declared` and carrying the
 /// test. A pair the journal already holds is not minted twice, so a wave that
@@ -554,15 +565,11 @@ fn mint_declarations(
         // What it answers: a port or a requirement, never an edge.
         let spec = SpecRef::parse(answers)
             .map_err(|e| file.refuse(task, Some(d.answers.span()), &e))?;
-        if let Some((source, target)) = edges.get(&spec.path) {
+        if let Some(ends) = edges.get(&spec.path) {
             return Err(file.refuse(
                 task,
                 Some(d.answers.span()),
-                &format!(
-                    "`{}` is an edge — an edge is a caller, and the code behind a port does not \
-                     know its callers; name the end this symbol answers: `{source}` or `{target}`",
-                    spec.path
-                ),
+                &edge_refusal(&spec.path, ends),
             ));
         }
 
@@ -645,6 +652,41 @@ pub enum Declaration {
     Stands(String),
 }
 
+/// The wave a started plan has in flight, and the task ids it holds. The
+/// capture by hand and the declaration verb both read the lifecycle this way:
+/// a plan whose layering is broken says so, a plan past its last wave says
+/// `no_wave` in the caller's own words, and a task the wave does not hold is
+/// named beside the ones it does. Only the state check stays with the caller,
+/// because these two name different next steps for it.
+fn wave_of(
+    root: &Path,
+    model: &Model,
+    plan: &plans::Plan,
+    task: &str,
+    no_wave: &str,
+) -> Result<(usize, Vec<String>), String> {
+    let report = plans::verify_plan(root, model, plan)?;
+    if !report.errors.is_empty() {
+        return Err(format!(
+            "the plan is structurally broken — `archi plan verify`:\n  {}",
+            report.errors.join("\n  ")
+        ));
+    }
+    let waves = &report.derived.waves;
+    if plan.closed_waves >= waves.len() {
+        return Err(no_wave.to_string());
+    }
+    let wave = plan.closed_waves + 1;
+    let ids = waves[wave - 1].clone();
+    if !ids.iter().any(|id| id == task) {
+        return Err(format!(
+            "`{task}` is not in wave {wave} — in flight: {}",
+            ids.join(", ")
+        ));
+    }
+    Ok((wave, ids))
+}
+
 /// The plan and the wave a task is in flight in. A declaration lands in the
 /// file the wave open wrote, so outside a started wave there is no file to
 /// append to — and the refusal names the lifecycle step that opens one
@@ -667,28 +709,8 @@ fn wave_in_flight(root: &Path, model: &Model, task: &str) -> Result<(String, usi
         }
         plans::PlanState::Started => {}
     }
-    let report = plans::verify_plan(root, model, &plan)?;
-    if !report.errors.is_empty() {
-        return Err(format!(
-            "the plan is structurally broken — `archi plan verify`:\n  {}",
-            report.errors.join("\n  ")
-        ));
-    }
-    let waves = &report.derived.waves;
-    if plan.closed_waves >= waves.len() {
-        return Err(format!(
-            "plan `{}` has no wave in flight — every wave closed",
-            plan.name
-        ));
-    }
-    let wave = plan.closed_waves + 1;
-    let ids = &waves[wave - 1];
-    if !ids.iter().any(|id| id == task) {
-        return Err(format!(
-            "`{task}` is not in wave {wave} — in flight: {}",
-            ids.join(", ")
-        ));
-    }
+    let no_wave = format!("plan `{}` has no wave in flight — every wave closed", plan.name);
+    let (wave, _) = wave_of(root, model, &plan, task, &no_wave)?;
     Ok((plan.name, wave))
 }
 
@@ -709,29 +731,13 @@ fn resolve_named(roots: &super::Roots, flag: &str, text: &str) -> Result<Anchor,
 fn resolve_answers(root: &Path, model: &Model, answers: &str) -> Result<(), String> {
     let refuse = |e: String| format!("--answers `{answers}`: {e}");
     let spec = SpecRef::parse(answers).map_err(refuse)?;
-    if let Some((source, target)) = edge_ends(model).get(&spec.path) {
-        return Err(refuse(format!(
-            "`{}` is an edge — an edge is a caller, and the code behind a port does not know its \
-             callers; name the end this symbol answers: `{source}` or `{target}`",
-            spec.path
-        )));
+    if let Some(ends) = edge_ends(model).get(&spec.path) {
+        return Err(refuse(edge_refusal(&spec.path, ends)));
     }
-    let mut slots = super::Slots::new(root);
-    let resolves = match &spec.version {
-        None => super::resolves_now(root, model, &mut slots, &spec)?,
-        Some(_) => slots.resolves_pinned(&spec)?,
-    };
-    if resolves {
+    if super::resolves_at_slot(root, model, &spec)? {
         return Ok(());
     }
-    Err(refuse(match (spec.requirement(), spec.scenario()) {
-        (Some(slug), _) => super::requirement_refusal(slug),
-        (None, Some((slug, _))) => super::scenario_refusal(root, slug, &spec.path),
-        (None, None) => {
-            let slot = spec.version.as_deref().unwrap_or("the live model");
-            format!("`{}` names no element of {slot} (E_MODEL_REF)", spec.path)
-        }
-    }))
+    Err(refuse(super::spec_refusal(root, &spec)))
 }
 
 /// `archi plan task <id> link add --symbol <anchor> --answers <ref>
@@ -1096,30 +1102,18 @@ pub fn run_manual(root: &Path, model: &Model, task_id: &str) -> Result<CaptureOu
             plan.name
         ));
     }
-    let report = plans::verify_plan(root, model, &plan)?;
-    if !report.errors.is_empty() {
-        return Err(format!(
-            "the plan is structurally broken — `archi plan verify`:\n  {}",
-            report.errors.join("\n  ")
-        ));
-    }
-    let waves = &report.derived.waves;
-    if plan.closed_waves >= waves.len() {
-        return Err("no wave in flight — the scenario step is pending".into());
-    }
-    let wave = plan.closed_waves + 1;
-    let ids = &waves[wave - 1];
+    let (wave, ids) = wave_of(
+        root,
+        model,
+        &plan,
+        task_id,
+        "no wave in flight — the scenario step is pending",
+    )?;
     let in_flight: Vec<&Task> = plan
         .tasks
         .iter()
         .filter(|t| ids.contains(&t.id))
         .collect();
-    if !in_flight.iter().any(|t| t.id == task_id) {
-        return Err(format!(
-            "`{task_id}` is not in wave {wave} — in flight: {}",
-            ids.join(", ")
-        ));
-    }
     capture_wave(root, model, &plan.name, wave, &in_flight, Some(task_id))
 }
 

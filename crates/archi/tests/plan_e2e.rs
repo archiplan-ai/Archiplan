@@ -1699,15 +1699,22 @@ const T1_STORE_GATED: &str =
      ## Spec\n\n- `Store`\n\n## Inputs\n\n## Outputs\n\n- code/store.rs\n\n## Stack\n\n\
      ## Verifications\n\n### store-encrypted\n\n- test — proves store-encrypted\n";
 
-/// The t2 Auth record beside it. `outputs` is the block under `## Outputs`,
-/// which is the whole of what varies: one test has t2 claim the file t1 wrote.
-fn t2_auth_gated(outputs: &str) -> String {
+/// The t2 Auth record beside it. `inputs` and `outputs` are the blocks under
+/// `## Inputs` and `## Outputs`, which is the whole of what varies: the input
+/// puts t2 in a wave behind t1 and no input puts it beside t1, and one test
+/// has t2 claim the file t1 wrote.
+fn t2_auth(inputs: &str, outputs: &str) -> String {
     format!(
         "---\nnode: Auth\nowns: [service-hardening]\n---\n\n# t2 — Auth\n\nguard the door\n\n\
-         ## Spec\n\n- `Auth`\n- `Service type_of Auth`\n\n## Inputs\n\n\
-         - from t1 — the store api\n\n## Outputs\n\n{outputs}\n## Stack\n\n## Verifications\n\n\
+         ## Spec\n\n- `Auth`\n- `Service type_of Auth`\n\n## Inputs\n\n{inputs}\
+         ## Outputs\n\n{outputs}\n## Stack\n\n## Verifications\n\n\
          ### service-hardening\n\n- test — proves service-hardening\n"
     )
+}
+
+/// The t2 Auth record that waits on t1: it opens in the wave behind it.
+fn t2_auth_gated(outputs: &str) -> String {
+    t2_auth("- from t1 — the store api\n\n", outputs)
 }
 
 /// The one declaration a `Store` task writes when its own work is not the
@@ -1991,23 +1998,23 @@ fn the_second_exit_retires_the_stale_pair_and_the_declaration_mints_it_anew() {
 // (`archi/requirements/planning/the-wave-opens-a-declaration-file-for-every-task.md`,
 // `archi/requirements/code-link/a-verb-writes-the-declaration.md`).
 
-/// The t2 Auth record with nothing coming in: t1 and t2 open together, so
-/// one wave puts two tasks in flight and the open owes a file to each.
-const T2_AUTH_SOLO: &str =
-    "---\nnode: Auth\nowns: [service-hardening]\n---\n\n# t2 — Auth\n\nguard the door\n\n\
-     ## Spec\n\n- `Auth`\n- `Service type_of Auth`\n\n## Inputs\n\n## Outputs\n\n\
-     - code/auth.rs\n\n## Stack\n\n## Verifications\n\n### service-hardening\n\n\
-     - test — proves service-hardening\n";
-
-/// Mint the plan and start it with t1 and t2 both in wave 1.
-fn started_two_task_plan() -> PathBuf {
+/// Mint the plan with t1 and t2, and nothing coming in to t2: the two open
+/// together, so one wave puts two tasks in flight and the open owes a file to
+/// each. Left in draft — [`started_two_task_plan`] starts it.
+fn two_task_plan() -> PathBuf {
     let root = temp_project();
     ok(&root, &["version", "save", "-m", "first"]);
     ok(&root, &["plan", "use", "mvp"]);
     ok(&root, &["plan", "task", "add", "Store"]);
     ok(&root, &["plan", "task", "add", "Auth"]);
     write_record(&root, "archi/plans/mvp/t1-store.md", T1_STORE_GATED);
-    write_record(&root, "archi/plans/mvp/t2-auth.md", T2_AUTH_SOLO);
+    write_record(&root, "archi/plans/mvp/t2-auth.md", &t2_auth("", "- code/auth.rs\n"));
+    root
+}
+
+/// The same plan started: t1 and t2 both in wave 1.
+fn started_two_task_plan() -> PathBuf {
+    let root = two_task_plan();
     let out = ok(&root, &["plan", "start"]);
     assert!(out.contains("wave 1 in flight: t1, t2"), "{out}");
     root
@@ -2246,13 +2253,7 @@ fn several_entries_land_in_one_batch_and_a_refusal_leaves_the_earlier_ones() {
 /// (`archi/requirements/code-link/a-verb-writes-the-declaration.md`).
 #[test]
 fn the_verb_refuses_outside_a_started_wave_and_names_the_step_that_opens_one() {
-    let root = temp_project();
-    ok(&root, &["version", "save", "-m", "first"]);
-    ok(&root, &["plan", "use", "mvp"]);
-    ok(&root, &["plan", "task", "add", "Store"]);
-    ok(&root, &["plan", "task", "add", "Auth"]);
-    write_record(&root, "archi/plans/mvp/t1-store.md", T1_STORE_GATED);
-    write_record(&root, "archi/plans/mvp/t2-auth.md", T2_AUTH_SOLO);
+    let root = two_task_plan();
 
     // Draft: no wave, no file.
     let (_, err) = fails(
