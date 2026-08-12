@@ -1,6 +1,6 @@
 ---
 node: Planner
-owns: [an-undeclared-change-refuses-the-wave, every-task-that-touched-a-symbol-declares-it, a-drifted-declaration-refuses-the-wave-that-moved-it]
+owns: [an-undeclared-change-refuses-the-wave, a-drifted-declaration-refuses-the-wave-that-moved-it]
 facts: [an-assistant-handed-the-whole-of-a-job-does-part-of-it@549190]
 ---
 
@@ -41,19 +41,11 @@ the wave refuses on an undeclared change, an unowed symbol and a drifted declara
 
 ### an-undeclared-change-refuses-the-wave
 
-- test — a wave with a task whose declaration file is absent refuses, naming the task
-- test — a wave where one changed symbol is declared and another is not refuses, naming only the second
-- test — the refusal names the task whose outputs claim the file
-- test — declaring the missing symbol clears the refusal and the wave closes
-- test — a changed file no in-flight task claims stays a leftover and does not refuse
-- test — a wave whose delta is empty closes with no declaration owed
-
-### every-task-that-touched-a-symbol-declares-it
-
-- test — two tasks claiming one file and both changing one symbol must both declare it
-- test — one of the two declaring is not enough, and the refusal names the other task
-- test — both declaring mints two links on the one symbol, each naming its task
-- test — a symbol only one in-flight task claims is owed by that task alone
+- test — a wave with a task whose declaration file is absent refuses, naming the task and the path it owes
+- test — a file that parses and declares nothing refuses the same way
+- test — a file with one entry closes the wave, whatever else the delta moved
+- test — the refusal names the next command
+- test — a wave with no task in flight owes no file
 
 ### a-drifted-declaration-refuses-the-wave-that-moved-it
 

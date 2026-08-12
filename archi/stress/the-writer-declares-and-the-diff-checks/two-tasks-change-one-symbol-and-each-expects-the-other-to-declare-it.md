@@ -1,6 +1,6 @@
 ---
 affects: [Links.Capture, Planner]
-outcome: breaking
+outcome: accepted
 ---
 
 # two tasks change one symbol and each expects the other to declare it
@@ -27,12 +27,16 @@ built what.
 
 ## Resolution
 
-The rule is "both", written down rather than left to whichever reading the implementation
-happens to take: derived `every-task-that-touched-a-symbol-declares-it`. A symbol two tasks
-answered carries two pairs, each naming its task, so the record reads as two claims instead
-of one duplicated.
+The pressure was answered once with a rule — every claimant declares the shared symbol — and
+the answer was withdrawn before it shipped, together with the per-symbol accounting it
+depended on. The gate asks only that a task in flight has written a file that declares
+something; nothing walks the delta asking who owes what, so there is no owing set for two
+tasks to divide.
 
-"Either" was the attractor precisely because it never blocks a wave, and that is what makes
-it the wrong answer: it buys a green wave with a coin toss about who built what. Capture
-already marks such files `shared`, so the owing set costs nothing to derive — only the
-decision, which now has consequences it did not have while candidates were cheap.
+The consequence stands unmitigated and is accepted. A symbol two tasks changed may be
+declared by one, by both or by neither, and the record says whatever the writers wrote. What
+buys that is the cost the wider rule turned out to carry: applied to the wave that built it,
+it demanded thirty entries for two files, twenty-seven of them for tests and the constants
+inside them. A gate that expensive is not paid, it is worked around.
+
+The first sign this was wrong will be shared work whose record names one author.
