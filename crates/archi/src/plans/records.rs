@@ -1037,7 +1037,14 @@ mod tests {
     }
 
     /// The fold changes nothing about the records this repository stands on:
-    /// every bullet the parser produces from them is one line of its own file
+    /// every one of them loads, and each parses to the value it would parse to
+    /// written one bullet per line, whatever layout its author left. The
+    /// renderers are the parsers' inverse and write that unwrapped form, so a
+    /// record parsed, rendered and parsed again *is* that comparison — for a
+    /// record nobody wrapped it says the reading did not move, and for one
+    /// somebody wrapped it says the wrap carried no meaning. The claim is
+    /// about the values, never about where a line ends: a guard that refused a
+    /// wrapped record would refuse the feature it stands under
     /// (`archi/requirements/planning/a-record-bullet-may-wrap.md`).
     #[test]
     fn every_record_standing_in_this_repository_parses_as_it_did() {
@@ -1055,28 +1062,27 @@ mod tests {
                 }
                 let label = format!("archi/plans/{name}/{file}");
                 let text = fs::read_to_string(entry.path()).unwrap();
-                let rendered = if let Some(ord) = task_ordinal(&file) {
-                    let task = parse_task(&label, &format!("t{ord}"), &text)
+                if let Some(ord) = task_ordinal(&file) {
+                    let id = format!("t{ord}");
+                    let task =
+                        parse_task(&label, &id, &text).unwrap_or_else(|e| panic!("{e}"));
+                    let again = parse_task(&label, &id, &render_task(&task))
                         .unwrap_or_else(|e| panic!("{e}"));
-                    render_task(&task)
+                    assert_eq!(again, task, "`{label}` reads two ways");
                 } else if file == format!("{name}.md") {
-                    let (problem, stack, summary, mapping) =
-                        parse_charter(&label, &text).unwrap_or_else(|e| panic!("{e}"));
+                    let charter = parse_charter(&label, &text).unwrap_or_else(|e| panic!("{e}"));
                     let mut plan = empty_plan(&name);
-                    plan.problem = problem;
-                    plan.technology_stack = stack;
-                    plan.architecture_summary = summary;
-                    plan.stack_mapping = mapping;
-                    render_charter(&plan)
+                    plan.problem = charter.0.clone();
+                    plan.technology_stack = charter.1.clone();
+                    plan.architecture_summary = charter.2.clone();
+                    plan.stack_mapping = charter.3.clone();
+                    let again = parse_charter(&label, &render_charter(&plan))
+                        .unwrap_or_else(|e| panic!("{e}"));
+                    assert_eq!(again, charter, "`{label}` reads two ways");
                 } else {
                     // A `scenarios.md` an old plan was written with is read
                     // by nobody, here as anywhere else.
                     continue;
-                };
-                let lines: std::collections::BTreeSet<&str> =
-                    text.lines().map(str::trim_end).collect();
-                for bullet in rendered.lines().filter(|l| l.starts_with("- ")) {
-                    assert!(lines.contains(bullet), "`{label}` folded `{bullet}`");
                 }
                 read += 1;
             }
