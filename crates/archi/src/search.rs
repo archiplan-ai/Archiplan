@@ -566,11 +566,19 @@ fn corpus(root: &Path, model: Option<&Model>) -> Vec<Card> {
                         // A port name is the element's addressable interface
                         // (`Sessions.fold` pipes into `query`) — it weighs as
                         // summary; its doc is supporting prose, body weight.
+                        // Beside a node with no definition of its own there
+                        // is no statement for the ports to support: their
+                        // prose is the statement, so it takes the summary
+                        // slot the missing definition left empty. Only the
+                        // empty slot is filled — a node that already speaks
+                        // keeps its ports at body weight, or a node with
+                        // many ports would float on their volume alone.
+                        let port_field = if doc.is_some() { 2 } else { 1 };
                         for p in ports.iter().flatten() {
                             c.push(1, 0, p.clone());
                         }
                         for (p, doc) in port_docs.iter().flatten() {
-                            c.push(2, 0, format!("{p} {doc}"));
+                            c.push(port_field, 0, format!("{p} {doc}"));
                         }
                     }
                     elements.push(c);
@@ -1098,6 +1106,135 @@ mod tests {
         let a = serde_json::to_string(&run(&root, "rate limiting fold", &[], 10)).unwrap();
         let b = serde_json::to_string(&run(&root, "rate limiting fold", &[], 10)).unwrap();
         assert_eq!(a, b);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The split the ports rule is about, in one model. Four nodes hold the
+    /// same words, each in a different slot: `Cartographer` in a port and
+    /// nowhere else, `Ledger` in a port beside a definition of its own,
+    /// `Surveyor` in its definition, `Quokka` in its name. `Atlas` and
+    /// `Cellar` hold none of them, so the phrase stays rarer than the corpus
+    /// and its frequency weight stays above zero.
+    const PORTS_MODEL: &str = "def node Cartographer:\n  port survey // charts the quokka runs after dark\ndef node Ledger: // the estate's book of debts\n  port audit // charts the quokka runs after dark\ndef node Surveyor // charts the quokka runs after dark\ndef node Quokka\ndef node Atlas\ndef node Cellar\n";
+
+    fn ports_project() -> PathBuf {
+        let root = temp_project();
+        put(&root, "archi/src/model.arch", PORTS_MODEL);
+        root
+    }
+
+    fn score_of(r: &SearchReport, slug: &str) -> f64 {
+        r.hits
+            .iter()
+            .find(|h| h.slug == slug)
+            .unwrap_or_else(|| panic!("`{slug}` is not in {:?}", slugs_of(r)))
+            .score
+    }
+
+    /// Scores ride out rounded to three decimals; a weight ratio holds to
+    /// well inside a hundredth.
+    fn close(a: f64, b: f64) -> bool {
+        (a - b).abs() < 0.01
+    }
+
+    /// The empty slot is filled: a node that carries no definition is
+    /// indexed by its ports' prose where its own prose would have sat, so
+    /// those words earn what the same words earn as a definition — and
+    /// twice what they earn as a port beside a definition.
+    #[test]
+    fn a_definitionless_node_ranks_on_its_ports_prose_at_summary_weight() {
+        let root = ports_project();
+        let r = run(&root, "quokka", &[Kind::Element], 10);
+        let carto = score_of(&r, "Cartographer");
+        let surveyor = score_of(&r, "Surveyor");
+        let ledger = score_of(&r, "Ledger");
+        assert!(
+            close(carto, surveyor),
+            "port prose scores {carto}, the same words as a definition score {surveyor}"
+        );
+        assert!(
+            close(carto, 2.0 * ledger),
+            "port prose scores {carto}, body weight is {ledger}"
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A summary is not a name: the promoted ports lift the node into the
+    /// middle weight class and no further.
+    #[test]
+    fn the_promoted_ports_still_lose_to_a_name_match() {
+        let root = ports_project();
+        let r = run(&root, "quokka", &[Kind::Element], 10);
+        assert_eq!(r.hits[0].slug, "Quokka", "{:?}", slugs_of(&r));
+        let name = score_of(&r, "Quokka");
+        let carto = score_of(&r, "Cartographer");
+        assert!(name > carto, "name {name} does not outrank ports {carto}");
+        assert!(
+            close(2.0 * name, 3.0 * carto),
+            "name {name} against summary {carto} is not three to two"
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Nothing moves for a node that already speaks: its ports stay
+    /// supporting detail, one third of a name and one half of a summary.
+    #[test]
+    fn a_node_with_its_own_definition_keeps_its_ports_at_body_weight() {
+        let root = ports_project();
+        let r = run(&root, "quokka", &[Kind::Element], 10);
+        let ledger = score_of(&r, "Ledger");
+        assert!(
+            close(3.0 * ledger, score_of(&r, "Quokka")),
+            "body {ledger} against a name is not one to three"
+        );
+        assert!(
+            close(2.0 * ledger, score_of(&r, "Surveyor")),
+            "body {ledger} against a summary is not one to two"
+        );
+        let card = r.hits.iter().find(|h| h.slug == "Ledger").unwrap();
+        assert_eq!(
+            card.refs.definition.as_deref(),
+            Some("the estate's book of debts"),
+            "the node under test must carry a definition of its own"
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A node with no ports and no definition has one field and answers out
+    /// of it alone, exactly as it did before the ports moved.
+    #[test]
+    fn a_node_with_no_ports_and_no_definition_scores_on_its_name_alone() {
+        let root = ports_project();
+        let r = run(&root, "quokka", &[Kind::Element], 10);
+        let bare = r.hits.iter().find(|h| h.slug == "Quokka").unwrap();
+        assert!(
+            close(2.0 * bare.score, 3.0 * score_of(&r, "Surveyor")),
+            "a bare name scores {}, a summary {}",
+            bare.score,
+            score_of(&r, "Surveyor")
+        );
+        assert_eq!(bare.refs.definition, None);
+        assert_eq!(bare.snippet, "", "a bare node carries no prose to show");
+        // And it gains nothing it did not hold: `Atlas` is bare too and the
+        // phrase never reaches it.
+        assert!(!slugs_of(&r).contains(&"Atlas"), "{:?}", slugs_of(&r));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The card of a definitionless node prints its port prose, from
+    /// whichever field now holds it.
+    #[test]
+    fn the_card_of_a_definitionless_node_shows_its_port_prose() {
+        let root = ports_project();
+        let r = run(&root, "quokka", &[Kind::Element], 10);
+        let card = r.hits.iter().find(|h| h.slug == "Cartographer").unwrap();
+        assert_eq!(card.refs.definition, None);
+        assert_eq!(card.snippet, "survey charts the quokka runs after dark");
+        assert!(
+            render_human(&r).contains("survey charts the quokka runs after dark"),
+            "{}",
+            render_human(&r)
+        );
         fs::remove_dir_all(&root).unwrap();
     }
 
