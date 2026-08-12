@@ -1,0 +1,9 @@
+[[declares]]
+symbol = "crates/archi/src/plans/mod.rs#gate_declarations"
+answers = "req:an-undeclared-change-refuses-the-wave"
+proved_by = "crates/archi/tests/plan_e2e.rs#a_wave_refuses_until_every_task_in_flight_has_declared"
+
+[[declares]]
+symbol = "crates/archi/src/plans/mod.rs#gate_declared_drift"
+answers = "req:a-drifted-declaration-refuses-the-wave-that-moved-it"
+proved_by = "crates/archi/tests/plan_e2e.rs#a_wave_that_moves_a_declared_symbol_refuses_until_the_pair_is_repinned"
