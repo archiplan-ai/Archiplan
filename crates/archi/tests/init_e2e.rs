@@ -18,6 +18,13 @@
 //! names no person and quotes nobody. The `CLAUDE.md` block says none of it: a
 //! fact is an archi record like a requirement or a stressor, and none of those
 //! carries a writing rule there.
+//!
+//! The implement skill carries the declaration loop
+//! (`archi/requirements/code-link/`): the per-task contract sends the writer to
+//! `archi plan task <id> link add` as its last act, several entries through
+//! `archi batch -`; the rule that keeps every `plan` and `link` command with
+//! the orchestrator holds and names that one verb as its exception; and no
+//! embedded skill sends a reader to a candidate list capture no longer makes.
 
 mod util;
 
@@ -33,9 +40,12 @@ static NEXT: AtomicUsize = AtomicUsize::new(0);
 /// planning skill is read by a second family as well, so it stands in the
 /// shared fixture module ([`util::SKILL_PLAN`]).
 const SKILL_ARCHI: &str = include_str!("../../../skills/archi.md");
+const SKILL_IMPLEMENT: &str = include_str!("../../../skills/archi-implement.md");
 const SKILL_MERGE: &str = include_str!("../../../skills/archi-merge.md");
+const SKILL_FINISH: &str = include_str!("../../../skills/archi-finish-worktree.md");
 const SKILL_MIGRATE: &str = include_str!("../../../skills/archi-migrate-fractal.md");
 const SKILL_MIGRATE_WORLD: &str = include_str!("../../../skills/archi-migrate-world.md");
+const SKILL_STE: &str = include_str!("../../../skills/ste-writing.md");
 
 fn temp_dir() -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -95,6 +105,29 @@ fn world_skills(root: &Path) -> (String, String) {
 /// line ends.
 fn flat(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The implement skill read off an initialized tree, pinned byte-equal to the
+/// copy this binary embeds — so what the suite reads is what a project gets.
+fn implement_skill(root: &Path) -> String {
+    let installed =
+        fs::read_to_string(root.join(".claude/skills/archi-implement/SKILL.md")).unwrap();
+    assert_eq!(installed, SKILL_IMPLEMENT, "the implement skill drifted on install");
+    installed
+}
+
+/// One passage of a skill: from where `opens` first stands to the next `##`
+/// heading. A rule is read where its reader meets it, so a passage that keeps
+/// the words while the words move to another step is not the same skill.
+fn passage<'a>(text: &'a str, opens: &str) -> &'a str {
+    let start = text
+        .find(opens)
+        .unwrap_or_else(|| panic!("the skill has no `{opens}`"));
+    let rest = &text[start..];
+    match rest.find("\n## ") {
+        Some(end) => &rest[..end],
+        None => rest,
+    }
 }
 
 /// Every file under `dir` with its bytes, path-sorted.
@@ -1011,5 +1044,168 @@ fn a_nested_init_names_the_enclosing_root() {
     let out = ok_in(&root, &["init", "services/billing"]);
     assert!(out.contains("enclosing project"), "{out}");
     assert!(root.join("services/billing/archi.toml").is_file());
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The writer declares what its code answers
+/// (`archi/requirements/code-link/the-writer-declares-what-the-code-answers.md`,
+/// `archi/requirements/code-link/the-sub-agent-posts-its-declarations-before-it-returns.md`),
+/// so the skill that briefs the writer names the verb whole. All three names
+/// are required and all three resolve before a byte is written, so a skill
+/// that names the verb with two of them briefs its reader into a refusal, and
+/// a skill that hangs a fourth flag off it briefs them into a usage error.
+#[test]
+fn the_implement_skill_names_the_declaration_verb_with_its_three_flags() {
+    let root = temp_dir();
+    ok_in(&root, &["init", "."]);
+    let flat = flat(&implement_skill(&root));
+
+    // Some mention of `link add` carries the whole invocation. Other mentions
+    // are prose about the verb, and prose does not repeat a usage line.
+    let full = flat
+        .match_indices("link add")
+        .map(|(at, _)| at)
+        .find(|&at| {
+            let window: String = flat[at..].chars().take(240).collect();
+            ["--symbol", "--answers", "--proved-by"]
+                .iter()
+                .all(|flag| window.contains(flag))
+        })
+        .unwrap_or_else(|| panic!("no mention of `link add` names all three flags:\n{flat}"));
+
+    // The plan's verb, not the journal's `archi link add`: the declaration is
+    // filed against the task, which is what tells capture whose claim it is.
+    let head = flat[..full]
+        .rsplit_once("archi ")
+        .map(|(_, tail)| tail.to_string())
+        .unwrap_or_default();
+    assert!(
+        head.starts_with("plan task"),
+        "the skill names `archi {head}link add`, not the plan's verb"
+    );
+
+    // The invocation is written as one code span, and every flag in it is one
+    // the verb takes. An invented flag reaches the writer as a usage error
+    // hours after the task, which is the whole cost this rewrite removes.
+    let open = flat[..full].rfind('`').expect("the verb is written as code");
+    let close = full + flat[full..].find('`').expect("the code span closes");
+    let verb = &flat[open + 1..close];
+    for token in verb.split_whitespace().filter(|t| t.starts_with("--")) {
+        let flag = token.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '-');
+        assert!(
+            ["--symbol", "--answers", "--proved-by", "--project"].contains(&flag),
+            "the skill names `{flag}`, which the verb does not take: `{verb}`"
+        );
+    }
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The declaration is the sub-agent's own last act, so it stands in the
+/// contract the sub-agent is handed and not in the orchestrator's steps
+/// (`archi/requirements/code-link/the-sub-agent-posts-its-declarations-before-it-returns.md`).
+/// Several entries go through `archi batch -`: a task that defends four
+/// symbols spends one process on them, and `--proved-by` names a test that
+/// passes, which is why the declaration comes after the green run and not
+/// before it.
+#[test]
+fn the_implement_skill_puts_the_declaration_in_the_sub_agent_contract() {
+    let root = temp_dir();
+    ok_in(&root, &["init", "."]);
+    let skill = implement_skill(&root);
+    let contract = flat(passage(&skill, "The per-task contract"));
+
+    for phrase in ["link add", "archi batch -"] {
+        assert!(
+            contract.contains(phrase),
+            "the per-task contract never names `{phrase}`:\n{contract}"
+        );
+    }
+    assert!(
+        ["last act", "before it returns", "last thing"]
+            .iter()
+            .any(|when| contract.contains(when)),
+        "the contract never says when the declaration is written:\n{contract}"
+    );
+
+    // The orchestrator builds the prompt from this contract, so the sentence
+    // that lists what a prompt carries lists the declaration too. A step the
+    // prompt omits is a step no sub-agent ever runs.
+    let dispatch = flat(passage(&skill, "## Sub-agents"));
+    assert!(
+        dispatch.contains("declar"),
+        "the dispatch never puts the declaration in the prompt:\n{dispatch}"
+    );
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// One verb is carved out, and the rule around it keeps its force
+/// (`archi/requirements/code-link/the-sub-agent-posts-its-declarations-before-it-returns.md`).
+/// A sub-agent that may run `link confirm` or `plan next` is a sub-agent that
+/// closes its own wave, so the carve-out is named in the same sentence as the
+/// rule — a reader who meets the rule meets its one exception, and cannot read
+/// the exception as licence for the rest.
+#[test]
+fn the_implement_skill_keeps_plan_and_link_with_the_orchestrator_but_for_one_verb() {
+    let root = temp_dir();
+    ok_in(&root, &["init", "."]);
+    let skill = implement_skill(&root);
+    let dispatch = flat(passage(&skill, "## Sub-agents"));
+
+    assert!(
+        dispatch.contains("Every `plan` and `link` command stays with you"),
+        "the orchestrator-only rule is gone:\n{dispatch}"
+    );
+    let rule = dispatch
+        .split(". ")
+        .find(|s| s.contains("stays with you"))
+        .expect("the rule is a sentence");
+    assert!(
+        ["except", "exception"].iter().any(|carve| rule.contains(carve)),
+        "the rule names no exception: {rule}"
+    );
+    assert!(
+        rule.contains("link add"),
+        "the exception is not named as the declaration verb: {rule}"
+    );
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// Capture proposes no candidates any more — it mints what the declarations
+/// name and nothing else
+/// (`archi/requirements/code-link/the-writer-declares-what-the-code-answers.md`,
+/// `archi/requirements/code-link/the-sub-agent-posts-its-declarations-before-it-returns.md`).
+/// A skill that still sends its reader to review a candidate list sends them
+/// to an empty one. Every embedded skill is read, not only the one this round
+/// rewrote: the instruction is stale wherever it stands, and this is the test
+/// that says so the next time a loop changes and a text does not.
+#[test]
+fn no_embedded_skill_sends_the_reader_to_confirm_candidates() {
+    let root = temp_dir();
+    ok_in(&root, &["init", "."]);
+
+    for (name, embedded) in [
+        ("archi", SKILL_ARCHI),
+        ("archi-plan", SKILL_PLAN),
+        ("archi-implement", SKILL_IMPLEMENT),
+        ("archi-merge", SKILL_MERGE),
+        ("archi-finish-worktree", SKILL_FINISH),
+        ("archi-migrate-fractal", SKILL_MIGRATE),
+        ("archi-migrate-world", SKILL_MIGRATE_WORLD),
+        ("ste-writing", SKILL_STE),
+    ] {
+        let installed =
+            fs::read_to_string(root.join(".claude/skills").join(name).join("SKILL.md")).unwrap();
+        assert_eq!(installed, embedded, "{name} drifted on install");
+        // Read over the line breaks: a command split across two lines is the
+        // same command.
+        let flat = flat(&installed);
+        for gone in ["link ls --evidence", "link confirm"] {
+            assert!(!flat.contains(gone), "{name} still sends its reader to `{gone}`");
+        }
+    }
+
     fs::remove_dir_all(&root).unwrap();
 }

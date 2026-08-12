@@ -150,6 +150,19 @@ d. **Run only the tests the task's own change can break** — the suites
    not have caught; the breakage a narrow view cannot see is exactly
    what your run after the wave is for. Name the commands in the prompt,
    with their cost, so the sub-agent has no reason to widen.
+e. **Declare the work — the last act of the task, after the tests are
+   green.** One entry for every symbol the agent will defend: `archi
+   plan task <id> link add --symbol <file#symbol> --answers <node, port
+   or req:slug> --proved-by <test file#test fn>`. Several of them go
+   through `archi batch -`, one line per symbol. All three names resolve
+   before a byte is written, so a refusal names which of the three
+   failed and writes nothing. `--answers` takes a node, a port or
+   `req:<slug>`, never an edge: an edge is a caller, and the code behind
+   a port does not know its callers. `--proved-by` names a test that
+   passes, which is why this comes last. What the file names becomes an
+   asserted link; what it does not name becomes nothing, and what to
+   name is the writer's own call. A repeated identical entry is a no-op,
+   so a re-run costs nothing.
 
 When every task in the wave is done, **commit the work of the wave
 first**. Capture stamps every new link with the commit of the clean tree
@@ -161,13 +174,21 @@ run:
 archi plan next
 ```
 
-It captures the delta of the wave into candidate links, and it gates on
-the asserted coverage of the refs that the delta presses:
+It reads the declaration file of every task the wave put in flight, mints
+what those files name as asserted links, and gates on the coverage of the
+refs that the delta presses:
 
-- Blocked on coverage. This is not an error. It is the loop. The links
-  are captured automatically, so review `archi link ls --evidence`. Run
-  `link confirm` on the load-bearing candidates, and `link rm` on the
-  incidental ones. A removal sticks. Then run `archi plan next` again.
+- Blocked on a declaration. This is not an error. It is the loop. The
+  gate refuses the wave that has a task with no declaration, and the wave
+  whose file names something that resolves against neither the model nor
+  the requirement set. The refusal names the task, the file and the line.
+  Read the file the sub-agent wrote — the file, not its prose report —
+  and send that task agent back to declare what it left out or to correct
+  the name. Then run `archi plan next` again.
+- Blocked on coverage. Also the loop. A pressed ref that no asserted link
+  covers holds the wave open, and `plan next` prints the `link add` lines
+  that would close it. Hand-author the ones that are true, then run
+  `archi plan next` again.
 - It prints the next wave. Loop with it.
 - It prints the cleanup block. The waves are done. Go to "The cleanup
   wave".
@@ -235,14 +256,19 @@ because sub-agents do not inherit the conversation context. Include the
 working directory of the worktree, and the member worktree path when the
 outputs of the task live in a member repo. Include the task id, its
 `archi plan task show` brief verbatim, and the per-task contract: TDD,
-context7 when available, implementation inside the declared outputs, and
-the named test commands that cover them — never the whole suite.
+context7 when available, implementation inside the declared outputs, the
+named test commands that cover them — never the whole suite — and the
+declaration the task closes with.
 Every sub-agent prompt forbids branch creation and branch switching —
 sub-agents write code on the branches the worktrees already stand on,
 and edit member code only in the member worktree paths that
 `archi status` prints.
 Sub-agents write code and tests only. Every `plan` and `link` command stays
-with you, the orchestrator. Wait for every sub-agent before you call
+with you, the orchestrator, except one: `archi plan task <id> link add` is
+the sub-agent's own, because the writer is the only actor that knows what
+its code answers, and a refusal that reaches it while the task is open
+costs one read. Everything else — `plan next`, `link verify`, `link rm`,
+`link repin` — is yours. Wait for every sub-agent before you call
 `archi plan next`.
 
 A sub-agent can need a tool or a permission that the model does not yet
@@ -264,9 +290,10 @@ Sub-agents cannot prompt for permission on their own.
   again after the landing merge. The cleanup wave runs the whole suite
   because it moves code across the unit. Widening the narrow actor buys
   nothing and costs the full suite every turn.
-- **Capture seals each wave.** A wave does not advance until every
-  pressed ref is covered. Confirm and prune the candidates. Never skip
-  the gate.
+- **The declarations seal each wave.** A wave does not advance while a
+  task in flight has declared nothing, while a declared name resolves
+  against nothing, or while a pressed ref is uncovered. Read the files.
+  Never skip the gate.
 - **The scenarios bless folded code.** The cleanup wave runs before
   them, and its sweep stays inside the delta of the unit.
 - **Every task runs in a sub-agent. There are no exceptions.** One Agent
