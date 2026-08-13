@@ -1666,58 +1666,68 @@ fn gate_declared_drift(
     Err(msg)
 }
 
-/// Asserted code-link coverage, scoped to the delta: a ref gates only when
-/// the closing capture pressed it — some claimed changed item of its task
-/// carries the ref's terms. Unpressed refs never block; the uncovered ones
-/// come back as suggested `link add` lines, since hand-authoring is the
-/// expected move for surface the delta did not touch. The refusal prints
-/// that same `link add` form for the refs that do gate — hand-authoring is
-/// the one repair that stands, so the two halves read as one voice.
-/// A link satisfies its ref however it was born.
+/// The wave gate: the files the delta touched against the declarations of the
+/// tasks in flight, read as one set. A file no entry names holds the wave
+/// open, and the refusal names that file. It names no task — the tasks of a
+/// wave share one tree, so nothing in the delta says who touched what — and
+/// an entry may name any file its writer touched, inside its task's
+/// `## Outputs` or not.
+///
+/// No spec ref is demanded and no term is compared. The gate asked for refs
+/// once, and it chose them by comparing the words of a changed file against
+/// the words of a model name: it demanded `WorldDoc` of a change to
+/// `world_check.rs` on the shared word `world`. What that gate tried to prove
+/// is the spec side, and the spec side has an honest reader already — the
+/// audit's `unlinked_spec_ref` finding, which reports a model element no code
+/// answers and never blocks. The refs no link covers come back from here as
+/// advice on a step that passed
+/// (`archi/requirements/code-link/the-file-in-the-delta-is-the-unit-the-gate-demands.md`).
 fn gate_coverage(
     root: &Path,
     in_flight: &[&Task],
-    pressed: &BTreeMap<String, BTreeSet<String>>,
+    moved: &BTreeSet<String>,
+    declared: &BTreeSet<String>,
 ) -> Result<Vec<String>, String> {
+    let undeclared: Vec<&String> = moved.difference(declared).collect();
+    if !undeclared.is_empty() {
+        let mut msg = String::from(
+            "this wave moved code no declaration accounts for. The tasks of a wave share one \
+             tree, so these files are named and no task is:",
+        );
+        for file in undeclared {
+            msg.push_str(&format!("\n  {file}"));
+        }
+        msg.push_str(&format!(
+            "\nthe writer that touched a file accounts for it — an entry may name any file its \
+             writer touched, in its task's `## Outputs` or not:\n  {}\n",
+            links::capture::declare_command(links::capture::TASK_HINT)
+        ));
+        msg.push_str(&format!(
+            "each entry lands as one table of this shape:\n{}\n",
+            links::capture::declaration_shape("  ")
+        ));
+        msg.push_str(
+            "`archi link add` does not answer this gate: the gate reads the declaration files, \
+             not the journal. Then re-run `archi plan next`",
+        );
+        return Err(msg);
+    }
+    // The advice: every ref of the wave no link covers, in the one form that
+    // authors it. A link satisfies its ref however it was born.
     let live = links::ls(root, None)?;
     let covered = |r: &str| live.iter().any(|l| anchors(l) && l.spec.path == r);
-    let mut gaps = Vec::new();
     let mut suggested = Vec::new();
     for t in in_flight {
         for r in &t.spec_refs {
-            if covered(r) {
-                continue;
-            }
-            // One repair, one form: what gates and what is voluntary differ
-            // in which half of the message carries the line, never in what
-            // the reader has to type.
-            let repair = format!(
-                "archi link add \"{r}\" <file#symbol> --kind indirect  # {}",
-                t.id
-            );
-            if pressed.get(&t.id).is_some_and(|p| p.contains(r)) {
-                gaps.push(repair);
-            } else {
-                suggested.push(repair);
+            if !covered(r) {
+                suggested.push(format!(
+                    "archi link add \"{r}\" <file#symbol> --kind indirect  # {}",
+                    t.id
+                ));
             }
         }
     }
-    if gaps.is_empty() {
-        return Ok(suggested);
-    }
-    let mut msg = format!(
-        "asserted code-link coverage of the refs this delta presses is incomplete — \
-         hand-author the link each ref is missing:\n  {}\nthen re-run `archi plan next`",
-        gaps.join("\n  ")
-    );
-    if !suggested.is_empty() {
-        msg.push_str(&format!(
-            "\nrefs the delta does not press are not demanded — hand-author them when the \
-             traceability is wanted:\n  {}",
-            suggested.join("\n  ")
-        ));
-    }
-    Err(msg)
+    Ok(suggested)
 }
 
 /// `archi plan start`: gate on structure and verifications, open wave 1.
@@ -1773,8 +1783,8 @@ pub struct NextOutcome {
     pub capture: Option<links::capture::CaptureOutcome>,
     /// The step.
     pub step: Step,
-    /// Suggested `link add` lines for uncovered refs the closing delta did
-    /// not press — the voluntary checklist; empty when the gate blocked
+    /// Suggested `link add` lines for the spec refs of the wave's tasks that
+    /// no link covers — the voluntary checklist; empty when the gate blocked
     /// (the message carries it) or nothing was left to suggest.
     pub checklist: Vec<String>,
 }
@@ -1883,7 +1893,7 @@ pub fn next(root: &Path, model: &Model) -> Result<NextOutcome, String> {
             checklist: Vec::new(),
         });
     }
-    let checklist = match gate_coverage(root, &in_flight, &capture.pressed) {
+    let checklist = match gate_coverage(root, &in_flight, &capture.moved, &capture.declared) {
         Ok(suggested) => suggested,
         Err(gaps) => {
             return Ok(NextOutcome {
@@ -2577,9 +2587,9 @@ mod tests {
         assert!(plan_dir(&root, "mvp").join("waves/w01.index.json").exists());
         assert!(start(&root, ws.model()).is_err(), "already started");
 
-        // Closing wave 1: the claimed delta presses both of t1's refs, and
-        // the coverage gate blocks. The task declared nothing, so nothing was
-        // minted — the delta proves a symbol changed, never what it answers.
+        // Closing wave 1: t1's output moves and the file the open wrote for
+        // it declares nothing, so the wave refuses. Nothing was minted — the
+        // delta proves a symbol changed, never what it answers.
         put(
             &root,
             "code/store.rs",
@@ -2630,12 +2640,10 @@ mod tests {
         let (_, in_flight) = current_wave(&root, ws.model()).unwrap();
         assert!(matches!(in_flight, InFlight::Wave(2, ids) if ids == vec!["t2".to_string()]));
 
-        // Wave 2's delta shares no term with any of t2's refs: nothing is
-        // pressed, so nothing gates — the wave closes into the cleanup
-        // stage, the no-signal product suppressed and the uncovered
-        // surface suggested for hand-authoring. A pre-asserted ref is
-        // silent in the checklist: covered is covered, however the link
-        // was born.
+        // Wave 2's declaration names the one file its delta moved, so the
+        // wave closes into the cleanup stage with no ref demanded, and the
+        // uncovered surface rides as advice. A pre-asserted ref is silent in
+        // that advice: covered is covered, however the link was born.
         links::add(&root, ws.model(), "Auth", "code/auth.rs", links::LinkKind::Indirect).unwrap();
         put(
             &root,
@@ -2660,11 +2668,10 @@ mod tests {
             "{}",
             links::capture::render_capture(&capture)
         );
-        assert_eq!(capture.suppressed.len(), 4, "every pair lacks signal");
-        assert!(capture.pressed.is_empty(), "{:?}", capture.pressed);
+        assert_eq!(capture.declared, capture.moved, "the delta is accounted for");
         assert!(
             matches!(outcome.step, Step::Cleanup),
-            "the unpressed wave closes to the cleanup wave"
+            "the declared wave closes to the cleanup wave"
         );
         assert!(active(&root).cleanup_displayed);
         assert!(!active(&root).scenarios_displayed);
@@ -2823,6 +2830,12 @@ mod tests {
         fs::remove_dir_all(&root).unwrap();
     }
 
+    /// The gate presses the delta — every file it moved is named by some
+    /// entry of the wave, or the wave stays open — and the refs no link
+    /// covers ride the passing step as advice. No ref is demanded and no
+    /// term is compared
+    /// (`archi/requirements/code-link/the-file-in-the-delta-is-the-unit-the-gate-demands.md`,
+    /// `archi/requirements/planning/waves-close-on-captured-coverage.md`).
     #[test]
     fn the_gate_presses_the_delta_and_suggests_the_rest() {
         let root = temp_project();
@@ -2853,18 +2866,17 @@ mod tests {
         );
         start(&root, ws.model()).unwrap();
 
-        // The delta names the incoming wire's ports but never the node:
-        // exactly one ref is pressed and gates; the rest arrive inside the
-        // blocked message as suggestions, not gaps.
+        // Two files move: the one the task was cut for, and one no task's
+        // `## Outputs` names.
         put(
             &root,
             "code/auth.rs",
             "pub fn login() -> bool { true }\npub fn inn_wire_probe() -> bool { true }\n",
         );
+        put(&root, "code/stray.rs", "pub fn stray() -> u8 { 7 }\n");
 
         // t1 is in flight and the file the open wrote for it declares
-        // nothing, so the wave refuses before it ever reaches the coverage
-        // gate.
+        // nothing, so the wave refuses before it ever reaches the delta gate.
         let outcome = next(&root, ws.model()).unwrap();
         let Step::Blocked(why) = &outcome.step else {
             panic!("the empty declaration file gates");
@@ -2872,9 +2884,9 @@ mod tests {
         assert!(why.contains("names nothing"), "{why}");
         assert!(why.contains("archi plan task t1 link add"), "{why}");
 
-        // The writer declares it against the requirement behind the node.
-        // The pressed ref is an edge, and an edge is never a declaration's to
-        // name, so the coverage gate is what stands after the declaration.
+        // The writer declares one of the two files against the requirement
+        // behind the node. The other file is still unaccounted for, and the
+        // gate names it — the file, and no task.
         put(
             &root,
             "archi/plans/mvp/waves/w01.t1.declares.toml",
@@ -2885,32 +2897,24 @@ mod tests {
         );
         let outcome = next(&root, ws.model()).unwrap();
         let Step::Blocked(why) = &outcome.step else {
-            panic!("the pressed ref gates");
+            panic!("the undeclared file gates");
         };
-        assert!(why.contains("coverage of the refs this delta presses"), "{why}");
-        // Both halves print the one repair that stands, and the halves stay
-        // apart: what gates above the "not press" line, what is voluntary
-        // below it.
-        let (gating, voluntary) = why
-            .split_once("refs the delta does not press")
-            .expect("the refusal carries both halves");
+        assert!(why.contains("code/stray.rs"), "names the file: {why}");
+        assert!(!why.contains("code/auth.rs"), "a named file is not asked again: {why}");
+        assert!(!why.contains("t1"), "names no task: {why}");
         assert!(
-            gating.contains("archi link add \"Gate.out wire Auth.inn\" <file#symbol> --kind indirect"),
-            "{why}"
+            why.contains("archi plan task <id> link add --symbol"),
+            "names the repair: {why}"
         );
-        assert!(!gating.contains("archi link add \"Auth\""), "unpressed refs never gap: {why}");
-        assert!(why.contains("hand-author"), "{why}");
-        assert!(voluntary.contains("archi link add \"Auth\""), "{why}");
         let capture = outcome.capture.expect("capture ran");
         assert_eq!(capture.minted.len(), 1, "{:?}", capture.minted);
         assert_eq!(capture.minted[0].spec.path, "req:service-hardening");
-        assert_eq!(capture.suppressed.len(), 3, "{:?}", capture.suppressed);
 
-        // The pressed ref is an edge, and an edge is never a declaration's to
-        // name: the one exit is the hand-authored link the message printed.
-        // The wave then closes into the cleanup wave and the same suggestions
-        // ride the passing step as the voluntary checklist; one more next
-        // completes (no scenarios).
+        // The entry that accounts for the second file closes the wave — and
+        // the edge no link covers was never demanded of it. The uncovered
+        // refs ride the passing step as advice; one more next completes (no
+        // scenarios). A ref an earlier hand covered is silent there: covered
+        // is covered, however the link was born.
         links::add(
             &root,
             ws.model(),
@@ -2919,8 +2923,28 @@ mod tests {
             links::LinkKind::Indirect,
         )
         .unwrap();
+        put(
+            &root,
+            "archi/plans/mvp/waves/w01.t1.declares.toml",
+            "[[declares]]\n\
+             symbol = \"code/auth.rs#inn_wire_probe\"\n\
+             answers = \"req:service-hardening\"\n\
+             proved_by = \"code/auth_test.rs#a_login_without_a_name_is_refused\"\n\n\
+             [[declares]]\n\
+             symbol = \"code/stray.rs#stray\"\n\
+             answers = \"req:service-hardening\"\n\
+             proved_by = \"code/auth_test.rs#a_login_without_a_name_is_refused\"\n",
+        );
         let outcome = next(&root, ws.model()).unwrap();
         assert!(matches!(outcome.step, Step::Cleanup));
+        assert!(
+            !outcome
+                .checklist
+                .iter()
+                .any(|s| s.contains("Gate.out wire Auth.inn")),
+            "the covered ref is silent: {:?}",
+            outcome.checklist
+        );
         assert_eq!(outcome.checklist.len(), 3, "{:?}", outcome.checklist);
         assert!(
             outcome
@@ -3197,13 +3221,13 @@ mod tests {
         store_plan(&root, &legacy).unwrap();
 
         // Lifecycle still moves the old form: start, next through the
-        // cleanup wave to done, reset.
+        // cleanup wave to done, reset. The test a declaration names stands
+        // before the wave opens, so it is never a change of its own.
+        put(&root, "code/store_test.rs", "pub fn a_row_is_persisted() {\n    assert!(true);\n}\n");
         let (started, wave1) = start(&root, ws.model()).unwrap();
         assert_eq!(started.state, PlanState::Started);
         assert_eq!(wave1, vec!["t1".to_string()]);
-        // The wave asks that the task in flight account for its work: one
-        // pair, whatever else the delta holds.
-        put(&root, "code/store_test.rs", "pub fn a_row_is_persisted() {\n    assert!(true);\n}\n");
+        // The wave asks that the task in flight account for its work.
         put(
             &root,
             "archi/plans/old/waves/w01.t1.declares.toml",

@@ -1,0 +1,30 @@
+# `t1` accounts for its work here: for every symbol it changed, what
+# that code answers and the test that proves it. One entry closes the
+# wave; what the file holds is the writer's to decide.
+#
+# Nobody types this file. The verb writes it, and it resolves all three
+# names before it writes:
+#
+#   archi plan task t1 link add --symbol "<file>#<symbol>" --answers "<node, port or req:slug>" --proved-by "<test file>#<test fn>"
+#
+# Each entry lands as one table of this shape:
+#
+#   [[declares]]
+#   symbol = "<file>#<symbol>"
+#   answers = "<node, port or req:slug>"
+#   proved_by = "<test file>#<test fn>"
+
+[[declares]]
+symbol = "crates/archi/src/plans/mod.rs#gate_coverage"
+answers = "Planner"
+proved_by = "crates/archi/tests/plan_e2e.rs#a_file_no_declaration_names_refuses_the_wave_and_the_refusal_names_it"
+
+[[declares]]
+symbol = "crates/archi/src/links/capture.rs#capture_wave"
+answers = "Links.Capture"
+proved_by = "crates/archi/tests/plan_e2e.rs#a_declaration_names_a_file_outside_its_task_s_outputs"
+
+[[declares]]
+symbol = "crates/archi/tests/plan_e2e.rs#the_refusal_names_the_file_and_no_task"
+answers = "req:the-file-in-the-delta-is-the-unit-the-gate-demands"
+proved_by = "crates/archi/tests/plan_e2e.rs#the_refusal_names_the_file_and_no_task"

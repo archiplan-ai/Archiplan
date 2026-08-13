@@ -647,9 +647,8 @@ fn located(err: &str, line: usize, quoted: &str) {
 /// The writer names the port and the requirement its symbol answers, and the
 /// test that proves each; both land as asserted links on that symbol, both
 /// read as declared, and the reverse view of the requirement hands back the
-/// test beside the code. The symbol nobody named draws nothing — the terms it
-/// shares with the task's refs are still counted and still reported, and they
-/// mint nothing at all
+/// test beside the code. The symbol nobody named draws nothing, whatever it
+/// resembles: nothing but a declaration mints
 /// (`archi/requirements/code-link/the-writer-declares-what-the-code-answers.md`,
 /// `archi/requirements/code-link/a-declaration-names-the-test-that-proves-it.md`).
 #[test]
@@ -696,19 +695,10 @@ fn a_declaration_mints_the_pair_asserted_and_the_reverse_view_names_the_test() {
     assert_eq!(out.lines().count(), 1, "{out}");
     assert!(out.contains(&format!("proved by {PROOF}")), "{out}");
 
-    // Nothing was minted for the symbol no declaration names, though the
-    // delta presses both of the task's refs through it: the shared-term rule
-    // mints nothing at all.
+    // Nothing was minted for the symbol no declaration names.
     assert!(!rows.contains("auth_gate"), "{rows}");
     let json: Value =
         serde_json::from_str(&ok(&root, &["link", "capture", "--task", "t1", "--json"])).unwrap();
-    let pressed: Vec<&str> = json["pressed"]["t1"]
-        .as_array()
-        .expect("the delta presses refs")
-        .iter()
-        .map(|v| v.as_str().unwrap())
-        .collect();
-    assert_eq!(pressed, vec!["Auth", "Gate.out wire Auth.inn"], "{json}");
     // And the re-run is idempotent: a declaration already minted is not
     // minted twice.
     assert!(json["minted"].as_array().unwrap().is_empty(), "{json}");

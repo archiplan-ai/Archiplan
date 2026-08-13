@@ -544,20 +544,19 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     assert!(captured_ids(&stdout).is_empty(), "{stdout}");
     assert!(stdout.contains("w01.t1.declares.toml"), "{stdout}");
 
-    // A manual re-run is idempotent, and `--json` carries the full
-    // product: what was pressed, what was suppressed.
+    // A manual re-run is idempotent, and `--json` carries the mint whole.
     let out = ok(&root, &["link", "capture", "--task", "t1"]);
     assert!(!out.contains("captured "), "{out}");
     let json: Value =
         serde_json::from_str(&ok(&root, &["link", "capture", "--task", "t1", "--json"])).unwrap();
-    assert_eq!(json["pressed"]["t1"].as_array().unwrap().len(), 2, "{json}");
-    assert!(json["suppressed"].as_array().unwrap().is_empty(), "{json}");
+    assert!(json["minted"].as_array().unwrap().is_empty(), "{json}");
 
-    // The writer declares what its symbol answers and the test that proves
-    // it: the pair lands asserted, with no review step between the claim and
-    // the record. The other pressed ref is an edge, and an edge is never a
-    // declaration's to name, so it is hand-authored — which is what the
-    // refusal printed.
+    // A second file moves beside the first, and no entry accounts for it: the
+    // delta is what the gate demands, so the wave stays open and the refusal
+    // names that file. The repair it prints is the declaration verb — a hand
+    // `link add` writes the journal, and the gate does not read the journal
+    // (`archi/requirements/planning/the-gate-refusal-names-the-repair-that-stands.md`).
+    fs::write(root.join("code/orphan.rs"), ORPHAN_RS).unwrap();
     declares(
         &root,
         1,
@@ -570,29 +569,38 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     );
     let (stdout, stderr) = fails(&root, &["plan", "next"]);
     assert_eq!(captured_ids(&stdout).len(), 1, "{stdout}");
-    assert!(stderr.contains("coverage of the refs this delta presses is incomplete"), "{stderr}");
-    // The refusal names the one repair that stands — the ref it wants and the
-    // anchor that ref takes — and no review step, because capture proposes no
-    // candidate to review
-    // (`archi/requirements/planning/the-gate-refusal-names-the-repair-that-stands.md`).
     // Flattened, so a hard wrap in the source string cannot hide a phrase.
     let flat = util::flat(&stderr);
+    assert!(flat.contains("code/orphan.rs"), "names the file: {stderr}");
     assert!(
-        flat.contains(
-            "archi link add \"Auth.creds wire Store.inn\" <file#symbol> --kind indirect"
-        ),
-        "the refusal names the repair, with the ref and its anchor: {stderr}"
+        flat.contains("archi plan task <id> link add --symbol"),
+        "names the repair: {stderr}"
     );
     assert!(!flat.contains("link ls --evidence"), "no candidate list to review: {stderr}");
     assert!(!flat.contains("link confirm"), "nothing captured to raise: {stderr}");
-    // The repair as printed is the repair that works.
+    // The repair as printed is the repair that works. The entry may name a
+    // file no `## Outputs` claims — the writer that touched it accounts for
+    // it.
+    ok(&root, &[
+        "plan", "task", "t1", "link", "add",
+        "--symbol", "code/orphan.rs#stray",
+        "--answers", "Store",
+        "--proved-by", "code/store_test.rs#a_row_is_persisted",
+    ]);
+    // The spec side is nobody's gate now: the incoming edge no link covers
+    // rides as advice, and the hand still authors it when the traceability is
+    // wanted.
+    let out = ok(&root, &["plan", "next"]);
+    assert!(
+        out.contains("archi link add \"Auth.creds wire Store.inn\" <file#symbol> --kind indirect"),
+        "the uncovered edge is advice: {out}"
+    );
+    assert_eq!(captured_ids(&out).len(), 1, "the orphan's pair mints: {out}");
+    assert!(out.contains("wave 1 closed — in flight: t2"), "{out}");
     ok(&root, &[
         "link", "add", "Auth.creds wire Store.inn", "code/store.rs#Store::put",
         "--kind", "indirect",
     ]);
-    let out = ok(&root, &["plan", "next"]);
-    assert!(captured_ids(&out).is_empty(), "the pair is held, not minted twice: {out}");
-    assert!(out.contains("wave 1 closed — in flight: t2"), "{out}");
     let declared = ok(&root, &["link", "ls", "--spec", "Store"]);
     assert!(declared.contains("asserted"), "{declared}");
     assert!(declared.contains("declared"), "{declared}");
@@ -601,11 +609,11 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
         "{declared}"
     );
 
-    // Wave 2's delta shares no term with any of t2's refs: nothing is
-    // pressed, so nothing gates — the last wave closes into the cleanup
-    // wave, the no-signal product suppressed and the untouched surface
-    // suggested as a checklist instead of a jam. The cleanup block
-    // prints once and latches in state.json; the scenarios wait.
+    // Wave 2's declaration names the one file its delta moved, so the last
+    // wave closes into the cleanup wave with no ref demanded and the
+    // untouched surface suggested as a checklist instead of a jam. The
+    // cleanup block prints once and latches in state.json; the scenarios
+    // wait.
     fs::write(
         root.join("code/auth.rs"),
         "pub fn login(u: &str) -> bool { !u.is_empty() }\n",
@@ -623,7 +631,7 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     );
     let out = ok(&root, &["plan", "next"]);
     assert_eq!(captured_ids(&out).len(), 1, "the declaration mints its pair: {out}");
-    assert!(out.contains("suppressed 3 no-signal pair(s)"), "{out}");
+    assert!(!out.contains("no-signal pair"), "no term is compared: {out}");
     assert!(out.contains("hand-author"), "{out}");
     assert!(out.contains("archi link add \"Auth\" <file#symbol> --kind indirect"), "{out}");
     assert_eq!(out.matches("the cleanup wave").count(), 1, "{out}");
@@ -1711,6 +1719,13 @@ const STORE_PUT_MOVED: &str = "pub struct Store;\nimpl Store {\n    \
                                pub fn put(&mut self, n: u16) -> bool { let _ = n; true }\n    \
                                pub fn get(&self) -> u8 { 0 }\n}\n";
 
+/// A file no task's `## Outputs` names, written after the wave opened: the
+/// delta holds it like any other file, and some declaration must name it.
+const ORPHAN_RS: &str = "pub fn stray() -> u8 { 7 }\n";
+
+/// `code/auth.rs` as a wave leaves it: the one symbol moved.
+const AUTH_MOVED: &str = "pub fn login(u: &str) -> bool { !u.is_empty() }\n";
+
 /// The project-relative path of one task's declaration file in a wave of
 /// plan `mvp`.
 fn declares_rel(wave: usize, task: &str) -> String {
@@ -1750,6 +1765,10 @@ const STORE_ENTRY: [&str; 3] = ["code/store.rs#Store::put", "Store", PROOF];
 
 /// The same for an `Auth` task.
 const AUTH_ENTRY: [&str; 3] = ["code/auth.rs#login", "Auth", AUTH_PROOF];
+
+/// The entry that accounts for [`ORPHAN_RS`] — a file no task's `## Outputs`
+/// names, so whichever writer touched it declares it.
+const ORPHAN_ENTRY: [&str; 3] = ["code/orphan.rs#stray", "Store", PROOF];
 
 /// Write one task's declaration file, as its sub-agent does before it
 /// returns: one `[[declares]]` table per pair it accounts for. An empty
@@ -1802,40 +1821,28 @@ fn unstamp_rule(root: &Path, id: &str) {
     fs::write(&path, format!("{}\n", aged.join("\n"))).unwrap();
 }
 
-/// The gate is the file and nothing else. A task in flight accounts for its
-/// work by writing one; a file that names nothing accounts for nothing and
-/// refuses the same way. What the file holds is the writer's to decide — one
-/// entry closes the wave, whatever else the delta moved
+/// The declaration gate is the file and nothing else. A task in flight
+/// accounts for its work by writing one; a file that names nothing accounts
+/// for nothing and refuses the same way. What the file holds is the writer's
+/// to decide — one entry per file closes the wave, whatever else moved inside
+/// those files
 /// (`archi/requirements/planning/an-undeclared-change-refuses-the-wave.md`).
 #[test]
 fn a_wave_refuses_until_every_task_in_flight_has_declared() {
     let root = temp_project();
-    ok(&root, &["version", "save", "-m", "first"]);
-    ok(&root, &["plan", "use", "mvp"]);
-    ok(&root, &["plan", "task", "add", "Store"]);
-    ok(&root, &["plan", "task", "add", "Auth"]);
-    write_record(&root, "archi/plans/mvp/t1-store.md", T1_STORE_GATED);
-    write_record(
-        &root,
-        "archi/plans/mvp/t2-auth.md",
-        &t2_auth_gated("- code/auth.rs\n"),
-    );
-    ok(&root, &["plan", "start"]);
+    gated_wave(&root);
 
-    // Two symbols move under t1's one output, and a file no task claims moves
-    // beside them.
+    // Two symbols move under t1's one output.
     fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
-    fs::write(root.join("code/orphan.rs"), "pub fn stray() -> u8 { 7 }\n").unwrap();
 
     // The file the open wrote parses and declares nothing: that accounts for
     // nothing, and the refusal names the task, the path and the command that
     // follows.
-    let (stdout, err) = fails(&root, &["plan", "next"]);
+    let (_, err) = fails(&root, &["plan", "next"]);
     assert!(err.contains("names nothing"), "{err}");
     assert!(err.contains("t1"), "names the task: {err}");
     assert!(err.contains(&declares_rel(1, "t1")), "names the path: {err}");
     assert!(err.contains("re-run `archi plan next`"), "names the next command: {err}");
-    assert!(stdout.contains("leftover code/orphan.rs#stray"), "{stdout}");
 
     // A file that parses and declares nothing the writer's own way — the empty
     // list — refuses exactly the same.
@@ -1844,12 +1851,11 @@ fn a_wave_refuses_until_every_task_in_flight_has_declared() {
     assert!(err.contains("names nothing"), "{err}");
     assert!(err.contains(&declares_rel(1, "t1")), "names the path: {err}");
 
-    // One entry closes the wave, whatever else the delta moved: two symbols
-    // moved under t1's output and the file names one of them.
+    // One entry closes the wave, whatever else moved inside the file it
+    // names: two symbols moved under t1's output and the file names one.
     declares(&root, 1, "t1", &[STORE_ENTRY]);
     let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("wave 1 closed — in flight: t2"), "{out}");
-    assert!(out.contains("leftover code/orphan.rs#stray"), "{out}");
 
     // The same gate on the next wave, on the file that wave's open wrote, and
     // the same one line answers it.
@@ -1865,6 +1871,236 @@ fn a_wave_refuses_until_every_task_in_flight_has_declared() {
     assert!(!root.join(declares_rel(3, "t1")).exists());
     let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("DONE"), "{out}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+// ---- the delta's files against the declarations ------------------------------
+//
+// `plan next` takes the files the wave's delta touched and asks the
+// declarations of the tasks in flight, read as one set, to name every one of
+// them (`archi/requirements/code-link/the-file-in-the-delta-is-the-unit-the-gate-demands.md`).
+
+/// The one-task wave: t1 over `code/store.rs` with t2 behind it, so wave 1
+/// holds one writer.
+fn gated_wave(root: &Path) {
+    ok(root, &["version", "save", "-m", "first"]);
+    ok(root, &["plan", "use", "mvp"]);
+    ok(root, &["plan", "task", "add", "Store"]);
+    ok(root, &["plan", "task", "add", "Auth"]);
+    write_record(root, "archi/plans/mvp/t1-store.md", T1_STORE_GATED);
+    write_record(
+        root,
+        "archi/plans/mvp/t2-auth.md",
+        &t2_auth_gated("- code/auth.rs\n"),
+    );
+    ok(root, &["plan", "start"]);
+}
+
+/// The two-task wave: t1 over `code/store.rs` and t2 over `code/auth.rs`, in
+/// flight together — no input edge puts one behind the other, so the wave
+/// holds two writers and one tree.
+fn two_task_wave(root: &Path) {
+    ok(root, &["version", "save", "-m", "first"]);
+    ok(root, &["plan", "use", "mvp"]);
+    ok(root, &["plan", "task", "add", "Store"]);
+    ok(root, &["plan", "task", "add", "Auth"]);
+    write_record(root, "archi/plans/mvp/t1-store.md", T1_STORE_GATED);
+    write_record(
+        root,
+        "archi/plans/mvp/t2-auth.md",
+        &t2_auth("", "- code/auth.rs\n"),
+    );
+    let out = ok(root, &["plan", "start"]);
+    assert!(out.contains("wave 1 in flight: t1, t2"), "{out}");
+}
+
+/// A file the delta holds and no declaration names holds the wave open, and
+/// the refusal names that file. The repair it prints is the declaration verb
+/// — the gate reads the declaration files, never the journal — and the entry
+/// that names the file closes the wave
+/// (`archi/requirements/code-link/the-file-in-the-delta-is-the-unit-the-gate-demands.md`).
+#[test]
+fn a_file_no_declaration_names_refuses_the_wave_and_the_refusal_names_it() {
+    let root = temp_project();
+    gated_wave(&root);
+
+    // Two files move under one writer; the declaration names one of them.
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+    fs::write(root.join("code/orphan.rs"), ORPHAN_RS).unwrap();
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
+
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains("code/orphan.rs"), "names the file: {err}");
+    assert!(
+        !err.contains("code/store.rs"),
+        "a named file is not asked for again: {err}"
+    );
+    // The repair is the verb that writes a declaration, and the refusal says
+    // that the journal is not what this gate reads.
+    assert!(err.contains("archi plan task"), "names the repair: {err}");
+    assert!(err.contains("link add --symbol"), "names the repair: {err}");
+    assert!(
+        err.contains("`archi link add`"),
+        "says which repair does not answer it: {err}"
+    );
+    assert!(err.contains("re-run `archi plan next`"), "names the next command: {err}");
+
+    // The entry that names the file closes the wave.
+    declares(&root, 1, "t1", &[STORE_ENTRY, ORPHAN_ENTRY]);
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("wave 1 closed — in flight: t2"), "{out}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The refusal names the file and no task. The tasks of a wave share one
+/// tree, so nothing in the delta says who touched what — with two writers in
+/// flight the gate still names only what moved
+/// (`archi/requirements/code-link/the-file-in-the-delta-is-the-unit-the-gate-demands.md`).
+#[test]
+fn the_refusal_names_the_file_and_no_task() {
+    let root = temp_project();
+    two_task_wave(&root);
+
+    // Each writer accounts for its own file; a third file moves beside them.
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+    fs::write(root.join("code/auth.rs"), AUTH_MOVED).unwrap();
+    fs::write(root.join("code/orphan.rs"), ORPHAN_RS).unwrap();
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
+    declares(&root, 1, "t2", &[AUTH_ENTRY]);
+
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains("code/orphan.rs"), "names the file: {err}");
+    assert!(!err.contains("t1"), "names no task: {err}");
+    assert!(!err.contains("t2"), "names no task: {err}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// An entry may name any file its writer touched, inside its task's
+/// `## Outputs` or not: the declarations of a wave are read as one set, so
+/// the entry that accounts for a file no task claims satisfies the gate for
+/// it (`archi/requirements/code-link/the-file-in-the-delta-is-the-unit-the-gate-demands.md`).
+#[test]
+fn a_declaration_names_a_file_outside_its_task_s_outputs() {
+    let root = temp_project();
+    two_task_wave(&root);
+
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+    fs::write(root.join("code/auth.rs"), AUTH_MOVED).unwrap();
+    fs::write(root.join("code/orphan.rs"), ORPHAN_RS).unwrap();
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
+    declares(&root, 1, "t2", &[AUTH_ENTRY]);
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains("code/orphan.rs"), "{err}");
+
+    // `code/orphan.rs` stands in no task's `## Outputs`. The writer that
+    // touched it names it, and the gate takes the entry.
+    declares(
+        &root,
+        1,
+        "t2",
+        &[AUTH_ENTRY, ["code/orphan.rs#stray", "Auth", AUTH_PROOF]],
+    );
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("the cleanup wave"), "{out}");
+    assert!(out.contains("← code/orphan.rs#stray"), "the entry mints its pair: {out}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// One file named by two entries against two different elements satisfies the
+/// gate once: the unit is the file, and a file serving two nodes is two
+/// entries and one demand met
+/// (`archi/requirements/code-link/the-file-in-the-delta-is-the-unit-the-gate-demands.md`).
+#[test]
+fn one_file_named_by_two_entries_satisfies_the_gate_once() {
+    let root = temp_project();
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Store"]);
+    ok(&root, &["plan", "task", "add", "Auth"]);
+    write_record(&root, "archi/plans/mvp/t1-store.md", T1_STORE_CURATED);
+    write_record(
+        &root,
+        "archi/plans/mvp/t2-auth.md",
+        &t2_auth_gated("- code/auth.rs\n"),
+    );
+    ok(&root, &["plan", "start"]);
+
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+    declares(
+        &root,
+        1,
+        "t1",
+        &[
+            ["code/store.rs#Store::put", "Store", PROOF],
+            ["code/store.rs#Store::put", "req:store-encrypted", PROOF],
+        ],
+    );
+
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("wave 1 closed — in flight: t2"), "{out}");
+    assert_eq!(captured_ids(&out).len(), 2, "both entries mint: {out}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// A wave whose declarations name every file in the delta closes, and no spec
+/// ref is demanded of it. The refs no link covers ride as advice on the
+/// passing step — advice is not a demand
+/// (`archi/requirements/code-link/the-file-in-the-delta-is-the-unit-the-gate-demands.md`).
+#[test]
+fn a_declared_delta_closes_the_wave_with_no_spec_ref_demanded() {
+    let root = temp_project();
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Store"]);
+    ok(&root, &["plan", "task", "add", "Auth"]);
+    // t1 carries an incoming edge no link covers: the old gate demanded it.
+    write_record(&root, "archi/plans/mvp/t1-store.md", T1_STORE_CURATED);
+    write_record(
+        &root,
+        "archi/plans/mvp/t2-auth.md",
+        &t2_auth_gated("- code/auth.rs\n"),
+    );
+    ok(&root, &["plan", "start"]);
+
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
+
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("wave 1 closed — in flight: t2"), "{out}");
+    assert!(!out.contains("coverage of the refs"), "no ref is demanded: {out}");
+    // The uncovered edge is advice on a step that passed.
+    assert!(out.contains("hand-author when the traceability is wanted"), "{out}");
+    assert!(
+        out.contains("archi link add \"Auth.creds wire Store.inn\""),
+        "{out}"
+    );
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// No term is compared anywhere, so `plan next` counts no no-signal pair and
+/// reports no leftover: a changed file is declared or it holds the wave open
+/// (`archi/requirements/code-link/the-file-in-the-delta-is-the-unit-the-gate-demands.md`).
+#[test]
+fn plan_next_prints_no_no_signal_pair_count() {
+    let root = temp_project();
+    two_task_wave(&root);
+
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+    fs::write(root.join("code/auth.rs"), AUTH_MOVED).unwrap();
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
+    declares(&root, 1, "t2", &[AUTH_ENTRY]);
+
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("the cleanup wave"), "{out}");
+    assert!(!out.contains("no-signal pair"), "{out}");
+    assert!(!out.contains("suppressed"), "{out}");
+    assert!(!out.contains("leftover"), "{out}");
 
     fs::remove_dir_all(&root).unwrap();
 }

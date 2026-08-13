@@ -2370,8 +2370,8 @@ fn run_plan(args: &Args) -> ExitCode {
                     }
                     if !outcome.checklist.is_empty() {
                         println!(
-                            "uncovered refs this delta does not press — hand-author when the \
-                             traceability is wanted:"
+                            "spec refs of this wave's tasks that no link covers — hand-author \
+                             when the traceability is wanted:"
                         );
                         for line in &outcome.checklist {
                             println!("  {line}");
