@@ -45,6 +45,7 @@ const SKILL_MERGE: &str = include_str!("../../../skills/archi-merge.md");
 const SKILL_FINISH: &str = include_str!("../../../skills/archi-finish-worktree.md");
 const SKILL_MIGRATE: &str = include_str!("../../../skills/archi-migrate-fractal.md");
 const SKILL_MIGRATE_WORLD: &str = include_str!("../../../skills/archi-migrate-world.md");
+const SKILL_MIGRATE_LINKS: &str = include_str!("../../../skills/archi-migrate-links.md");
 const SKILL_STE: &str = include_str!("../../../skills/ste-writing.md");
 
 fn temp_dir() -> PathBuf {
@@ -150,7 +151,7 @@ fn a_fresh_init_stands_up_a_building_project() {
     // The report: every artifact created, the manifest on the last created
     // line, the verdict naming the project.
     let created: Vec<&str> = out.lines().filter(|l| l.starts_with("created")).collect();
-    assert_eq!(created.len(), 12, "{out}");
+    assert_eq!(created.len(), 13, "{out}");
     assert!(created.last().unwrap().contains("archi.toml"), "{out}");
     assert!(out.contains("initialized `proj`"), "{out}");
 
@@ -1187,6 +1188,7 @@ fn no_embedded_skill_sends_the_reader_to_confirm_candidates() {
         ("archi-finish-worktree", SKILL_FINISH),
         ("archi-migrate-fractal", SKILL_MIGRATE),
         ("archi-migrate-world", SKILL_MIGRATE_WORLD),
+        ("archi-migrate-links", SKILL_MIGRATE_LINKS),
         ("ste-writing", SKILL_STE),
     ] {
         let installed =

@@ -516,7 +516,10 @@ once.
    plan, use the `archi-implement` skill.
 9. **Steady state.** Run `archi check` and `archi link verify` in CI. Run
    `archi link audit` for code that moved with no spec account, and spec
-   that no code realizes.
+   that no code realizes. A journal carried over from a binary that minted
+   links from shared words holds rows nobody ever read: `archi link ls |
+   awk '{print $5}' | sort | uniq -c` counts them under `inferred`, and the
+   `archi-migrate-links` skill is the one pass that sorts them.
 
 ## Brownfield
 
