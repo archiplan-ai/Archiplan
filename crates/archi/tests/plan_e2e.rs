@@ -627,11 +627,7 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     // untouched surface suggested as a checklist instead of a jam. The
     // cleanup block prints once and latches in state.json; the scenarios
     // wait.
-    fs::write(
-        root.join("code/auth.rs"),
-        "pub fn login(u: &str) -> bool { !u.is_empty() }\n",
-    )
-    .unwrap();
+    fs::write(root.join("code/auth.rs"), AUTH_MOVED).unwrap();
     declares(
         &root,
         2,
@@ -1746,9 +1742,9 @@ fn declares_rel(wave: usize, task: &str) -> String {
 }
 
 /// The t1 Store record the tests below drive. Its `Spec` names the node
-/// alone — [`T1_STORE_CURATED`] carries the incoming edge beside it — so the
-/// declaration gates are what these tests meet, and no edge ref presses the
-/// coverage gate in front of them.
+/// alone — [`T1_STORE_CURATED`] carries the incoming edge beside it — so a
+/// test that wants an uncovered ref in the advice takes the curated one, and
+/// a test that wants none takes this.
 const T1_STORE_GATED: &str =
     "---\nnode: Store\nowns: [store-encrypted]\n---\n\n# t1 — Store\n\npersist rows\n\n\
      ## Spec\n\n- `Store`\n\n## Inputs\n\n## Outputs\n\n- code/store.rs\n\n## Stack\n\n\
@@ -1843,7 +1839,7 @@ fn unstamp_rule(root: &Path, id: &str) {
 #[test]
 fn a_wave_refuses_until_every_task_in_flight_has_declared() {
     let root = temp_project();
-    gated_wave(&root);
+    gated_wave(&root, T1_STORE_GATED);
 
     // Two symbols move under t1's one output.
     fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
@@ -1894,14 +1890,16 @@ fn a_wave_refuses_until_every_task_in_flight_has_declared() {
 // declarations of the tasks in flight, read as one set, to name every one of
 // them (`archi/requirements/code-link/the-file-in-the-delta-is-the-unit-the-gate-demands.md`).
 
-/// The one-task wave: t1 over `code/store.rs` with t2 behind it, so wave 1
-/// holds one writer.
-fn gated_wave(root: &Path) {
+/// The one-task wave: the given t1 record over `code/store.rs` with t2 behind
+/// it, so wave 1 holds one writer. The t1 record is what varies —
+/// [`T1_STORE_GATED`] names the node alone, [`T1_STORE_CURATED`] carries the
+/// incoming edge beside it.
+fn gated_wave(root: &Path, t1: &str) {
     ok(root, &["version", "save", "-m", "first"]);
     ok(root, &["plan", "use", "mvp"]);
     ok(root, &["plan", "task", "add", "Store"]);
     ok(root, &["plan", "task", "add", "Auth"]);
-    write_record(root, "archi/plans/mvp/t1-store.md", T1_STORE_GATED);
+    write_record(root, "archi/plans/mvp/t1-store.md", t1);
     write_record(
         root,
         "archi/plans/mvp/t2-auth.md",
@@ -1910,22 +1908,17 @@ fn gated_wave(root: &Path) {
     ok(root, &["plan", "start"]);
 }
 
-/// The two-task wave: t1 over `code/store.rs` and t2 over `code/auth.rs`, in
-/// flight together — no input edge puts one behind the other, so the wave
-/// holds two writers and one tree.
-fn two_task_wave(root: &Path) {
-    ok(root, &["version", "save", "-m", "first"]);
-    ok(root, &["plan", "use", "mvp"]);
-    ok(root, &["plan", "task", "add", "Store"]);
-    ok(root, &["plan", "task", "add", "Auth"]);
-    write_record(root, "archi/plans/mvp/t1-store.md", T1_STORE_GATED);
-    write_record(
-        root,
-        "archi/plans/mvp/t2-auth.md",
-        &t2_auth("", "- code/auth.rs\n"),
-    );
-    let out = ok(root, &["plan", "start"]);
-    assert!(out.contains("wave 1 in flight: t1, t2"), "{out}");
+/// The two-task wave with each writer's own file moved and declared: t1 over
+/// `code/store.rs` and t2 over `code/auth.rs`, in flight together over one
+/// tree ([`started_two_task_plan`]). A test that wants a file nobody
+/// accounted for writes it beside this.
+fn two_writers_declared() -> PathBuf {
+    let root = started_two_task_plan();
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+    fs::write(root.join("code/auth.rs"), AUTH_MOVED).unwrap();
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
+    declares(&root, 1, "t2", &[AUTH_ENTRY]);
+    root
 }
 
 /// A file the delta holds and no declaration names holds the wave open, and
@@ -1936,7 +1929,7 @@ fn two_task_wave(root: &Path) {
 #[test]
 fn a_file_no_declaration_names_refuses_the_wave_and_the_refusal_names_it() {
     let root = temp_project();
-    gated_wave(&root);
+    gated_wave(&root, T1_STORE_GATED);
 
     // Two files move under one writer; the declaration names one of them.
     fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
@@ -1973,15 +1966,9 @@ fn a_file_no_declaration_names_refuses_the_wave_and_the_refusal_names_it() {
 /// (`archi/requirements/code-link/the-file-in-the-delta-is-the-unit-the-gate-demands.md`).
 #[test]
 fn the_refusal_names_the_file_and_no_task() {
-    let root = temp_project();
-    two_task_wave(&root);
-
     // Each writer accounts for its own file; a third file moves beside them.
-    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
-    fs::write(root.join("code/auth.rs"), AUTH_MOVED).unwrap();
+    let root = two_writers_declared();
     fs::write(root.join("code/orphan.rs"), ORPHAN_RS).unwrap();
-    declares(&root, 1, "t1", &[STORE_ENTRY]);
-    declares(&root, 1, "t2", &[AUTH_ENTRY]);
 
     let (_, err) = fails(&root, &["plan", "next"]);
     assert!(err.contains("code/orphan.rs"), "names the file: {err}");
@@ -1997,14 +1984,8 @@ fn the_refusal_names_the_file_and_no_task() {
 /// it (`archi/requirements/code-link/the-file-in-the-delta-is-the-unit-the-gate-demands.md`).
 #[test]
 fn a_declaration_names_a_file_outside_its_task_s_outputs() {
-    let root = temp_project();
-    two_task_wave(&root);
-
-    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
-    fs::write(root.join("code/auth.rs"), AUTH_MOVED).unwrap();
+    let root = two_writers_declared();
     fs::write(root.join("code/orphan.rs"), ORPHAN_RS).unwrap();
-    declares(&root, 1, "t1", &[STORE_ENTRY]);
-    declares(&root, 1, "t2", &[AUTH_ENTRY]);
     let (_, err) = fails(&root, &["plan", "next"]);
     assert!(err.contains("code/orphan.rs"), "{err}");
 
@@ -2030,17 +2011,7 @@ fn a_declaration_names_a_file_outside_its_task_s_outputs() {
 #[test]
 fn one_file_named_by_two_entries_satisfies_the_gate_once() {
     let root = temp_project();
-    ok(&root, &["version", "save", "-m", "first"]);
-    ok(&root, &["plan", "use", "mvp"]);
-    ok(&root, &["plan", "task", "add", "Store"]);
-    ok(&root, &["plan", "task", "add", "Auth"]);
-    write_record(&root, "archi/plans/mvp/t1-store.md", T1_STORE_CURATED);
-    write_record(
-        &root,
-        "archi/plans/mvp/t2-auth.md",
-        &t2_auth_gated("- code/auth.rs\n"),
-    );
-    ok(&root, &["plan", "start"]);
+    gated_wave(&root, T1_STORE_CURATED);
 
     fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
     declares(
@@ -2067,18 +2038,8 @@ fn one_file_named_by_two_entries_satisfies_the_gate_once() {
 #[test]
 fn a_declared_delta_closes_the_wave_with_no_spec_ref_demanded() {
     let root = temp_project();
-    ok(&root, &["version", "save", "-m", "first"]);
-    ok(&root, &["plan", "use", "mvp"]);
-    ok(&root, &["plan", "task", "add", "Store"]);
-    ok(&root, &["plan", "task", "add", "Auth"]);
     // t1 carries an incoming edge no link covers: the old gate demanded it.
-    write_record(&root, "archi/plans/mvp/t1-store.md", T1_STORE_CURATED);
-    write_record(
-        &root,
-        "archi/plans/mvp/t2-auth.md",
-        &t2_auth_gated("- code/auth.rs\n"),
-    );
-    ok(&root, &["plan", "start"]);
+    gated_wave(&root, T1_STORE_CURATED);
 
     fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
     declares(&root, 1, "t1", &[STORE_ENTRY]);
@@ -2101,13 +2062,7 @@ fn a_declared_delta_closes_the_wave_with_no_spec_ref_demanded() {
 /// (`archi/requirements/code-link/the-file-in-the-delta-is-the-unit-the-gate-demands.md`).
 #[test]
 fn plan_next_prints_no_no_signal_pair_count() {
-    let root = temp_project();
-    two_task_wave(&root);
-
-    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
-    fs::write(root.join("code/auth.rs"), AUTH_MOVED).unwrap();
-    declares(&root, 1, "t1", &[STORE_ENTRY]);
-    declares(&root, 1, "t2", &[AUTH_ENTRY]);
+    let root = two_writers_declared();
 
     let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("the cleanup wave"), "{out}");
@@ -2164,11 +2119,7 @@ fn a_wave_that_moves_a_declared_symbol_refuses_until_the_pair_is_repinned() {
 
     // Wave 2 moves nothing in `code/store.rs`: the declared pair stands and
     // the wave closes.
-    fs::write(
-        root.join("code/auth.rs"),
-        "pub fn login(u: &str) -> bool { !u.is_empty() }\n",
-    )
-    .unwrap();
+    fs::write(root.join("code/auth.rs"), AUTH_MOVED).unwrap();
     declares(&root, 2, "t2", &[["code/auth.rs#login", "Auth", AUTH_PROOF]]);
     let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("wave 2 closed — in flight: t3"), "{out}");
@@ -2398,11 +2349,7 @@ fn a_wave_whose_files_were_never_written_still_refuses_the_absent_one() {
 fn the_verb_appends_one_entry_and_the_wave_closes_on_it() {
     let root = started_two_task_plan();
     fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
-    fs::write(
-        root.join("code/auth.rs"),
-        "pub fn login(u: &str) -> bool { !u.is_empty() }\n",
-    )
-    .unwrap();
+    fs::write(root.join("code/auth.rs"), AUTH_MOVED).unwrap();
 
     let out = ok(&root, &declare_verb("t1", "code/store.rs#Store::put", "Store", PROOF));
     assert!(out.contains("code/store.rs#Store::put"), "{out}");

@@ -264,13 +264,17 @@ fn entry_table(values: [&str; 3]) -> String {
     out
 }
 
-/// One entry's shape, keys and hints — indented for a refusal that prints it.
-pub(crate) fn declaration_shape(indent: &str) -> String {
-    entry_table([SYMBOL_HINT, ANSWERS_HINT, PROVED_BY_HINT])
+/// What a refusal that asks for an entry prints under its repair line: the
+/// sentence, and one entry's shape — keys and hints — indented beneath it.
+/// Both gates that ask for an entry ask in these words, from here, so the two
+/// refusals cannot drift apart or from the reader.
+pub(crate) fn entry_shape_block() -> String {
+    let shape = entry_table([SYMBOL_HINT, ANSWERS_HINT, PROVED_BY_HINT])
         .lines()
-        .map(|l| format!("{indent}{l}"))
+        .map(|l| format!("  {l}"))
         .collect::<Vec<_>>()
-        .join("\n")
+        .join("\n");
+    format!("each entry lands as one table of this shape:\n{shape}\n")
 }
 
 /// The verb with no task id filled in. The wave gate refuses on a file, and
@@ -462,6 +466,20 @@ fn edge_refusal(path: &str, ends: &(String, String)) -> String {
     )
 }
 
+/// What one task's declaration file yielded.
+#[derive(Default)]
+struct Minted {
+    /// Freshly minted links.
+    links: Vec<Link>,
+    /// Ids of live rows this task is a second reader of.
+    touched: Vec<String>,
+    /// The file side of every entry, as scan keys — read off the same
+    /// [`Anchor::parse`] the mint resolves the entry with, so the set the wave
+    /// gate matches the delta against cannot disagree with the set the mint
+    /// stands on.
+    files: BTreeSet<String>,
+}
+
 /// Mint one task's declarations: what the file names becomes an asserted
 /// link on the symbol that named it, stamped `declared` and carrying the
 /// test. A pair the journal already holds is not minted twice, so a wave that
@@ -477,14 +495,13 @@ fn mint_declarations(
     file: &DeclarationFile,
     task: &str,
     live: &[Link],
-) -> Result<(Vec<Link>, Vec<String>), String> {
+) -> Result<Minted, String> {
+    let mut out = Minted::default();
     if file.declares.is_empty() {
-        return Ok((Vec::new(), Vec::new()));
+        return Ok(out);
     }
     let roots = super::Roots::resolve(root)?;
     let edges = edge_ends(model);
-    let mut minted = Vec::new();
-    let mut touched = Vec::new();
     for d in &file.declares {
         let answers = d.answers.get_ref();
         let symbol = d.symbol.get_ref();
@@ -503,8 +520,11 @@ fn mint_declarations(
 
         // Where the code is. It is resolved here, before the mint, so a
         // symbol the tree does not hold is refused on the line that named it.
+        // The file it names is the wave gate's unit, whatever the entry
+        // answers and whether or not the pair below is already held.
         let anchor = Anchor::parse(symbol)
             .map_err(|e| file.refuse(task, Some(d.symbol.span()), &e))?;
+        out.files.insert(anchor.qualified_file());
         let symbol_root = roots
             .require(&anchor.repo)
             .map_err(|e| file.refuse(task, Some(d.symbol.span()), &e))?;
@@ -542,7 +562,7 @@ fn mint_declarations(
         // and the journal records who — once.
         let held = live
             .iter()
-            .chain(&minted)
+            .chain(&out.links)
             .find(|l| l.spec.version.is_none() && l.spec.path == spec.path && l.anchor == anchor)
             .map(|l| {
                 let re_encounter = !matches!(&l.origin, Origin::Captured { task: t } if t == task)
@@ -551,7 +571,7 @@ fn mint_declarations(
             });
         if let Some((id, re_encounter)) = held {
             if re_encounter {
-                touched.push(id);
+                out.touched.push(id);
             }
             continue;
         }
@@ -570,9 +590,9 @@ fn mint_declarations(
             Some(test),
         )
         .map_err(|e| file.refuse(task, Some(d.answers.span()), &e))?;
-        minted.push(link);
+        out.links.push(link);
     }
-    Ok((minted, touched))
+    Ok(out)
 }
 
 // ---- the verb that writes one -------------------------------------------------
@@ -748,7 +768,9 @@ pub struct CaptureOutcome {
     pub minted: Vec<Link>,
     /// `(link id, task)`: a live link another task declared again.
     pub touched: Vec<(String, String)>,
-    /// Members the diff could not cover, and why.
+    /// Reporting lines: the members the diff could not cover and why, and the
+    /// tasks in flight whose declaration file named nothing. Refusing on the
+    /// second is the wave gate's, not this reader's.
     pub notes: Vec<String>,
     /// In-flight tasks that wrote no declaration file: `(task, path)`. What
     /// capture does with an absent file is a note; what the wave does with it
@@ -850,21 +872,16 @@ pub(crate) fn capture_wave(
                     ));
                     out.empty.push((task.id.clone(), file.path.clone()));
                 }
-                // The file side of each entry, whatever the entry answers:
-                // this is what the wave gate matches the delta against. An
-                // unparseable symbol is the mint's refusal below, on its own
-                // line.
-                for d in &file.declares {
-                    if let Ok(anchor) = Anchor::parse(d.symbol.get_ref()) {
-                        out.declared.insert(anchor.qualified_file());
-                    }
-                }
-                let (minted, touched) = mint_declarations(root, model, &file, &task.id, &live)?;
-                for link in minted {
+                // The mint reads the file once: the pairs it stands up, the
+                // rows it meets again, and the file side of every entry —
+                // what the wave gate matches the delta against.
+                let read = mint_declarations(root, model, &file, &task.id, &live)?;
+                out.declared.extend(read.files);
+                for link in read.links {
                     out.minted.push(link.clone());
                     live.push(link);
                 }
-                for id in touched {
+                for id in read.touched {
                     events.push(Event::Touch {
                         id: id.clone(),
                         task: task.id.clone(),

@@ -1595,10 +1595,7 @@ fn gate_declarations(
         for (task, _) in capture.absent.iter().chain(&capture.empty) {
             msg.push_str(&format!("  {}\n", links::capture::declare_command(task)));
         }
-        msg.push_str(&format!(
-            "each entry lands as one table of this shape:\n{}\n",
-            links::capture::declaration_shape("  ")
-        ));
+        msg.push_str(&links::capture::entry_shape_block());
         msg.push_str(
             "what the file holds is the writer's to decide: one entry closes the wave. Then \
              re-run `archi plan next`",
@@ -1702,10 +1699,7 @@ fn gate_coverage(
              writer touched, in its task's `## Outputs` or not:\n  {}\n",
             links::capture::declare_command(links::capture::TASK_HINT)
         ));
-        msg.push_str(&format!(
-            "each entry lands as one table of this shape:\n{}\n",
-            links::capture::declaration_shape("  ")
-        ));
+        msg.push_str(&links::capture::entry_shape_block());
         msg.push_str(
             "`archi link add` does not answer this gate: the gate reads the declaration files, \
              not the journal. Then re-run `archi plan next`",
