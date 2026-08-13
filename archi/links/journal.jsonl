@@ -7131,3 +7131,4 @@
 {"event":"retire","id":"l0394","at":"2026-08-13T11:40:03Z"}
 {"event":"retire","id":"l0403","at":"2026-08-13T11:40:03Z"}
 {"event":"retire","id":"l0408","at":"2026-08-13T11:40:03Z"}
+{"event":"repin","id":"l2920-06791c","at":"2026-08-13T11:45:54Z","anchor":{"file":"crates/archi/src/plans/mod.rs","symbol":"gate_coverage"},"pins":{"canonicalizer":"rust-tok-v1","interface":"sha256:a63c71bc3f77843b5dfa5235c3b89b339e61ffbae81f33ecd8e516f652713852","body":"sha256:5d3f57bf2438c5bba7d6c7a5f2fafc5d7b08c8dc235a086478362a1b8e076beb"}}

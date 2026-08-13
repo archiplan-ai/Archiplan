@@ -578,6 +578,19 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     );
     assert!(!flat.contains("link ls --evidence"), "no candidate list to review: {stderr}");
     assert!(!flat.contains("link confirm"), "nothing captured to raise: {stderr}");
+    // `archi link add` appears here only in the sentence that denies it, and
+    // that is exactly why matching a command name proves nothing: read what
+    // the refusal tells the reader to run
+    // (`archi/requirements/planning/the-gate-refusal-names-the-repair-that-stands.md`).
+    let denial = stderr
+        .lines()
+        .find(|l| l.contains("archi link add"))
+        .expect("the refusal says which neighbouring verb does not answer it");
+    assert!(denial.contains("does not answer this gate"), "{denial}");
+    assert!(
+        !denial.contains("plan task"),
+        "the repair and its denial are two statements, not one line: {denial}"
+    );
     // The repair as printed is the repair that works. The entry may name a
     // file no `## Outputs` claims — the writer that touched it accounts for
     // it.
