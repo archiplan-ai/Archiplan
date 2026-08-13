@@ -8,47 +8,18 @@ Seen 2026-08-11, during the unit `the-workaround-is-the-record`.
 
 ---
 
-## One lexical test decides both what is proposed and what is demanded
+## Paid: the lexical test, and the count that was its only surface
 
-`crates/archi/src/links/capture.rs:426-434`. For every changed file-symbol, every task that
-claims the file, and every spec ref of that task, one boolean decides two separate things:
+Two entries stood here — one on the single boolean that decided both what capture
+proposed and what the wave gate demanded, one on the `suppressed <n> no-signal pair(s)`
+count that was the only view over what the boolean missed.
 
-- whether a candidate link is minted, and
-- whether the ref enters `pressed`, which is what the wave gate demands coverage for.
-
-The boolean is `ref_terms(spec_ref)` and `item_terms(file, content)` sharing at least one
-word. `crates/archi/src/plans/mod.rs:1549` reads `pressed` for the gate, and the test at
-`crates/archi/src/plans/mod.rs:2644` states the consequence as intended behavior:
-`unpressed refs never gap`.
-
-The two directions do not cost the same.
-
-- A word matches by accident. A wrong candidate is minted. The reviewer sees it at the gate
-  and retires it; anything missed decays to confidence 0.00 and the audit asks for it again.
-  Loud, and guarded twice.
-- A word does not match although the code does realize the edge. No candidate is minted,
-  **and the ref never enters the gate**. The wave closes reporting complete coverage,
-  having never asked. Silent, and guarded by nothing.
-
-Measured on this unit: nine candidates offered for the two refs the gate held, of which
-seven were anchored at a file that realizes neither. 48 of the 229 decayed rows now standing
-in the journal are anchored at one file this effort wrote. That is the loud direction, and
-its size says how coarse the test is.
-
-What a round would have to decide: whether one signal can carry both jobs, or whether
-proposing a candidate and demanding coverage need separate tests with separate thresholds.
-
-## The no-signal list is a count, and the count is the whole surface
-
-`crates/archi/src/links/capture.rs:609-611`. Pairs with no shared word are reported as
-`suppressed <n> no-signal pair(s) — whole under --json`. This is the only place a
-false negative can be seen, and this unit's wave printed `128`. A number that large is read
-as noise and not opened, so the one surface over the silent failure is closed by its own
-size.
-
-What a round would have to decide: whether the list needs narrowing to be worth printing —
-by ref, by task, by whether the ref is otherwise uncovered — or whether the gate should
-speak for itself instead of relying on a reader.
+Both are paid. The proposing half went with `the-writer-declares-what-the-code-answers`:
+capture mints what a task's declaration file names and nothing else. The demanding half
+went with `the-file-in-the-delta-is-the-unit-the-gate-demands`: the gate takes the files
+the wave's delta moved and subtracts the files the declarations name. `ref_terms`,
+`item_terms`, `Suppressed` and the count are gone from the tree, so neither entry names
+anything a reader could open.
 
 ## Refusals that do not name the continuation
 
