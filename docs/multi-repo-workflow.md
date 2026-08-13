@@ -2,7 +2,7 @@
 
 How to run the archi loop when code lives in repositories of its own and the spec repository
 holds only the model, requirements, stress rounds, plans and the link journal. The loop's
-rhythm — save, plan, implement, `plan next`, confirm, commit, anchor — is unchanged from the
+rhythm — save, plan, implement, `plan next`, commit, anchor — is unchanged from the
 single-repo shape; what changes is where commands find code (**members**) and how many commits
 land at the end (one per touched repository).
 

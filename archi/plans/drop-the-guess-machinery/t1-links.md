@@ -63,4 +63,5 @@ one standing: the guess machinery leaves the code
 - test — a journal fixture holding an `add` with `"standing":"evidence"` and a `decay` event
   folds without error, and `link ls` prints that row as asserted
 - test — `link verify` grades that row exactly as it grades an asserted one
-- test — this project's own journal still loads, and no row prints the word `evidence`
+- test — this project's own journal still loads, and every live row reads asserted in its
+  standing column

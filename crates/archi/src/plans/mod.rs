@@ -875,13 +875,13 @@ fn link_add(spec: &str) -> String {
     )
 }
 
-/// Whether one link anchors what it names: asserted, in the Working slot.
-/// Evidence is a candidate nobody stood behind, and a link pinned to a
-/// version is history — neither one anchors. Both gates read this one
-/// predicate, so the coverage gate and the closing block can never disagree
-/// about what an anchor is.
+/// Whether one link anchors what it names: a live row in the Working slot.
+/// Every live row is a claim, so standing decides nothing here; a link pinned
+/// to a version is history, and history does not anchor. Both gates read this
+/// one predicate, so the coverage gate and the closing block can never
+/// disagree about what an anchor is.
 fn anchors(link: &links::Link) -> bool {
-    link.standing == links::Standing::Asserted && link.spec.version.is_none()
+    link.spec.version.is_none()
 }
 
 /// Every collected scenario with the state of its link — the one read the
@@ -1673,8 +1673,7 @@ fn gate_declared_drift(
 /// expected move for surface the delta did not touch. The refusal prints
 /// that same `link add` form for the refs that do gate — hand-authoring is
 /// the one repair that stands, so the two halves read as one voice.
-/// Evidence never gates, and an asserted link satisfies its ref however it
-/// was born.
+/// A link satisfies its ref however it was born.
 fn gate_coverage(
     root: &Path,
     in_flight: &[&Task],

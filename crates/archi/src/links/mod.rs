@@ -1253,18 +1253,20 @@ pub fn add(
         kind,
         Rule::Authored,
         Origin::Authored,
-        Standing::Asserted,
         None,
     )
 }
 
 /// Mint one row: resolve the spec side at its slot, resolve and pin the
-/// anchor, journal the add. The producing rule, the provenance and the
-/// standing are the caller's — `link add` stamps a hand-authored claim, and
-/// the reader of a writer's declaration stamps `declared` through this same
-/// path, so a declared row is minted exactly as an authored one and differs
-/// only in what it says of itself
+/// anchor, journal the add. The producing rule and the provenance are the
+/// caller's — `link add` stamps a hand-authored claim, and the reader of a
+/// writer's declaration stamps `declared` through this same path, so a
+/// declared row is minted exactly as an authored one and differs only in what
+/// it says of itself
 /// (`archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`).
+/// The standing is not the caller's, because there is only one: every row a
+/// mint writes is a claim
+/// (`archi/requirements/code-link/a-link-stands-asserted-or-it-does-not-stand.md`).
 ///
 /// `proves` is the test the row carries, already parsed and already resolved
 /// by the caller: whether a named test reaches a symbol is the declaration
@@ -1279,7 +1281,6 @@ pub(crate) fn mint(
     kind: LinkKind,
     rule: Rule,
     origin: Origin,
-    standing: Standing,
     proves: Option<Anchor>,
 ) -> Result<Link, String> {
     let spec = SpecRef::parse(spec_text)?;
@@ -1300,7 +1301,7 @@ pub(crate) fn mint(
         spec,
         anchor,
         kind,
-        standing,
+        standing: Standing::Asserted,
         origin,
         rule,
         proves,
@@ -2212,11 +2213,9 @@ pub fn audit(root: &Path, model: &Model, opts: &AuditOptions) -> Result<AuditRep
     let folded = load(root)?;
     let mut report = AuditReport {
         live: folded.live.len(),
-        asserted: folded
-            .live
-            .iter()
-            .filter(|l| l.standing == Standing::Asserted)
-            .count(),
+        // One standing, so the two counts are one count. The tally prints
+        // both because the reader is told what stands, not left to assume it.
+        asserted: folded.live.len(),
         inferred: folded.live.iter().filter(|l| l.rule == Rule::Inferred).count(),
         declared: folded.live.iter().filter(|l| l.rule == Rule::Declared).count(),
         authored: folded.live.iter().filter(|l| l.rule == Rule::Authored).count(),
@@ -4046,7 +4045,6 @@ Then the view arrives late
             LinkKind::Indirect,
             Rule::Declared,
             Origin::Captured { task: "t9".into() },
-            Standing::Asserted,
             None,
         )
         .unwrap();
@@ -4117,8 +4115,9 @@ Then the view arrives late
         fs::remove_dir_all(&root).unwrap();
     }
 
-    /// The audit carries the word on every line that names a row: the tally
-    /// it opens with, and each finding that names a link
+    /// The audit carries the word on the one line that names rows: the tally
+    /// it opens with. No finding names a row anymore — the one that did left
+    /// with the second standing
     /// (`archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`).
     #[test]
     fn the_audit_carries_the_producing_rule() {
@@ -4141,7 +4140,6 @@ Then the view arrives late
             LinkKind::Indirect,
             Rule::Declared,
             Origin::Captured { task: "t9".into() },
-            Standing::Asserted,
             None,
         )
         .unwrap();

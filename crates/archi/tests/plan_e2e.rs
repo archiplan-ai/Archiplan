@@ -668,8 +668,8 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     ok(&root, &["link", "add", "Gate.out wire Auth.inn", "code/auth.rs#login", "--kind", "indirect"]);
     ok(&root, &["link", "add", "Service type_of Auth", "code/auth.rs", "--kind", "indirect"]);
 
-    // Nothing in the plan's scope is dark now, and the journal holds the
-    // captures with their confirms folded in.
+    // Nothing in the plan's scope is dark now, and the journal holds what the
+    // wave captured beside what the hand authored.
     let out = ok(&root, &["link", "audit"]);
     assert!(!out.contains("unlinked spec element"), "{out}");
     let out = ok(&root, &["link", "ls"]);

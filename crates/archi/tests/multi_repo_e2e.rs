@@ -1,6 +1,6 @@
 //! End to end through the real binary: code in member repositories, spec in
 //! its own — refs qualified `member//file#symbol`, absence graded
-//! Unreachable and never decayed, baselines per member, the audit worded per
+//! Unreachable and never journaled, baselines per member, the audit worded per
 //! member, and the memberless project untouched
 //! (`archi/requirements/multi-repo/`).
 

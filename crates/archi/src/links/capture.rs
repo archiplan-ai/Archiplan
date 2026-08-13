@@ -41,7 +41,7 @@ use serde::{Deserialize, Serialize};
 use toml::Spanned;
 
 use super::code;
-use super::{Anchor, Event, Link, LinkKind, Origin, Rule, SpecRef, Standing};
+use super::{Anchor, Event, Link, LinkKind, Origin, Rule, SpecRef};
 use crate::plans::{self, Task};
 
 // ---- the wave-open index ----------------------------------------------------
@@ -630,7 +630,6 @@ fn mint_declarations(
             Origin::Captured {
                 task: task.to_string(),
             },
-            Standing::Asserted,
             Some(test),
         )
         .map_err(|e| file.refuse(task, Some(d.answers.span()), &e))?;
@@ -1111,7 +1110,7 @@ mod tests {
 
     use modeling_lang::Workspace;
 
-    use super::super::{append, load, now, resolve_anchor, Birth};
+    use super::super::{append, load, now, resolve_anchor, Birth, Standing};
 
     static NEXT: AtomicUsize = AtomicUsize::new(0);
 

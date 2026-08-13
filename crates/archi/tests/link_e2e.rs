@@ -210,9 +210,12 @@ fn the_standing_journal_takes_its_rule_from_its_origin_with_no_migration() {
         words("\"standing\":\"evidence\""),
         words("\"event\":\"decay\"")
     );
+    // The standing column, not the whole row: a `proved by` anchor may name a
+    // test whose own name carries the word, and that says nothing about how
+    // the row stands.
     for line in out.lines() {
-        assert!(line.contains("asserted"), "{line}");
-        assert!(!line.contains("evidence"), "{line}");
+        let standing = line.split_whitespace().nth(2);
+        assert_eq!(standing, Some("asserted"), "{line}");
     }
 }
 
@@ -232,16 +235,21 @@ fn only_row(root: &Path) -> String {
     out.lines().next().expect("the row").to_string()
 }
 
+/// The id of that one row — it opens the line.
+fn only_id(root: &Path) -> String {
+    only_row(root)
+        .split_whitespace()
+        .next()
+        .expect("the id opens the row")
+        .to_string()
+}
+
 /// Rewrite the journal as an older binary wrote it: the row it holds was
 /// minted under the second standing, and a wave pressed a decay onto it. The
 /// mint is real — the pins are the ones `link add` computed — and only the
 /// word for the standing changes. Hands back the row's id.
 fn as_an_older_binary_wrote_it(root: &Path) -> String {
-    let id = only_row(root)
-        .split_whitespace()
-        .next()
-        .expect("the id opens the row")
-        .to_string();
+    let id = only_id(root);
     let path = root.join("archi/links/journal.jsonl");
     let text = fs::read_to_string(&path).expect("the journal");
     assert!(text.contains("\"standing\":\"asserted\""), "{text}");
@@ -263,11 +271,7 @@ fn the_verbs_that_served_the_second_standing_answer_a_usage_error() {
     ok(&root, &[
         "link", "add", "Auth", "code/auth.rs#login", "--kind", "indirect",
     ]);
-    let id = only_row(&root)
-        .split_whitespace()
-        .next()
-        .expect("the id")
-        .to_string();
+    let id = only_id(&root);
 
     for args in [
         vec!["link", "confirm", id.as_str()],

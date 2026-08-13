@@ -117,7 +117,7 @@ own reverse lookup. The command refuses on an unsaved model.
 with every task in its own sub-agent, until `archi plan next` reports
 `DONE`. The plan stays the source of truth. The task briefs come from
 `archi plan task show`. Every wave commits inside the worktree before the
-merge, and code-link evidence is captured as each wave closes.
+merge, and the code-links each task declares are captured as its wave closes.
 
 ### Land and merge
 
