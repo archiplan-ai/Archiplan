@@ -28,3 +28,13 @@ proved_by = "crates/archi/tests/plan_e2e.rs#a_declaration_names_a_file_outside_i
 symbol = "crates/archi/tests/plan_e2e.rs#the_refusal_names_the_file_and_no_task"
 answers = "req:the-file-in-the-delta-is-the-unit-the-gate-demands"
 proved_by = "crates/archi/tests/plan_e2e.rs#the_refusal_names_the_file_and_no_task"
+
+[[declares]]
+symbol = "crates/archi/src/main.rs#run_plan"
+answers = "req:the-gate-refusal-names-the-repair-that-stands"
+proved_by = "crates/archi/tests/plan_e2e.rs#the_plan_loop_produces_the_links_its_gate_demands"
+
+[[declares]]
+symbol = "crates/archi/tests/link_e2e.rs#a_declaration_mints_the_pair_asserted_and_the_reverse_view_names_the_test"
+answers = "req:the-file-in-the-delta-is-the-unit-the-gate-demands"
+proved_by = "crates/archi/tests/link_e2e.rs#a_declaration_mints_the_pair_asserted_and_the_reverse_view_names_the_test"
