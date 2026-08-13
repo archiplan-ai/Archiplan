@@ -52,11 +52,12 @@ speak for itself instead of relying on a reader.
 
 ## Refusals that do not name the continuation
 
-`refusals-name-the-continuation` is a standing requirement. Three refusals break it.
+`refusals-name-the-continuation` is a standing requirement. Two refusals break it.
 
-- `archi link confirm l2748` answers ``no live link `l2748` `` while the row stands and is
-  listed. The address needs the digest: `l2748-c8acee`. The refusal does not say a suffix is
-  missing and does not show the shape of a correct address.
+The third was `archi link confirm l2748` answering ``no live link `l2748` `` while the row
+stood and was listed, because the address needed its digest. It went with the verb when
+`a-link-stands-asserted-or-it-does-not-stand` retired the second standing.
+
 - `archi plan task req remove` does not exist as a verb, and a refusal elsewhere names it as
   the way forward. Seen earlier in this effort; the way around it was to hand-edit `owns:`.
 - `archi plan verify` on a record whose bullet wrapped onto a second line answers
@@ -67,7 +68,7 @@ speak for itself instead of relying on a reader.
   bullet that is already correct except for its width. Cost two rounds of guessing on this
   unit alone.
 
-All three leave the reader without the next move, which is the whole of what that
+Both leave the reader without the next move, which is the whole of what that
 requirement asks for.
 
 What a round would have to decide: nothing about design — these are defects against a

@@ -515,8 +515,8 @@ once.
    `plan use` refuses on an unsaved model, so save first. To execute the
    plan, use the `archi-implement` skill.
 9. **Steady state.** Run `archi check` and `archi link verify` in CI. Run
-   `archi link audit` for code that moved with no spec account, spec that
-   no code realizes, and decayed evidence.
+   `archi link audit` for code that moved with no spec account, and spec
+   that no code realizes.
 
 ## Brownfield
 

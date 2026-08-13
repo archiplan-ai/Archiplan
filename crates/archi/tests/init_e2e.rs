@@ -1195,7 +1195,19 @@ fn no_embedded_skill_sends_the_reader_to_confirm_candidates() {
         // Read over the line breaks: a command split across two lines is the
         // same command.
         let flat = flat(&installed);
-        for gone in ["link ls --evidence", "link confirm"] {
+        // The verbs, and the vocabulary they were the verbs of. The verbs
+        // alone were not enough: `skills/archi.md` promised the audit
+        // reports "decayed evidence" and this guard read straight past it,
+        // because the sentence names no command
+        // (`archi/requirements/code-link/a-link-stands-asserted-or-it-does-not-stand.md`).
+        for gone in [
+            "link ls --evidence",
+            "link confirm",
+            "audit --prune",
+            "decayed evidence",
+            "evidence link",
+            "confidence",
+        ] {
             assert!(!flat.contains(gone), "{name} still sends its reader to `{gone}`");
         }
     }
