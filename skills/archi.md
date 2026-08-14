@@ -700,8 +700,11 @@ fact, and marks it as anchor-born.
   Remint and save refuse while markers remain. The order is archive,
   fold, remint.
 - `plan next` is blocked on coverage. This is not an error. It is the
-  loop: confirm or retire the candidates it just created, then run it
-  again.
+  loop: the refusal names the files of the wave that no declaration
+  accounts for, the writer that touched a file posts `archi plan task
+  <id> link add` for it, then run it again. `archi link add` does not
+  answer this gate, because the gate reads the declarations and not the
+  journal.
 - Verify notes "no longer resolves at Working". The spec advanced. Run
   `plan repin`, then fix the tasks it flags.
 - Never hand-edit lifecycle state (`state`, `closed_waves`, latches), the

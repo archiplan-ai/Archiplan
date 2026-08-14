@@ -25,6 +25,12 @@
 //! `archi batch -`; the rule that keeps every `plan` and `link` command with
 //! the orchestrator holds and names that one verb as its exception; and no
 //! embedded skill sends a reader to a candidate list capture no longer makes.
+//!
+//! The briefing sends its reader to the record before the tree
+//! (`archi/requirements/agent-retrieval/`): the planning skill seeds
+//! `## Outputs` with `archi link ls --spec`, the implement skill puts the
+//! rows for the task's refs in the sub-agent prompt, and the candidate guard
+//! reads the sentences that name no command too.
 
 mod util;
 
@@ -122,6 +128,26 @@ fn passage<'a>(text: &'a str, opens: &str) -> &'a str {
         Some(end) => &rest[..end],
         None => rest,
     }
+}
+
+/// One bullet of a skill, flattened: from where `opens` first stands to the
+/// next top-level bullet or heading. A wrapped bullet is one bullet, and a
+/// rule is read in the bullet it belongs to — a command named three steps
+/// down the page is a command the author meets after the step it governs.
+fn bullet(text: &str, opens: &str) -> String {
+    let start = text
+        .find(opens)
+        .unwrap_or_else(|| panic!("the skill has no `{opens}` bullet"));
+    let rest = &text[start + opens.len()..];
+    let end = rest
+        .match_indices('\n')
+        .find(|(at, _)| {
+            let line = &rest[at + 1..];
+            line.starts_with("- ") || line.starts_with('#') || line.starts_with("```")
+        })
+        .map(|(at, _)| at)
+        .unwrap_or(rest.len());
+    flat(&text[start..start + opens.len() + end])
 }
 
 /// Every file under `dir` with its bytes, path-sorted.
@@ -1167,6 +1193,68 @@ fn the_implement_skill_keeps_plan_and_link_with_the_orchestrator_but_for_one_ver
     fs::remove_dir_all(&root).unwrap();
 }
 
+/// The planner asks the record which files answer a ref
+/// (`archi/requirements/agent-retrieval/the-briefing-sends-the-reader-to-the-record-before-the-tree.md`).
+/// `## Outputs` is the slot a planner fills by guessing from file names, and
+/// `archi link ls --spec <ref>` answers the same question from what is
+/// recorded. The assertion stands on the bullet that authors the slot and not
+/// on the skill as a whole: a read named in some other step is a read the
+/// author meets after they have already guessed.
+#[test]
+fn the_planning_skill_seeds_its_outputs_from_the_record() {
+    let root = temp_dir();
+    ok_in(&root, &["init", "."]);
+    let installed = fs::read_to_string(root.join(".claude/skills/archi-plan/SKILL.md")).unwrap();
+    assert_eq!(installed, SKILL_PLAN, "the planning skill drifted on install");
+
+    let outputs = bullet(&installed, "- `## Outputs`");
+    assert!(
+        outputs.contains("archi link ls --spec"),
+        "the `## Outputs` bullet names no read of the record: {outputs}"
+    );
+    // What the rows are. A command with no answer beside it is a command a
+    // reader skips, and the guess it replaces survives.
+    assert!(
+        outputs.contains("record"),
+        "the bullet never says the rows are what is already recorded: {outputs}"
+    );
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The prompt carries the recorded files
+/// (`archi/requirements/agent-retrieval/the-briefing-sends-the-reader-to-the-record-before-the-tree.md`).
+/// The read belongs to the orchestrator, like every other `link` verb, so the
+/// sub-agent runs no ritual of its own: the rows for the task's refs stand in
+/// the prompt and the writer starts from them. An empty answer is an answer
+/// too — nothing is recorded, the tree is the only source left, and what the
+/// sub-agent finds there comes back as a report instead of an assumption
+/// (`archi/world/facts/an-assistant-guesses-which-files-answer-a-written-obligation.md`).
+#[test]
+fn the_implement_skill_puts_the_recorded_files_in_the_sub_agent_prompt() {
+    let root = temp_dir();
+    ok_in(&root, &["init", "."]);
+    let skill = implement_skill(&root);
+    let dispatch = flat(passage(&skill, "## Sub-agents"));
+
+    assert!(
+        dispatch.contains("archi link ls --spec"),
+        "the dispatch never reads the record for the task's refs:\n{dispatch}"
+    );
+    assert!(
+        ["nothing recorded", "nothing is recorded", "no rows"]
+            .iter()
+            .any(|empty| dispatch.contains(empty)),
+        "the dispatch never says what an empty answer means:\n{dispatch}"
+    );
+    assert!(
+        dispatch.contains("report"),
+        "the dispatch never says the unrecorded finding is reported:\n{dispatch}"
+    );
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
 /// Capture proposes no candidates any more — it mints what the declarations
 /// name and nothing else
 /// (`archi/requirements/code-link/the-writer-declares-what-the-code-answers.md`,
@@ -1209,6 +1297,23 @@ fn no_embedded_skill_sends_the_reader_to_confirm_candidates() {
             "decayed evidence",
             "evidence link",
             "confidence",
+            // The verbs of the retired loop with the noun they acted on.
+            // `candidate` alone is ordinary prose in these skills — a
+            // candidate branch, a requirement candidate, a decomposition
+            // candidate, the world conditions the migration interviews — so
+            // what is forbidden is a candidate a reader is told to act on.
+            // The `archi.md` failure mode said "confirm or retire the
+            // candidates it just created" and the list above read past it,
+            // because that sentence names no command
+            // (`archi/requirements/agent-retrieval/the-briefing-sends-the-reader-to-the-record-before-the-tree.md`).
+            "confirm the candidate",
+            "confirm a candidate",
+            "review the candidate",
+            "review a candidate",
+            "retire the candidate",
+            "retire a candidate",
+            "confirm or retire",
+            "candidate link",
         ] {
             assert!(!flat.contains(gone), "{name} still sends its reader to `{gone}`");
         }

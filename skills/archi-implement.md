@@ -259,6 +259,13 @@ outputs of the task live in a member repo. Include the task id, its
 context7 when available, implementation inside the declared outputs, the
 named test commands that cover them — never the whole suite — and the
 declaration the task closes with.
+Include the recorded files: run `archi link ls --spec <ref>` for every ref
+in the task's brief and paste the rows into the prompt, so the writer
+starts from the files that answer the ref today instead of reading the
+tree for them. A ref that prints no rows has nothing recorded — say so,
+because then the tree is the only source left, and what the sub-agent
+finds there comes back in its report instead of standing as an
+assumption.
 Every sub-agent prompt forbids branch creation and branch switching —
 sub-agents write code on the branches the worktrees already stand on,
 and edit member code only in the member worktree paths that

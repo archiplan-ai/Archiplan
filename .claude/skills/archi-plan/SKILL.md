@@ -226,8 +226,10 @@ persist rows
   generated client, a migration. A weak note like "data from X" breaks
   the contract. When you cannot name what flows, the dependency probably
   should not exist.
-- `## Outputs` — the files the task will write, as relative paths.
-  Capture attributes deltas through them.
+- `## Outputs` — the files the task will write, as relative paths. Seed
+  them with `archi link ls --spec <ref>`, one call per `## Spec` ref: it
+  prints the files already recorded against the ref, and a ref with no
+  rows is new ground. Capture attributes deltas through them.
 - `## Stack` — the task-level specifics: the library, the API, the
   pattern or the path.
 - `## Verifications` — one `### <slug>` subhead per owned requirement,
