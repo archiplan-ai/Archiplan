@@ -107,6 +107,14 @@ fn world_skills(root: &Path) -> (String, String) {
     (workflow, migration)
 }
 
+/// The planning skill read off an initialized tree, pinned byte-equal to the
+/// copy this binary embeds, the way [`implement_skill`] pins its own.
+fn planning_skill(root: &Path) -> String {
+    let installed = fs::read_to_string(root.join(".claude/skills/archi-plan/SKILL.md")).unwrap();
+    assert_eq!(installed, SKILL_PLAN, "the planning skill drifted on install");
+    installed
+}
+
 /// The implement skill read off an initialized tree, pinned byte-equal to the
 /// copy this binary embeds — so what the suite reads is what a project gets.
 fn implement_skill(root: &Path) -> String {
@@ -398,14 +406,12 @@ fn the_briefing_carries_the_world() {
 fn the_planning_skill_collects_its_scenarios_and_authors_none() {
     let root = temp_dir();
     ok_in(&root, &["init", "."]);
-    let installed = fs::read_to_string(root.join(".claude/skills/archi-plan/SKILL.md")).unwrap();
-
     // Installed byte-equal to the embedded copy, as every other skill is.
-    assert_eq!(installed, SKILL_PLAN, "the planning skill drifted on install");
+    let installed = planning_skill(&root);
 
     // The prose is hard-wrapped, so a sentence is read over its line breaks:
     // what the skill says must not depend on where a line ends.
-    let flat = installed.split_whitespace().collect::<Vec<_>>().join(" ");
+    let flat = flat(&installed);
 
     // No instruction to author the file. The skill still names `scenarios.md`,
     // because it has to say the author writes nothing into it — so every line
@@ -1204,8 +1210,7 @@ fn the_implement_skill_keeps_plan_and_link_with_the_orchestrator_but_for_one_ver
 fn the_planning_skill_seeds_its_outputs_from_the_record() {
     let root = temp_dir();
     ok_in(&root, &["init", "."]);
-    let installed = fs::read_to_string(root.join(".claude/skills/archi-plan/SKILL.md")).unwrap();
-    assert_eq!(installed, SKILL_PLAN, "the planning skill drifted on install");
+    let installed = planning_skill(&root);
 
     let outputs = bullet(&installed, "- `## Outputs`");
     assert!(
