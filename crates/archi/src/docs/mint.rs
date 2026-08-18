@@ -49,18 +49,9 @@ pub fn req_add(
         ));
     }
     let tree = super::discover_tree(root);
-    let intents: Vec<&str> = tree.intents.iter().map(|i| i.slug.as_str()).collect();
-    if !intents.contains(&intent) {
-        return Err(if intents.is_empty() {
-            "no intent folders exist yet — capture the intent first: \
-             archi/requirements/<intent>/<intent>.md"
-                .to_string()
-        } else {
-            format!(
-                "no intent `{intent}` — existing intents: {}; re-run with --intent <folder>",
-                intents.join(", ")
-            )
-        });
+    if !tree.intents.iter().any(|i| i.slug == intent) {
+        let intents: Vec<String> = tree.intents.iter().map(|i| i.slug.clone()).collect();
+        return Err(super::unknown_intent(intent, &intents));
     }
     // origin: the two mintable states. `parent` belongs to subrequirement
     // sections and `fusion` to merge ceremonies — neither is born here.

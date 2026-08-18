@@ -646,8 +646,8 @@ pub(crate) fn serve_requirements(root: &Path) -> ReqList {
 }
 
 /// The refusal an unknown `--intent` folder earns: name the folders that
-/// exist, or the capture path when none does. [`mint::req_add`] still
-/// carries this wording inline — one later sweep folds it onto this.
+/// exist, or the capture path when none does. [`mint::req_add`] and
+/// `req ls` both answer with it.
 pub(crate) fn unknown_intent(intent: &str, intents: &[String]) -> String {
     if intents.is_empty() {
         "no intent folders exist yet — capture the intent first: \
