@@ -37,6 +37,7 @@
 //! archi viz   [<graph.json> | -] [--depth <n>] [--max-nodes <n>] [--details]
 //! archi search <phrase>... [--kind element|intent|requirement|stressor|session|decision|world]...
 //!             [--limit <n>] [--json]
+//! archi req   add <title> … | rm <slug> | ls [--satisfies <element>] [--intent <folder>] [--json]
 //! archi world add <title> | rm <slug> | ls [--covers <element>] [--json]
 //! archi --help | --version
 //! ```
@@ -102,6 +103,7 @@ const USAGE: &str = "usage:
   archi session fold <loser> --into <winner> -m <note> [--project <dir>]
   archi req add <title> --intent <folder> --kind functional|non-functional --origin 'intent|stressor(<slug>)' [--deferred <reason>] [--project <dir>]
   archi req rm <slug> [--project <dir>]
+  archi req ls [--satisfies <element>] [--intent <folder>] [--json] [--project <dir>]
   archi world add <title> [--project <dir>]
   archi world rm <slug> [--project <dir>]
   archi world ls [--covers <element>] [--json] [--project <dir>]
@@ -194,6 +196,7 @@ struct Args {
     carriers: Vec<String>,
     edge_types: Vec<String>,
     covers: Option<String>,
+    satisfies: Option<String>,
     yes: bool,
     details: bool,
     max_nodes: Option<usize>,
@@ -270,6 +273,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         carriers: Vec::new(),
         edge_types: Vec::new(),
         covers: None,
+        satisfies: None,
         yes: false,
         details: false,
         max_nodes: None,
@@ -326,6 +330,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--view" => args.views.push(value(&mut it, "--view")?),
             "--carrier" => args.carriers.push(value(&mut it, "--carrier")?),
             "--covers" => args.covers = Some(value(&mut it, "--covers")?),
+            "--satisfies" => args.satisfies = Some(value(&mut it, "--satisfies")?),
             "--edge-type" => args.edge_types.push(value(&mut it, "--edge-type")?),
             "--exclude" => args.exclude.push(value(&mut it, "--exclude")?),
             "--only" => args.only.push(value(&mut it, "--only")?),
@@ -2561,9 +2566,11 @@ fn run_self_update(args: &Args) -> ExitCode {
 }
 
 
-/// `archi req add|rm` — requirement skeletons come from a command: every
+/// `archi req add|rm|ls` — requirement skeletons come from a command: every
 /// machine field an explicit parameter, the text slots left for the
-/// author, removal pre-flighted against owning plans.
+/// author, removal pre-flighted against owning plans. `add` and `rm` mutate,
+/// so they meet the seat rule at the router; `ls` reads the standing set and
+/// answers anywhere.
 fn run_req(args: &Args) -> ExitCode {
     let fail = |e: String| -> ExitCode {
         eprintln!("archi: {e}");
@@ -2607,11 +2614,102 @@ fn run_req(args: &Args) -> ExitCode {
             }
             Err(e) => fail(e),
         },
+        (Some("ls"), []) => run_req_ls(args, &root),
         _ => usage_err(
             "usage: archi req add <title> --intent <folder> --kind functional|non-functional \
-             --origin 'intent|stressor(<slug>)' [--deferred <reason>] | rm <slug>",
+             --origin 'intent|stressor(<slug>)' [--deferred <reason>] | rm <slug> | \
+             ls [--satisfies <element>] [--intent <folder>] [--json]",
         ),
     }
+}
+
+/// `archi req ls` — the read over the standing requirements: one row per
+/// file-scale requirement — slug, state, `satisfied-by`, the first phrase of
+/// its summary — narrowed by `--satisfies <element>` to the requirements
+/// naming that element and by `--intent <folder>` to one area
+/// (`archi/requirements/agent-retrieval/one-verb-lists-the-requirements-an-element-carries.md`).
+/// The listing reads the live tree and resolves `--satisfies` against the
+/// live model, as `world ls --covers` does.
+fn run_req_ls(args: &Args, root: &Path) -> ExitCode {
+    let ws = match compile_or_report(root, args.json) {
+        Ok(c) => c.workspace,
+        Err(code) => return code,
+    };
+    let model = ws.model();
+    // A filter the model cannot answer is a refusal, never an empty list:
+    // the two look the same and mean opposite things.
+    if let Some(element) = args.satisfies.as_deref()
+        && model.resolve_element(element).is_none()
+    {
+        eprintln!(
+            "archi: `--satisfies {element}` names no element of the current model — \
+             `archi search {element} --kind element` finds its path, `archi req ls` \
+             lists every requirement"
+        );
+        return ExitCode::from(1);
+    }
+    let list = docs::serve_requirements(root);
+    // An unknown folder lists the folders, as `req add` already does.
+    if let Some(intent) = args.intent.as_deref()
+        && !list.intents.iter().any(|i| i == intent)
+    {
+        eprintln!("archi: {}", docs::unknown_intent(intent, &list.intents));
+        return ExitCode::from(1);
+    }
+    let rows: Vec<&docs::ReqRow> = list
+        .rows
+        .iter()
+        .filter(|r| {
+            args.satisfies
+                .as_deref()
+                .is_none_or(|e| r.satisfied_by.iter().any(|s| s == e))
+        })
+        .filter(|r| args.intent.as_deref().is_none_or(|i| r.intent == i))
+        .collect();
+    if args.json {
+        let items: Vec<Value> = rows
+            .iter()
+            .map(|r| {
+                json!({
+                    "slug": r.slug,
+                    "path": r.file,
+                    "intent": r.intent,
+                    "state": r.state,
+                    "satisfied_by": r.satisfied_by,
+                    "summary": r.summary,
+                })
+            })
+            .collect();
+        let mut envelope = json!({ "status": "ok", "requirements": items });
+        if let Some(element) = args.satisfies.as_deref() {
+            envelope["satisfies"] = json!(element);
+        }
+        if let Some(intent) = args.intent.as_deref() {
+            envelope["intent"] = json!(intent);
+        }
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&envelope).expect("serializes")
+        );
+    } else {
+        for r in &rows {
+            println!("{}", render_req_row(r));
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+/// One requirement as the sweep reads it: slug, state, the `satisfied-by`
+/// list in its frontmatter surface — `[]` is emptiness, visible — and the
+/// first phrase of the summary. The brackets are load-bearing: an edge entry
+/// carries spaces, so they mark where the list ends and the phrase begins.
+fn render_req_row(r: &docs::ReqRow) -> String {
+    let mut out = format!("{}  {}  [{}]", r.slug, r.state, r.satisfied_by.join(", "));
+    if !r.summary.is_empty() {
+        out.push_str("  ");
+        out.push_str(&r.summary);
+    }
+    out
 }
 
 /// `archi stress open|add|rm` — the round's records come from commands: the

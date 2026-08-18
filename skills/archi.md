@@ -34,7 +34,11 @@ not on disk as prose. Narrow the search with `--kind`. Machine-read it
 with `--json`. Search before you derive a requirement, to see whether a
 claim like it exists. Search before you define an element, to see whether
 the concept is already modeled. Search when a finding names something
-unfamiliar.
+unfamiliar. Three structural reads answer before search does:
+`archi req ls --satisfies <element>` lists the requirements that name
+an element, `archi world ls --covers <element>` the conditions on it,
+and `archi link ls --spec <ref>` the files recorded against an element
+or a requirement. Search is for when you hold a phrase and no address.
 
 **Show, do not tell.** When the user asks you to explain or to visualize
 the design, pipe a query into the visualizer: `archi query <filters> |
@@ -285,7 +289,11 @@ once.
    traversal from a node to the conditions that rule it. A project that
    stands without a world gains one through the `archi-migrate-world`
    skill.
-4. **Derive requirements.** One claim is one file, and the command makes it:
+4. **Derive requirements.** Run `archi req ls --satisfies <element>` for
+   the elements the new claim will name, so the neighbouring claims are
+   on screen before the file exists. A claim that contradicts a standing
+   one is caught by reading one cluster, not one hundred files. One
+   claim is one file, and the command makes it:
 
    ```
    archi req add "<title>" --intent <folder> --kind functional|non-functional --origin intent

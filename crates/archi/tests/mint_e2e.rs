@@ -2,6 +2,8 @@
 //! `req add|rm`, `stress open|add|rm` — every machine field explicit or
 //! derived, text slots held empty by the schema's own diagnostics, removals
 //! pre-flighted (`archi/requirements/spec-docs/skeletons-come-from-a-verb.md`).
+//! `req ls` is the read over the standing set
+//! (`archi/requirements/agent-retrieval/one-verb-lists-the-requirements-an-element-carries.md`).
 
 mod util;
 
@@ -350,4 +352,231 @@ fn a_replayed_batch_converges() {
         "req", "add", "Gate throttles", "--intent", "hardening", "--kind", "non-functional", "--origin", "intent",
     ]);
     assert!(e.contains("moved past its skeleton") || e.contains("not re-mintable"), "{e}");
+}
+
+// ---- `req ls` — the read verb over the standing requirements ---------------
+// (`archi/requirements/agent-retrieval/one-verb-lists-the-requirements-an-element-carries.md`)
+
+/// One standing requirement on disk, in the shape `req add` mints and a
+/// person fills. `satisfied_by` is the frontmatter list body (`Gate, Ledger`),
+/// `deferred` the reason or empty, `summary` the prose paragraph — empty
+/// leaves the minted hole. `satisfied-by` and the `Satisfy` prose hold
+/// together, so a non-empty claim brings its section prose.
+fn req_file(root: &Path, intent: &str, slug: &str, title: &str, satisfied_by: &str, deferred: &str, summary: &str) {
+    let dir = root.join("archi/requirements").join(intent);
+    fs::create_dir_all(&dir).unwrap();
+    let deferred = if deferred.is_empty() {
+        String::new()
+    } else {
+        format!(" {deferred}")
+    };
+    let summary = if summary.is_empty() {
+        String::new()
+    } else {
+        format!("\n{summary}\n")
+    };
+    let satisfy = if satisfied_by.is_empty() {
+        String::new()
+    } else {
+        "\nHeld by the named elements.\n\n- test — the named suite passes\n".to_string()
+    };
+    fs::write(
+        dir.join(format!("{slug}.md")),
+        format!(
+            "---\nkind: functional\norigin: intent\nsatisfied-by: [{satisfied_by}]\ndeferred:{deferred}\n---\n\n\
+             # {title}\n{summary}\n## System Context\n\n## Satisfy\n{satisfy}"
+        ),
+    )
+    .unwrap();
+}
+
+/// The standing set the listing tests read: two intent areas, six file-scale
+/// requirements — satisfied, deferred and open, one satisfied by a port, one
+/// still the minted skeleton.
+fn listing_project() -> PathBuf {
+    let root = temp_project();
+    let retrieval = root.join("archi/requirements/retrieval");
+    fs::create_dir_all(&retrieval).unwrap();
+    fs::write(retrieval.join("retrieval.md"), "# Retrieval\n\nThe reading area.\n").unwrap();
+    req_file(&root, "hardening", "gate-throttles", "Gate throttles", "Gate", "",
+        "The gate sheds load before the ledger sees it. A second sentence rides behind.");
+    req_file(&root, "hardening", "replays-are-refused", "Replays are refused", "",
+        "until the gateway lands", "Replays die at the door.");
+    req_file(&root, "hardening", "still-a-hole", "Still a hole", "", "", "");
+    req_file(&root, "retrieval", "born-before-the-model", "Born before the model", "", "",
+        "A claim minted before any element stands.");
+    req_file(&root, "retrieval", "keep-answers", "Keep answers", "Ledger.keep", "",
+        "The keep port answers every read.");
+    req_file(&root, "retrieval", "ledger-is-append-only", "Ledger is append only", "Ledger, Gate", "",
+        "The ledger takes writes at the end only.");
+    root
+}
+
+/// The standing requirement files on disk: every `.md` under an intent
+/// folder except the intent's own anchor. The fixture is flat — no promoted
+/// requirement folders — so the walk is one level.
+fn files_on_disk(root: &Path) -> usize {
+    let base = root.join("archi/requirements");
+    let mut n = 0;
+    for intent in fs::read_dir(&base).unwrap().flatten() {
+        if !intent.path().is_dir() {
+            continue;
+        }
+        let islug = intent.file_name().to_string_lossy().into_owned();
+        for f in fs::read_dir(intent.path()).unwrap().flatten() {
+            let p = f.path();
+            if p.extension().is_some_and(|e| e == "md")
+                && p.file_stem().is_some_and(|s| s != islug.as_str())
+            {
+                n += 1;
+            }
+        }
+    }
+    n
+}
+
+/// `req ls` prints one row per standing requirement — slug, state,
+/// `satisfied-by`, the first phrase of the summary — and the count matches
+/// the files on disk (one-verb-lists-the-requirements-an-element-carries).
+#[test]
+fn the_listing_prints_one_row_per_standing_requirement() {
+    let root = listing_project();
+    let out = ok(&root, &["req", "ls"]);
+    assert_eq!(out.lines().count(), files_on_disk(&root), "{out}");
+    for slug in [
+        "gate-throttles",
+        "replays-are-refused",
+        "still-a-hole",
+        "born-before-the-model",
+        "keep-answers",
+        "ledger-is-append-only",
+    ] {
+        assert_eq!(
+            out.lines().filter(|l| l.starts_with(slug)).count(),
+            1,
+            "{slug}\n{out}"
+        );
+    }
+    // The intent anchors are areas, not rows.
+    assert!(!out.lines().any(|l| l.starts_with("hardening") || l.starts_with("retrieval")), "{out}");
+    // The row: slug, state, `satisfied-by`, first phrase — one line, and the
+    // second sentence stays behind.
+    assert!(
+        out.contains("gate-throttles  satisfied  [Gate]  The gate sheds load before the ledger sees it."),
+        "{out}"
+    );
+    assert!(!out.contains("A second sentence"), "{out}");
+    // The state is the compiler's own grading: a deferral reason defers.
+    assert!(
+        out.contains("replays-are-refused  deferred  []  Replays die at the door."),
+        "{out}"
+    );
+    // Tree order: intent folder, then path within it.
+    let pos = |s: &str| out.find(s).unwrap();
+    assert!(pos("gate-throttles") < pos("replays-are-refused"), "{out}");
+    assert!(pos("still-a-hole") < pos("born-before-the-model"), "{out}");
+    assert!(pos("keep-answers") < pos("ledger-is-append-only"), "{out}");
+}
+
+/// `--satisfies <element>` prints exactly the requirements whose
+/// `satisfied-by` names it — the entry, not the hub around it
+/// (one-verb-lists-the-requirements-an-element-carries).
+#[test]
+fn satisfies_narrows_to_the_requirements_naming_the_element() {
+    let root = listing_project();
+    let out = ok(&root, &["req", "ls", "--satisfies", "Gate"]);
+    assert_eq!(out.lines().count(), 2, "{out}");
+    assert!(out.contains("gate-throttles"), "{out}");
+    assert!(out.contains("ledger-is-append-only"), "{out}");
+    // The port's claim is the port's: `Ledger` does not gather `Ledger.keep`.
+    let out = ok(&root, &["req", "ls", "--satisfies", "Ledger"]);
+    assert_eq!(out.lines().count(), 1, "{out}");
+    assert!(out.contains("ledger-is-append-only"), "{out}");
+    let out = ok(&root, &["req", "ls", "--satisfies", "Ledger.keep"]);
+    assert_eq!(out.lines().count(), 1, "{out}");
+    assert!(out.contains("keep-answers"), "{out}");
+}
+
+/// A `--satisfies` name no model holds refuses, naming it — a refusal is
+/// never an empty list (one-verb-lists-the-requirements-an-element-carries).
+#[test]
+fn satisfies_refuses_a_name_no_model_holds() {
+    let root = listing_project();
+    let e = refuse(&root, &["req", "ls", "--satisfies", "Ghost"]);
+    assert!(e.contains("Ghost"), "{e}");
+    assert!(e.contains("--satisfies"), "{e}");
+    assert!(e.contains("names no element"), "{e}");
+}
+
+/// `--intent` narrows to the folder; an unknown folder lists the folders,
+/// as `req add` already does
+/// (one-verb-lists-the-requirements-an-element-carries).
+#[test]
+fn intent_narrows_and_an_unknown_folder_lists_the_folders() {
+    let root = listing_project();
+    let out = ok(&root, &["req", "ls", "--intent", "retrieval"]);
+    assert_eq!(out.lines().count(), 3, "{out}");
+    for slug in ["born-before-the-model", "keep-answers", "ledger-is-append-only"] {
+        assert!(out.contains(slug), "{out}");
+    }
+    assert!(!out.contains("gate-throttles"), "{out}");
+    let e = refuse(&root, &["req", "ls", "--intent", "nope"]);
+    assert!(e.contains("no intent `nope`"), "{e}");
+    assert!(e.contains("hardening"), "{e}");
+    assert!(e.contains("retrieval"), "{e}");
+}
+
+/// A requirement with an empty `satisfied-by` lists, its emptiness visible —
+/// born-before-the-model is a legal state
+/// (one-verb-lists-the-requirements-an-element-carries).
+#[test]
+fn an_empty_satisfied_by_lists_visibly() {
+    let root = listing_project();
+    let out = ok(&root, &["req", "ls"]);
+    assert!(
+        out.contains("born-before-the-model  open  []  A claim minted before any element stands."),
+        "{out}"
+    );
+    // The minted skeleton — no summary yet — is still a whole row.
+    assert!(out.lines().any(|l| l == "still-a-hole  open  []"), "{out}");
+}
+
+/// `--json` carries the same rows as the render, in the same order
+/// (one-verb-lists-the-requirements-an-element-carries).
+#[test]
+fn json_carries_the_same_rows_as_the_render() {
+    let root = listing_project();
+    let rendered = ok(&root, &["req", "ls"]);
+    let v: serde_json::Value =
+        serde_json::from_str(&ok(&root, &["req", "ls", "--json"])).unwrap();
+    assert_eq!(v["status"], "ok");
+    let rows = v["requirements"].as_array().unwrap();
+    assert_eq!(rows.len(), rendered.lines().count());
+    for (line, row) in rendered.lines().zip(rows) {
+        let slug = row["slug"].as_str().unwrap();
+        let state = row["state"].as_str().unwrap();
+        let named: Vec<&str> = row["satisfied_by"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s.as_str().unwrap())
+            .collect();
+        let summary = row["summary"].as_str().unwrap();
+        let mut want = format!("{slug}  {state}  [{}]", named.join(", "));
+        if !summary.is_empty() {
+            want.push_str("  ");
+            want.push_str(summary);
+        }
+        assert_eq!(line, want);
+    }
+    // The row is addressable: the envelope carries the file.
+    assert_eq!(rows[0]["path"], "archi/requirements/hardening/gate-throttles.md");
+    // The filter narrows the envelope the same way.
+    let v: serde_json::Value = serde_json::from_str(&ok(
+        &root,
+        &["req", "ls", "--satisfies", "Gate", "--json"],
+    ))
+    .unwrap();
+    assert_eq!(v["requirements"].as_array().unwrap().len(), 2);
+    assert_eq!(v["satisfies"], "Gate");
 }

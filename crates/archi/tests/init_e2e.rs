@@ -29,8 +29,10 @@
 //! The briefing sends its reader to the record before the tree
 //! (`archi/requirements/agent-retrieval/`): the planning skill seeds
 //! `## Outputs` with `archi link ls --spec`, the implement skill puts the
-//! rows for the task's refs in the sub-agent prompt, and the candidate guard
-//! reads the sentences that name no command too.
+//! rows for the task's refs in the sub-agent prompt, the workflow skill
+//! reads the standing claims with `archi req ls --satisfies` before it
+//! derives one, and the candidate guard reads the sentences that name no
+//! command too.
 
 mod util;
 
@@ -1323,6 +1325,39 @@ fn no_embedded_skill_sends_the_reader_to_confirm_candidates() {
             assert!(!flat.contains(gone), "{name} still sends its reader to `{gone}`");
         }
     }
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The writer of a claim reads the standing claims first
+/// (`archi/requirements/agent-retrieval/the-briefing-sends-the-reader-to-the-record-before-the-tree.md`).
+/// `archi req ls --satisfies <element>` puts the neighbouring claims on
+/// screen before the file exists. The slice holds the derivation step
+/// alone, opener to opener, and the read must stand before the mint: a
+/// command met after `archi req add` is a command the writer meets once
+/// the claim is already written.
+#[test]
+fn the_workflow_skill_reads_the_record_before_it_derives_a_requirement() {
+    let root = temp_dir();
+    ok_in(&root, &["init", "."]);
+    let skill = fs::read_to_string(root.join(".claude/skills/archi/SKILL.md")).unwrap();
+    assert_eq!(skill, SKILL_ARCHI, "the workflow skill drifted on install");
+
+    let start = skill.find("**Derive requirements.**").expect("the derivation step");
+    let end = skill.find("**Draft the model.**").expect("the drafting step");
+    let derive = flat(&skill[start..end]);
+
+    let read = derive
+        .find("archi req ls --satisfies")
+        .expect("the derivation step names no read of the standing claims");
+    let write = derive.find("archi req add").expect("the derivation step names the mint");
+    assert!(read < write, "the read stands after the write: {derive}");
+    // Why the rows are read. A command with no answer beside it is a
+    // command a reader skips, and the guess it replaces survives.
+    assert!(
+        derive.contains("before the file exists"),
+        "the step never says the claims are on screen before the file exists: {derive}"
+    );
 
     fs::remove_dir_all(&root).unwrap();
 }

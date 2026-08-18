@@ -1,0 +1,25 @@
+# `t2` accounts for its work here: for every symbol it changed, what
+# that code answers and the test that proves it. One entry closes the
+# wave; what the file holds is the writer's to decide.
+#
+# Nobody types this file. The verb writes it, and it resolves all three
+# names before it writes:
+#
+#   archi plan task t2 link add --symbol "<file>#<symbol>" --answers "<node, port or req:slug>" --proved-by "<test file>#<test fn>"
+#
+# Each entry lands as one table of this shape:
+#
+#   [[declares]]
+#   symbol = "<file>#<symbol>"
+#   answers = "<node, port or req:slug>"
+#   proved_by = "<test file>#<test fn>"
+
+[[declares]]
+symbol = "skills/archi.md"
+answers = "req:the-briefing-sends-the-reader-to-the-record-before-the-tree"
+proved_by = "crates/archi/tests/init_e2e.rs#the_workflow_skill_reads_the_record_before_it_derives_a_requirement"
+
+[[declares]]
+symbol = "crates/archi/tests/init_e2e.rs#the_workflow_skill_reads_the_record_before_it_derives_a_requirement"
+answers = "req:the-briefing-sends-the-reader-to-the-record-before-the-tree"
+proved_by = "crates/archi/tests/init_e2e.rs#the_workflow_skill_reads_the_record_before_it_derives_a_requirement"

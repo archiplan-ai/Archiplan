@@ -577,6 +577,137 @@ fn walk_requirements(
     }
 }
 
+// ---- the requirement listing -----------------------------------------------
+
+/// One standing requirement as `req ls` serves it
+/// (`archi/requirements/agent-retrieval/one-verb-lists-the-requirements-an-element-carries.md`):
+/// the file-scale record, its state as the schema's own graders decide it,
+/// and the first phrase of its summary.
+pub(crate) struct ReqRow {
+    /// The slug — the reference currency.
+    pub(crate) slug: String,
+    /// The intent folder whose area holds it.
+    pub(crate) intent: String,
+    /// Project-relative path of the file.
+    pub(crate) file: String,
+    /// `satisfied`, `deferred` or `open` — graded by [`schema::ReqFields`]'s
+    /// own readers, in the precedence the cross-check findings use.
+    pub(crate) state: &'static str,
+    /// The `satisfied-by` entries. Empty is a legal state — born before the
+    /// model — and an unsound field is no claim of any entry.
+    pub(crate) satisfied_by: Vec<String>,
+    /// The first phrase of the summary; empty while the summary is still
+    /// the minted hole.
+    pub(crate) summary: String,
+}
+
+/// The standing requirement set and the intent folders over it, one walk.
+pub(crate) struct ReqList {
+    /// The intent folder slugs, in path order — the refusal listing.
+    pub(crate) intents: Vec<String>,
+    /// One row per file-scale requirement, in tree order: intent folder,
+    /// then path within it. Section-scale requirements ride inside their
+    /// file's row, as everywhere.
+    pub(crate) rows: Vec<ReqRow>,
+}
+
+/// Serve the standing requirements for `req ls`: the tree walked by the same
+/// discovery `check` reads, so the listing can never disagree with it about
+/// what a requirement is.
+pub(crate) fn serve_requirements(root: &Path) -> ReqList {
+    let tree = discover_tree(root);
+    let intents: Vec<String> = tree.intents.iter().map(|i| i.slug.clone()).collect();
+    let mut rows = Vec::new();
+    for r in &tree.requirements {
+        let Some(f) = &r.fields else { continue };
+        let state = if f.satisfied() {
+            "satisfied"
+        } else if f.deferred() {
+            "deferred"
+        } else {
+            "open"
+        };
+        let satisfied_by = f
+            .satisfied_by
+            .as_ref()
+            .map(|(v, _)| v.clone())
+            .unwrap_or_default();
+        let intent = r.file.split('/').nth(2).unwrap_or_default().to_string();
+        rows.push(ReqRow {
+            slug: r.slug.clone(),
+            intent,
+            file: r.file.clone(),
+            state,
+            satisfied_by,
+            summary: first_phrase(root, &r.file),
+        });
+    }
+    ReqList { intents, rows }
+}
+
+/// The refusal an unknown `--intent` folder earns: name the folders that
+/// exist, or the capture path when none does. [`mint::req_add`] still
+/// carries this wording inline — one later sweep folds it onto this.
+pub(crate) fn unknown_intent(intent: &str, intents: &[String]) -> String {
+    if intents.is_empty() {
+        "no intent folders exist yet — capture the intent first: \
+         archi/requirements/<intent>/<intent>.md"
+            .to_string()
+    } else {
+        format!(
+            "no intent `{intent}` — existing intents: {}; re-run with --intent <folder>",
+            intents.join(", ")
+        )
+    }
+}
+
+/// The longest phrase a one-line row carries before it is cut.
+const PHRASE_CAP: usize = 72;
+
+/// The first phrase of a doc's summary, for the one-line row: the
+/// hard-wrapped lines joined, cut at the first sentence end, capped at
+/// [`PHRASE_CAP`] chars. A file that cannot be read or parsed, or a summary
+/// still the minted hole, is an empty phrase — the row lists without one.
+fn first_phrase(root: &Path, file: &str) -> String {
+    let Ok(text) = fs::read_to_string(root.join(file)) else {
+        return String::new();
+    };
+    let Ok(doc) = md::parse(&text) else {
+        return String::new();
+    };
+    let joined = doc
+        .summary
+        .iter()
+        .map(|(_, t)| t.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut end = joined.len();
+    for (i, c) in joined.char_indices() {
+        // A sentence ends at its punctuation before a space — a dot inside
+        // `archi.toml` or `main.rs#run_req` ends nothing.
+        if matches!(c, '.' | '!' | '?')
+            && joined[i + c.len_utf8()..]
+                .chars()
+                .next()
+                .is_none_or(char::is_whitespace)
+        {
+            end = i + c.len_utf8();
+            break;
+        }
+    }
+    let phrase = joined[..end].trim();
+    if phrase.chars().count() > PHRASE_CAP {
+        let mut cut: String = phrase.chars().take(PHRASE_CAP - 1).collect();
+        while cut.ends_with(' ') {
+            cut.pop();
+        }
+        cut.push('…');
+        cut
+    } else {
+        phrase.to_string()
+    }
+}
+
 // ---- cross-checks ----------------------------------------------------------
 
 fn cross_check(
