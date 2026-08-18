@@ -38,3 +38,5 @@ byte-equal to the embedded copies).
 - test — the embedded implement skill's sub-agent contract requires the recorded files for
   the task's refs in the prompt
 - test — no embedded skill tells a reader to confirm, review or retire a candidate
+- test — the embedded workflow skill names `req ls --satisfies` in the passage that
+  derives requirements
