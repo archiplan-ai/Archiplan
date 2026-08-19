@@ -2073,6 +2073,113 @@ fn plan_next_prints_no_no_signal_pair_count() {
     fs::remove_dir_all(&root).unwrap();
 }
 
+// ---- the plan cleans up after itself ------------------------------------------
+//
+// The wave's working files are input, not record: the index is diffed once
+// and the declarations are consumed once, so a wave that closes takes them
+// with it, and a completed plan's folder holds records and nothing else
+// (`archi/requirements/planning/the-plan-cleans-up-after-itself.md`).
+
+/// A successful wave close deletes the files it consumed — the closed wave's
+/// index and declaration file — and the next wave's files stand untouched
+/// where its open put them
+/// (`archi/requirements/planning/the-plan-cleans-up-after-itself.md`).
+#[test]
+fn a_successful_close_deletes_the_consumed_files_and_spares_the_next_wave_s() {
+    let root = temp_project();
+    gated_wave(&root, T1_STORE_GATED);
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
+
+    let waves = root.join("archi/plans/mvp/waves");
+    assert!(waves.join("w01.index.json").exists());
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("wave 1 closed — in flight: t2"), "{out}");
+
+    // Wave 1's files went with its close; wave 2's stand.
+    assert!(!waves.join("w01.index.json").exists(), "the diffed index is consumed");
+    assert!(!root.join(declares_rel(1, "t1")).exists(), "the declaration is consumed");
+    assert!(waves.join("w02.index.json").exists(), "the open wave's index stands");
+    assert!(root.join(declares_rel(2, "t2")).exists(), "the open wave's file stands");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// A blocked close deletes nothing: the index and the declaration files are
+/// what the retry reads, so they stand through the refusal — and the entry
+/// that answers it lands in the same file and the retry closes on it
+/// (`archi/requirements/planning/the-plan-cleans-up-after-itself.md`).
+#[test]
+fn a_blocked_close_deletes_nothing_and_the_retry_closes_on_the_same_files() {
+    // Each writer accounts for its own file; a third moves beside them and
+    // no declaration names it, so the coverage gate blocks the close.
+    let root = two_writers_declared();
+    fs::write(root.join("code/orphan.rs"), ORPHAN_RS).unwrap();
+
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains("code/orphan.rs"), "{err}");
+    let waves = root.join("archi/plans/mvp/waves");
+    assert!(waves.join("w01.index.json").exists(), "the blocked close keeps the index");
+    assert!(root.join(declares_rel(1, "t1")).exists(), "and every declaration file");
+    assert!(root.join(declares_rel(1, "t2")).exists(), "and every declaration file");
+
+    // The entry that accounts for the file lands in the same file the
+    // refusal left standing, and the retry closes on it.
+    declares(
+        &root,
+        1,
+        "t2",
+        &[AUTH_ENTRY, ["code/orphan.rs#stray", "Auth", AUTH_PROOF]],
+    );
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("the cleanup wave"), "{out}");
+    assert!(out.contains("← code/orphan.rs#stray"), "the retried file minted: {out}");
+    assert!(!waves.join("w01.index.json").exists(), "the successful retry consumed it");
+    assert!(!root.join(declares_rel(1, "t1")).exists());
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// At DONE the plan folder holds no `waves/` at all: the completion removes
+/// the directory whole, so a file a pre-cleanup binary's close left behind
+/// goes with it, and the completed folder is records and nothing else
+/// (`archi/requirements/planning/the-plan-cleans-up-after-itself.md`).
+#[test]
+fn at_done_the_plan_folder_holds_no_waves_at_all() {
+    let root = two_writers_declared();
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("the cleanup wave"), "{out}");
+
+    // A leftover of an older binary's close: the completion takes the
+    // directory whole, not the files it knows by name.
+    let waves = root.join("archi/plans/mvp/waves");
+    fs::create_dir_all(&waves).unwrap();
+    fs::write(waves.join("w00.index.json"), "{}\n").unwrap();
+
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("DONE"), "{out}");
+    assert!(!waves.exists(), "a completed plan holds records and nothing else");
+    assert!(root.join("archi/plans/mvp/state.json").exists(), "the record stays");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// `plan reset` still clears `waves/` whole: the rewind takes the working
+/// files with the rest of the wave's state, exactly as it always did
+/// (`archi/requirements/planning/the-plan-cleans-up-after-itself.md`).
+#[test]
+fn plan_reset_still_clears_waves_whole() {
+    let root = started_two_task_plan();
+    let waves = root.join("archi/plans/mvp/waves");
+    assert!(waves.join("w01.index.json").exists());
+    assert!(root.join(declares_rel(1, "t1")).exists());
+
+    ok(&root, &["plan", "reset"]);
+    assert!(!waves.exists(), "the rewind takes the folder whole");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
 /// A declared pair the wave moves out from under refuses that wave, and the
 /// refusal names the link, the symbol and both exits. The rows nobody
 /// declared — inferred and hand-authored — drift beside it and say nothing

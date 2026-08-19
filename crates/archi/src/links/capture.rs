@@ -345,6 +345,32 @@ pub(crate) fn open_declarations(
     Ok(())
 }
 
+/// Delete one closed wave's working files: the index [`write_index`] wrote
+/// and the declaration files [`open_declarations`] opened. The writers name
+/// the paths, and this deleter reads the same two functions, so the two
+/// cannot disagree. Only a successful `plan next` calls this, after every
+/// gate has passed — a blocked close keeps the files, because the retry
+/// reads them; `link capture --task` re-reads and never deletes. A file
+/// already gone is no error: the files are dead once the wave is closed
+/// (`archi/requirements/planning/the-plan-cleans-up-after-itself.md`).
+pub(crate) fn remove_wave_files(
+    root: &Path,
+    plan: &str,
+    wave: usize,
+    tasks: &[String],
+) -> Result<(), String> {
+    let mut paths = vec![index_path(root, plan, wave)];
+    paths.extend(tasks.iter().map(|task| root.join(declares_rel(plan, wave, task))));
+    for path in paths {
+        match fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("cannot remove `{}`: {e}", path.display())),
+        }
+    }
+    Ok(())
+}
+
 /// One declaration. Each field is read spanned, so a name that parses and
 /// then resolves to nothing is refused on the line it was written on and not
 /// on the table above it.

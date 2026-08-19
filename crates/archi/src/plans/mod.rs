@@ -1841,6 +1841,11 @@ pub fn next(root: &Path, model: &Model) -> Result<NextOutcome, String> {
                     }
                 }
                 plan.state = PlanState::Completed;
+                // The waves are all closed and their files consumed: the
+                // completion takes the empty `waves/` whole, and any file an
+                // older binary's closes left behind goes with the directory
+                // (`archi/requirements/planning/the-plan-cleans-up-after-itself.md`).
+                remove_waves(root, &plan.name)?;
                 Step::Done
             } else {
                 plan.scenarios_displayed = true;
@@ -1862,6 +1867,9 @@ pub fn next(root: &Path, model: &Model) -> Result<NextOutcome, String> {
             gate_anchored(&grade_block(root, model, &report.block)?)?;
             plan.scenarios_closed = true;
             plan.state = PlanState::Completed;
+            // The step that prints DONE removes the empty `waves/` on this
+            // path too (`archi/requirements/planning/the-plan-cleans-up-after-itself.md`).
+            remove_waves(root, &plan.name)?;
             save_state(root, &plan)?;
             return Ok(NextOutcome {
                 capture: None,
@@ -1915,6 +1923,12 @@ pub fn next(root: &Path, model: &Model) -> Result<NextOutcome, String> {
         Step::Cleanup
     };
     save_state(root, &plan)?;
+    // The close consumed the wave's working files — the index it diffed and
+    // the declarations it minted from — so it deletes them: only here, after
+    // every gate has passed and the close is recorded. A blocked close
+    // returned above and kept the files, because they are what the retry
+    // reads (`archi/requirements/planning/the-plan-cleans-up-after-itself.md`).
+    links::capture::remove_wave_files(root, &plan.name, wave, &waves[wave - 1])?;
     Ok(NextOutcome {
         capture: Some(capture),
         step,
@@ -1964,6 +1978,19 @@ pub fn close(root: &Path) -> Result<Plan, String> {
     Ok(plan)
 }
 
+/// Remove a plan's `waves/` directory whole; one already gone is no error.
+/// The completion and `plan reset` both come through here: the directory is
+/// the unit, so working files a pre-cleanup binary's closes left behind go
+/// with it (`archi/requirements/planning/the-plan-cleans-up-after-itself.md`).
+fn remove_waves(root: &Path, name: &str) -> Result<(), String> {
+    let waves_dir = plan_dir(root, name).join("waves");
+    if waves_dir.exists() {
+        fs::remove_dir_all(&waves_dir)
+            .map_err(|e| format!("cannot remove `{}`: {e}", waves_dir.display()))?;
+    }
+    Ok(())
+}
+
 /// `archi plan reset`: back to draft — waves rewound, latches unlatched,
 /// wave indexes removed. Journaled links stay: the journal is append-only.
 pub fn reset(root: &Path) -> Result<Plan, String> {
@@ -1973,11 +2000,7 @@ pub fn reset(root: &Path) -> Result<Plan, String> {
     plan.cleanup_displayed = false;
     plan.scenarios_displayed = false;
     plan.scenarios_closed = false;
-    let waves_dir = plan_dir(root, &plan.name).join("waves");
-    if waves_dir.exists() {
-        fs::remove_dir_all(&waves_dir)
-            .map_err(|e| format!("cannot remove `{}`: {e}", waves_dir.display()))?;
-    }
+    remove_waves(root, &plan.name)?;
     save_state(root, &plan)?;
     Ok(plan)
 }

@@ -1,0 +1,35 @@
+# `t1` accounts for its work here: for every symbol it changed, what
+# that code answers and the test that proves it. One entry closes the
+# wave; what the file holds is the writer's to decide.
+#
+# Nobody types this file. The verb writes it, and it resolves all three
+# names before it writes:
+#
+#   archi plan task t1 link add --symbol "<file>#<symbol>" --answers "<node, port or req:slug>" --proved-by "<test file>#<test fn>"
+#
+# Each entry lands as one table of this shape:
+#
+#   [[declares]]
+#   symbol = "<file>#<symbol>"
+#   answers = "<node, port or req:slug>"
+#   proved_by = "<test file>#<test fn>"
+
+[[declares]]
+symbol = "crates/archi/src/plans/mod.rs#next"
+answers = "req:the-plan-cleans-up-after-itself"
+proved_by = "crates/archi/tests/plan_e2e.rs#a_blocked_close_deletes_nothing_and_the_retry_closes_on_the_same_files"
+
+[[declares]]
+symbol = "crates/archi/src/links/capture.rs#remove_wave_files"
+answers = "req:the-plan-cleans-up-after-itself"
+proved_by = "crates/archi/tests/plan_e2e.rs#a_successful_close_deletes_the_consumed_files_and_spares_the_next_wave_s"
+
+[[declares]]
+symbol = "crates/archi/src/plans/mod.rs#remove_waves"
+answers = "req:the-plan-cleans-up-after-itself"
+proved_by = "crates/archi/tests/plan_e2e.rs#at_done_the_plan_folder_holds_no_waves_at_all"
+
+[[declares]]
+symbol = "crates/archi/src/plans/mod.rs#reset"
+answers = "req:the-plan-cleans-up-after-itself"
+proved_by = "crates/archi/tests/plan_e2e.rs#plan_reset_still_clears_waves_whole"
