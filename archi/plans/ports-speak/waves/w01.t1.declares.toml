@@ -1,4 +1,0 @@
-[[declares]]
-symbol = "crates/archi/src/search.rs#corpus"
-answers = "req:a-node-with-no-prose-speaks-through-its-ports"
-proved_by = "crates/archi/src/search.rs#tests::a_definitionless_node_ranks_on_its_ports_prose_at_summary_weight"
