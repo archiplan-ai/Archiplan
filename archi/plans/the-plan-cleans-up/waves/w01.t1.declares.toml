@@ -33,3 +33,8 @@ proved_by = "crates/archi/tests/plan_e2e.rs#at_done_the_plan_folder_holds_no_wav
 symbol = "crates/archi/src/plans/mod.rs#reset"
 answers = "req:the-plan-cleans-up-after-itself"
 proved_by = "crates/archi/tests/plan_e2e.rs#plan_reset_still_clears_waves_whole"
+
+[[declares]]
+symbol = "crates/archi/tests/plan_e2e.rs#at_done_the_plan_folder_holds_no_waves_at_all"
+answers = "req:the-plan-cleans-up-after-itself"
+proved_by = "crates/archi/tests/plan_e2e.rs#at_done_the_plan_folder_holds_no_waves_at_all"
