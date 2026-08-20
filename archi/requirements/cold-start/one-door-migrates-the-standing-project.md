@@ -9,8 +9,11 @@ deferred:
 
 `archi-migrate` is the one page for a project that predates a mechanism. It opens with the
 measurements that name the gap — `world ls` empty where the model stands, `link ls` counting
-rows under `inferred` — and carries both passes inline: the world interview and the journal
-triage. What the measurement shows is the pass to run; a tree holding `.fractal/` belongs to
+rows under `inferred` — and carries the passes inline: the world interview, the journal
+triage, and the scrap sweep — a `waves/` folder under a completed plan is dead weight
+left by a binary from before the close cleaned up after itself
+(`the-plan-cleans-up-after-itself`), measured by `ls -d archi/plans/*/waves` against
+`archi plan list`, and removed once; a plan still in flight keeps its folder. What the measurement shows is the pass to run; a tree holding `.fractal/` belongs to
 the old client, and one pointer line sends it to `archi-migrate-fractal`, which stays its
 own page. The reader does not need to know the name of their staleness to cure it.
 `sync-skills` reports an installed skill this binary no longer embeds, so a merge that
@@ -37,8 +40,9 @@ pointer). `Scaffold` (embeds nine skills where there were ten, installs them byt
 
 - test — a fresh init installs `archi-migrate` byte-equal, and installs neither
   `archi-migrate-world` nor `archi-migrate-links`
-- test — the embedded `archi-migrate` opens with the two measurements, carries both passes,
-  and names `archi-migrate-fractal` as the old client's own page
+- test — the embedded `archi-migrate` opens with the measurements, carries the world,
+  journal and scrap passes, and names `archi-migrate-fractal` as the old client's own page
+- test — the scrap pass says a completed plan's `waves/` goes and a live plan's stays
 - test — `sync-skills` on a tree holding an installed skill the binary does not embed
   reports it as orphaned, by name, and removes nothing
 - test — the world-pass content the standing tests read survives at the new path
