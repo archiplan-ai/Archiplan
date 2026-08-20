@@ -36,15 +36,15 @@ the archi-explain page under the new api
   above are the contract), the stressor files (description, attractor, verdict,
   Resolution), `version list` and `version diff <a> <b>` (the tree never moves — no
   checkout dance), `link ls --spec` (who realizes it today) — then the answer rules from
-  the old page, kept in spirit verbatim: lead with the answer; quote decisions verbatim
-  and name the alternatives that lost; cite ids and origins; surface the pressure trail;
-  silence is a real answer — no decision means no recorded trade-off, say so and offer to
-  record one; never invent rationale
+  the old page, kept in spirit: lead with the answer; quote decisions verbatim and name
+  the alternatives that lost; cite ids and origins; surface the pressure trail; silence
+  is a real answer — no decision means no recorded trade-off, say so and offer to record
+  one; never invent rationale
 - `skills/archi.md`: the "Show, do not tell" ground rule gains one sentence — the
   structure half is `query | viz`, the why half is the `archi-explain` skill
-- `scaffold.rs`: `SKILLS` nine → ten; `init_e2e.rs`: the install count 13 → 14, the
+- `scaffold.rs`: `SKILLS` nine -> ten; `init_e2e.rs`: the install count 13 -> 14, the
   `EMBEDDED_SKILLS` table gains the row (the pointer and confirm-candidates guards then
-  read the new page automatically), plus the three content guards from the verify bullets
+  read the new page automatically), plus the content guards from the verify bullets
 - the doctrine-singleton guard stands: the page names commands in its chain steps but
   must not reproduce `archi-search`'s distinctive sentences
 
