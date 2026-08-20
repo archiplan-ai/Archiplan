@@ -9,6 +9,8 @@ description: Drive the implementation of a started archi plan — wave by wave, 
 > `created`, the text you follow is stale. Read that file again, follow
 > it, and only then continue. `ok` means continue.
 
+> Retrieval — how to find anything here — is the `archi-search` skill.
+
 > **Working rules — they apply to every step of this session:**
 > - **Bash output hygiene.** Do not print `echo` separators. Do not call
 >   `python` or `jq` to reformat output that already reads well. Parse

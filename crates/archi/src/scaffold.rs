@@ -16,8 +16,9 @@ use std::path::{Path, PathBuf};
 use modeling_lang::source::{find_project_root, manifest_src};
 
 /// The briefing, embedded at build time: skill name → SKILL.md text.
-const SKILLS: [(&str, &str); 9] = [
+const SKILLS: [(&str, &str); 10] = [
     ("archi", include_str!("../../../skills/archi.md")),
+    ("archi-search", include_str!("../../../skills/archi-search.md")),
     ("archi-plan", include_str!("../../../skills/archi-plan.md")),
     ("archi-implement", include_str!("../../../skills/archi-implement.md")),
     ("archi-merge", include_str!("../../../skills/archi-merge.md")),

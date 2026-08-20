@@ -9,6 +9,8 @@ description: Give a standing archiplan project its world facts — read the worl
 > `updated` or `created`, the text you follow is stale. Read that file
 > again, follow it, and only then continue. `ok` means continue.
 
+> Retrieval — how to find anything here — is the `archi-search` skill.
+
 # Migrate a standing project into the world
 
 A project modeled before the world already claims things about the world.

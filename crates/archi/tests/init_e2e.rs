@@ -33,6 +33,12 @@
 //! reads the standing claims with `archi req ls --satisfies` before it
 //! derives one, and the candidate guard reads the sentences that name no
 //! command too.
+//!
+//! The search doctrine lives in one skill
+//! (`archi/requirements/agent-retrieval/the-search-doctrine-lives-in-one-skill.md`):
+//! `archi-search` installs beside the other nine and alone carries the
+//! order — the menu, the three structural reads, then search — and the
+//! grep rule; every working skill points at it by bare name.
 
 mod util;
 
@@ -55,6 +61,23 @@ const SKILL_MIGRATE: &str = include_str!("../../../skills/archi-migrate-fractal.
 const SKILL_MIGRATE_WORLD: &str = include_str!("../../../skills/archi-migrate-world.md");
 const SKILL_MIGRATE_LINKS: &str = include_str!("../../../skills/archi-migrate-links.md");
 const SKILL_STE: &str = include_str!("../../../skills/ste-writing.md");
+const SKILL_SEARCH: &str = include_str!("../../../skills/archi-search.md");
+
+/// Every skill this binary embeds, name -> source. The guards that read all
+/// installed skills iterate this list, so a new skill joins them by joining
+/// it.
+const EMBEDDED_SKILLS: [(&str, &str); 10] = [
+    ("archi", SKILL_ARCHI),
+    ("archi-search", SKILL_SEARCH),
+    ("archi-plan", SKILL_PLAN),
+    ("archi-implement", SKILL_IMPLEMENT),
+    ("archi-merge", SKILL_MERGE),
+    ("archi-finish-worktree", SKILL_FINISH),
+    ("archi-migrate-fractal", SKILL_MIGRATE),
+    ("archi-migrate-world", SKILL_MIGRATE_WORLD),
+    ("archi-migrate-links", SKILL_MIGRATE_LINKS),
+    ("ste-writing", SKILL_STE),
+];
 
 fn temp_dir() -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -187,7 +210,7 @@ fn a_fresh_init_stands_up_a_building_project() {
     // The report: every artifact created, the manifest on the last created
     // line, the verdict naming the project.
     let created: Vec<&str> = out.lines().filter(|l| l.starts_with("created")).collect();
-    assert_eq!(created.len(), 13, "{out}");
+    assert_eq!(created.len(), 14, "{out}");
     assert!(created.last().unwrap().contains("archi.toml"), "{out}");
     assert!(out.contains("initialized `proj`"), "{out}");
 
@@ -1275,17 +1298,7 @@ fn no_embedded_skill_sends_the_reader_to_confirm_candidates() {
     let root = temp_dir();
     ok_in(&root, &["init", "."]);
 
-    for (name, embedded) in [
-        ("archi", SKILL_ARCHI),
-        ("archi-plan", SKILL_PLAN),
-        ("archi-implement", SKILL_IMPLEMENT),
-        ("archi-merge", SKILL_MERGE),
-        ("archi-finish-worktree", SKILL_FINISH),
-        ("archi-migrate-fractal", SKILL_MIGRATE),
-        ("archi-migrate-world", SKILL_MIGRATE_WORLD),
-        ("archi-migrate-links", SKILL_MIGRATE_LINKS),
-        ("ste-writing", SKILL_STE),
-    ] {
+    for (name, embedded) in EMBEDDED_SKILLS {
         let installed =
             fs::read_to_string(root.join(".claude/skills").join(name).join("SKILL.md")).unwrap();
         assert_eq!(installed, embedded, "{name} drifted on install");
@@ -1360,4 +1373,104 @@ fn the_workflow_skill_reads_the_record_before_it_derives_a_requirement() {
     );
 
     fs::remove_dir_all(&root).unwrap();
+}
+
+/// A fresh init installs the search doctrine like every other skill —
+/// byte-equal to the binary's embedded copy
+/// (`archi/requirements/agent-retrieval/the-search-doctrine-lives-in-one-skill.md`).
+#[test]
+fn a_fresh_init_installs_the_search_skill_verbatim() {
+    let root = temp_dir();
+    let out = ok_in(&root, &["init", "."]);
+    assert!(out.contains(".claude/skills/archi-search/SKILL.md"), "{out}");
+    let installed =
+        fs::read_to_string(root.join(".claude/skills/archi-search/SKILL.md")).unwrap();
+    assert_eq!(installed, SKILL_SEARCH, "the search skill drifted on install");
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The embedded doctrine names its order — the semantic menu, then the
+/// three structural reads from an element, then search — and says why
+/// grep never answers
+/// (`archi/requirements/agent-retrieval/the-search-doctrine-lives-in-one-skill.md`).
+#[test]
+fn the_search_skill_names_the_order_and_why_grep_misses() {
+    let flat = flat(SKILL_SEARCH);
+    let mut prev: Option<usize> = None;
+    for step in [
+        "`archi query --top`",
+        "`archi req ls --satisfies <element>`",
+        "`archi world ls --covers <element>`",
+        "`archi link ls --spec <ref>`",
+        "`archi search <phrase> [--kind",
+    ] {
+        let at = flat
+            .find(step)
+            .unwrap_or_else(|| panic!("the doctrine never names {step}"));
+        if let Some(prev) = prev {
+            assert!(prev < at, "{step} stands out of order: {flat}");
+        }
+        prev = Some(at);
+    }
+    assert!(
+        flat.contains(
+            "Grep misses the model, because definitions live in the compiled \
+             graph and not on disk as prose."
+        ),
+        "the doctrine never says why grep misses the model: {flat}"
+    );
+}
+
+/// Every working skill points at the doctrine by bare name, so the one
+/// page is one pointer away wherever a reader stands
+/// (`archi/requirements/agent-retrieval/the-search-doctrine-lives-in-one-skill.md`).
+#[test]
+fn every_working_skill_names_the_search_skill() {
+    let root = temp_dir();
+    ok_in(&root, &["init", "."]);
+
+    for (name, embedded) in EMBEDDED_SKILLS {
+        // Two exemptions. `ste-writing` is a prose-style reference, not an
+        // archiplan workflow: it retrieves nothing from the spec, so a
+        // pointer would brief nobody — the plan names it exempt.
+        // `archi-finish-worktree` retrieves nothing either — its landing
+        // follows the reports of the commands it runs — and it stands
+        // outside the archi-search unit's outputs.
+        if name == "ste-writing" || name == "archi-finish-worktree" {
+            continue;
+        }
+        let installed =
+            fs::read_to_string(root.join(".claude/skills").join(name).join("SKILL.md")).unwrap();
+        assert_eq!(installed, embedded, "{name} drifted on install");
+        assert!(installed.contains("archi-search"), "{name} never names `archi-search`");
+    }
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The doctrine's distinctive sentences live in exactly one file, so there
+/// is no second copy to drift
+/// (`archi/requirements/agent-retrieval/the-search-doctrine-lives-in-one-skill.md`).
+/// A bare command mention stays legitimate elsewhere — step 4 of the
+/// workflow skill runs `req ls --satisfies`, the planning skill seeds
+/// `## Outputs` with `link ls --spec` — so what is guarded is the phrase
+/// and the glossed chain of the three reads, never a lone command.
+#[test]
+fn the_search_doctrine_lives_in_one_skill() {
+    const PHRASE: &str = "Search, do not grep";
+    const READS: &str = "`archi req ls --satisfies <element>` — the requirements that name it \
+                         (similar and contradicting claims live in one cluster); \
+                         `archi world ls --covers <element>` — the outside conditions on it; \
+                         `archi link ls --spec <ref>` — the files recorded against an element";
+
+    for (name, embedded) in EMBEDDED_SKILLS {
+        let flat = flat(embedded);
+        if name == "archi-search" {
+            assert!(flat.contains(PHRASE), "the doctrine lost its phrase");
+            assert!(flat.contains(READS), "the doctrine lost its ordered reads: {flat}");
+        } else {
+            assert!(!flat.contains(PHRASE), "{name} carries a second copy of `{PHRASE}`");
+            assert!(!flat.contains(READS), "{name} carries a second copy of the ordered reads");
+        }
+    }
 }

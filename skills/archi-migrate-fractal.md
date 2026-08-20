@@ -9,6 +9,8 @@ description: Migrate a machine and its projects off the old fractal client — s
 > `updated` or `created`, the text you follow is stale. Read that file
 > again, follow it, and only then continue. `ok` means continue.
 
+> Retrieval — how to find anything here — is the `archi-search` skill.
+
 # Migrate from fractal
 
 The old fractal client and the new Archiplan CLI both install as `archi`.

@@ -10,8 +10,10 @@ deferred:
 `archi-search` is the one page that says how to find things: the semantic menu first
 (`query --top`), then the structural reads from an element (`req ls --satisfies`,
 `world ls --covers`, `link ls --spec`), search last — when you hold a phrase and no
-address — and grep never, with the reason. Every working skill carries one pointer line
-naming `archi-search` and no retrieval vocabulary of its own; the workflow steps keep the
+address — and grep never, with the reason. Every skill that searches carries one
+pointer line naming `archi-search` and no retrieval vocabulary of its own; the two that
+never search — the landing protocol (`archi-finish-worktree`) and the prose-style page
+(`ste-writing`) — are exempt, and the guard names both. The workflow steps keep the
 commands they use at the moment they use them. The doctrine's distinctive sentences exist
 in exactly one file, so there is no second copy to drift.
 
@@ -36,6 +38,7 @@ the referenced page is always beside the reader.
 - test — the embedded `archi-search` names the order: `query --top`, then `req ls
   --satisfies`, `world ls --covers`, `link ls --spec`, then search, and says grep misses
   the model
-- test — every working skill names `archi-search`, and `ste-writing` is exempt
+- test — every skill that searches names `archi-search`, and the two exemptions are named
+  in the test with their reasons
 - test — the phrase `Search, do not grep` and the doctrine's order live only in
   `archi-search`

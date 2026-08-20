@@ -4,6 +4,8 @@
 > or `created`, the text you follow is stale. Read that file again, follow
 > it, and only then continue. `ok` means continue.
 
+> Retrieval — how to find anything here — is the `archi-search` skill.
+
 # Migrate a journal written by the matcher
 
 A project modeled before the declaration carries a journal capture wrote by

@@ -25,20 +25,8 @@ verify` is the list of work to do. Lifecycle moves only through commands.
 Run `archi check` after every editing round. Errors block. Findings are
 the work to do.
 
-**Search, do not grep.** `archi search <phrase>` is ranked retrieval over
-every archi object: model elements with their identity prose, intents,
-requirements, stressors and sessions. Each hit carries its addresses
-(file:line, satisfied-by, affects, state), so the next command starts there.
-Grep misses the model, because definitions live in the compiled graph and
-not on disk as prose. Narrow the search with `--kind`. Machine-read it
-with `--json`. Search before you derive a requirement, to see whether a
-claim like it exists. Search before you define an element, to see whether
-the concept is already modeled. Search when a finding names something
-unfamiliar. Three structural reads answer before search does:
-`archi req ls --satisfies <element>` lists the requirements that name
-an element, `archi world ls --covers <element>` the conditions on it,
-and `archi link ls --spec <ref>` the files recorded against an element
-or a requirement. Search is for when you hold a phrase and no address.
+**How to find anything — nodes, claims, conditions, files — is the
+`archi-search` skill.** Read it before you hunt.
 
 **Show, do not tell.** When the user asks you to explain or to visualize
 the design, pipe a query into the visualizer: `archi query <filters> |

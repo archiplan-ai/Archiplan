@@ -9,6 +9,8 @@ description: Merge two branches that both mutated an archiplan spec — triage t
 > `created`, the text you follow is stale. Read that file again, follow
 > it, and only then continue. `ok` means continue.
 
+> Retrieval — how to find anything here — is the `archi-search` skill.
+
 # Archi merge
 
 Two writers changed one spec.
