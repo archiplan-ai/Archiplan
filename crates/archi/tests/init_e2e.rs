@@ -940,21 +940,28 @@ fn the_migration_skill_installs_and_names_its_gate() {
 
 /// One door migrates the standing project
 /// (`archi/requirements/cold-start/one-door-migrates-the-standing-project.md`):
-/// the embedded page opens with the two measurements that name the gap,
-/// carries both passes inline, and names `archi-migrate-fractal` as the old
-/// client's own page. The reader does not need to know the name of their
-/// staleness to cure it.
+/// the embedded page opens with the three measurements that name the gap,
+/// carries the world, journal and scrap passes inline, and names
+/// `archi-migrate-fractal` as the old client's own page. The reader does not
+/// need to know the name of their staleness to cure it. The fn keeps its
+/// name — the journal anchors it — while the page it guards grew a third
+/// pass.
 #[test]
 fn the_migrate_page_opens_with_the_measurements_and_carries_both_passes() {
     let text = flat(SKILL_MIGRATE);
 
-    // The triage head: both measurements stand before either pass begins.
+    // The triage head: all three measurements stand before any pass begins.
     let world_pass = text.find("## The world pass").expect("the page has no world pass");
     let journal_pass = text
         .find("## The journal pass")
         .expect("the page has no journal pass");
+    let scrap_pass = text.find("## The scrap pass").expect("the page has no scrap pass");
+    let passes = world_pass.min(journal_pass).min(scrap_pass);
     let world_measure = text.find("`archi world ls`").expect("no world measurement");
     let journal_measure = text.find("`archi link ls").expect("no journal measurement");
+    let scrap_measure = text
+        .find("`ls -d archi/plans/*/waves`")
+        .expect("no scrap measurement");
     assert!(
         world_measure < world_pass && world_measure < journal_pass,
         "the world measurement does not open the page"
@@ -963,10 +970,13 @@ fn the_migrate_page_opens_with_the_measurements_and_carries_both_passes() {
         journal_measure < world_pass && journal_measure < journal_pass,
         "the journal measurement does not open the page"
     );
-    let head = &text[..world_pass.min(journal_pass)];
+    assert!(scrap_measure < passes, "the scrap measurement does not open the page");
+    let head = &text[..passes];
     assert!(head.contains("`inferred`"), "the head never names the fifth column's word");
 
-    // Both passes, moved whole: the interview's gate, the triage's rule word.
+    // The standing passes, moved whole: the interview's gate, the triage's
+    // rule word — and the scrap pass ordered after the journal pass.
+    assert!(journal_pass < scrap_pass, "the scrap pass does not follow the journal pass");
     for (pass, carries) in [
         ("the world pass", "The gate is question 2"),
         ("the world pass", "the day they stop, the fact is dead"),
@@ -976,10 +986,27 @@ fn the_migrate_page_opens_with_the_measurements_and_carries_both_passes() {
         assert!(text.contains(carries), "{pass} lost `{carries}`");
     }
 
+    // The scrap pass: a completed plan's `waves/` goes — state confirmed in
+    // `archi plan list`, old `plan.json` plans read the same way, one
+    // `git rm -r`, one commit — a live plan's stays, and the journal is the
+    // record deleting cannot lose.
+    let scrap = &text[scrap_pass..];
+    for carries in [
+        "`archi plan list`",
+        "`plan.json`",
+        "`git rm -r",
+        "A draft or started plan keeps its folder",
+        "`archi check`",
+        "commit naming the count",
+        "The record of what those waves accounted for is the journal",
+    ] {
+        assert!(scrap.contains(carries), "the scrap pass lost `{carries}`");
+    }
+
     // A tree holding `.fractal/` is the old client's, and its page keeps its
-    // name — one pointer, no third in-project pass.
+    // name — one pointer, no fourth in-project pass.
     let pointer = text.find(".fractal/").expect("the head never names `.fractal/`");
-    assert!(pointer < world_pass.min(journal_pass), "the fractal pointer left the head");
+    assert!(pointer < passes, "the fractal pointer left the head");
     assert!(
         text.contains("`archi-migrate-fractal`"),
         "the page never names the old client's own page"

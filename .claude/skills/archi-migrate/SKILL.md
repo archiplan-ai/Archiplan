@@ -1,6 +1,6 @@
 ---
 name: archi-migrate
-description: Migrate a standing archiplan project past the mechanisms it predates — measure the gap first (`archi world ls` empty against a standing model, `archi link ls` counting rows under `inferred`), then run the pass the measurement names: the world interview that turns prose a person can stand behind into world facts, or the journal triage that retires what the old matcher guessed; a tree holding `.fractal/` goes to `archi-migrate-fractal` instead.
+description: Migrate a standing archiplan project past the mechanisms it predates — measure the gap first (`archi world ls` empty against a standing model, `archi link ls` counting rows under `inferred`, `ls -d archi/plans/*/waves` hitting under completed plans), then run the pass the measurement names: the world interview that turns prose a person can stand behind into world facts, the journal triage that retires what the old matcher guessed, or the scrap sweep that removes the `waves/` folders an older binary's closes left behind; a tree holding `.fractal/` goes to `archi-migrate-fractal` instead.
 ---
 
 > **Skill freshness — the first step.** In an initialized project, run
@@ -21,6 +21,9 @@ and the measurement names the pass to run:
 - `archi link ls | awk '{print $5}' | sort | uniq -c` — rows counted
   under `inferred` are a journal from before the declaration. Run the
   journal pass.
+- `ls -d archi/plans/*/waves` — a hit under a plan that
+  `archi plan list` shows completed is scrap from a binary older than
+  `the-plan-cleans-up-after-itself`. Run the scrap pass.
 
 A tree holding `.fractal/` belongs to the old client, and that migration
 — the binary swap and the import — is its own page: the
@@ -428,3 +431,22 @@ the links" is not.
   on purpose, and the `authored` rule that says a person chose it.
 - **Retiring appends.** Nothing is rewritten, nothing is lost, and the record
   of what the tool once believed stays readable.
+
+## The scrap pass — sweep the waves an old binary left behind
+
+A project planned before `the-plan-cleans-up-after-itself` carries
+`waves/` folders its closes never deleted: today a successful close
+removes the files its wave consumed, and completion removes `waves/`
+whole. Under a completed plan the folder is dead weight from the older
+binary, and this pass removes it once.
+
+Confirm the plan's state first: `archi plan list` shows it completed,
+and an old `plan.json` plan reads its state the same way. Then
+`git rm -r archi/plans/<name>/waves` for each completed plan the
+measurement named. A draft or started plan keeps its folder — its
+files are what the next close reads. Close with `archi check` and one
+commit naming the count of folders removed.
+
+Deleting loses nothing. The record of what those waves accounted for
+is the journal — every link carries its rule, its proving test and its
+commit provenance — and git history keeps the snapshots.
