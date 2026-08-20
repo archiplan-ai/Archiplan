@@ -83,19 +83,28 @@ Three places hold candidates, and nothing else does:
   carries no condition and is not a candidate.
 
 Write the candidate list down, each with the file it came from, and work
-down it. One candidate is one interview. Never batch them: a batch is a
-converter with extra steps.
+down it. Drafting them all up front is fine — a batch of drafts is
+reading, and reading is this step. One candidate is one interview.
+Never batch them: a batch of interviews is a converter with extra
+steps.
 
 ### 2. The interview — the workaround is the gate
 
-A person answers. You ask, you record, and you never fill an answer in
-yourself. For one candidate, in this order:
+A person answers, and the prose speaks first. Draft the candidate whole
+from the file it came from — the condition, the behavior, the reach:
+the sentence that made it a candidate usually answers all three. Put
+the draft in front of the operator to confirm or correct, and ask only
+what the prose does not answer. A draft is a proposal, not a record:
+the operator's yes or correction is what lands in the file. The one
+answer never taken from prose is the workaround — ask it of every
+candidate, because the gate is worth nothing answered from paper. For
+one candidate, in this order:
 
 1. **The condition.** What is true outside the system? Say it in the
    words of the world, not of the model.
-2. **The workaround.** Ask what people do today instead of this. Wait
-   for a concrete answer: what they do, how long it takes, what it
-   costs them.
+2. **The workaround.** Always asked, never drafted. Ask
+   what people do today instead of this. Wait for a concrete answer:
+   what they do, how long it takes, what it costs them.
 3. **The behavior.** Which scenarios does the condition dictate? One is
    enough to start.
 4. **The reach.** Which parts of the model does the story touch?
@@ -191,6 +200,18 @@ Given the device has no network
 When the reader opens the app
 Then the last synced view appears
 ```
+
+When a standing suite already proves a scenario — often the very test
+the candidate came from — bind the two at the moment the fact is
+written:
+
+```sh
+archi link add "<fact>#<scenario>" <test file>#<test fn> --kind indirect
+```
+
+The fact arrives holding proof the tree already runs. Do not wait for
+a plan close that may never come: when one does, this link is what it
+finds already standing.
 
 Write the fact **without the nouns of the model**. The condition is
 about the world, so the world's words are the right ones, and `check`

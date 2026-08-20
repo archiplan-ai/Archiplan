@@ -15,8 +15,11 @@ description: Answer why a thing is the way it is from the record — the world c
 # Archi explain — why it is the way it is
 
 The user asks why an element exists, why it is split or merged, why it
-has its shape, or what happened to it over time. Pull the answer from
-the record — never speculate.
+has its shape, or what happened to it over time. Resolve the subject
+first: read the element's definition and quote its identity sentence —
+the subject before the why. A question that fits several addresses is
+put to the user as options, never guessed. Pull the answer from the
+record — never speculate.
 
 ## Mandate
 
@@ -34,7 +37,8 @@ Walk the chain in order, outside-in — the world first, the code last.
    all.
 2. **`archi req ls --satisfies <element>`** — what must hold on it.
    Open the files: the claim is the summary, and each file's `origin:`
-   names its stressor.
+   names its stressor — or reads `origin: intent`, and the answer
+   comes from the intent folder's own problem statement.
 3. **`archi decision ls --links <name>`** — the recorded trades on an
    element or a doc slug: slug, `prefer → over`, the first phrase of
    the rationale. The file under `archi/decisions/` carries the rest.

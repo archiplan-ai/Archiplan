@@ -8,7 +8,10 @@
 //! verb and the no-model-nouns rule stand in the workflow skill, the workflow
 //! captures the world before it derives requirements, and
 //! `archi-migrate` installs beside the other skills so a project that
-//! stands without a world can gain one through its world pass. The planning skill moved with the
+//! stands without a world can gain one through its world pass — a
+//! draft-first interview whose workaround is never answered from prose,
+//! anchoring what a standing suite already proves as the fact is
+//! written. The planning skill moved with the
 //! behaviour too: it collects its closing block from the world and asks for
 //! none of it. Both skills that ask for a scenario teach its shape — a heading
 //! and its step lines. The same two skills carry the four folders of the world
@@ -42,10 +45,13 @@
 //!
 //! The why reads back from the record
 //! (`archi/requirements/agent-retrieval/the-why-reads-back-from-the-record.md`):
-//! `archi-explain` walks the chain outside-in — the world condition, the
-//! standing claims, the recorded trades, the pressure behind them, the
-//! timeline, who realizes it today — read-only, silence a real answer,
-//! invented rationale forbidden.
+//! `archi-explain` resolves first — the identity sentence quoted, an
+//! ambiguous address put to the user as options — then walks the chain
+//! outside-in — the world condition, the standing claims, the recorded
+//! trades, the pressure behind them (an intent-born claim answering from
+//! its intent folder's own problem statement), the timeline, who realizes
+//! it today — read-only, silence a real answer, invented rationale
+//! forbidden.
 
 mod util;
 
@@ -865,6 +871,62 @@ fn the_migration_skill_learns_to_ask() {
     fs::remove_dir_all(&root).unwrap();
 }
 
+/// The interview is draft-first
+/// (`archi/requirements/world-facts/a-skill-migrates-a-standing-project-into-the-world.md`):
+/// the candidate is drafted whole from the prose it came from, the operator
+/// confirms or corrects, and only the gaps are asked — the survey opener is
+/// gone. The one answer never taken from prose is the workaround, in as many
+/// words and again on the question itself, so the gate is never met from
+/// paper.
+#[test]
+fn the_world_pass_drafts_from_the_prose_and_asks_only_the_gaps() {
+    let flat = flat(SKILL_MIGRATE);
+
+    for phrase in [
+        "Draft the candidate whole",
+        "confirm or correct",
+        "ask only what the prose does not answer",
+        "The one answer never taken from prose is the workaround",
+        "Always asked, never drafted",
+    ] {
+        assert!(flat.contains(phrase), "the world pass misses `{phrase}`");
+    }
+
+    // The survey opener is gone: a reader told to ask every question asks
+    // the operator to read the prose back to them.
+    assert!(
+        !flat.contains("you never fill an answer in yourself"),
+        "the interview still opens as a survey"
+    );
+}
+
+/// A scenario a standing suite already proves is bound when the fact is
+/// written
+/// (`archi/requirements/world-facts/a-skill-migrates-a-standing-project-into-the-world.md`):
+/// the write step carries the `link add` line — the fact's scenario on the
+/// left, the standing test on the right — so the fact arrives holding proof
+/// the tree already runs instead of waiting on a plan close that may never
+/// come.
+#[test]
+fn the_world_pass_anchors_a_scenario_a_standing_suite_already_proves() {
+    let flat = flat(SKILL_MIGRATE);
+
+    let write = flat.find("### 3. Write the fact").expect("the world pass has no write step");
+    let close = flat.find("### 4. Check").expect("the world pass has no check step");
+    let anchor = flat
+        .find("archi link add \"<fact>#<scenario>\" <test file>#<test fn> --kind indirect")
+        .expect("the write step never binds a proved scenario");
+    assert!(write < anchor && anchor < close, "the anchoring move stands outside the write step");
+
+    for phrase in [
+        "often the very test the candidate came from",
+        "at the moment the fact is written",
+        "already standing",
+    ] {
+        assert!(flat.contains(phrase), "the anchoring move misses `{phrase}`");
+    }
+}
+
 #[test]
 fn a_pre_world_project_syncs_into_the_world() {
     let root = temp_dir();
@@ -1682,4 +1744,55 @@ fn the_explain_page_is_read_only_in_as_many_words() {
     let flat = flat(SKILL_EXPLAIN);
     assert!(flat.contains("Read-only"), "{flat}");
     assert!(flat.contains("Mutate nothing"), "{flat}");
+}
+
+/// The question resolves before the chain
+/// (`archi/requirements/agent-retrieval/the-why-reads-back-from-the-record.md`):
+/// the element's definition is read and its identity sentence quoted — the
+/// subject before the why — and a question that fits several addresses goes
+/// to the user as options, never guessed. Both stand before the chain pulls.
+#[test]
+fn the_explain_page_resolves_the_subject_before_the_why() {
+    let flat = flat(SKILL_EXPLAIN);
+    let chain = flat.find("## Pull the explanation").expect("the page has no chain");
+    for phrase in [
+        "the element's definition",
+        "identity sentence",
+        "the subject before the why",
+        "fits several addresses",
+        "as options, never guessed",
+    ] {
+        let at = flat
+            .find(phrase)
+            .unwrap_or_else(|| panic!("the explain page misses `{phrase}`"));
+        assert!(at < chain, "`{phrase}` stands after the chain opens: {flat}");
+    }
+}
+
+/// The origin hop names both births
+/// (`archi/requirements/agent-retrieval/the-why-reads-back-from-the-record.md`):
+/// a claim's `origin:` is read in the requirements step, and beside the
+/// stressor hop the page names the intent one — `origin: intent` answers
+/// from the intent folder's own problem statement — without moving the
+/// chain's numbered order.
+#[test]
+fn the_explain_page_names_the_intent_origin_beside_the_stressor() {
+    let flat = flat(SKILL_EXPLAIN);
+    let reqs = flat
+        .find("`archi req ls --satisfies <element>`")
+        .expect("the page has no requirements step");
+    let trades = flat
+        .find("`archi decision ls --links <name>`")
+        .expect("the page has no decisions step");
+    let intent = flat
+        .find("`origin: intent`")
+        .expect("the page never names the intent origin");
+    assert!(
+        reqs < intent && intent < trades,
+        "the intent hop does not stand beside the stressor one in step 2"
+    );
+    assert!(
+        flat.contains("the intent folder's own problem statement"),
+        "the page never says where an intent-born claim answers from: {flat}"
+    );
 }
