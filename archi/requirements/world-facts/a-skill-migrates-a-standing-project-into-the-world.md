@@ -7,7 +7,8 @@ deferred:
 
 # A skill migrates a standing project into the world
 
-`archi-migrate-world` is the skill that gives a standing project its world facts. It reads
+The world pass of `archi-migrate` is what gives a standing project its world facts
+(`one-door-migrates-the-standing-project` holds the door; this claim holds the pass). It reads
 what the project already claims — the world prose inside its intents, and the free-text
 story blocks its plans authored, and the tests its suites already name — and turns
 candidates into facts one at a time, by interview. Its gate is the workaround: an operator
