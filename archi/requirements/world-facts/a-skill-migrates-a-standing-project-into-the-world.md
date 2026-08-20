@@ -17,7 +17,14 @@ skill writes nothing. It asks by offering concrete options wherever answers have
 because an open question phrased in the abstract stalls where the same question with two or
 three candidate answers is answered at once. And a first "nothing would make this false" is
 not a verdict: the skill asks again with concrete shapes, because a claim that looks like an
-axiom is far more often a claim stated badly. Its output is
+axiom is far more often a claim stated badly. It drafts each candidate from the prose the
+candidate came from and asks only what the prose does not answer — the operator confirms
+or corrects a draft instead of filling a survey; the one answer never taken from prose is
+the workaround, because the gate is worth nothing pre-filled. And when a standing suite
+already proves a scenario, the pass anchors it there and then —
+`archi link add "<fact>#<scenario>" <test file>#<test fn> --kind indirect` — so the fact
+arrives bound to the proof the tree already runs instead of waiting for a plan that may
+never close. Its output is
 facts under `archi/world/` plus a brief naming what did not map and why. It deletes
 nothing.
 
@@ -56,3 +63,7 @@ and the brief it must return).
 - test — a fact the skill mints names its origin file in `sources` and reports nothing
 - test — a migrated project passes `check` with no world finding
 - test — the skill deletes no intent prose and no plan story block
+- test — the world pass drafts the candidate from its prose and asks only the gaps, and the
+  workaround is never answered from prose
+- test — the world pass anchors a scenario a standing suite already proves, at the moment
+  the fact is written

@@ -8,10 +8,14 @@ deferred:
 # The why reads back from the record
 
 `archi-explain` is the page for "why is this the way it is". It is read-only: the answer
-comes from the record, never from speculation. The chain runs world first — the condition
+comes from the record, never from speculation. Before the chain, the question resolves: the
+element's own identity sentence is read and quoted — the subject before the why — and a
+question that fits several addresses is put to the user as options, never guessed. The
+chain runs world first — the condition
 the behavior serves (`world ls --covers`), then the claims that must hold
 (`req ls --satisfies`), then the recorded trade-offs (`decision ls --links`), then each
-requirement's origin back to its stressor, then the timeline (`version list`,
+requirement's origin back to where it was born — a stressor's round, or for
+`origin: intent` the intent folder's own problem statement, then the timeline (`version list`,
 `version diff` — the tree never moves), then who realizes it today (`link ls --spec`).
 The answer leads; decisions are quoted verbatim with the alternatives that lost; every
 citation carries its address. A question with no recorded trade-off is answered "the
@@ -41,3 +45,6 @@ mandate, the `archi-search` pointer for resolving a phrase to an address). `Scaf
   then stressors, then versions, then links
 - test — the page says silence is a real answer and forbids invented rationale
 - test — the page is read-only in as many words and mutates nothing
+- test — the page reads the element's definition before the chain and puts an ambiguous
+  question to the user as options
+- test — the page names the intent-origin hop beside the stressor one
