@@ -627,11 +627,7 @@ pub(crate) fn serve_requirements(root: &Path) -> ReqList {
         } else {
             "open"
         };
-        let satisfied_by = f
-            .satisfied_by
-            .as_ref()
-            .map(|(v, _)| v.clone())
-            .unwrap_or_default();
+        let satisfied_by = list_entries(&f.satisfied_by);
         let intent = r.file.split('/').nth(2).unwrap_or_default().to_string();
         rows.push(ReqRow {
             slug: r.slug.clone(),
@@ -708,6 +704,13 @@ fn first_phrase(root: &Path, file: &str) -> String {
     }
 }
 
+/// A frontmatter list's entries, owned for a row, or none — an unsound
+/// field is no claim of any entry. Both listings read their list fields
+/// through it, as they read their prose through [`first_phrase`].
+fn list_entries(field: &Option<(Vec<String>, usize)>) -> Vec<String> {
+    field.as_ref().map(|(v, _)| v.clone()).unwrap_or_default()
+}
+
 // ---- the decision listing --------------------------------------------------
 
 /// One standing decision as `decision ls` serves it
@@ -745,9 +748,6 @@ pub(crate) struct DecisionList {
 /// about what a decision is.
 pub(crate) fn serve_decisions(root: &Path) -> DecisionList {
     let tree = discover_tree(root);
-    let entries = |field: &Option<(Vec<String>, usize)>| -> Vec<String> {
-        field.as_ref().map(|(v, _)| v.clone()).unwrap_or_default()
-    };
     let mut doc_slugs: BTreeSet<String> = BTreeSet::new();
     doc_slugs.extend(tree.requirements.iter().map(|r| r.slug.clone()));
     doc_slugs.extend(tree.stressors.iter().map(|s| s.slug.clone()));
@@ -759,9 +759,9 @@ pub(crate) fn serve_decisions(root: &Path) -> DecisionList {
         .map(|d| DecisionRow {
             slug: d.slug.clone(),
             file: d.file.clone(),
-            links: entries(&d.links),
-            prefer: entries(&d.prefer),
-            over: entries(&d.over),
+            links: list_entries(&d.links),
+            prefer: list_entries(&d.prefer),
+            over: list_entries(&d.over),
             summary: first_phrase(root, &d.file),
         })
         .collect();
