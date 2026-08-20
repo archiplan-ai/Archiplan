@@ -241,9 +241,13 @@ pub fn sync_skills(target: &Path) -> Result<Outcome, String> {
 
     let mut steps = Vec::new();
 
+    // The one folder both walks below share: the install loop writes into it,
+    // the orphan report reads it back.
+    let skills_dir = target.join(".claude/skills");
+
     // The briefing skills: overwrite any that has drifted from the embedded copy.
     for (skill, text) in SKILLS {
-        let path = target.join(".claude/skills").join(skill).join("SKILL.md");
+        let path = skills_dir.join(skill).join("SKILL.md");
         let act = match fs::read_to_string(&path) {
             Err(_) => {
                 write_new(&path, text)?;
@@ -264,7 +268,7 @@ pub fn sync_skills(target: &Path) -> Result<Outcome, String> {
     // is named — and never removed. Only the binary's own `archi-` namespace
     // is judged: the folder holds skills the user authored beside the
     // installed briefing, and those are nobody's orphans.
-    if let Ok(entries) = fs::read_dir(target.join(".claude/skills")) {
+    if let Ok(entries) = fs::read_dir(&skills_dir) {
         let mut orphaned: Vec<PathBuf> = entries
             .flatten()
             .filter_map(|e| {
