@@ -12,7 +12,7 @@ merge, fractal-migration and world-migration skills land verbatim — byte-equal
 the binary's embedded copies — under `.claude/skills/archi/SKILL.md`,
 `.claude/skills/archi-merge/SKILL.md`,
 `.claude/skills/archi-migrate-fractal/SKILL.md` and
-`.claude/skills/archi-migrate-world/SKILL.md`, and `CLAUDE.md` carries a fenced
+`.claude/skills/archi-migrate/SKILL.md`, and `CLAUDE.md` carries a fenced
 archi block carrying only what no command prints: the rule to use the tool, what the tree
 is, the `archi check` loop, that delegated spec work returns as files, and that a world
 fact carries no noun of the model — `the-briefing-says-what-help-does-not` holds its

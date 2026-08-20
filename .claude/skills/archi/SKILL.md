@@ -275,7 +275,7 @@ once.
    `archi world rm <slug>` retires one, and it refuses while a plan or a
    code-link stands on it. `archi world ls [--covers <element>]` is the
    traversal from a node to the conditions that rule it. A project that
-   stands without a world gains one through the `archi-migrate-world`
+   stands without a world gains one through the `archi-migrate`
    skill.
 4. **Derive requirements.** Run `archi req ls --satisfies <element>` for
    the elements the new claim will name, so the neighbouring claims are
@@ -515,7 +515,7 @@ once.
    that no code realizes. A journal carried over from a binary that minted
    links from shared words holds rows nobody ever read: `archi link ls |
    awk '{print $5}' | sort | uniq -c` counts them under `inferred`, and the
-   `archi-migrate-links` skill is the one pass that sorts them.
+   `archi-migrate` skill carries the one pass that sorts them.
 
 ## Brownfield
 

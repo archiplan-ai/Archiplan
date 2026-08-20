@@ -1,0 +1,60 @@
+# `t1` accounts for its work here: for every symbol it changed, what
+# that code answers and the test that proves it. One entry closes the
+# wave; what the file holds is the writer's to decide.
+#
+# Nobody types this file. The verb writes it, and it resolves all three
+# names before it writes:
+#
+#   archi plan task t1 link add --symbol "<file>#<symbol>" --answers "<node, port or req:slug>" --proved-by "<test file>#<test fn>"
+#
+# Each entry lands as one table of this shape:
+#
+#   [[declares]]
+#   symbol = "<file>#<symbol>"
+#   answers = "<node, port or req:slug>"
+#   proved_by = "<test file>#<test fn>"
+
+[[declares]]
+symbol = "skills/archi-migrate.md"
+answers = "req:one-door-migrates-the-standing-project"
+proved_by = "crates/archi/tests/init_e2e.rs#the_migrate_page_opens_with_the_measurements_and_carries_both_passes"
+
+[[declares]]
+symbol = "skills/archi-migrate.md"
+answers = "AgentBrief"
+proved_by = "crates/archi/tests/init_e2e.rs#the_migration_skill_installs_and_names_its_gate"
+
+[[declares]]
+symbol = "skills/archi-migrate-fractal.md"
+answers = "AgentBrief"
+proved_by = "crates/archi/tests/init_e2e.rs#the_briefing_lands_verbatim_and_the_fence_appends_once"
+
+[[declares]]
+symbol = "skills/archi.md"
+answers = "AgentBrief"
+proved_by = "crates/archi/tests/init_e2e.rs#the_briefing_carries_the_world"
+
+[[declares]]
+symbol = "crates/archi/src/scaffold.rs#sync_skills"
+answers = "Scaffold"
+proved_by = "crates/archi/tests/init_e2e.rs#sync_skills_reports_an_orphaned_skill_and_removes_nothing"
+
+[[declares]]
+symbol = "crates/archi/src/scaffold.rs"
+answers = "req:one-door-migrates-the-standing-project"
+proved_by = "crates/archi/tests/init_e2e.rs#a_fresh_init_stands_up_a_building_project"
+
+[[declares]]
+symbol = "crates/archi/tests/init_e2e.rs#the_migrate_page_opens_with_the_measurements_and_carries_both_passes"
+answers = "req:one-door-migrates-the-standing-project"
+proved_by = "crates/archi/tests/init_e2e.rs#the_migrate_page_opens_with_the_measurements_and_carries_both_passes"
+
+[[declares]]
+symbol = "crates/archi/tests/init_e2e.rs#sync_skills_reports_an_orphaned_skill_and_removes_nothing"
+answers = "req:one-door-migrates-the-standing-project"
+proved_by = "crates/archi/tests/init_e2e.rs#sync_skills_reports_an_orphaned_skill_and_removes_nothing"
+
+[[declares]]
+symbol = "crates/archi/tests/init_e2e.rs#the_migration_skill_installs_and_names_its_gate"
+answers = "req:one-door-migrates-the-standing-project"
+proved_by = "crates/archi/tests/init_e2e.rs#the_migration_skill_installs_and_names_its_gate"

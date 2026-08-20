@@ -7,8 +7,8 @@
 //! The skills carry the world (`archi/requirements/world-facts/`): the `world`
 //! verb and the no-model-nouns rule stand in the workflow skill, the workflow
 //! captures the world before it derives requirements, and
-//! `archi-migrate-world` installs beside the other skills so a project that
-//! stands without a world can gain one. The planning skill moved with the
+//! `archi-migrate` installs beside the other skills so a project that
+//! stands without a world can gain one through its world pass. The planning skill moved with the
 //! behaviour too: it collects its closing block from the world and asks for
 //! none of it. Both skills that ask for a scenario teach its shape — a heading
 //! and its step lines. The same two skills carry the four folders of the world
@@ -36,7 +36,7 @@
 //!
 //! The search doctrine lives in one skill
 //! (`archi/requirements/agent-retrieval/the-search-doctrine-lives-in-one-skill.md`):
-//! `archi-search` installs beside the other nine and alone carries the
+//! `archi-search` installs beside the other eight and alone carries the
 //! order — the menu, the three structural reads, then search — and the
 //! grep rule; every working skill points at it by bare name.
 
@@ -57,25 +57,23 @@ const SKILL_ARCHI: &str = include_str!("../../../skills/archi.md");
 const SKILL_IMPLEMENT: &str = include_str!("../../../skills/archi-implement.md");
 const SKILL_MERGE: &str = include_str!("../../../skills/archi-merge.md");
 const SKILL_FINISH: &str = include_str!("../../../skills/archi-finish-worktree.md");
-const SKILL_MIGRATE: &str = include_str!("../../../skills/archi-migrate-fractal.md");
-const SKILL_MIGRATE_WORLD: &str = include_str!("../../../skills/archi-migrate-world.md");
-const SKILL_MIGRATE_LINKS: &str = include_str!("../../../skills/archi-migrate-links.md");
+const SKILL_MIGRATE: &str = include_str!("../../../skills/archi-migrate.md");
+const SKILL_MIGRATE_FRACTAL: &str = include_str!("../../../skills/archi-migrate-fractal.md");
 const SKILL_STE: &str = include_str!("../../../skills/ste-writing.md");
 const SKILL_SEARCH: &str = include_str!("../../../skills/archi-search.md");
 
 /// Every skill this binary embeds, name -> source. The guards that read all
 /// installed skills iterate this list, so a new skill joins them by joining
 /// it.
-const EMBEDDED_SKILLS: [(&str, &str); 10] = [
+const EMBEDDED_SKILLS: [(&str, &str); 9] = [
     ("archi", SKILL_ARCHI),
     ("archi-search", SKILL_SEARCH),
     ("archi-plan", SKILL_PLAN),
     ("archi-implement", SKILL_IMPLEMENT),
     ("archi-merge", SKILL_MERGE),
     ("archi-finish-worktree", SKILL_FINISH),
-    ("archi-migrate-fractal", SKILL_MIGRATE),
-    ("archi-migrate-world", SKILL_MIGRATE_WORLD),
-    ("archi-migrate-links", SKILL_MIGRATE_LINKS),
+    ("archi-migrate", SKILL_MIGRATE),
+    ("archi-migrate-fractal", SKILL_MIGRATE_FRACTAL),
     ("ste-writing", SKILL_STE),
 ];
 
@@ -126,9 +124,9 @@ fn block_of(root: &Path) -> String {
 fn world_skills(root: &Path) -> (String, String) {
     let workflow = fs::read_to_string(root.join(".claude/skills/archi/SKILL.md")).unwrap();
     let migration =
-        fs::read_to_string(root.join(".claude/skills/archi-migrate-world/SKILL.md")).unwrap();
+        fs::read_to_string(root.join(".claude/skills/archi-migrate/SKILL.md")).unwrap();
     assert_eq!(workflow, SKILL_ARCHI, "the workflow skill drifted on install");
-    assert_eq!(migration, SKILL_MIGRATE_WORLD, "the migration skill drifted on install");
+    assert_eq!(migration, SKILL_MIGRATE, "the migration skill drifted on install");
     (workflow, migration)
 }
 
@@ -210,9 +208,18 @@ fn a_fresh_init_stands_up_a_building_project() {
     // The report: every artifact created, the manifest on the last created
     // line, the verdict naming the project.
     let created: Vec<&str> = out.lines().filter(|l| l.starts_with("created")).collect();
-    assert_eq!(created.len(), 14, "{out}");
+    assert_eq!(created.len(), 13, "{out}");
     assert!(created.last().unwrap().contains("archi.toml"), "{out}");
     assert!(out.contains("initialized `proj`"), "{out}");
+
+    // One door migrates the standing project: the merged page lands byte-equal,
+    // and neither of the two pages it absorbed installs
+    // (archi/requirements/cold-start/one-door-migrates-the-standing-project.md).
+    let migrate =
+        fs::read_to_string(root.join("proj/.claude/skills/archi-migrate/SKILL.md")).unwrap();
+    assert_eq!(migrate, SKILL_MIGRATE, "archi-migrate drifted on install");
+    assert!(!root.join("proj/.claude/skills/archi-migrate-world").exists());
+    assert!(!root.join("proj/.claude/skills/archi-migrate-links").exists());
 
     // Worktree artifacts are ignored from birth — machine-local, never merged.
     let ignore = fs::read_to_string(root.join("proj/.gitignore")).unwrap();
@@ -295,8 +302,8 @@ fn the_briefing_lands_verbatim_and_the_fence_appends_once() {
     for (skill, text) in [
         ("archi", SKILL_ARCHI),
         ("archi-merge", SKILL_MERGE),
-        ("archi-migrate-fractal", SKILL_MIGRATE),
-        ("archi-migrate-world", SKILL_MIGRATE_WORLD),
+        ("archi-migrate-fractal", SKILL_MIGRATE_FRACTAL),
+        ("archi-migrate", SKILL_MIGRATE),
     ] {
         let installed =
             fs::read_to_string(root.join(".claude/skills").join(skill).join("SKILL.md")).unwrap();
@@ -534,7 +541,7 @@ fn the_skills_teach_the_scenario_shape_and_the_block_stays_short() {
         assert!(workflow_flat.contains(phrase), "the workflow skill misses `{phrase}`");
     }
 
-    let installed = [("archi", workflow.as_str()), ("archi-migrate-world", migration.as_str())];
+    let installed = [("archi", workflow.as_str()), ("archi-migrate", migration.as_str())];
     for (name, text) in installed {
         // Not a subset of that grammar any more, and the tag went with it.
         assert!(!text.contains("Gherkin"), "{name} still calls the grammar Gherkin");
@@ -637,7 +644,7 @@ fn the_skills_describe_the_four_layers_and_the_source_rule() {
 
     // The source rule, in both texts that ask for one: every path a paragraph
     // about `sources` offers the reader is a path inside the world.
-    let installed = [("archi", workflow.as_str()), ("archi-migrate-world", migration.as_str())];
+    let installed = [("archi", workflow.as_str()), ("archi-migrate", migration.as_str())];
     for (name, text) in installed {
         let mut explained = 0;
         for paragraph in text.split("\n\n") {
@@ -701,7 +708,7 @@ fn the_skills_ask_for_the_workaround_and_not_for_the_killer() {
     ok_in(&root, &["init", "."]);
     // Byte-equal to the copies this binary embeds — asserted inside.
     let (workflow, migration) = world_skills(&root);
-    let installed = [("archi", workflow.as_str()), ("archi-migrate-world", migration.as_str())];
+    let installed = [("archi", workflow.as_str()), ("archi-migrate", migration.as_str())];
 
     for (name, text) in installed {
         let text_flat = flat(text);
@@ -820,7 +827,7 @@ fn the_migration_skill_learns_to_ask() {
     let root = temp_dir();
     ok_in(&root, &["init", "."]);
     let installed =
-        fs::read_to_string(root.join(".claude/skills/archi-migrate-world/SKILL.md")).unwrap();
+        fs::read_to_string(root.join(".claude/skills/archi-migrate/SKILL.md")).unwrap();
 
     // Options, not open questions — and the options are scaffolding, not a menu.
     for phrase in [
@@ -866,12 +873,12 @@ fn a_pre_world_project_syncs_into_the_world() {
         "# Archi workflow\n\nthe loop as it stood\n",
     )
     .unwrap();
-    fs::remove_dir_all(root.join(".claude/skills/archi-migrate-world")).unwrap();
+    fs::remove_dir_all(root.join(".claude/skills/archi-migrate")).unwrap();
 
     let out = ok_in(&root, &["sync-skills"]);
     assert!(out.contains("updated  .claude/skills/archi/SKILL.md"), "{out}");
     assert!(
-        out.contains("created  .claude/skills/archi-migrate-world/SKILL.md"),
+        out.contains("created  .claude/skills/archi-migrate/SKILL.md"),
         "{out}"
     );
     assert!(out.contains("updated  CLAUDE.md"), "{out}");
@@ -884,8 +891,8 @@ fn a_pre_world_project_syncs_into_the_world() {
         SKILL_ARCHI
     );
     assert_eq!(
-        fs::read_to_string(root.join(".claude/skills/archi-migrate-world/SKILL.md")).unwrap(),
-        SKILL_MIGRATE_WORLD
+        fs::read_to_string(root.join(".claude/skills/archi-migrate/SKILL.md")).unwrap(),
+        SKILL_MIGRATE
     );
 
     fs::remove_dir_all(&root).unwrap();
@@ -895,18 +902,18 @@ fn a_pre_world_project_syncs_into_the_world() {
 fn the_migration_skill_installs_and_names_its_gate() {
     let root = temp_dir();
     ok_in(&root, &["init", "."]);
-    let path = root.join(".claude/skills/archi-migrate-world/SKILL.md");
-    assert_eq!(fs::read_to_string(&path).unwrap(), SKILL_MIGRATE_WORLD);
+    let path = root.join(".claude/skills/archi-migrate/SKILL.md");
+    assert_eq!(fs::read_to_string(&path).unwrap(), SKILL_MIGRATE);
 
     // A drifted copy is reclaimed by sync, as every other skill's is.
     fs::write(&path, "locally tuned\n").unwrap();
     let out = ok_in(&root, &["sync-skills"]);
     assert!(
-        out.contains("updated  .claude/skills/archi-migrate-world/SKILL.md"),
+        out.contains("updated  .claude/skills/archi-migrate/SKILL.md"),
         "{out}"
     );
     let installed = fs::read_to_string(&path).unwrap();
-    assert_eq!(installed, SKILL_MIGRATE_WORLD);
+    assert_eq!(installed, SKILL_MIGRATE);
 
     // The procedure the text must carry: the material it reads, the gate that
     // stops a fact being written, the state a migrated fact is left in, the one
@@ -927,6 +934,96 @@ fn the_migration_skill_installs_and_names_its_gate() {
     ] {
         assert!(installed.contains(phrase), "the skill misses `{phrase}`");
     }
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// One door migrates the standing project
+/// (`archi/requirements/cold-start/one-door-migrates-the-standing-project.md`):
+/// the embedded page opens with the two measurements that name the gap,
+/// carries both passes inline, and names `archi-migrate-fractal` as the old
+/// client's own page. The reader does not need to know the name of their
+/// staleness to cure it.
+#[test]
+fn the_migrate_page_opens_with_the_measurements_and_carries_both_passes() {
+    let text = flat(SKILL_MIGRATE);
+
+    // The triage head: both measurements stand before either pass begins.
+    let world_pass = text.find("## The world pass").expect("the page has no world pass");
+    let journal_pass = text
+        .find("## The journal pass")
+        .expect("the page has no journal pass");
+    let world_measure = text.find("`archi world ls`").expect("no world measurement");
+    let journal_measure = text.find("`archi link ls").expect("no journal measurement");
+    assert!(
+        world_measure < world_pass && world_measure < journal_pass,
+        "the world measurement does not open the page"
+    );
+    assert!(
+        journal_measure < world_pass && journal_measure < journal_pass,
+        "the journal measurement does not open the page"
+    );
+    let head = &text[..world_pass.min(journal_pass)];
+    assert!(head.contains("`inferred`"), "the head never names the fifth column's word");
+
+    // Both passes, moved whole: the interview's gate, the triage's rule word.
+    for (pass, carries) in [
+        ("the world pass", "The gate is question 2"),
+        ("the world pass", "the day they stop, the fact is dead"),
+        ("the journal pass", "The rule word is the whole triage"),
+        ("the journal pass", "Measure the cost before paying it"),
+    ] {
+        assert!(text.contains(carries), "{pass} lost `{carries}`");
+    }
+
+    // A tree holding `.fractal/` is the old client's, and its page keeps its
+    // name — one pointer, no third in-project pass.
+    let pointer = text.find(".fractal/").expect("the head never names `.fractal/`");
+    assert!(pointer < world_pass.min(journal_pass), "the fractal pointer left the head");
+    assert!(
+        text.contains("`archi-migrate-fractal`"),
+        "the page never names the old client's own page"
+    );
+}
+
+/// A merge that retires a page leaves its installed copy standing as if
+/// current unless the sync names it
+/// (`archi/requirements/cold-start/one-door-migrates-the-standing-project.md`):
+/// `sync-skills` reports an installed `archi-*` skill this binary does not
+/// embed as orphaned, by name, removes nothing, and closes on its usual
+/// verdict. A skill the user authored in the same folder is not archi's to
+/// judge, so a name outside the `archi-` namespace is passed over.
+#[test]
+fn sync_skills_reports_an_orphaned_skill_and_removes_nothing() {
+    let root = temp_dir();
+    ok_in(&root, &["init", "."]);
+
+    // The tree this very merge leaves behind on every deployed project: a
+    // retired page still installed — and a skill of the user's own beside it.
+    let orphan = root.join(".claude/skills/archi-migrate-world/SKILL.md");
+    fs::create_dir_all(orphan.parent().unwrap()).unwrap();
+    fs::write(&orphan, "the world interview, as it stood\n").unwrap();
+    let own = root.join(".claude/skills/deploy/SKILL.md");
+    fs::create_dir_all(own.parent().unwrap()).unwrap();
+    fs::write(&own, "the user's own deploy notes\n").unwrap();
+
+    let out = ok_in(&root, &["sync-skills"]);
+    assert!(
+        out.contains(
+            "orphaned .claude/skills/archi-migrate-world/SKILL.md \
+             (this binary embeds no such skill)"
+        ),
+        "{out}"
+    );
+    assert!(!out.contains("deploy"), "the user's own skill is judged:\n{out}");
+
+    // Named, never removed — and the verdict is the usual one.
+    assert_eq!(
+        fs::read_to_string(&orphan).unwrap(),
+        "the world interview, as it stood\n"
+    );
+    assert!(own.is_file());
+    assert!(out.contains("already in sync"), "{out}");
 
     fs::remove_dir_all(&root).unwrap();
 }
@@ -1038,7 +1135,7 @@ fn a_pre_world_project_upgrades_stays_green_and_takes_its_first_fact() {
         "# Archi workflow\n\nthe loop as it stood\n",
     )
     .unwrap();
-    fs::remove_dir_all(root.join(".claude/skills/archi-migrate-world")).unwrap();
+    fs::remove_dir_all(root.join(".claude/skills/archi-migrate")).unwrap();
     assert!(!root.join("archi/world").exists());
 
     // It checks green, and the world it never opted into says nothing.
@@ -1049,12 +1146,12 @@ fn a_pre_world_project_upgrades_stays_green_and_takes_its_first_fact() {
     // the others — and the check does not move by a byte.
     let out = ok_in(&root, &["sync-skills"]);
     assert!(
-        out.contains("created  .claude/skills/archi-migrate-world/SKILL.md"),
+        out.contains("created  .claude/skills/archi-migrate/SKILL.md"),
         "{out}"
     );
     assert_eq!(
-        fs::read_to_string(root.join(".claude/skills/archi-migrate-world/SKILL.md")).unwrap(),
-        SKILL_MIGRATE_WORLD
+        fs::read_to_string(root.join(".claude/skills/archi-migrate/SKILL.md")).unwrap(),
+        SKILL_MIGRATE
     );
     assert_eq!(ok_in(&root, &["check"]), before);
 

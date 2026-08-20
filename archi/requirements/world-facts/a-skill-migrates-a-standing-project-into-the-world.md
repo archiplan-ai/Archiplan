@@ -41,7 +41,7 @@ observation.
 
 ## Satisfy
 
-`Scaffold` (installs `.claude/skills/archi-migrate-world/SKILL.md` byte-equal to the
+`Scaffold` (installs `.claude/skills/archi-migrate/SKILL.md` byte-equal to the
 binary's embedded copy, as it installs the other skills). `AgentBrief` (the durable carrier
 of the procedure: the interview, the workaround gate, the options it must offer instead of
 open questions, the second ask on an apparent axiom, the test suites it reads for candidates,
