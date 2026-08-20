@@ -3,7 +3,9 @@
 //! derived, text slots held empty by the schema's own diagnostics, removals
 //! pre-flighted (`archi/requirements/spec-docs/skeletons-come-from-a-verb.md`).
 //! `req ls` is the read over the standing set
-//! (`archi/requirements/agent-retrieval/one-verb-lists-the-requirements-an-element-carries.md`).
+//! (`archi/requirements/agent-retrieval/one-verb-lists-the-requirements-an-element-carries.md`);
+//! `decision ls` is the same read over the standing decisions
+//! (`archi/requirements/agent-retrieval/one-verb-lists-the-decisions-on-an-element.md`).
 
 mod util;
 
@@ -390,9 +392,28 @@ fn req_file(root: &Path, intent: &str, slug: &str, title: &str, satisfied_by: &s
     .unwrap();
 }
 
+/// One standing decision on disk, in the shape a person writes
+/// (`archi/requirements/agent-retrieval/one-verb-lists-the-decisions-on-an-element.md`):
+/// the checked `links` — doc slugs and model elements mixed — the trade's
+/// two sides, both legally empty, and the rationale prose behind the name.
+fn decision_file(root: &Path, slug: &str, title: &str, links: &str, prefer: &str, over: &str, rationale: &str) {
+    let dir = root.join("archi/decisions");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join(format!("{slug}.md")),
+        format!(
+            "---\nlinks: [{links}]\nprefer: [{prefer}]\nover: [{over}]\n---\n\n\
+             # {title}\n\n{rationale}\n"
+        ),
+    )
+    .unwrap();
+}
+
 /// The standing set the listing tests read: two intent areas, six file-scale
 /// requirements — satisfied, deferred and open, one satisfied by a port, one
-/// still the minted skeleton.
+/// still the minted skeleton — and two standing decisions: one linking a
+/// model element and a requirement slug, one an empty-sided, link-less record
+/// (one-verb-lists-the-decisions-on-an-element).
 fn listing_project() -> PathBuf {
     let root = temp_project();
     let retrieval = root.join("archi/requirements/retrieval");
@@ -409,6 +430,11 @@ fn listing_project() -> PathBuf {
         "The keep port answers every read.");
     req_file(&root, "retrieval", "ledger-is-append-only", "Ledger is append only", "Ledger, Gate", "",
         "The ledger takes writes at the end only.");
+    decision_file(&root, "accept-shed-load", "Accept shed load", "Gate, gate-throttles",
+        "simplicity", "scalability",
+        "The gate sheds before the ledger sees the spike. A second sentence stays behind.");
+    decision_file(&root, "keep-the-monolith", "Keep the monolith", "", "", "",
+        "One deployable until the seams are proven.");
     root
 }
 
@@ -579,4 +605,123 @@ fn json_carries_the_same_rows_as_the_render() {
     .unwrap();
     assert_eq!(v["requirements"].as_array().unwrap().len(), 2);
     assert_eq!(v["satisfies"], "Gate");
+}
+
+// ---- `decision ls` — the read verb over the standing decisions -------------
+// (`archi/requirements/agent-retrieval/one-verb-lists-the-decisions-on-an-element.md`)
+
+/// The standing decision files on disk: every `.md` under the flat
+/// `archi/decisions/`.
+fn decision_files_on_disk(root: &Path) -> usize {
+    fs::read_dir(root.join("archi/decisions"))
+        .unwrap()
+        .flatten()
+        .filter(|f| f.path().extension().is_some_and(|e| e == "md"))
+        .count()
+}
+
+/// `decision ls` prints one row per decision file — slug, `prefer -> over`,
+/// the first phrase of the rationale — and the count matches the files on
+/// disk (one-verb-lists-the-decisions-on-an-element).
+#[test]
+fn the_decision_listing_prints_one_row_per_decision_file() {
+    let root = listing_project();
+    let out = ok(&root, &["decision", "ls"]);
+    assert_eq!(out.lines().count(), decision_files_on_disk(&root), "{out}");
+    // The row: slug, the trade, first phrase — one line, and the second
+    // sentence stays behind.
+    assert!(
+        out.contains(
+            "accept-shed-load  [simplicity] -> [scalability]  \
+             The gate sheds before the ledger sees the spike."
+        ),
+        "{out}"
+    );
+    assert!(!out.contains("A second sentence"), "{out}");
+    // An empty trade is a legal non-comparative record: both sides shown
+    // empty, the row whole.
+    assert!(
+        out.contains("keep-the-monolith  [] -> []  One deployable until the seams are proven."),
+        "{out}"
+    );
+}
+
+/// `--links <element>` narrows to the decisions naming it, and
+/// `--links <slug>` does the same for a doc slug; a link-less decision never
+/// matches a filter (one-verb-lists-the-decisions-on-an-element).
+#[test]
+fn links_narrows_by_element_and_by_doc_slug() {
+    let root = listing_project();
+    // The model currency: `Gate` is a live element.
+    let out = ok(&root, &["decision", "ls", "--links", "Gate"]);
+    assert_eq!(out.lines().count(), 1, "{out}");
+    assert!(out.contains("accept-shed-load"), "{out}");
+    // The doc currency: `gate-throttles` is a requirement slug.
+    let out = ok(&root, &["decision", "ls", "--links", "gate-throttles"]);
+    assert_eq!(out.lines().count(), 1, "{out}");
+    assert!(out.contains("accept-shed-load"), "{out}");
+    // A name that resolves but no decision links is an empty list, not a
+    // refusal — and the link-less record matches nothing.
+    let out = ok(&root, &["decision", "ls", "--links", "Ledger"]);
+    assert_eq!(out.lines().count(), 0, "{out}");
+    // The decisions are records themselves: their slugs resolve too.
+    let out = ok(&root, &["decision", "ls", "--links", "keep-the-monolith"]);
+    assert_eq!(out.lines().count(), 0, "{out}");
+}
+
+/// `--links` with a name that resolves as neither element nor record
+/// refuses, naming it — a refusal is never an empty list
+/// (one-verb-lists-the-decisions-on-an-element).
+#[test]
+fn links_refuses_a_name_that_is_neither_element_nor_record() {
+    let root = listing_project();
+    let e = refuse(&root, &["decision", "ls", "--links", "Ghost"]);
+    assert!(e.contains("Ghost"), "{e}");
+    assert!(e.contains("--links"), "{e}");
+    assert!(e.contains("names no"), "{e}");
+}
+
+/// `--json` carries the same rows as the render, in the same order
+/// (one-verb-lists-the-decisions-on-an-element).
+#[test]
+fn decision_json_carries_the_same_rows_as_the_render() {
+    let root = listing_project();
+    let rendered = ok(&root, &["decision", "ls"]);
+    let v: serde_json::Value =
+        serde_json::from_str(&ok(&root, &["decision", "ls", "--json"])).unwrap();
+    assert_eq!(v["status"], "ok");
+    let rows = v["decisions"].as_array().unwrap();
+    assert_eq!(rows.len(), rendered.lines().count());
+    for (line, row) in rendered.lines().zip(rows) {
+        let side = |key: &str| -> Vec<&str> {
+            row[key]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|s| s.as_str().unwrap())
+                .collect()
+        };
+        let mut want = format!(
+            "{}  [{}] -> [{}]",
+            row["slug"].as_str().unwrap(),
+            side("prefer").join(", "),
+            side("over").join(", ")
+        );
+        let summary = row["summary"].as_str().unwrap();
+        if !summary.is_empty() {
+            want.push_str("  ");
+            want.push_str(summary);
+        }
+        assert_eq!(line, want);
+    }
+    // The row is addressable: the envelope carries the file.
+    assert_eq!(rows[0]["path"], "archi/decisions/accept-shed-load.md");
+    // The filter narrows the envelope the same way.
+    let v: serde_json::Value = serde_json::from_str(&ok(
+        &root,
+        &["decision", "ls", "--links", "Gate", "--json"],
+    ))
+    .unwrap();
+    assert_eq!(v["decisions"].as_array().unwrap().len(), 1);
+    assert_eq!(v["links"], "Gate");
 }

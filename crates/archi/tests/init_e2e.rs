@@ -36,9 +36,16 @@
 //!
 //! The search doctrine lives in one skill
 //! (`archi/requirements/agent-retrieval/the-search-doctrine-lives-in-one-skill.md`):
-//! `archi-search` installs beside the other eight and alone carries the
+//! `archi-search` installs beside the other nine and alone carries the
 //! order — the menu, the three structural reads, then search — and the
 //! grep rule; every working skill points at it by bare name.
+//!
+//! The why reads back from the record
+//! (`archi/requirements/agent-retrieval/the-why-reads-back-from-the-record.md`):
+//! `archi-explain` walks the chain outside-in — the world condition, the
+//! standing claims, the recorded trades, the pressure behind them, the
+//! timeline, who realizes it today — read-only, silence a real answer,
+//! invented rationale forbidden.
 
 mod util;
 
@@ -61,13 +68,15 @@ const SKILL_MIGRATE: &str = include_str!("../../../skills/archi-migrate.md");
 const SKILL_MIGRATE_FRACTAL: &str = include_str!("../../../skills/archi-migrate-fractal.md");
 const SKILL_STE: &str = include_str!("../../../skills/ste-writing.md");
 const SKILL_SEARCH: &str = include_str!("../../../skills/archi-search.md");
+const SKILL_EXPLAIN: &str = include_str!("../../../skills/archi-explain.md");
 
 /// Every skill this binary embeds, name -> source. The guards that read all
 /// installed skills iterate this list, so a new skill joins them by joining
 /// it.
-const EMBEDDED_SKILLS: [(&str, &str); 9] = [
+const EMBEDDED_SKILLS: [(&str, &str); 10] = [
     ("archi", SKILL_ARCHI),
     ("archi-search", SKILL_SEARCH),
+    ("archi-explain", SKILL_EXPLAIN),
     ("archi-plan", SKILL_PLAN),
     ("archi-implement", SKILL_IMPLEMENT),
     ("archi-merge", SKILL_MERGE),
@@ -208,7 +217,7 @@ fn a_fresh_init_stands_up_a_building_project() {
     // The report: every artifact created, the manifest on the last created
     // line, the verdict naming the project.
     let created: Vec<&str> = out.lines().filter(|l| l.starts_with("created")).collect();
-    assert_eq!(created.len(), 13, "{out}");
+    assert_eq!(created.len(), 14, "{out}");
     assert!(created.last().unwrap().contains("archi.toml"), "{out}");
     assert!(out.contains("initialized `proj`"), "{out}");
 
@@ -1597,4 +1606,80 @@ fn the_search_doctrine_lives_in_one_skill() {
             assert!(!flat.contains(READS), "{name} carries a second copy of the ordered reads");
         }
     }
+}
+
+/// A fresh init installs the explain page like every other skill —
+/// byte-equal to the binary's embedded copy — and the page's freshness
+/// header names its own installed path, so the staleness loop can close
+/// (`archi/requirements/agent-retrieval/the-why-reads-back-from-the-record.md`).
+#[test]
+fn a_fresh_init_installs_the_explain_skill_verbatim() {
+    let root = temp_dir();
+    let out = ok_in(&root, &["init", "."]);
+    assert!(out.contains(".claude/skills/archi-explain/SKILL.md"), "{out}");
+    let installed =
+        fs::read_to_string(root.join(".claude/skills/archi-explain/SKILL.md")).unwrap();
+    assert_eq!(installed, SKILL_EXPLAIN, "the explain skill drifted on install");
+    assert!(
+        installed.contains(".claude/skills/archi-explain/SKILL.md"),
+        "the freshness header never names the installed path"
+    );
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The embedded page orders the chain outside-in: the world condition the
+/// behavior serves, then what must hold, then the recorded trades, then
+/// the pressure behind them, then the timeline, then who realizes it
+/// today. The stressor step is addressed by the requirement's own
+/// `origin:` field, and the timeline reads as list and diff — the tree
+/// never moves
+/// (`archi/requirements/agent-retrieval/the-why-reads-back-from-the-record.md`).
+#[test]
+fn the_explain_page_orders_the_chain_world_first_links_last() {
+    let flat = flat(SKILL_EXPLAIN);
+    let mut prev: Option<usize> = None;
+    for step in [
+        "`archi world ls --covers <element>`",
+        "`archi req ls --satisfies <element>`",
+        "`archi decision ls --links <name>`",
+        "origin: stressor(<slug>)",
+        "`archi version list`",
+        "`archi link ls --spec <ref>`",
+    ] {
+        let at = flat
+            .find(step)
+            .unwrap_or_else(|| panic!("the explain page never names {step}"));
+        if let Some(prev) = prev {
+            assert!(prev < at, "{step} stands out of order: {flat}");
+        }
+        prev = Some(at);
+    }
+    assert!(flat.contains("`archi version diff <a> <b>`"), "{flat}");
+    assert!(flat.contains("the tree never moves"), "{flat}");
+    assert!(
+        !flat.contains("version checkout"),
+        "the page still teaches the checkout dance: {flat}"
+    );
+}
+
+/// Silence is a real answer and invention is forbidden, both in as many
+/// words: a question with no recorded trade-off is answered "the record
+/// holds no rationale here" plus an offer to record one
+/// (`archi/requirements/agent-retrieval/the-why-reads-back-from-the-record.md`).
+#[test]
+fn the_explain_page_calls_silence_a_real_answer_and_never_invents() {
+    let flat = flat(SKILL_EXPLAIN);
+    assert!(flat.contains("Silence is a real answer"), "{flat}");
+    assert!(flat.contains("the record holds no rationale here"), "{flat}");
+    assert!(flat.contains("offer to record one"), "{flat}");
+    assert!(flat.contains("Never invent rationale"), "{flat}");
+}
+
+/// The page is read-only in as many words and mutates nothing
+/// (`archi/requirements/agent-retrieval/the-why-reads-back-from-the-record.md`).
+#[test]
+fn the_explain_page_is_read_only_in_as_many_words() {
+    let flat = flat(SKILL_EXPLAIN);
+    assert!(flat.contains("Read-only"), "{flat}");
+    assert!(flat.contains("Mutate nothing"), "{flat}");
 }

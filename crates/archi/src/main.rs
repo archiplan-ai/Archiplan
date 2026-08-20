@@ -39,6 +39,7 @@
 //!             [--limit <n>] [--json]
 //! archi req   add <title> … | rm <slug> | ls [--satisfies <element>] [--intent <folder>] [--json]
 //! archi world add <title> | rm <slug> | ls [--covers <element>] [--json]
+//! archi decision ls [--links <name>] [--json]
 //! archi --help | --version
 //! ```
 //!
@@ -107,6 +108,7 @@ const USAGE: &str = "usage:
   archi world add <title> [--project <dir>]
   archi world rm <slug> [--project <dir>]
   archi world ls [--covers <element>] [--json] [--project <dir>]
+  archi decision ls [--links <name>] [--json] [--project <dir>]
   archi stress open <title> [--project <dir>]
   archi stress add <title> --affects <A,B,...> [--project <dir>]
   archi stress rm <slug> [--project <dir>]
@@ -197,6 +199,7 @@ struct Args {
     edge_types: Vec<String>,
     covers: Option<String>,
     satisfies: Option<String>,
+    links: Option<String>,
     yes: bool,
     details: bool,
     max_nodes: Option<usize>,
@@ -274,6 +277,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         edge_types: Vec::new(),
         covers: None,
         satisfies: None,
+        links: None,
         yes: false,
         details: false,
         max_nodes: None,
@@ -331,6 +335,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--carrier" => args.carriers.push(value(&mut it, "--carrier")?),
             "--covers" => args.covers = Some(value(&mut it, "--covers")?),
             "--satisfies" => args.satisfies = Some(value(&mut it, "--satisfies")?),
+            "--links" => args.links = Some(value(&mut it, "--links")?),
             "--edge-type" => args.edge_types.push(value(&mut it, "--edge-type")?),
             "--exclude" => args.exclude.push(value(&mut it, "--exclude")?),
             "--only" => args.only.push(value(&mut it, "--only")?),
@@ -396,6 +401,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
                     | "req"
                     | "stress"
                     | "world"
+                    | "decision"
                     | "search"
                     | "init"
                     | "repo"
@@ -2930,6 +2936,109 @@ fn world_list(field: &Option<(Vec<String>, usize)>) -> &[String] {
     field.as_ref().map_or(&[], |(v, _)| v.as_slice())
 }
 
+/// `archi decision ls` — the read over the standing decisions, beside `req`
+/// and `world`. The verb only lists: a decision is written by hand, so the
+/// whole arm reads and answers anywhere
+/// (`archi/requirements/agent-retrieval/one-verb-lists-the-decisions-on-an-element.md`).
+fn run_decision(args: &Args) -> ExitCode {
+    let root = match locate_project(args) {
+        Ok(r) => r,
+        Err(e) => return usage_err(&e),
+    };
+    match (
+        args.positional.first().map(String::as_str),
+        args.positional.get(1..).unwrap_or_default(),
+    ) {
+        (Some("ls"), []) => run_decision_ls(args, &root),
+        _ => usage_err("usage: archi decision ls [--links <name>] [--json]"),
+    }
+}
+
+/// `archi decision ls` — one row per standing decision: slug, the
+/// `prefer -> over` trade, the first phrase of the rationale — narrowed by
+/// `--links <name>` to the decisions whose `links` field names it
+/// (`archi/requirements/agent-retrieval/one-verb-lists-the-decisions-on-an-element.md`).
+/// The `links` field speaks both reference currencies at once, so the filter
+/// resolves against the live model first, then the doc slugs — requirements,
+/// stressors, world facts and the decisions themselves.
+fn run_decision_ls(args: &Args, root: &Path) -> ExitCode {
+    let ws = match compile_or_report(root, args.json) {
+        Ok(c) => c.workspace,
+        Err(code) => return code,
+    };
+    let model = ws.model();
+    let list = docs::serve_decisions(root);
+    // A filter neither currency resolves is a refusal, never an empty list:
+    // the two look the same and mean opposite things.
+    if let Some(name) = args.links.as_deref()
+        && model.resolve_element(name).is_none()
+        && !list.doc_slugs.contains(name)
+    {
+        eprintln!(
+            "archi: `--links {name}` names no element of the current model and no doc \
+             slug — `archi search {name}` finds its address, `archi decision ls` \
+             lists every decision"
+        );
+        return ExitCode::from(1);
+    }
+    let rows: Vec<&docs::DecisionRow> = list
+        .rows
+        .iter()
+        .filter(|r| {
+            args.links
+                .as_deref()
+                .is_none_or(|n| r.links.iter().any(|l| l == n))
+        })
+        .collect();
+    if args.json {
+        let items: Vec<Value> = rows
+            .iter()
+            .map(|r| {
+                json!({
+                    "slug": r.slug,
+                    "path": r.file,
+                    "links": r.links,
+                    "prefer": r.prefer,
+                    "over": r.over,
+                    "summary": r.summary,
+                })
+            })
+            .collect();
+        let mut envelope = json!({ "status": "ok", "decisions": items });
+        if let Some(name) = args.links.as_deref() {
+            envelope["links"] = json!(name);
+        }
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&envelope).expect("serializes")
+        );
+    } else {
+        for r in &rows {
+            println!("{}", render_decision_row(r));
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+/// One decision as the sweep reads it: slug, the trade with both sides in
+/// their frontmatter surface — `[]` is emptiness, visible — and the first
+/// phrase of the rationale. The brackets are load-bearing, as in `req ls`:
+/// an off-list axis label may carry spaces, so they mark where each side
+/// ends.
+fn render_decision_row(r: &docs::DecisionRow) -> String {
+    let mut out = format!(
+        "{}  [{}] -> [{}]",
+        r.slug,
+        r.prefer.join(", "),
+        r.over.join(", ")
+    );
+    if !r.summary.is_empty() {
+        out.push_str("  ");
+        out.push_str(&r.summary);
+    }
+    out
+}
+
 /// `archi sync-skills` — sync an initialized tree's briefing to this binary's
 /// copies. Locates an existing project (never creates one) and overwrites any
 /// divergent skill or CLAUDE.md block with the binary's copy, unconditionally;
@@ -3493,6 +3602,7 @@ fn main() -> ExitCode {
         "req" => run_req(&args),
         "stress" => run_stress(&args),
         "world" => run_world(&args),
+        "decision" => run_decision(&args),
         "link" => run_link(&args),
         "repo" => run_repo(&args),
         "worktree" => run_worktree(&args),

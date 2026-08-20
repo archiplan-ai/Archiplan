@@ -708,6 +708,66 @@ fn first_phrase(root: &Path, file: &str) -> String {
     }
 }
 
+// ---- the decision listing --------------------------------------------------
+
+/// One standing decision as `decision ls` serves it
+/// (`archi/requirements/agent-retrieval/one-verb-lists-the-decisions-on-an-element.md`):
+/// the priced record, its trade and the first phrase of its rationale.
+pub(crate) struct DecisionRow {
+    /// The slug — the reference currency.
+    pub(crate) slug: String,
+    /// Project-relative path of the file.
+    pub(crate) file: String,
+    /// The `links` entries — doc slugs and model elements mixed. Empty is a
+    /// legal state: the record then never matches a filter but lists
+    /// unfiltered. An unsound field is no claim of any entry.
+    pub(crate) links: Vec<String>,
+    /// Axis labels the decision favours; empty is a non-comparative record.
+    pub(crate) prefer: Vec<String>,
+    /// Axis labels it sacrifices; empty as `prefer` is.
+    pub(crate) over: Vec<String>,
+    /// The first phrase of the rationale; empty while the prose is absent.
+    pub(crate) summary: String,
+}
+
+/// The standing decision set and the doc-slug space a `--links` filter
+/// resolves against, one walk.
+pub(crate) struct DecisionList {
+    /// Every doc slug the `links` currency reaches — requirements,
+    /// stressors, world facts and the decisions themselves.
+    pub(crate) doc_slugs: BTreeSet<String>,
+    /// One row per decision file, in tree order.
+    pub(crate) rows: Vec<DecisionRow>,
+}
+
+/// Serve the standing decisions for `decision ls`: the tree walked by the
+/// same discovery `check` reads, so the listing can never disagree with it
+/// about what a decision is.
+pub(crate) fn serve_decisions(root: &Path) -> DecisionList {
+    let tree = discover_tree(root);
+    let entries = |field: &Option<(Vec<String>, usize)>| -> Vec<String> {
+        field.as_ref().map(|(v, _)| v.clone()).unwrap_or_default()
+    };
+    let mut doc_slugs: BTreeSet<String> = BTreeSet::new();
+    doc_slugs.extend(tree.requirements.iter().map(|r| r.slug.clone()));
+    doc_slugs.extend(tree.stressors.iter().map(|s| s.slug.clone()));
+    doc_slugs.extend(tree.world.iter().map(|f| f.doc.slug.clone()));
+    doc_slugs.extend(tree.decisions.iter().map(|d| d.slug.clone()));
+    let rows = tree
+        .decisions
+        .iter()
+        .map(|d| DecisionRow {
+            slug: d.slug.clone(),
+            file: d.file.clone(),
+            links: entries(&d.links),
+            prefer: entries(&d.prefer),
+            over: entries(&d.over),
+            summary: first_phrase(root, &d.file),
+        })
+        .collect();
+    DecisionList { doc_slugs, rows }
+}
+
 // ---- cross-checks ----------------------------------------------------------
 
 fn cross_check(

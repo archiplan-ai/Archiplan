@@ -32,7 +32,8 @@ the work to do.
 the design, pipe a query into the visualizer: `archi query <filters> |
 archi viz`. It draws the subgraph as a readable ASCII diagram. It
 collapses detail and deep nesting. It refuses a slice too large to read
-and gives hints to narrow it.
+and gives hints to narrow it. The diagram is the structure half of the
+answer; the why half is the `archi-explain` skill.
 
 **Never invent references.** Requirements name model elements by absolute
 path. Stressors pin versions. Tasks pin nodes. `check` and `plan verify`
