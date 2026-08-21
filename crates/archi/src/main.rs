@@ -24,7 +24,8 @@
 //! archi link ls [--spec <ref>] [--json]
 //! archi link verify [--spec <ref>] [--since <rev>] [--json]
 //! archi link rm <id>... | rm --spec <ref> --yes
-//! archi link repin <id> [--to <file[#symbol]>] [--spec <fact-slug>#<scenario name>]
+//! archi link repin <id> [--to <file[#symbol]>] [--spec <fact-slug>#<scenario name>] |
+//!   repin --moved [--json]
 //! archi link capture --task <TASK> [--json]
 //! archi link audit [--scope <path>] [--since <rev>] [--json]
 //! archi plan use <name> | repin | show [<name>] [--json] | verify [--json]
@@ -116,7 +117,8 @@ const USAGE: &str = "usage:
   archi link ls [--spec <ref>] [--json] [--project <dir>]
   archi link verify [--spec <ref>] [--since [<member>=]<rev>] [--repo <member>] [--json] [--project <dir>]
   archi link rm <id>... | rm --spec <ref> --yes [--project <dir>]
-  archi link repin <id> [--to <file[#symbol]>] [--spec <fact-slug>#<scenario name>] [--project <dir>]
+  archi link repin <id> [--to <file[#symbol]>] [--spec <fact-slug>#<scenario name>] |
+              repin --moved [--json] [--project <dir>]
   archi link capture --task <TASK> [--json] [--project <dir>]
   archi link audit [--scope <path>] [--since [<member>=]<rev>] [--repo <member>] [--json] [--project <dir>]
   archi repo ls [--json] [--project <dir>]
@@ -202,6 +204,7 @@ struct Args {
     links: Option<String>,
     yes: bool,
     details: bool,
+    moved: bool,
     max_nodes: Option<usize>,
     repos: Option<String>,
     base: Vec<String>,
@@ -279,6 +282,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         satisfies: None,
         links: None,
         yes: false,
+        moved: false,
         details: false,
         max_nodes: None,
         repos: None,
@@ -343,6 +347,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--session" => args.session = Some(value(&mut it, "--session")?),
             "--since" => args.since = Some(value(&mut it, "--since")?),
             "--yes" => args.yes = true,
+            "--moved" => args.moved = true,
             "--intent" => args.intent = Some(value(&mut it, "--intent")?),
             "--origin" => args.origin = Some(value(&mut it, "--origin")?),
             "--deferred" => args.deferred = Some(value(&mut it, "--deferred")?),
@@ -1691,6 +1696,34 @@ fn run_link(args: &Args) -> ExitCode {
             }
             Err(e) => fail(e),
         },
+        // The sweep: grade the live set the way verify does and accept every
+        // exact candidate at once; the model rides along for the spec side,
+        // as it does on verify.
+        (Some("repin"), []) if args.moved => {
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            match links::repin_moved(&root, ws.model()) {
+                Ok(report) => {
+                    if args.json {
+                        println!(
+                            "{}",
+                            pretty(serde_json::to_value(&report).expect("serializes"))
+                        );
+                    } else {
+                        print!("{}", links::render_moved(&report));
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
+        (Some("repin"), [_]) if args.moved => usage_err(
+            "`repin <id>` moves one row by a person's judgement; `repin --moved` accepts the \
+             exact candidates in bulk — the two forms are separate: give an id or --moved, \
+             not both",
+        ),
         // Two repins, one verb: `--to` moves the anchor, `--spec` moves the
         // spec ref the link hangs on — a scenario that was renamed, or a
         // link re-aimed at another fact's scenario.
@@ -1759,7 +1792,7 @@ fn run_link(args: &Args) -> ExitCode {
             "`link` takes: add <spec> <file[#symbol]> --kind <k> | ls | verify | \
              rm <id>... | rm --spec <ref> --yes | \
              repin <id> [--to <ref>] [--spec <fact-slug>#<scenario name>] | \
-             capture --task <t> | audit",
+             repin --moved | capture --task <t> | audit",
         ),
     }
 }

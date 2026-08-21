@@ -1464,6 +1464,59 @@ pub fn repin_spec(root: &Path, id: &str, spec_text: &str) -> Result<Link, String
     Ok(repinned)
 }
 
+/// The outcome of `archi link repin --moved`: what the pass accepted, and
+/// what it left with a person.
+#[derive(Serialize)]
+pub struct MovedReport {
+    /// Links repinned to their exact candidates, each as `repin --to`
+    /// leaves it, in journal order.
+    pub repinned: Vec<Link>,
+    /// Moved links whose candidate is inexact — reported, never taken. Each
+    /// carries its grading as verify would say it, the repair note addressed
+    /// to its own id.
+    pub reported: Vec<Checked>,
+}
+
+/// `archi link repin --moved`: the bulk consumer of the exact candidates the
+/// grader computes. Every live link is graded exactly as verify grades it,
+/// and where the anchor is gone with an exact-hash candidate elsewhere — the
+/// same body at a new path — the pass repins to that candidate through
+/// [`repin`], the one journal author. Exactness is the licence: a body-hash
+/// match is the same code at a new place, so accepting it in bulk asserts
+/// nothing new; an inexact candidate is a judgement, and judgement stays
+/// per-row with a person. Every other grade — clean, drifted, missing,
+/// unreachable — is untouched, so a second run finds nothing moved and
+/// appends nothing
+/// (`archi/requirements/code-link/an-exact-move-repins-in-one-pass.md`).
+pub fn repin_moved(root: &Path, model: &Model) -> Result<MovedReport, String> {
+    let folded = load(root)?;
+    let roots = Roots::resolve(root)?;
+    let mut slots = Slots::new(root);
+    let mut repinned = Vec::new();
+    let mut reported = Vec::new();
+    for link in folded.live {
+        let mut checked = check_link(root, model, &roots, &mut slots, link)?;
+        match &checked.state {
+            State::Moved { file, symbol, exact: true } => {
+                let to = format!(
+                    "{}{}",
+                    qualify(checked.link.anchor.repo.as_deref(), file),
+                    symbol.as_deref().map(|s| format!("#{s}")).unwrap_or_default(),
+                );
+                repinned.push(repin(root, &checked.link.id, Some(&to))?);
+            }
+            State::Moved { exact: false, .. } => {
+                if let Some(n) = checked.note.take() {
+                    checked.note = Some(n.replace("<id>", &checked.link.id));
+                }
+                reported.push(checked);
+            }
+            _ => {}
+        }
+    }
+    Ok(MovedReport { repinned, reported })
+}
+
 // ---- verify ----------------------------------------------------------------
 
 /// A projection's graded state (`archi/requirements/code-link/verify-grades-every-claim.md`).
@@ -2557,6 +2610,26 @@ pub fn render_verify(report: &VerifyReport) -> String {
         out.push_str(&format!(", {} skipped (unchanged since rev)", report.skipped));
     }
     out.push('\n');
+    out
+}
+
+/// The `repin --moved` pass as human lines: each accepted row in `repin`'s
+/// own words, each inexact candidate reported under its row — and a pass
+/// that found no moved link says so.
+pub fn render_moved(report: &MovedReport) -> String {
+    if report.repinned.is_empty() && report.reported.is_empty() {
+        return "no moved links\n".to_string();
+    }
+    let mut out = String::new();
+    for l in &report.repinned {
+        out.push_str(&format!("repinned {}\n", render_link(l)));
+    }
+    for c in &report.reported {
+        out.push_str(&format!("inexact  {}\n", render_link(&c.link)));
+        if let Some(n) = &c.note {
+            out.push_str(&format!("  {n}\n"));
+        }
+    }
     out
 }
 

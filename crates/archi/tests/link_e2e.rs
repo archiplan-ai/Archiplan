@@ -901,3 +901,179 @@ fn an_absent_declaration_file_mints_nothing_and_says_so() {
 
     cleanup(&fixture);
 }
+
+// ---- repin --moved: the bulk consumer of exact candidates --------------------
+//
+// A crate rename orphans every link into it at once. The grader already
+// proves each move — the body hash matches across the tree — and the pass is
+// the missing consumer of that proof: every exact candidate accepted in one
+// journal stroke per row, every inexact one reported and left with a person
+// (`archi/requirements/code-link/an-exact-move-repins-in-one-pass.md`).
+
+/// Two symbols in the one file the move fixtures rename.
+const GUARD_RS: &str = "pub fn admit(user: &str) -> bool {\n    !user.is_empty()\n}\n\n\
+                        pub fn expel(user: &str) -> bool {\n    user.is_empty()\n}\n";
+
+/// A bound project with `code/guard.rs` linked at both symbols.
+fn linked_guard(tag: &str) -> (PathBuf, PathBuf) {
+    let (fixture, root) = bound(tag);
+    fs::write(root.join("code/guard.rs"), GUARD_RS).unwrap();
+    ok(&root, &["link", "add", "Gate", "code/guard.rs#admit", "--kind", "literal"]);
+    ok(&root, &["link", "add", "Auth", "code/guard.rs#expel", "--kind", "literal"]);
+    (fixture, root)
+}
+
+/// A renamed file's links repin to their exact candidates in one pass — one
+/// row per repin, in `repin`'s own words — and a second run finds nothing
+/// moved and appends nothing
+/// (`archi/requirements/code-link/an-exact-move-repins-in-one-pass.md`).
+#[test]
+fn a_renamed_files_links_repin_to_their_exact_candidates_in_one_pass() {
+    let (fixture, root) = linked_guard("moved-pass");
+    fs::rename(root.join("code/guard.rs"), root.join("code/warden.rs")).unwrap();
+
+    let out = ok(&root, &["link", "repin", "--moved"]);
+    assert_eq!(
+        out.lines().filter(|l| l.starts_with("repinned ")).count(),
+        2,
+        "{out}"
+    );
+    assert!(out.contains("Gate ← code/warden.rs#admit"), "{out}");
+    assert!(out.contains("Auth ← code/warden.rs#expel"), "{out}");
+
+    // The journal took the moves: the rows anchor at the new path, and the
+    // whole set grades clean again.
+    let ls = ok(&root, &["link", "ls"]);
+    assert!(ls.contains("code/warden.rs#admit"), "{ls}");
+    assert!(ls.contains("code/warden.rs#expel"), "{ls}");
+    assert!(!ls.contains("guard.rs"), "{ls}");
+    let verify = ok(&root, &["link", "verify"]);
+    assert!(verify.contains("2 checked: 2 clean, 0 failing"), "{verify}");
+
+    // The second run finds nothing moved and appends nothing.
+    let journal = root.join("archi/links/journal.jsonl");
+    let before = fs::read_to_string(&journal).unwrap();
+    let again = ok(&root, &["link", "repin", "--moved"]);
+    assert!(again.contains("no moved links"), "{again}");
+    assert_eq!(fs::read_to_string(&journal).unwrap(), before, "{again}");
+
+    cleanup(&fixture);
+}
+
+/// An inexact candidate is a judgement: the pass reports it — the row, the
+/// candidate and the per-row repair addressed to this id — and never takes it
+/// (`archi/requirements/code-link/an-exact-move-repins-in-one-pass.md`).
+#[test]
+fn an_inexact_candidate_is_reported_and_never_taken() {
+    let (fixture, root) = bound("moved-inexact");
+    fs::write(root.join("code/guard.rs"), GUARD_RS).unwrap();
+    ok(&root, &["link", "add", "Gate", "code/guard.rs#admit", "--kind", "literal"]);
+    let id = only_id(&root);
+
+    // The body moves and changes in the same stroke: the new place holds
+    // `admit`, but not the body the link pinned.
+    fs::remove_file(root.join("code/guard.rs")).unwrap();
+    fs::write(
+        root.join("code/warden.rs"),
+        "pub fn admit(user: &str) -> bool {\n    user.len() > 1\n}\n\n\
+         pub fn expel(user: &str) -> bool {\n    user.is_empty()\n}\n",
+    )
+    .unwrap();
+
+    let out = ok(&root, &["link", "repin", "--moved"]);
+    assert!(!out.contains("repinned"), "{out}");
+    assert!(out.contains(&format!("inexact  {id}")), "{out}");
+    assert!(out.contains("candidate: `code/warden.rs#admit`"), "{out}");
+    assert!(out.contains(&format!("link repin {id} --to")), "{out}");
+
+    // Untouched: the row still anchors where it anchored, and verify still
+    // grades the same move.
+    assert!(only_row(&root).contains("code/guard.rs#admit"), "untouched");
+    let verify = ok(&root, &["link", "verify"]);
+    assert!(verify.contains("moved"), "{verify}");
+
+    cleanup(&fixture);
+}
+
+/// Links grading clean, drifted or missing-without-candidate are not the
+/// pass's rows: nothing is taken, the grading stands exactly as it stood,
+/// and running the pass again changes exactly as little
+/// (`archi/requirements/code-link/an-exact-move-repins-in-one-pass.md`).
+#[test]
+fn links_grading_anything_else_are_untouched_and_a_second_run_is_a_no_op() {
+    let (fixture, root) = linked_guard("moved-else");
+    ok(&root, &["link", "add", "Gate", "code/auth.rs#login", "--kind", "literal"]);
+    // `admit` drifts in place; `expel` goes missing with no candidate
+    // anywhere; `login` stays clean.
+    fs::write(
+        root.join("code/guard.rs"),
+        "pub fn admit(user: &str) -> bool {\n    user.len() > 1\n}\n",
+    )
+    .unwrap();
+
+    let (_, graded, _) = util::run(&root, &["link", "verify"]);
+    for state in ["clean", "drifted", "missing"] {
+        assert!(graded.contains(state), "{graded}");
+    }
+    let journal = root.join("archi/links/journal.jsonl");
+    let before = fs::read_to_string(&journal).unwrap();
+
+    let out = ok(&root, &["link", "repin", "--moved"]);
+    assert!(out.contains("no moved links"), "{out}");
+    let again = ok(&root, &["link", "repin", "--moved"]);
+    assert!(again.contains("no moved links"), "{again}");
+
+    assert_eq!(fs::read_to_string(&journal).unwrap(), before, "nothing appended");
+    let (_, regraded, _) = util::run(&root, &["link", "verify"]);
+    assert_eq!(regraded, graded, "every state held");
+
+    cleanup(&fixture);
+}
+
+/// `repin <id> --moved` refuses, and the refusal names the two forms
+/// (`archi/requirements/code-link/an-exact-move-repins-in-one-pass.md`).
+#[test]
+fn repin_refuses_an_id_and_moved_together_naming_the_two_forms() {
+    let (fixture, root) = bound("moved-refusal");
+
+    let (success, _, err) = util::run(&root, &["link", "repin", "l0001", "--moved"]);
+    assert!(!success, "the two forms together are refused");
+    let refusal = err.lines().next().unwrap_or_default();
+    assert!(refusal.contains("repin <id>"), "{err}");
+    assert!(refusal.contains("repin --moved"), "{err}");
+
+    cleanup(&fixture);
+}
+
+/// `--json` carries the same rows as the render: the repinned links and the
+/// reported inexact ones, one envelope
+/// (`archi/requirements/code-link/an-exact-move-repins-in-one-pass.md`).
+#[test]
+fn the_json_envelope_carries_the_same_rows_as_the_render() {
+    let (fixture, root) = linked_guard("moved-json");
+    // One symbol moves verbatim, the other moves and changes: an exact and
+    // an inexact candidate out of the same rename.
+    fs::remove_file(root.join("code/guard.rs")).unwrap();
+    fs::write(
+        root.join("code/warden.rs"),
+        "pub fn admit(user: &str) -> bool {\n    !user.is_empty()\n}\n\n\
+         pub fn expel(user: &str) -> bool {\n    user.trim().is_empty()\n}\n",
+    )
+    .unwrap();
+
+    let out = ok(&root, &["link", "repin", "--moved", "--json"]);
+    let v: Value = serde_json::from_str(&out).unwrap();
+    let repinned = v["repinned"].as_array().unwrap();
+    assert_eq!(repinned.len(), 1, "{out}");
+    assert_eq!(repinned[0]["anchor"]["file"], "code/warden.rs", "{out}");
+    assert_eq!(repinned[0]["anchor"]["symbol"], "admit", "{out}");
+    let reported = v["reported"].as_array().unwrap();
+    assert_eq!(reported.len(), 1, "{out}");
+    assert_eq!(reported[0]["state"], "moved", "{out}");
+    assert_eq!(reported[0]["exact"], false, "{out}");
+    assert_eq!(reported[0]["link"]["anchor"]["file"], "code/guard.rs", "{out}");
+    let note = reported[0]["note"].as_str().unwrap();
+    assert!(note.contains("code/warden.rs#expel"), "{out}");
+
+    cleanup(&fixture);
+}

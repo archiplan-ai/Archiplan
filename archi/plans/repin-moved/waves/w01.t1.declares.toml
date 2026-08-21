@@ -1,0 +1,60 @@
+# `t1` accounts for its work here: for every symbol it changed, what
+# that code answers and the test that proves it. One entry closes the
+# wave; what the file holds is the writer's to decide.
+#
+# Nobody types this file. The verb writes it, and it resolves all three
+# names before it writes:
+#
+#   archi plan task t1 link add --symbol "<file>#<symbol>" --answers "<node, port or req:slug>" --proved-by "<test file>#<test fn>"
+#
+# Each entry lands as one table of this shape:
+#
+#   [[declares]]
+#   symbol = "<file>#<symbol>"
+#   answers = "<node, port or req:slug>"
+#   proved_by = "<test file>#<test fn>"
+
+[[declares]]
+symbol = "crates/archi/src/links/mod.rs#repin_moved"
+answers = "req:an-exact-move-repins-in-one-pass"
+proved_by = "crates/archi/tests/link_e2e.rs#a_renamed_files_links_repin_to_their_exact_candidates_in_one_pass"
+
+[[declares]]
+symbol = "crates/archi/src/links/mod.rs#render_moved"
+answers = "req:an-exact-move-repins-in-one-pass"
+proved_by = "crates/archi/tests/link_e2e.rs#an_inexact_candidate_is_reported_and_never_taken"
+
+[[declares]]
+symbol = "crates/archi/src/main.rs#run_link"
+answers = "req:an-exact-move-repins-in-one-pass"
+proved_by = "crates/archi/tests/link_e2e.rs#repin_refuses_an_id_and_moved_together_naming_the_two_forms"
+
+[[declares]]
+symbol = "crates/archi/tests/link_e2e.rs#a_renamed_files_links_repin_to_their_exact_candidates_in_one_pass"
+answers = "req:an-exact-move-repins-in-one-pass"
+proved_by = "crates/archi/tests/link_e2e.rs#a_renamed_files_links_repin_to_their_exact_candidates_in_one_pass"
+
+[[declares]]
+symbol = "crates/archi/tests/link_e2e.rs#an_inexact_candidate_is_reported_and_never_taken"
+answers = "req:an-exact-move-repins-in-one-pass"
+proved_by = "crates/archi/tests/link_e2e.rs#an_inexact_candidate_is_reported_and_never_taken"
+
+[[declares]]
+symbol = "crates/archi/tests/link_e2e.rs#links_grading_anything_else_are_untouched_and_a_second_run_is_a_no_op"
+answers = "req:an-exact-move-repins-in-one-pass"
+proved_by = "crates/archi/tests/link_e2e.rs#links_grading_anything_else_are_untouched_and_a_second_run_is_a_no_op"
+
+[[declares]]
+symbol = "crates/archi/tests/link_e2e.rs#repin_refuses_an_id_and_moved_together_naming_the_two_forms"
+answers = "req:an-exact-move-repins-in-one-pass"
+proved_by = "crates/archi/tests/link_e2e.rs#repin_refuses_an_id_and_moved_together_naming_the_two_forms"
+
+[[declares]]
+symbol = "crates/archi/tests/link_e2e.rs#the_json_envelope_carries_the_same_rows_as_the_render"
+answers = "req:an-exact-move-repins-in-one-pass"
+proved_by = "crates/archi/tests/link_e2e.rs#the_json_envelope_carries_the_same_rows_as_the_render"
+
+[[declares]]
+symbol = "skills/archi.md"
+answers = "AgentBrief"
+proved_by = "crates/archi/tests/init_e2e.rs#no_embedded_skill_sends_the_reader_to_confirm_candidates"

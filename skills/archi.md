@@ -705,6 +705,12 @@ fact, and marks it as anchor-born.
   <id> link add` for it, then run it again. `archi link add` does not
   answer this gate, because the gate reads the declarations and not the
   journal.
+- A whole file or crate was renamed, and every link into it went stale
+  at once. `link verify` grades each old anchor *moved* with an exact
+  candidate — the same body at its new path. Run `archi link repin
+  --moved` to accept every exact candidate in one pass. An inexact
+  candidate is a judgement: the pass reports it and leaves it for a
+  per-row `link repin <id> --to`.
 - Verify notes "no longer resolves at Working". The spec advanced. Run
   `plan repin`, then fix the tasks it flags.
 - Never hand-edit lifecycle state (`state`, `closed_waves`, latches), the
