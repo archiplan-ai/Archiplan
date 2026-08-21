@@ -235,6 +235,18 @@ once.
    task does not answer, and ask it by options — two or three concrete
    candidates, never a bare open question. `AskUserQuestion` is the tool.
 
+   **Ask the node question of every node a fact will cover.** The
+   spoken task under-reaches: the condition a whole layer exists for
+   goes unsaid, because to the operator it is obvious. So ask, of each
+   node, **which outside condition stops holding if this node is gone?**
+   Draft the answer first, like the fact itself, and put it through
+   the poll tool (`AskUserQuestion` in Claude Code, the equivalent
+   elsewhere): the drafted condition as one option, another shape of
+   it as a second, and "nothing outside reaches this node" last, which
+   routes to `.worldignore`. An answer that stands is the fact the
+   layer is for. A symptom cannot answer, because the symptom survives
+   the node's removal.
+
    **Do not ask the workaround question about machinery.** It is
    answerable only about a condition somebody lives with, so if the
    subject is a component, a store or a protocol, the question lands as
@@ -307,8 +319,13 @@ once.
    carries its definition. Classify every term against them (`Service
    type_of AuthService`) or against types you define. Then write nodes,
    ports and typed edges in `.arch`. The syntax is in "`.arch` in brief"
-   below. As elements land, fill each requirement's `satisfied-by`, its
-   Satisfy prose, and its verification bullets (`- test — …`, `-
+   below. As each node lands, ask once
+   **which outside condition stops holding if this node is gone?** —
+   draft the answer and poll it as in step 3; an answer that stands is
+   the next fact to write, and "nothing outside reaches this node" is
+   the node's `.worldignore` line. As elements land, fill each
+   requirement's `satisfied-by`, its Satisfy prose, and its
+   verification bullets (`- test — …`, `-
    type-level — …`). Run `archi check` until it reports zero errors. A
    passing check closes with the NKP scoring line and the refactoring
    directions. `archi nkp` prints the full landscape report. Read the
@@ -705,6 +722,12 @@ fact, and marks it as anchor-born.
   <id> link add` for it, then run it again. `archi link add` does not
   answer this gate, because the gate reads the declarations and not the
   journal.
+- A whole file or crate was renamed, and every link into it went stale
+  at once. `link verify` grades each old anchor *moved* with an exact
+  candidate — the same body at its new path. Run `archi link repin
+  --moved` to accept every exact candidate in one pass. An inexact
+  candidate is a judgement: the pass reports it and leaves it for a
+  per-row `link repin <id> --to`.
 - Verify notes "no longer resolves at Working". The spec advanced. Run
   `plan repin`, then fix the tasks it flags.
 - Never hand-edit lifecycle state (`state`, `closed_waves`, latches), the

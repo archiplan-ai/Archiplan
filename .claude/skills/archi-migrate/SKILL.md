@@ -88,6 +88,16 @@ reading, and reading is this step. One candidate is one interview.
 Never batch them: a batch of interviews is a converter with extra
 steps.
 
+After the drafts, walk the nodes they cover once with one question,
+asked of each node: **which outside condition stops holding if this
+node is gone?** Draft the answer and poll it like every other
+question of this pass, the drafted condition beside another shape of
+it, and "nothing outside reaches this node" last, which routes to
+`archi/world/.worldignore`. An answer that stands and that no draft
+carries is one more candidate for the interview. A node whose only
+covering fact is symptom-shaped has its real fact still unwritten —
+the question mints the candidate the prose never carried.
+
 ### 2. The interview — the workaround is the gate
 
 A person answers, and the prose speaks first. Draft the candidate whole

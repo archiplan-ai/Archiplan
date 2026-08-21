@@ -59,6 +59,14 @@
 //! its intent folder's own problem statement), the timeline, who realizes
 //! it today — read-only, silence a real answer, invented rationale
 //! forbidden.
+//!
+//! One question joins the briefing wherever an agent walks the nodes
+//! (`archi/requirements/world-facts/each-node-names-the-condition-that-needs-it.md`):
+//! the workflow skill's capture and model steps and the migrate page's world
+//! pass each ask which outside condition stops holding if the node is gone —
+//! the answer drafted, then polled, "nothing outside reaches this node"
+//! routing to `.worldignore` — and the three copies are extracted and held
+//! word-identical.
 
 mod util;
 
@@ -933,6 +941,88 @@ fn the_world_pass_anchors_a_scenario_a_standing_suite_already_proves() {
         "already standing",
     ] {
         assert!(flat.contains(phrase), "the anchoring move misses `{phrase}`");
+    }
+}
+
+/// The node question, one sentence
+/// (`archi/requirements/world-facts/each-node-names-the-condition-that-needs-it.md`):
+/// the condition a whole layer exists for goes unsaid because it is obvious
+/// to the operator, so the briefing asks it of every node, wherever an agent
+/// walks them.
+const NODE_QUESTION: &str = "which outside condition stops holding if this node is gone?";
+
+/// The three walks that carry the node question, each sliced to where its
+/// reader meets it and flattened, so a wrapped sentence is one sentence: the
+/// workflow skill's capture and model steps, and the migrate page's world
+/// pass.
+fn node_question_walks() -> [(&'static str, String); 3] {
+    let capture = SKILL_ARCHI.find("**Capture the world.**").expect("the capture step");
+    let derive = SKILL_ARCHI.find("**Derive requirements.**").expect("the derivation step");
+    let model = SKILL_ARCHI.find("**Draft the model.**").expect("the model step");
+    let save = SKILL_ARCHI.find("**Save.**").expect("the save step");
+    let pass = SKILL_MIGRATE.find("## The world pass").expect("the world pass");
+    let journal = SKILL_MIGRATE.find("## The journal pass").expect("the journal pass");
+    [
+        ("the capture step", flat(&SKILL_ARCHI[capture..derive])),
+        ("the model step", flat(&SKILL_ARCHI[model..save])),
+        ("the world pass", flat(&SKILL_MIGRATE[pass..journal])),
+    ]
+}
+
+/// One question joins the briefing wherever an agent walks the nodes
+/// (`archi/requirements/world-facts/each-node-names-the-condition-that-needs-it.md`):
+/// the capture step, the model step and the migrate world pass each carry it
+/// bold, and the copies are extracted and compared whole — a placement that
+/// drifts by one word fails on its own diff, not on a missed search.
+#[test]
+fn the_node_question_stands_word_identical_at_the_three_walks() {
+    for (walk, text) in node_question_walks() {
+        let at = text
+            .find("**which")
+            .unwrap_or_else(|| panic!("{walk} never asks the node question"));
+        let sentence = text[at + 2..].split("**").next().unwrap();
+        assert_eq!(sentence, NODE_QUESTION, "{walk} asks a different question");
+    }
+}
+
+/// Each placement drafts the answer and puts it through the poll tool, and
+/// the last option — "nothing outside reaches this node" — routes to
+/// `.worldignore`
+/// (`archi/requirements/world-facts/each-node-names-the-condition-that-needs-it.md`):
+/// the operator judges the drafted condition through options, never an open
+/// ask, and the tool is named whole where the question is taught.
+#[test]
+fn each_placement_drafts_the_answer_and_routes_no_condition_to_worldignore() {
+    for (walk, text) in node_question_walks() {
+        let lower = text.to_lowercase();
+        for (job, mark) in [
+            ("never drafts the answer", "draft the answer"),
+            ("never polls the operator", "poll"),
+            ("misses the no-condition option", "\"nothing outside reaches this node\""),
+            ("routes the no-condition answer nowhere", ".worldignore"),
+        ] {
+            assert!(lower.contains(mark), "{walk} {job}: no `{mark}`");
+        }
+    }
+
+    let [(_, capture), ..] = node_question_walks();
+    assert!(
+        capture.contains(
+            "the poll tool (`AskUserQuestion` in Claude Code, the equivalent elsewhere)"
+        ),
+        "the capture step never names the poll tool whole"
+    );
+}
+
+/// A symptom cannot answer the node question, because the symptom survives
+/// the node's removal — and the rule stands where the question is taught,
+/// the capture step
+/// (`archi/requirements/world-facts/each-node-names-the-condition-that-needs-it.md`).
+#[test]
+fn the_capture_placement_says_a_symptom_cannot_answer() {
+    let [(_, capture), ..] = node_question_walks();
+    for phrase in ["A symptom cannot answer", "survives the node's removal"] {
+        assert!(capture.contains(phrase), "the capture step misses `{phrase}`");
     }
 }
 
