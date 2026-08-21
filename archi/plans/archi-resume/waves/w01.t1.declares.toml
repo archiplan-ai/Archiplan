@@ -1,0 +1,65 @@
+# `t1` accounts for its work here: for every symbol it changed, what
+# that code answers and the test that proves it. One entry closes the
+# wave; what the file holds is the writer's to decide.
+#
+# Nobody types this file. The verb writes it, and it resolves all three
+# names before it writes:
+#
+#   archi plan task t1 link add --symbol "<file>#<symbol>" --answers "<node, port or req:slug>" --proved-by "<test file>#<test fn>"
+#
+# Each entry lands as one table of this shape:
+#
+#   [[declares]]
+#   symbol = "<file>#<symbol>"
+#   answers = "<node, port or req:slug>"
+#   proved_by = "<test file>#<test fn>"
+
+[[declares]]
+symbol = "skills/archi-resume.md"
+answers = "req:one-door-resumes-the-standing-work"
+proved_by = "crates/archi/tests/init_e2e.rs#the_resume_page_routes_all_five_states_to_their_skills"
+
+[[declares]]
+symbol = "skills/archi-resume.md"
+answers = "AgentBrief"
+proved_by = "crates/archi/tests/init_e2e.rs#a_fresh_init_installs_the_resume_skill_verbatim"
+
+[[declares]]
+symbol = "skills/archi.md"
+answers = "AgentBrief"
+proved_by = "crates/archi/tests/init_e2e.rs#the_briefing_lands_verbatim_and_the_fence_appends_once"
+
+[[declares]]
+symbol = "crates/archi/src/scaffold.rs#SKILLS"
+answers = "Scaffold"
+proved_by = "crates/archi/tests/init_e2e.rs#a_fresh_init_installs_the_resume_skill_verbatim"
+
+[[declares]]
+symbol = "crates/archi/src/scaffold.rs"
+answers = "req:one-door-resumes-the-standing-work"
+proved_by = "crates/archi/tests/init_e2e.rs#a_fresh_init_stands_up_a_building_project"
+
+[[declares]]
+symbol = "crates/archi/tests/init_e2e.rs#EMBEDDED_SKILLS"
+answers = "req:one-door-resumes-the-standing-work"
+proved_by = "crates/archi/tests/init_e2e.rs#no_embedded_skill_sends_the_reader_to_confirm_candidates"
+
+[[declares]]
+symbol = "crates/archi/tests/init_e2e.rs#a_fresh_init_installs_the_resume_skill_verbatim"
+answers = "req:one-door-resumes-the-standing-work"
+proved_by = "crates/archi/tests/init_e2e.rs#a_fresh_init_installs_the_resume_skill_verbatim"
+
+[[declares]]
+symbol = "crates/archi/tests/init_e2e.rs#the_resume_page_names_the_reads_record_before_archaeology"
+answers = "req:one-door-resumes-the-standing-work"
+proved_by = "crates/archi/tests/init_e2e.rs#the_resume_page_names_the_reads_record_before_archaeology"
+
+[[declares]]
+symbol = "crates/archi/tests/init_e2e.rs#the_resume_page_routes_all_five_states_to_their_skills"
+answers = "req:one-door-resumes-the-standing-work"
+proved_by = "crates/archi/tests/init_e2e.rs#the_resume_page_routes_all_five_states_to_their_skills"
+
+[[declares]]
+symbol = "crates/archi/tests/init_e2e.rs#the_resume_page_adds_directories_first_and_polls_the_seat_choice"
+answers = "req:one-door-resumes-the-standing-work"
+proved_by = "crates/archi/tests/init_e2e.rs#the_resume_page_adds_directories_first_and_polls_the_seat_choice"

@@ -39,9 +39,16 @@
 //!
 //! The search doctrine lives in one skill
 //! (`archi/requirements/agent-retrieval/the-search-doctrine-lives-in-one-skill.md`):
-//! `archi-search` installs beside the other nine and alone carries the
+//! `archi-search` installs beside the other ten and alone carries the
 //! order — the menu, the three structural reads, then search — and the
 //! grep rule; every working skill points at it by bare name.
+//!
+//! One door resumes the standing work
+//! (`archi/requirements/cold-start/one-door-resumes-the-standing-work.md`):
+//! `archi-resume` installs beside the rest and carries the reads, the
+//! routing table and the seat entry — the record before archaeology,
+//! each standing state routed to the skill that continues it, and the
+//! choice of seat the user's whenever more than one stands.
 //!
 //! The why reads back from the record
 //! (`archi/requirements/agent-retrieval/the-why-reads-back-from-the-record.md`):
@@ -75,14 +82,16 @@ const SKILL_MIGRATE_FRACTAL: &str = include_str!("../../../skills/archi-migrate-
 const SKILL_STE: &str = include_str!("../../../skills/ste-writing.md");
 const SKILL_SEARCH: &str = include_str!("../../../skills/archi-search.md");
 const SKILL_EXPLAIN: &str = include_str!("../../../skills/archi-explain.md");
+const SKILL_RESUME: &str = include_str!("../../../skills/archi-resume.md");
 
 /// Every skill this binary embeds, name -> source. The guards that read all
 /// installed skills iterate this list, so a new skill joins them by joining
 /// it.
-const EMBEDDED_SKILLS: [(&str, &str); 10] = [
+const EMBEDDED_SKILLS: [(&str, &str); 11] = [
     ("archi", SKILL_ARCHI),
     ("archi-search", SKILL_SEARCH),
     ("archi-explain", SKILL_EXPLAIN),
+    ("archi-resume", SKILL_RESUME),
     ("archi-plan", SKILL_PLAN),
     ("archi-implement", SKILL_IMPLEMENT),
     ("archi-merge", SKILL_MERGE),
@@ -223,7 +232,7 @@ fn a_fresh_init_stands_up_a_building_project() {
     // The report: every artifact created, the manifest on the last created
     // line, the verdict naming the project.
     let created: Vec<&str> = out.lines().filter(|l| l.starts_with("created")).collect();
-    assert_eq!(created.len(), 14, "{out}");
+    assert_eq!(created.len(), 15, "{out}");
     assert!(created.last().unwrap().contains("archi.toml"), "{out}");
     assert!(out.contains("initialized `proj`"), "{out}");
 
@@ -1794,5 +1803,111 @@ fn the_explain_page_names_the_intent_origin_beside_the_stressor() {
     assert!(
         flat.contains("the intent folder's own problem statement"),
         "the page never says where an intent-born claim answers from: {flat}"
+    );
+}
+
+/// A fresh init installs the resume door like every other skill —
+/// byte-equal to the binary's embedded copy — and the page's freshness
+/// header names its own installed path, so the staleness loop can close
+/// (`archi/requirements/cold-start/one-door-resumes-the-standing-work.md`).
+#[test]
+fn a_fresh_init_installs_the_resume_skill_verbatim() {
+    let root = temp_dir();
+    let out = ok_in(&root, &["init", "."]);
+    assert!(out.contains(".claude/skills/archi-resume/SKILL.md"), "{out}");
+    let installed =
+        fs::read_to_string(root.join(".claude/skills/archi-resume/SKILL.md")).unwrap();
+    assert_eq!(installed, SKILL_RESUME, "the resume skill drifted on install");
+    assert!(
+        installed.contains(".claude/skills/archi-resume/SKILL.md"),
+        "the freshness header never names the installed path"
+    );
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The embedded page names the reads in their order — the seats with the
+/// registry's `--status` flag, the binding, the plan lifecycles, then the
+/// record for anything the question names — and the rule that puts the
+/// record before archaeology
+/// (`archi/requirements/cold-start/one-door-resumes-the-standing-work.md`).
+#[test]
+fn the_resume_page_names_the_reads_record_before_archaeology() {
+    let flat = flat(SKILL_RESUME);
+    let mut prev: Option<usize> = None;
+    for read in [
+        "`archi worktree ls [--status active|closed|all] [--plan <slug>] [--spec <effort>]`",
+        "`archi status`",
+        "`archi plan list`",
+        "`archi version list`",
+    ] {
+        let at = flat
+            .find(read)
+            .unwrap_or_else(|| panic!("the resume page never names {read}"));
+        if let Some(prev) = prev {
+            assert!(prev < at, "{read} stands out of order: {flat}");
+        }
+        prev = Some(at);
+    }
+    assert!(
+        flat.contains("A `waiting` row is work in flight and is never closed."),
+        "the page never says what a waiting row is: {flat}"
+    );
+    assert!(
+        flat.contains(
+            "Git history is the last resort, and reading it first is what \
+             produces a report about the wrong round."
+        ),
+        "the page never puts the record before archaeology: {flat}"
+    );
+}
+
+/// The routing table names all five routes, state to skill, in order —
+/// draft to `archi-plan`, started to `archi-implement`, completed to
+/// `archi-finish-worktree`, an open round or an unsaved model to `archi`,
+/// and the pushed-branch re-attach through `worktree mint`, which
+/// attaches and never creates
+/// (`archi/requirements/cold-start/one-door-resumes-the-standing-work.md`).
+#[test]
+fn the_resume_page_routes_all_five_states_to_their_skills() {
+    let flat = flat(SKILL_RESUME);
+    let mut prev: Option<usize> = None;
+    for route in [
+        "plan `draft` — finish authoring in `archi-plan`",
+        "plan `started` — `archi-implement` picks the wave up",
+        "plan `completed` with the seat standing — land through `archi-finish-worktree`",
+        "an open stress round or an unsaved model — the `archi` skill",
+        "re-attach with `archi worktree mint <slug>`; it attaches, never creates",
+    ] {
+        let at = flat
+            .find(route)
+            .unwrap_or_else(|| panic!("the routing table misses `{route}`"));
+        if let Some(prev) = prev {
+            assert!(prev < at, "`{route}` stands out of order: {flat}");
+        }
+        prev = Some(at);
+    }
+}
+
+/// The seat entry keeps the session inside its own walls
+/// (`archi/requirements/cold-start/one-door-resumes-the-standing-work.md`):
+/// a member checkout outside the session's working directories is added
+/// to them before any git runs there, and more than one standing seat
+/// goes to the user as options, never the agent's own pick.
+#[test]
+fn the_resume_page_adds_directories_first_and_polls_the_seat_choice() {
+    let flat = flat(SKILL_RESUME);
+    assert!(
+        flat.contains(
+            "A member checkout outside the session's working directories is \
+             added to them before any git runs there"
+        ),
+        "the page never adds the member checkout to the working directories first: {flat}"
+    );
+    assert!(
+        flat.contains(
+            "More than one standing seat is one question through the poll tool \
+             (AskUserQuestion), the seats as the options — never your own pick"
+        ),
+        "the page never sends the seat choice to the user as options: {flat}"
     );
 }

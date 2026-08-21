@@ -91,6 +91,9 @@ IMPORTANT: Keep free text in the spec short.
 
 ## Opening: find your worktree
 
+Picking which standing unit to resume — and which skill continues it —
+is the `archi-resume` page.
+
 One worktree carries one whole unit of work: the spec, then its plan,
 then the code. The unit merges once, at the end. Do these steps at the
 start of every working session, before any mutation.
