@@ -21,6 +21,22 @@ the wave's delta moved and subtracts the files the declarations name. `ref_terms
 `item_terms`, `Suppressed` and the count are gone from the tree, so neither entry names
 anything a reader could open.
 
+## Coverage is presence, not sufficiency
+
+The save gate asks "is this element covered by any fact", never "by the fact the layer
+exists for". One narrow, symptom-shaped fact closes a node forever, injects its narrow
+scenarios into every plan that touches the node, and no signal ever fires. Counters do not
+help: condition and symptom are indistinguishable to a compiler, and every count we ever
+wrote down lied within a week.
+
+What worked, twice, was a person reading the fact set whole and asking why the obvious
+condition is missing. `each-node-names-the-condition-that-needs-it` writes that prod into
+the briefing as a per-node question; what remains unpressed is regularity.
+
+What a round would have to decide: whether the sufficiency reading becomes a named move of
+an aimed stress round — a world-aimed round walking the hot nodes and asking, per covering
+fact, whether it is the reason the node exists or the corner that found it.
+
 ## Refusals that do not name the continuation
 
 `refusals-name-the-continuation` is a standing requirement. Two refusals break it.
