@@ -1911,3 +1911,51 @@ fn the_resume_page_adds_directories_first_and_polls_the_seat_choice() {
         "the page never sends the seat choice to the user as options: {flat}"
     );
 }
+
+/// The seat entry enters a cascaded seat's members too
+/// (`archi/requirements/cold-start/one-door-resumes-the-standing-work.md`):
+/// a standing member worktree is switched into like the home one, an
+/// absent one re-attaches through `worktree mint` with `--repos` — it
+/// extends the seat, never recreates it — a refused baseline routes
+/// through `--base`, member health is read with `repo ls`, and member
+/// code is edited only in the printed paths, never in a main checkout.
+#[test]
+fn the_resume_page_enters_the_members() {
+    let flat = flat(SKILL_RESUME);
+    assert!(
+        flat.contains("A cascaded seat enters its members too"),
+        "the page never enters the members of a cascaded seat: {flat}"
+    );
+    assert!(
+        flat.contains("A standing member worktree is switched into like the home one"),
+        "the page never switches into a standing member worktree: {flat}"
+    );
+    assert!(
+        flat.contains(
+            "an absent one re-attaches with `archi worktree mint <slug> --repos a,b` \
+             — it extends the seat, never recreates it"
+        ),
+        "the page never re-attaches an absent member worktree through the mint: {flat}"
+    );
+    assert!(
+        flat.contains(
+            "a refused baseline routes through `--base <member>=<branch>` as \
+             `archi.md` teaches"
+        ),
+        "the page never routes a refused baseline through `--base`: {flat}"
+    );
+    assert!(
+        flat.contains(
+            "`archi repo ls` is the health read on the way in: reachability, \
+             cleanliness, baselines"
+        ),
+        "the page never reads member health with `repo ls`: {flat}"
+    );
+    assert!(
+        flat.contains(
+            "Member code is edited only in the member worktree paths `status` \
+             prints, never in a member's main checkout"
+        ),
+        "the page never confines member edits to the printed worktree paths: {flat}"
+    );
+}

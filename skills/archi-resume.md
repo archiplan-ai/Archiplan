@@ -30,8 +30,9 @@ The record before archaeology, in this order:
 2. `archi status` — this checkout's binding, the plan state, the
    version state, the open stress round, and the member worktree
    paths.
-3. `archi plan list` — every plan with its lifecycle.
-4. For anything the question names, `archi version list` and the
+3. `archi repo ls` — on a cascaded seat, each member's health.
+4. `archi plan list` — every plan with its lifecycle.
+5. For anything the question names, `archi version list` and the
    `archi-search` page.
 
 Git history is the last resort, and reading it first is what
@@ -58,7 +59,15 @@ State to skill:
 `cd` into the chosen worktree yourself: the CLI never changes your
 directory. More than one standing seat is one question through the
 poll tool (AskUserQuestion), the seats as the options — never your
-own pick. A member checkout outside the session's working
+own pick. A cascaded seat enters its members too. Member code is
+edited only in the member worktree paths `status` prints, never in
+a member's main checkout. A standing member worktree is switched
+into like the home one; an absent one re-attaches with
+`archi worktree mint <slug> --repos a,b` — it extends the seat,
+never recreates it, and a refused baseline routes through
+`--base <member>=<branch>` as `archi.md` teaches. `archi repo ls`
+is the health read on the way in: reachability, cleanliness,
+baselines. A member checkout outside the session's working
 directories is added to them before any git runs there — `/add-dir`
 in Claude Code, the equivalent elsewhere. Git refused there is the
 session's boundary, not the tool's, and handing git back to the
