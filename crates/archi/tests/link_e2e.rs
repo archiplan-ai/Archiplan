@@ -827,6 +827,189 @@ fn a_test_that_resolves_to_nothing_refuses_and_names_the_test() {
     cleanup(&fixture);
 }
 
+// ---- the proof takes the file where the file is the address -------------------
+//
+// The demand follows the file's canonicalizer: a Rust file indexes its items,
+// so the test fn is addressable and is named; every other file holds whole,
+// and `--proved-by` takes the bare path the way `--symbol` already does
+// (`archi/requirements/code-link/a-declaration-names-the-test-that-proves-it.md`).
+
+/// The TypeScript pair the whole-file proofs stand on: a source and a test
+/// file. `text-v1` holds both whole — no symbol index — so the file is the
+/// finest address either name has.
+const STORE_TS: &str = "export class Store {\n  \
+     private rows = new Map<string, string>();\n\n  \
+     put(id: string, value: string): void {\n    this.rows.set(id, value);\n  }\n\n  \
+     get(id: string): string | undefined {\n    return this.rows.get(id);\n  }\n}\n";
+
+/// The test the bare-path declarations name.
+const STORE_TEST_TS: &str = "import { Store } from \"../code/store\";\n\n\
+     test(\"a row put into the store is served back\", () => {\n  \
+     const store = new Store();\n  store.put(\"a\", \"1\");\n  \
+     expect(store.get(\"a\")).toBe(\"1\");\n});\n";
+
+/// Grow the fixture its TypeScript pair — written before the plan starts, so
+/// both files sit in the wave-open index the way `code/auth_test.rs` does.
+fn with_typescript(root: &Path) {
+    fs::write(root.join("code/store.ts"), STORE_TS).unwrap();
+    fs::create_dir_all(root.join("tests")).unwrap();
+    fs::write(root.join("tests/store.test.ts"), STORE_TEST_TS).unwrap();
+}
+
+/// The wave's TypeScript delta: the store moves.
+fn change_store(root: &Path) {
+    fs::write(
+        root.join("code/store.ts"),
+        format!("{STORE_TS}\nexport const STORE_VERSION = 2;\n"),
+    )
+    .unwrap();
+}
+
+/// Rust strictness stands: a bare path into a symbol-indexed file under-names
+/// the test — the test fn is addressable — and the verb's refusal names the
+/// rule beside the standing words. A symbol into a file the canonicalizer
+/// holds whole refuses as it always did: the resolver cannot find what is not
+/// indexed, and the refusal says why
+/// (`archi/requirements/code-link/a-declaration-names-the-test-that-proves-it.md`).
+#[test]
+fn a_bare_proof_into_a_symbol_indexed_file_refuses_naming_the_rule() {
+    let (fixture, root) = bound("bare-rs-proof");
+    with_typescript(&root);
+    started_plan(&root);
+    change_auth(&root);
+    let before = fs::read_to_string(root.join(DECLARES)).unwrap();
+
+    let (success, _, err) = util::run(
+        &root,
+        &[
+            "plan", "task", "t1", "link", "add",
+            "--symbol", "code/auth.rs#login",
+            "--answers", "Auth.inn",
+            "--proved-by", "code/auth_test.rs",
+        ],
+    );
+    assert!(!success, "the bare Rust proof is refused:\n{err}");
+    assert!(err.contains("--proved-by"), "names the flag:\n{err}");
+    assert!(err.contains("code/auth_test.rs"), "names the file:\n{err}");
+    assert!(
+        err.contains("a Rust test is addressable — name the test fn"),
+        "names the rule:\n{err}"
+    );
+
+    // The other side of the same rule: a symbol into a whole-file test.
+    let (success, _, err) = util::run(
+        &root,
+        &[
+            "plan", "task", "t1", "link", "add",
+            "--symbol", "code/auth.rs#login",
+            "--answers", "Auth.inn",
+            "--proved-by", "tests/store.test.ts#a_row_is_served",
+        ],
+    );
+    assert!(!success, "a symbol into a text file is refused:\n{err}");
+    assert!(err.contains("--proved-by"), "names the flag:\n{err}");
+    assert!(
+        err.contains("symbol anchors need a Rust file"),
+        "says why it cannot resolve:\n{err}"
+    );
+
+    // Neither refusal wrote anything.
+    assert_eq!(fs::read_to_string(root.join(DECLARES)).unwrap(), before);
+    assert_eq!(ok(&root, &["link", "ls"]), "no links\n", "nothing was minted");
+
+    cleanup(&fixture);
+}
+
+/// In a file the canonicalizer holds whole, the file is the finest address
+/// that exists: `--proved-by` takes the bare path the way `--symbol` already
+/// does, the pair mints carrying the whole-file anchor, and the reverse view
+/// shows the file as the proof
+/// (`archi/requirements/code-link/a-declaration-names-the-test-that-proves-it.md`).
+#[test]
+fn a_bare_proof_into_a_whole_file_test_mints_and_the_reverse_view_shows_it() {
+    let (fixture, root) = bound("bare-ts-proof");
+    with_typescript(&root);
+    started_plan(&root);
+    change_store(&root);
+
+    ok(
+        &root,
+        &[
+            "plan", "task", "t1", "link", "add",
+            "--symbol", "code/store.ts",
+            "--answers", "Auth.inn",
+            "--proved-by", "tests/store.test.ts",
+        ],
+    );
+    let out = ok(&root, &["link", "capture", "--task", "t1"]);
+    assert_eq!(out.matches("captured ").count(), 1, "{out}");
+    assert!(!out.contains("note:"), "{out}");
+
+    let rows = ok(&root, &["link", "ls"]);
+    assert_eq!(rows.lines().count(), 1, "{rows}");
+    let row = rows.lines().next().unwrap();
+    assert!(row.contains("asserted"), "{row}");
+    assert_eq!(rule_word(row), Some("declared"), "{row}");
+    assert!(row.contains("Auth.inn ← code/store.ts"), "{row}");
+    assert!(row.contains("proved by tests/store.test.ts"), "{row}");
+
+    // The reverse view of what it answers shows the file as the proof.
+    let out = ok(&root, &["link", "ls", "--spec", "Auth.inn"]);
+    assert_eq!(out.lines().count(), 1, "{out}");
+    assert!(out.contains("proved by tests/store.test.ts"), "{out}");
+
+    cleanup(&fixture);
+}
+
+/// The mint-side reader decides by the same rule as the verb: a declaration
+/// file naming the bare `.ts` test mints, the minted row's `proves` carries
+/// the whole-file anchor — and the same bare `.rs` file keeps refusing at its
+/// line, naming the rule
+/// (`archi/requirements/code-link/a-declaration-names-the-test-that-proves-it.md`).
+#[test]
+fn the_mint_side_reader_takes_the_bare_proof_by_the_same_rule() {
+    let (fixture, root) = bound("mint-side-proof");
+    with_typescript(&root);
+    started_plan(&root);
+    change_store(&root);
+
+    declare(
+        &root,
+        &entry(&[
+            ("symbol", "code/store.ts"),
+            ("answers", &format!("req:{REQ}")),
+            ("proved_by", "tests/store.test.ts"),
+        ]),
+    );
+    let out = ok(&root, &["link", "capture", "--task", "t1"]);
+    assert_eq!(out.matches("captured ").count(), 1, "{out}");
+    let out = ok(&root, &["link", "ls", "--spec", &format!("req:{REQ}")]);
+    assert!(out.contains("proved by tests/store.test.ts"), "{out}");
+
+    // The same reader, the same bare file, a symbol index: refused at its line.
+    declare(
+        &root,
+        &entry(&[
+            ("symbol", "code/auth.rs#login"),
+            ("answers", "Auth.inn"),
+            ("proved_by", "code/auth_test.rs"),
+        ]),
+    );
+    let err = refused(&root);
+    located(&err, 4, "proved_by = \"code/auth_test.rs\"");
+    assert!(
+        err.contains("a Rust test is addressable — name the test fn"),
+        "names the rule:\n{err}"
+    );
+    assert_eq!(
+        ok(&root, &["link", "ls"]).lines().count(),
+        1,
+        "the refusal minted nothing"
+    );
+
+    cleanup(&fixture);
+}
+
 /// A malformed file is refused with the line, what was expected there and what
 /// stood there — never with a restatement of the grammar alone, and never by
 /// ignoring what it did not understand

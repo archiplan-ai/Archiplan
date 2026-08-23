@@ -1,0 +1,45 @@
+# `t1` accounts for its work here: for every symbol it changed, what
+# that code answers and the test that proves it. One entry closes the
+# wave; what the file holds is the writer's to decide.
+#
+# Nobody types this file. The verb writes it, and it resolves all three
+# names before it writes:
+#
+#   archi plan task t1 link add --symbol "<file>#<symbol>" --answers "<node, port or req:slug>" --proved-by "<test file>#<test fn>"
+#
+# Each entry lands as one table of this shape:
+#
+#   [[declares]]
+#   symbol = "<file>#<symbol>"
+#   answers = "<node, port or req:slug>"
+#   proved_by = "<test file>#<test fn>"
+
+[[declares]]
+symbol = "crates/archi/src/links/capture.rs#bare_proof_refused"
+answers = "req:a-declaration-names-the-test-that-proves-it"
+proved_by = "crates/archi/tests/link_e2e.rs#the_mint_side_reader_takes_the_bare_proof_by_the_same_rule"
+
+[[declares]]
+symbol = "crates/archi/src/links/capture.rs#declare"
+answers = "req:a-declaration-names-the-test-that-proves-it"
+proved_by = "crates/archi/tests/link_e2e.rs#a_bare_proof_into_a_whole_file_test_mints_and_the_reverse_view_shows_it"
+
+[[declares]]
+symbol = "crates/archi/src/links/capture.rs#mint_declarations"
+answers = "req:a-declaration-names-the-test-that-proves-it"
+proved_by = "crates/archi/tests/link_e2e.rs#the_mint_side_reader_takes_the_bare_proof_by_the_same_rule"
+
+[[declares]]
+symbol = "crates/archi/tests/link_e2e.rs#a_bare_proof_into_a_symbol_indexed_file_refuses_naming_the_rule"
+answers = "req:a-declaration-names-the-test-that-proves-it"
+proved_by = "crates/archi/tests/link_e2e.rs#a_bare_proof_into_a_symbol_indexed_file_refuses_naming_the_rule"
+
+[[declares]]
+symbol = "crates/archi/tests/link_e2e.rs#a_bare_proof_into_a_whole_file_test_mints_and_the_reverse_view_shows_it"
+answers = "req:a-declaration-names-the-test-that-proves-it"
+proved_by = "crates/archi/tests/link_e2e.rs#a_bare_proof_into_a_whole_file_test_mints_and_the_reverse_view_shows_it"
+
+[[declares]]
+symbol = "crates/archi/tests/link_e2e.rs#the_mint_side_reader_takes_the_bare_proof_by_the_same_rule"
+answers = "req:a-declaration-names-the-test-that-proves-it"
+proved_by = "crates/archi/tests/link_e2e.rs#the_mint_side_reader_takes_the_bare_proof_by_the_same_rule"

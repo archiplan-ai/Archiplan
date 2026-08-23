@@ -506,6 +506,23 @@ struct Minted {
     files: BTreeSet<String>,
 }
 
+/// The rule the two proof readers share — the verb's `--proved-by` check and
+/// the mint-side reader of a written `proved_by` decide through this one
+/// predicate. The demand follows the file's canonicalizer
+/// ([`code::canonicalizer_of`]): a Rust file indexes its items, so the test
+/// fn is addressable and a bare path under-names it; every other file holds
+/// whole, and the file is the finest address that exists — the bare path
+/// resolves the way `--symbol`'s bare path does, and the minted `proves`
+/// carries the whole-file anchor
+/// (`archi/requirements/code-link/a-declaration-names-the-test-that-proves-it.md`).
+fn bare_proof_refused(test: &Anchor) -> bool {
+    test.symbol.is_none() && code::canonicalizer_of(&test.file) == code::RUST_CANON
+}
+
+/// The clause the refusal grows when the bare path lands in a Rust file: the
+/// rule, in the words both sites append to their standing sentence.
+const RUST_PROOF_RULE: &str = "a Rust test is addressable — name the test fn";
+
 /// Mint one task's declarations: what the file names becomes an asserted
 /// link on the symbol that named it, stamped `declared` and carrying the
 /// test. A pair the journal already holds is not minted twice, so a wave that
@@ -561,13 +578,13 @@ fn mint_declarations(
         // is checked, its passing is the suite's business.
         let test = Anchor::parse(proved_by)
             .map_err(|e| file.refuse(task, Some(d.proved_by.span()), &e))?;
-        if test.symbol.is_none() {
+        if bare_proof_refused(&test) {
             return Err(file.refuse(
                 task,
                 Some(d.proved_by.span()),
                 &format!(
                     "the test `{test}` names a file and no symbol — `proved_by` names the test \
-                     itself, as `<file>#<test fn>`"
+                     itself, as `<file>#<test fn>`; {RUST_PROOF_RULE}"
                 ),
             ));
         }
@@ -745,10 +762,10 @@ pub fn declare(
     let roots = super::Roots::resolve(root)?;
     resolve_named(&roots, "--symbol", symbol)?;
     let test = resolve_named(&roots, "--proved-by", proved_by)?;
-    if test.symbol.is_none() {
+    if bare_proof_refused(&test) {
         return Err(format!(
             "--proved-by `{proved_by}`: it names a file and no symbol — `--proved-by` names the \
-             test itself, as `{PROVED_BY_HINT}`"
+             test itself, as `{PROVED_BY_HINT}`; {RUST_PROOF_RULE}"
         ));
     }
     resolve_answers(root, model, answers)?;
