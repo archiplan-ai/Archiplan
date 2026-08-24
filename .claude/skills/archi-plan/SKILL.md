@@ -60,13 +60,13 @@ checkout. `archi status` answers where you are. Branch on it:
 
 ## Step 1 — Name and create the plan
 
-Decide the name of the plan. When the user gave no name, ask through the
-poll tool with two options: **automation**, where you derive a name from
-the problem statement, and a **free-text field** for a name of their own.
+Derive the name of the plan from the problem statement — short,
+kebab-case, like the standing plans — and ask nobody: a name is an
+address, not a decision. A name the user volunteered is used as given.
 
-Check whether a plan with that name exists, with `archi plan list`. When
-it does, ask through the poll tool: **continue the existing plan**, or
-**pick a different name**. Then run:
+Check whether a plan with that name exists, with `archi plan list`. A
+collision means the name is taken: derive another, still without a
+question — continuing a standing plan is `archi-resume`'s door. Then run:
 
 ```
 archi plan use <name>

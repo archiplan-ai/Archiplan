@@ -553,6 +553,70 @@ fn a_standing_project_syncs_the_new_planning_skill() {
 }
 
 
+/// The plan names itself
+/// (`archi/requirements/planning/the-plan-names-itself.md`): step 1 derives
+/// the name from the problem statement and asks nobody. The poll tool is
+/// reserved for choices that change the work, and a name changes nothing —
+/// it is an address, not a decision. The assertions stand on the step-1
+/// passage alone: the polls the skill genuinely owes — the worktree in
+/// step 0, the stack in step 4 — keep their words.
+#[test]
+fn the_planning_skill_derives_the_name_itself_and_step_1_names_no_poll() {
+    let root = temp_dir();
+    ok_in(&root, &["init", "."]);
+    let installed = planning_skill(&root);
+
+    // The prose is hard-wrapped, so the step is read over its line breaks.
+    let step = flat(passage(&installed, "## Step 1"));
+
+    // No poll and no menu of naming options in the step. This is what
+    // catches the old page, which opened every planning session with "ask
+    // through the poll tool" — automation, or a free-text field.
+    for gone in ["poll", "automation", "free-text"] {
+        assert!(!step.contains(gone), "step 1 still says `{gone}`: {step}");
+    }
+
+    // What stands in its place: the skill derives, from what the user
+    // already said, in the shape the standing plans wear.
+    for phrase in ["Derive the name", "problem statement", "kebab-case"] {
+        assert!(step.contains(phrase), "step 1 misses `{phrase}`: {step}");
+    }
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// A volunteered name is used as given, and a collision derives another name
+/// without a question
+/// (`archi/requirements/planning/the-plan-names-itself.md`). The old page
+/// answered a collision with a second poll — continue the standing plan, or
+/// rename. Continuing is `archi-resume`'s door, so a collision leaves
+/// nothing to ask: the name is taken, derive another.
+#[test]
+fn a_volunteered_name_is_used_as_given_and_a_collision_derives_another_name() {
+    let root = temp_dir();
+    ok_in(&root, &["init", "."]);
+    let installed = planning_skill(&root);
+
+    let step = flat(passage(&installed, "## Step 1"));
+
+    for phrase in ["volunteered", "used as given", "derive another", "without a question"] {
+        assert!(step.contains(phrase), "step 1 misses `{phrase}`: {step}");
+    }
+
+    // The collision case still routes a standing plan somewhere real — to
+    // the resume door, never to a poll option here.
+    assert!(
+        step.contains("`archi-resume`"),
+        "step 1 names no door for continuing a standing plan: {step}"
+    );
+    assert!(
+        !step.contains("continue the existing plan"),
+        "the collision case still offers to continue: {step}"
+    );
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
 /// A scenario is a heading and its steps
 /// (`archi/requirements/world-facts/the-grammar-is-a-named-subset.md`), so the
 /// two skills that ask a person to write one teach that shape: `### <name>`
