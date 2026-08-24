@@ -1,7 +1,7 @@
 ---
 kind: functional
 origin: intent
-satisfied-by: [Planner]
+satisfied-by: [Planner, AgentBrief]
 deferred:
 ---
 
@@ -12,7 +12,12 @@ verb does not. The wave's file gate is answered by a declaration —
 `archi plan task <id> link add` — and its refusal states in as many words that
 `archi link add` does not answer it, because that gate reads the declaration files and not
 the journal. The advisory checklist beside it is answered by `archi link add`, and it says
-so. No refusal names a candidate list or `link confirm`.
+so. And a refusal that can be answered two ways names both: the file gate's second repair
+is the boundary — a changed file that is not code leaves the scans through
+`[audit] exclude` in `archi.toml`, the same boundary the audit and capture already share —
+and the refusal says it, because the reader stuck on a lockfile or a generated artifact
+cannot be expected to know a manifest key the message never names. No refusal names a
+candidate list or `link confirm`.
 
 ## System Context
 
@@ -38,3 +43,7 @@ documents them).
   are not the same line
 - test — the advisory checklist names `archi link add` with the ref and the anchor it takes
 - test — no refusal and no checklist names `link ls --evidence` or `link confirm`
+- test — the file gate's refusal names the boundary repair: a non-code file leaves through
+  `[audit] exclude`, and the sentence names the manifest key
+- test — the briefing's failure modes carry the same case for the wave gate, beside the
+  audit's prose-files entry
