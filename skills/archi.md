@@ -683,6 +683,10 @@ fact, and marks it as anchor-born.
   code motion. Mute the boundary once with `[audit] exclude = ["*.md",
   …]` in `archi.toml`. Capture and the audit share the setting, and links
   into excluded files still verify.
+- The wave gate names lockfiles or generated artifacts. This is not
+  code motion. Widen `[audit] exclude` in `archi.toml` once: the wave
+  gate, capture and the audit share the boundary, and a link into an
+  excluded file still verifies.
 - `plan use` refuses. The model has unsaved changes, so run `version
   save` first.
 - `worktree merge` refuses a stale member baseline, because the worktree

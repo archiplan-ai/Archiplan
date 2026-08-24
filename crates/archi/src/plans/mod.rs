@@ -1700,6 +1700,15 @@ fn gate_coverage(
             links::capture::declare_command(links::capture::TASK_HINT)
         ));
         msg.push_str(&links::capture::entry_shape_block());
+        // The second repair, for the reader stuck on a lockfile or a
+        // generated artifact: the boundary, named with its manifest key —
+        // a key that reader cannot be expected to know unnamed
+        // (`archi/requirements/planning/the-gate-refusal-names-the-repair-that-stands.md`).
+        msg.push_str(
+            "a changed file that is not code leaves the scans through `[audit] exclude` in \
+             `archi.toml` — the boundary the audit and capture already share — and links into \
+             excluded files still verify.\n",
+        );
         msg.push_str(
             "`archi link add` does not answer this gate: the gate reads the declaration files, \
              not the journal. Then re-run `archi plan next`",

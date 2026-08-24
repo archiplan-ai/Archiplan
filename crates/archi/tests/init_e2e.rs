@@ -1700,6 +1700,54 @@ fn no_embedded_skill_sends_the_reader_to_confirm_candidates() {
     fs::remove_dir_all(&root).unwrap();
 }
 
+/// The briefing's failure modes carry the boundary case for the wave gate,
+/// beside the audit's prose-files entry: the gate naming lockfiles or
+/// generated artifacts is not code motion, and the repair is `[audit]
+/// exclude` in `archi.toml`. Two cases, two entries — the audit's mutes the
+/// boundary once, the wave gate's says the gate, capture and the audit
+/// share it
+/// (`archi/requirements/planning/the-gate-refusal-names-the-repair-that-stands.md`).
+#[test]
+fn the_failure_modes_carry_the_wave_gate_s_boundary_case_beside_the_audit_s() {
+    let root = temp_dir();
+    ok_in(&root, &["init", "."]);
+    let (workflow, _) = world_skills(&root);
+
+    let modes = passage(&workflow, "## Failure modes");
+    let audit_at = modes
+        .find("- Audit findings name prose files")
+        .expect("the audit's prose-files entry");
+    let gate_at = modes
+        .find("- The wave gate names lockfiles")
+        .expect("the wave-gate entry");
+    // Beside: the wave-gate case is the next entry after the audit's.
+    assert!(audit_at < gate_at, "the audit's entry stands first");
+    assert_eq!(
+        modes[audit_at..gate_at].matches("\n- ").count(),
+        0,
+        "no entry stands between the audit's case and the wave gate's"
+    );
+
+    let gate = bullet(modes, "- The wave gate names lockfiles");
+    assert!(gate.contains("generated artifacts"), "{gate}");
+    assert!(gate.contains("not code motion"), "{gate}");
+    assert!(
+        gate.contains("`[audit] exclude` in `archi.toml`"),
+        "the entry names the manifest key: {gate}"
+    );
+    assert!(
+        gate.contains("the wave gate, capture and the audit share the boundary"),
+        "{gate}"
+    );
+    assert!(gate.contains("a link into an excluded file still verifies"), "{gate}");
+    // Two entries, not one twice: muting the boundary is the audit's case.
+    assert!(!gate.contains("Mute the boundary"), "{gate}");
+    let audit = bullet(modes, "- Audit findings name prose files");
+    assert!(!audit.contains("wave gate"), "{audit}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
 /// The writer of a claim reads the standing claims first
 /// (`archi/requirements/agent-retrieval/the-briefing-sends-the-reader-to-the-record-before-the-tree.md`).
 /// `archi req ls --satisfies <element>` puts the neighbouring claims on

@@ -1960,6 +1960,67 @@ fn a_file_no_declaration_names_refuses_the_wave_and_the_refusal_names_it() {
     fs::remove_dir_all(&root).unwrap();
 }
 
+/// A refusal that can be answered two ways names both: beside the
+/// declaration verb stands the boundary — a changed file that is not code
+/// leaves the scans through `[audit] exclude` in `archi.toml` — and the
+/// sentence names the manifest key, because the reader stuck on a lockfile
+/// or a generated artifact cannot be expected to know a key the message
+/// never names. The check exercises what the refusal tells the reader to
+/// run, not which words appear in it: the boundary widens once, the
+/// artifact leaves the gate, and a link into the excluded file still
+/// verifies
+/// (`archi/requirements/planning/the-gate-refusal-names-the-repair-that-stands.md`).
+#[test]
+fn the_refusal_names_the_boundary_repair_and_widening_it_releases_the_artifact() {
+    let root = temp_project();
+    gated_wave(&root, T1_STORE_GATED);
+
+    // The writer's own file moves and is declared; a generated artifact
+    // lands beside it — in the delta like any file, and not code.
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+    fs::write(root.join("Cargo.lock"), "# generated: not code\n").unwrap();
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
+
+    let (_, err) = fails(&root, &["plan", "next"]);
+    let flat = util::flat(&err);
+    assert!(flat.contains("Cargo.lock"), "names the artifact: {err}");
+    assert!(
+        flat.contains("leaves the scans through `[audit] exclude` in `archi.toml`"),
+        "names the boundary repair and its manifest key: {err}"
+    );
+    // The boundary is its own statement — a second repair, not part of the
+    // sentence that denies a neighbouring verb and not fused with the first.
+    let boundary = err
+        .lines()
+        .find(|l| l.contains("[audit] exclude"))
+        .expect("the boundary repair stands on its own line");
+    assert!(!boundary.contains("does not answer"), "a repair, not a denial: {boundary}");
+    assert!(!boundary.contains("plan task"), "two repairs, two statements: {boundary}");
+
+    // The repair as printed is the repair that works: widen the boundary
+    // once, the artifact leaves the scans, and the wave closes on the entry
+    // already posted — no declaration owed for a file that is not code.
+    fs::write(
+        root.join("archi.toml"),
+        "[project]\nname = \"t\"\npreset = \"default\"\n\n[audit]\nexclude = [\"Cargo.lock\"]\n",
+    )
+    .unwrap();
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("wave 1 closed — in flight: t2"), "{out}");
+
+    // Exclusion governs what the scans volunteer, not what links may claim:
+    // a link into the excluded file still verifies.
+    ok(&root, &["link", "add", "Store", "Cargo.lock", "--kind", "indirect"]);
+    let report = ok(&root, &["link", "verify", "--spec", "Store"]);
+    assert!(
+        report.contains("Cargo.lock"),
+        "the link into the excluded file is graded: {report}"
+    );
+    assert!(report.contains("0 failing"), "{report}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
 /// The refusal names the file and no task. The tasks of a wave share one
 /// tree, so nothing in the delta says who touched what — with two writers in
 /// flight the gate still names only what moved
