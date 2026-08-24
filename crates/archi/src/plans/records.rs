@@ -5,12 +5,21 @@
 //! Content is the files — there is no write command for prose. The charter
 //! `<name>.md` carries the envelope: problem prose, `## Stack` bullets
 //! with provenance, `## Architecture` bullets for summary lines and stack
-//! mappings. Each task is `t<N>-<node-slug>.md`: `node` and hand-curated
-//! `owns` in the frontmatter, description prose, then `## Spec`,
-//! `## Inputs`, `## Outputs`, `## Stack` bullets and `## Verifications`
-//! keyed by owned slug. `scenarios.md` is a bullet list. `state.json`
-//! alone moves through commands — the mint writes it, `save_state` rewrites
-//! it, and nothing else in the folder is machine-written past its mint.
+//! mappings. Each task is `t<N>-<node-slug>.md`: `node`, hand-curated
+//! `owns` and machine-resolved `facts` in the frontmatter, description
+//! prose, then `## Spec`, `## Inputs`, `## Outputs`, `## Stack` bullets
+//! and `## Verifications` keyed by owned slug. `state.json` alone moves
+//! through commands — the mint writes it, `save_state` rewrites it — and
+//! the one other machine write in the folder is [`write_facts`], which
+//! moves the `facts` line and nothing else: a covering fact is carried,
+//! never curated
+//! (`archi/requirements/world-facts/a-task-carries-the-facts-that-cover-its-node.md`).
+//!
+//! A `scenarios.md` a pre-world plan was written with is read by nobody,
+//! written by nobody and deleted by nobody: the stories live in the world
+//! now and history is left exactly as it is
+//! (`archi/requirements/world-facts/a-plan-s-own-scenarios-block-retires.md`,
+//! `archi/decisions/the-old-plans-are-left-alone.md`).
 //!
 //! Parsing is tolerant on whitespace and strict on shape: an unknown
 //! section, a shapeless bullet, a verification under an unowned slug are
@@ -24,7 +33,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::{Plan, PlanState, StackMapping, SummaryLine, Task, TechChoice, plan_dir};
+use super::{
+    CoveringFact, Plan, PlanState, StackMapping, SummaryLine, Task, TechChoice, plan_dir,
+};
 use crate::docs::md::slugify;
 
 // ---- the folder --------------------------------------------------------------
@@ -37,10 +48,6 @@ pub(crate) fn is_record(root: &Path, name: &str) -> bool {
 
 pub(crate) fn charter_path(root: &Path, name: &str) -> PathBuf {
     plan_dir(root, name).join(format!("{name}.md"))
-}
-
-fn scenarios_path(root: &Path, name: &str) -> PathBuf {
-    plan_dir(root, name).join("scenarios.md")
 }
 
 fn state_path(root: &Path, name: &str) -> PathBuf {
@@ -101,6 +108,13 @@ struct StateFile {
     scenarios_displayed: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     scenarios_closed: bool,
+    // The mark of the world: the mint stamps it, nothing else moves it, and
+    // a plan written before the world carries no such field and parses as
+    // what it is — which is what decides whether an empty closing block may
+    // close the plan
+    // (`archi/requirements/world-facts/a-plan-s-own-scenarios-block-retires.md`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    minted_after_the_world: bool,
 }
 
 /// Persist the lifecycle fields of a record plan — the only write any
@@ -115,6 +129,7 @@ pub(crate) fn write_state(root: &Path, plan: &Plan) -> Result<(), String> {
         cleanup_displayed: plan.cleanup_displayed,
         scenarios_displayed: plan.scenarios_displayed,
         scenarios_closed: plan.scenarios_closed,
+        minted_after_the_world: plan.minted_after_the_world,
     };
     let path = state_path(root, &plan.name);
     let mut text =
@@ -171,10 +186,23 @@ pub(crate) fn render_charter(plan: &Plan) -> String {
     out
 }
 
+/// The `facts` frontmatter line: the covering facts as `<slug>@<digest>`.
+/// It rides only when the world reaches the node, so a project without one
+/// sees no new line in its task files.
+fn facts_line(facts: &[CoveringFact]) -> String {
+    let entries: Vec<String> = facts.iter().map(CoveringFact::render).collect();
+    format!("facts: [{}]", entries.join(", "))
+}
+
 /// One task file: frontmatter, description prose, the bullet sections.
 /// Empty sections keep their heading — the slots the author fills.
 pub(crate) fn render_task(task: &Task) -> String {
-    let mut out = format!("---\nnode: {}\nowns: [{}]\n---\n", task.node, task.owns.join(", "));
+    let mut out = format!("---\nnode: {}\nowns: [{}]\n", task.node, task.owns.join(", "));
+    if !task.facts.is_empty() {
+        out.push_str(&facts_line(&task.facts));
+        out.push('\n');
+    }
+    out.push_str("---\n");
     out.push_str(&format!("\n# {} — {}\n", task.id, task.node));
     if !task.description.is_empty() {
         out.push('\n');
@@ -218,18 +246,6 @@ pub(crate) fn render_task(task: &Task) -> String {
     out
 }
 
-/// `scenarios.md`: a heading and one bullet per scenario.
-pub(crate) fn render_scenarios(scenarios: &[String]) -> String {
-    let mut out = String::from("# Scenarios\n");
-    if !scenarios.is_empty() {
-        out.push('\n');
-        for s in scenarios {
-            out.push_str(&format!("- {s}\n"));
-        }
-    }
-    out
-}
-
 // ---- parsing -----------------------------------------------------------------
 
 fn shape_err(label: &str, line: usize, message: &str) -> String {
@@ -241,6 +257,42 @@ fn bullet<'a>(label: &str, line: usize, raw: &'a str, shape: &str) -> Result<&'a
     raw.trim_end()
         .strip_prefix("- ")
         .ok_or_else(|| shape_err(label, line, shape))
+}
+
+/// Fold one line of a bullet section into the bullet standing open, and hand
+/// back the bullet that line closed. A bullet section is read whole: it
+/// splits at the lines that open with `- `, and every other line continues
+/// the piece the last such line opened, its own break and any blank line
+/// around it collapsing to a single space. There is no rule about which bare
+/// line continues and which does not — that rule is what refused a wrapped
+/// bullet in the first place
+/// (`archi/requirements/planning/a-record-bullet-may-wrap.md`).
+///
+/// The piece keeps the line it opened on, so a refusal names the line the
+/// author wrote the bullet on and never a continuation. A section opening on
+/// a bare line hands that line back as a bullet with no prefix, which refuses
+/// exactly where it always did; a paragraph left *under* the bullets joins
+/// the last one instead, which the requirement states and accepts.
+fn fold_bullet(
+    open: &mut Option<(usize, String)>,
+    line: usize,
+    raw: &str,
+) -> Option<(usize, String)> {
+    if raw.starts_with("- ") {
+        return open.replace((line, raw.trim_end().to_string()));
+    }
+    let text = raw.trim();
+    if text.is_empty() {
+        return None;
+    }
+    match open {
+        Some((_, bullet)) => {
+            bullet.push(' ');
+            bullet.push_str(text);
+        }
+        None => *open = Some((line, raw.trim_end().to_string())),
+    }
+    None
 }
 
 /// Prose slot: raw lines joined verbatim, leading and trailing blank
@@ -256,6 +308,48 @@ fn join_prose(lines: &[&str]) -> String {
     lines.join("\n")
 }
 
+/// One folded bullet of the charter, under the section it stands in.
+fn charter_bullet(
+    label: &str,
+    section: &str,
+    line: usize,
+    raw: &str,
+    stack: &mut Vec<TechChoice>,
+    summary: &mut Vec<SummaryLine>,
+    mapping: &mut Vec<StackMapping>,
+) -> Result<(), String> {
+    if section == "Stack" {
+        let b = bullet(label, line, raw, "stack bullets are `- <tech> — <provenance>`")?;
+        let (tech, provenance) = b.split_once(" — ").unwrap_or((b, ""));
+        stack.push(TechChoice {
+            tech: tech.trim().to_string(),
+            provenance: provenance.trim().to_string(),
+        });
+        return Ok(());
+    }
+    let b = bullet(
+        label,
+        line,
+        raw,
+        "architecture bullets are `- `<node>` — <role>` or `- `<node>` realizes <tech>`",
+    )?;
+    let (node, rest) = backticked(b).ok_or_else(|| {
+        shape_err(label, line, "architecture bullets open with a backticked node")
+    })?;
+    if let Some(role) = rest.strip_prefix(" — ") {
+        summary.push(SummaryLine { node, role: role.trim().to_string() });
+    } else if let Some(tech) = rest.strip_prefix(" realizes ") {
+        mapping.push(StackMapping { tech: tech.trim().to_string(), node });
+    } else {
+        return Err(shape_err(
+            label,
+            line,
+            "after the node comes `— <role>` or `realizes <tech>`",
+        ));
+    }
+    Ok(())
+}
+
 /// The charter's fields: problem prose, then `## Stack` and
 /// `## Architecture` bullets. Anything else is a shape error.
 fn parse_charter(
@@ -268,6 +362,9 @@ fn parse_charter(
     let mut mapping = Vec::new();
     let mut seen_h1 = false;
     let mut section: Option<&str> = None;
+    // The bullet standing open, if any: a heading ends the section, and the
+    // section is what the fold reads whole ([`fold_bullet`]).
+    let mut open: Option<(usize, String)> = None;
     for (i, raw) in text.lines().enumerate() {
         let line = i + 1;
         if !seen_h1 {
@@ -281,6 +378,10 @@ fn parse_charter(
             return Err(shape_err(label, line, "a charter opens with `# <name>`"));
         }
         if let Some(heading) = raw.trim_end().strip_prefix("## ") {
+            if let Some((at, folded)) = open.take() {
+                let sec = section.expect("a bullet stands inside a section");
+                charter_bullet(label, sec, at, &folded, &mut stack, &mut summary, &mut mapping)?;
+            }
             section = match heading.trim() {
                 "Stack" => Some("Stack"),
                 "Architecture" => Some("Architecture"),
@@ -295,38 +396,16 @@ fn parse_charter(
         }
         match section {
             None => problem_lines.push(raw),
-            Some(_) if raw.trim().is_empty() => {}
-            Some("Stack") => {
-                let b = bullet(label, line, raw, "stack bullets are `- <tech> — <provenance>`")?;
-                let (tech, provenance) = b.split_once(" — ").unwrap_or((b, ""));
-                stack.push(TechChoice {
-                    tech: tech.trim().to_string(),
-                    provenance: provenance.trim().to_string(),
-                });
-            }
-            Some(_) => {
-                let b = bullet(
-                    label,
-                    line,
-                    raw,
-                    "architecture bullets are `- `<node>` — <role>` or `- `<node>` realizes <tech>`",
-                )?;
-                let (node, rest) = backticked(b).ok_or_else(|| {
-                    shape_err(label, line, "architecture bullets open with a backticked node")
-                })?;
-                if let Some(role) = rest.strip_prefix(" — ") {
-                    summary.push(SummaryLine { node, role: role.trim().to_string() });
-                } else if let Some(tech) = rest.strip_prefix(" realizes ") {
-                    mapping.push(StackMapping { tech: tech.trim().to_string(), node });
-                } else {
-                    return Err(shape_err(
-                        label,
-                        line,
-                        "after the node comes `— <role>` or `realizes <tech>`",
-                    ));
+            Some(sec) => {
+                if let Some((at, folded)) = fold_bullet(&mut open, line, raw) {
+                    charter_bullet(label, sec, at, &folded, &mut stack, &mut summary, &mut mapping)?;
                 }
             }
         }
+    }
+    if let Some((at, folded)) = open.take() {
+        let sec = section.expect("a bullet stands inside a section");
+        charter_bullet(label, sec, at, &folded, &mut stack, &mut summary, &mut mapping)?;
     }
     if !seen_h1 {
         return Err(format!("`{label}`: a charter opens with `# <name>`"));
@@ -341,6 +420,53 @@ fn backticked(text: &str) -> Option<(String, &str)> {
     Some((rest[..close].to_string(), &rest[close + 1..]))
 }
 
+/// One folded bullet of a task file, under the section it stands in — and,
+/// in `Verifications`, under the `### <slug>` it rides.
+fn task_bullet(
+    label: &str,
+    section: &str,
+    slug: Option<&String>,
+    (line, raw): (usize, &str),
+    task: &mut Task,
+    stack_lines: &mut Vec<String>,
+) -> Result<(), String> {
+    match section {
+        "Spec" => {
+            let b = bullet(label, line, raw, "spec bullets are `- `<ref>``")?;
+            let (r, rest) = backticked(b)
+                .ok_or_else(|| shape_err(label, line, "spec refs are backtick-wrapped"))?;
+            if !rest.trim().is_empty() {
+                return Err(shape_err(label, line, "spec bullets carry one ref and nothing else"));
+            }
+            task.spec_refs.push(r);
+        }
+        "Inputs" => {
+            let b = bullet(label, line, raw, "input bullets are `- from <task> — <note>`")?;
+            let b = b.strip_prefix("from ").ok_or_else(|| {
+                shape_err(label, line, "input bullets are `- from <task> — <note>`")
+            })?;
+            let (from, note) = b.split_once(" — ").unwrap_or((b, ""));
+            task.inputs.insert(from.trim().to_string(), note.trim().to_string());
+        }
+        "Outputs" => {
+            let b = bullet(label, line, raw, "output bullets are `- <path>`")?;
+            task.outputs.push(b.to_string());
+        }
+        "Stack" => {
+            let b = bullet(label, line, raw, "stack bullets are `- <detail>`")?;
+            stack_lines.push(b.to_string());
+        }
+        _ => {
+            let b = bullet(label, line, raw, "verifications ride under a `### <slug>`")?;
+            let Some(slug) = slug else {
+                return Err(shape_err(label, line, "verifications ride under a `### <slug>`"));
+            };
+            task.verifications.get_mut(slug).expect("opened above").push(b.to_string());
+        }
+    }
+    Ok(())
+}
+
 /// One task file. The id arrives from the file name — the `t<N>-` prefix
 /// is the identity; frontmatter carries the node and the curated owns.
 fn parse_task(label: &str, id: &str, text: &str) -> Result<Task, String> {
@@ -350,6 +476,7 @@ fn parse_task(label: &str, id: &str, text: &str) -> Result<Task, String> {
     }
     let mut node: Option<String> = None;
     let mut owns: Vec<String> = Vec::new();
+    let mut facts: Vec<CoveringFact> = Vec::new();
     let mut body_at = None;
     for (i, raw) in lines.iter().enumerate().skip(1) {
         let line = i + 1;
@@ -375,11 +502,28 @@ fn parse_task(label: &str, id: &str, text: &str) -> Result<Task, String> {
                     .map(str::to_string)
                     .collect();
             }
+            "facts" => {
+                let inner = value
+                    .trim()
+                    .strip_prefix('[')
+                    .and_then(|v| v.strip_suffix(']'))
+                    .ok_or_else(|| {
+                        shape_err(label, line, "facts is an inline list: `[<slug>@<digest>]`")
+                    })?;
+                for entry in inner.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                    facts.push(
+                        CoveringFact::parse(entry).map_err(|m| shape_err(label, line, &m))?,
+                    );
+                }
+            }
             other => {
                 return Err(shape_err(
                     label,
                     line,
-                    &format!("unknown frontmatter key `{other}` — task files carry `node` and `owns`"),
+                    &format!(
+                        "unknown frontmatter key `{other}` — task files carry `node`, `owns` \
+                         and `facts`"
+                    ),
                 ));
             }
         }
@@ -397,6 +541,7 @@ fn parse_task(label: &str, id: &str, text: &str) -> Result<Task, String> {
         description: String::new(),
         spec_refs: Vec::new(),
         owns,
+        facts,
         stack_details: String::new(),
         inputs: BTreeMap::new(),
         outputs: Vec::new(),
@@ -407,6 +552,9 @@ fn parse_task(label: &str, id: &str, text: &str) -> Result<Task, String> {
     let mut seen_h1 = false;
     let mut section: Option<&str> = None;
     let mut slug: Option<String> = None;
+    // The bullet standing open: a heading — `## ` or the `### <slug>` of a
+    // verification — ends the section the fold reads whole ([`fold_bullet`]).
+    let mut open: Option<(usize, String)> = None;
     for (i, raw) in lines.iter().enumerate().skip(body_at) {
         let line = i + 1;
         if !seen_h1 {
@@ -420,6 +568,10 @@ fn parse_task(label: &str, id: &str, text: &str) -> Result<Task, String> {
             return Err(shape_err(label, line, "a task file opens with `# t<N> — <node>`"));
         }
         if let Some(heading) = raw.trim_end().strip_prefix("## ") {
+            if let Some((at, folded)) = open.take() {
+                let sec = section.expect("a bullet stands inside a section");
+                task_bullet(label, sec, slug.as_ref(), (at, &folded), &mut task, &mut stack_lines)?;
+            }
             let heading = heading.trim();
             section = match heading {
                 "Spec" | "Inputs" | "Outputs" | "Stack" | "Verifications" => Some(heading),
@@ -436,6 +588,16 @@ fn parse_task(label: &str, id: &str, text: &str) -> Result<Task, String> {
         if section == Some("Verifications")
             && let Some(head) = raw.trim_end().strip_prefix("### ")
         {
+            if let Some((at, folded)) = open.take() {
+                task_bullet(
+                    label,
+                    "Verifications",
+                    slug.as_ref(),
+                    (at, &folded),
+                    &mut task,
+                    &mut stack_lines,
+                )?;
+            }
             let head = head.trim().to_string();
             // Owns is the curation; a proof for a requirement the task
             // never owned is structural, not advisory — own it first.
@@ -451,40 +613,23 @@ fn parse_task(label: &str, id: &str, text: &str) -> Result<Task, String> {
         }
         match section {
             None => desc_lines.push(raw),
-            Some(_) if raw.trim().is_empty() => {}
-            Some("Spec") => {
-                let b = bullet(label, line, raw, "spec bullets are `- `<ref>``")?;
-                let (r, rest) = backticked(b)
-                    .ok_or_else(|| shape_err(label, line, "spec refs are backtick-wrapped"))?;
-                if !rest.trim().is_empty() {
-                    return Err(shape_err(label, line, "spec bullets carry one ref and nothing else"));
+            Some(sec) => {
+                if let Some((at, folded)) = fold_bullet(&mut open, line, raw) {
+                    task_bullet(
+                        label,
+                        sec,
+                        slug.as_ref(),
+                        (at, &folded),
+                        &mut task,
+                        &mut stack_lines,
+                    )?;
                 }
-                task.spec_refs.push(r);
-            }
-            Some("Inputs") => {
-                let b = bullet(label, line, raw, "input bullets are `- from <task> — <note>`")?;
-                let b = b.strip_prefix("from ").ok_or_else(|| {
-                    shape_err(label, line, "input bullets are `- from <task> — <note>`")
-                })?;
-                let (from, note) = b.split_once(" — ").unwrap_or((b, ""));
-                task.inputs.insert(from.trim().to_string(), note.trim().to_string());
-            }
-            Some("Outputs") => {
-                let b = bullet(label, line, raw, "output bullets are `- <path>`")?;
-                task.outputs.push(b.to_string());
-            }
-            Some("Stack") => {
-                let b = bullet(label, line, raw, "stack bullets are `- <detail>`")?;
-                stack_lines.push(b.to_string());
-            }
-            Some(_) => {
-                let b = bullet(label, line, raw, "verifications ride under a `### <slug>`")?;
-                let Some(slug) = &slug else {
-                    return Err(shape_err(label, line, "verifications ride under a `### <slug>`"));
-                };
-                task.verifications.get_mut(slug).expect("opened above").push(b.to_string());
             }
         }
+    }
+    if let Some((at, folded)) = open.take() {
+        let sec = section.expect("a bullet stands inside a section");
+        task_bullet(label, sec, slug.as_ref(), (at, &folded), &mut task, &mut stack_lines)?;
     }
     if !seen_h1 {
         return Err(format!("`{label}`: a task file opens with `# t<N> — <node>`"));
@@ -492,28 +637,6 @@ fn parse_task(label: &str, id: &str, text: &str) -> Result<Task, String> {
     task.description = join_prose(&desc_lines);
     task.stack_details = stack_lines.join("\n");
     Ok(task)
-}
-
-/// `scenarios.md`: a heading, then bullets — nothing else.
-fn parse_scenarios(label: &str, text: &str) -> Result<Vec<String>, String> {
-    let mut out = Vec::new();
-    let mut seen_h1 = false;
-    for (i, raw) in text.lines().enumerate() {
-        let line = i + 1;
-        if raw.trim().is_empty() {
-            continue;
-        }
-        if !seen_h1 {
-            if raw.starts_with("# ") {
-                seen_h1 = true;
-                continue;
-            }
-            return Err(shape_err(label, line, "scenarios open with `# Scenarios`"));
-        }
-        let b = bullet(label, line, raw, "scenarios are `- <text>` bullets")?;
-        out.push(b.to_string());
-    }
-    Ok(out)
 }
 
 // ---- loading and minting -----------------------------------------------------
@@ -553,15 +676,6 @@ pub(crate) fn load(root: &Path, name: &str) -> Result<Plan, String> {
         by_ordinal.insert(ord, (file, task));
     }
 
-    let scenarios_file = scenarios_path(root, name);
-    let scenarios = if scenarios_file.exists() {
-        let text = fs::read_to_string(&scenarios_file)
-            .map_err(|e| format!("cannot read `{}`: {e}", scenarios_file.display()))?;
-        parse_scenarios(&scenarios_file.display().to_string(), &text)?
-    } else {
-        Vec::new()
-    };
-
     let state = load_state(root, name)?;
     Ok(Plan {
         name: name.to_string(),
@@ -574,16 +688,18 @@ pub(crate) fn load(root: &Path, name: &str) -> Result<Plan, String> {
         technology_stack,
         architecture_summary,
         stack_mapping,
-        scenarios,
+        scenarios: Vec::new(),
         cleanup_displayed: state.cleanup_displayed,
         scenarios_displayed: state.scenarios_displayed,
         scenarios_closed: state.scenarios_closed,
+        minted_after_the_world: state.minted_after_the_world,
         tasks: by_ordinal.into_values().map(|(_, t)| t).collect(),
     })
 }
 
-/// Mint a fresh record plan: the charter and scenarios skeletons plus the
-/// lifecycle file — every prose slot empty for the author to fill.
+/// Mint a fresh record plan: the charter skeleton plus the lifecycle file
+/// — every prose slot empty for the author to fill. No `scenarios.md`: the
+/// plan authors no stories, it collects them from the world at its close.
 pub(crate) fn mint(
     root: &Path,
     name: &str,
@@ -606,15 +722,14 @@ pub(crate) fn mint(
         cleanup_displayed: false,
         scenarios_displayed: false,
         scenarios_closed: false,
+        minted_after_the_world: true,
         tasks: Vec::new(),
     };
     let dir = plan_dir(root, name);
     fs::create_dir_all(&dir).map_err(|e| format!("cannot create `{}`: {e}", dir.display()))?;
-    let write = |path: PathBuf, text: String| {
-        fs::write(&path, text).map_err(|e| format!("cannot write `{}`: {e}", path.display()))
-    };
-    write(charter_path(root, name), render_charter(&plan))?;
-    write(scenarios_path(root, name), render_scenarios(&plan.scenarios))?;
+    let path = charter_path(root, name);
+    fs::write(&path, render_charter(&plan))
+        .map_err(|e| format!("cannot write `{}`: {e}", path.display()))?;
     write_state(root, &plan)?;
     Ok(plan)
 }
@@ -625,6 +740,46 @@ pub(crate) fn write_task(root: &Path, name: &str, task: &Task) -> Result<PathBuf
     fs::write(&path, render_task(task))
         .map_err(|e| format!("cannot write `{}`: {e}", path.display()))?;
     Ok(path)
+}
+
+/// Move one task file's `facts` line and nothing else — the re-resolution
+/// `plan repin` performs. The rest of the file is the author's and is left
+/// line for line; an unchanged list writes nothing at all.
+pub(crate) fn write_facts(
+    root: &Path,
+    name: &str,
+    id: &str,
+    facts: &[CoveringFact],
+) -> Result<(), String> {
+    let path =
+        task_path(root, name, id).ok_or_else(|| format!("no file carries `{id}`"))?;
+    let text =
+        fs::read_to_string(&path).map_err(|e| format!("cannot read `{}`: {e}", path.display()))?;
+    let mut out: Vec<String> = Vec::new();
+    let mut in_frontmatter = false;
+    for (i, raw) in text.lines().enumerate() {
+        if i == 0 {
+            in_frontmatter = raw.trim_end() == "---";
+        } else if in_frontmatter {
+            // The machine's line is rewritten, not edited around.
+            if raw.trim_start().starts_with("facts:") {
+                continue;
+            }
+            if raw.trim_end() == "---" {
+                if !facts.is_empty() {
+                    out.push(facts_line(facts));
+                }
+                in_frontmatter = false;
+            }
+        }
+        out.push(raw.to_string());
+    }
+    let mut fresh = out.join("\n");
+    fresh.push('\n');
+    if fresh == text {
+        return Ok(());
+    }
+    fs::write(&path, fresh).map_err(|e| format!("cannot write `{}`: {e}", path.display()))
 }
 
 #[cfg(test)]
@@ -651,6 +806,10 @@ mod tests {
             description: "guard the door\n\nand keep the log".into(),
             spec_refs: vec!["Auth.Gate".into(), "Gate.out wire Auth.inn".into()],
             owns: vec!["gate-throughput".into(), "service-hardening".into()],
+            facts: vec![CoveringFact {
+                fact: "riders-lose-the-signal".into(),
+                digest: "9f3ab1".into(),
+            }],
             stack_details: "axum 0.7\ntower layers".into(),
             inputs: [("t1".to_string(), "the store api".to_string())].into(),
             outputs: vec!["code/auth.rs".into()],
@@ -678,6 +837,7 @@ mod tests {
             cleanup_displayed: false,
             scenarios_displayed: false,
             scenarios_closed: false,
+            minted_after_the_world: true,
             tasks: Vec::new(),
         }
     }
@@ -724,16 +884,19 @@ mod tests {
     fn a_task_file_round_trips() {
         let task = task();
         let text = render_task(&task);
+        assert!(text.contains("facts: [riders-lose-the-signal@9f3ab1]"), "{text}");
         let parsed = parse_task("t", "t2", &text).unwrap();
         assert_eq!(parsed, task);
 
-        // The skeleton: empty slots keep their headings, owns is `[]`.
+        // The skeleton: empty slots keep their headings, owns is `[]`, and
+        // a node no fact covers carries no `facts` line at all.
         let bare = Task {
             id: "t1".into(),
             node: "Store".into(),
             description: String::new(),
             spec_refs: vec!["Store".into()],
             owns: Vec::new(),
+            facts: Vec::new(),
             stack_details: String::new(),
             inputs: BTreeMap::new(),
             outputs: Vec::new(),
@@ -741,19 +904,190 @@ mod tests {
         };
         let text = render_task(&bare);
         assert!(text.contains("owns: []"), "{text}");
+        assert!(!text.contains("facts:"), "{text}");
         assert!(text.contains("\n## Verifications\n"), "{text}");
         assert_eq!(parse_task("t", "t1", &text).unwrap(), bare);
         assert_eq!(task_file_name(&task), "t2-auth-gate.md");
+
+        // A shapeless fact entry refuses with the shape.
+        let text = render_task(&task).replace("@9f3ab1", "");
+        let err = parse_task("t", "t2", &text).unwrap_err();
+        assert!(err.contains("`<fact-slug>@<digest>`"), "{err}");
     }
 
+    /// The `facts` line moves alone: the rest of an authored file is left
+    /// exactly as its author wrote it, and an unchanged list writes nothing.
     #[test]
-    fn scenarios_round_trip() {
-        let scenarios = vec!["a user logs in".to_string(), "a row survives a restart".to_string()];
-        let text = render_scenarios(&scenarios);
-        assert_eq!(parse_scenarios("s", &text).unwrap(), scenarios);
-        assert_eq!(parse_scenarios("s", &render_scenarios(&[])).unwrap(), Vec::<String>::new());
-        let err = parse_scenarios("s", "# Scenarios\n\nprose\n").unwrap_err();
-        assert!(err.contains("`- <text>` bullets"), "{err}");
+    fn write_facts_moves_the_line_and_nothing_else() {
+        let root = temp_dir();
+        mint(&root, "mvp", "v0001".into(), None, "now".into()).unwrap();
+        let mut task = task();
+        task.id = "t1".into();
+        let path = write_task(&root, "mvp", &task).unwrap();
+        let authored = fs::read_to_string(&path).unwrap() + "\nhand-written tail\n";
+        fs::write(&path, &authored).unwrap();
+
+        // A different list rewrites the one line.
+        let moved = vec![CoveringFact { fact: "tunnels-run-long".into(), digest: "abc123".into() }];
+        write_facts(&root, "mvp", "t1", &moved).unwrap();
+        let after = fs::read_to_string(&path).unwrap();
+        assert!(after.contains("facts: [tunnels-run-long@abc123]"), "{after}");
+        assert!(!after.contains("riders-lose-the-signal"), "{after}");
+        assert_eq!(
+            after.replace("tunnels-run-long@abc123", "riders-lose-the-signal@9f3ab1"),
+            authored,
+            "only the one line moved"
+        );
+
+        // The same list writes nothing; an empty one drops the line.
+        write_facts(&root, "mvp", "t1", &moved).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), after);
+        write_facts(&root, "mvp", "t1", &[]).unwrap();
+        let bare = fs::read_to_string(&path).unwrap();
+        assert!(!bare.contains("facts:"), "{bare}");
+        assert!(bare.contains("hand-written tail"), "{bare}");
+
+        // A file that carries no line yet gets one — the world reaching a
+        // node it did not reach before.
+        write_facts(&root, "mvp", "t1", &moved).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), after);
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A charter bullet may run onto further lines, wrapped where the
+    /// author's editor wrapped it: the section splits at the lines that open
+    /// with `- ` and each piece collapses to one line
+    /// (`archi/requirements/planning/a-record-bullet-may-wrap.md`).
+    #[test]
+    fn a_charter_bullet_may_wrap() {
+        let text = "# mvp\n\nthe problem\nover two lines\n\n\
+                    ## Stack\n\n\
+                    - Rust —\n  user choice\n\n\
+                    - sqlite\n\n\
+                    ## Architecture\n\n\
+                    - `Store` — keeps\n  the rows\n\
+                    - `Store` realizes\n  sqlite\n";
+        let (problem, stack, summary, mapping) = parse_charter("c", text).unwrap();
+        // Prose keeps its line breaks; the bullets lose theirs.
+        assert_eq!(problem, "the problem\nover two lines");
+        assert_eq!(
+            stack,
+            vec![
+                TechChoice { tech: "Rust".into(), provenance: "user choice".into() },
+                TechChoice { tech: "sqlite".into(), provenance: String::new() },
+            ]
+        );
+        assert_eq!(
+            summary,
+            vec![SummaryLine { node: "Store".into(), role: "keeps the rows".into() }]
+        );
+        assert_eq!(mapping, vec![StackMapping { tech: "sqlite".into(), node: "Store".into() }]);
+
+        // A section that opens on prose still refuses, at the line the piece
+        // opened on and not at the line that continues it.
+        let err = parse_charter("c", "# mvp\n\n## Stack\n\nprose\n  and more prose\n").unwrap_err();
+        assert!(err.contains("line 5"), "{err}");
+    }
+
+    /// The same fold in every bullet section a task file carries, over two
+    /// lines, over three, and over a blank line inside one bullet
+    /// (`archi/requirements/planning/a-record-bullet-may-wrap.md`).
+    #[test]
+    fn every_bullet_section_of_a_task_may_wrap() {
+        let text = "---\nnode: Store\nowns: [store-encrypted]\n---\n\n\
+                    # t1 — Store\n\n\
+                    persist rows\nover two lines\n\n\
+                    ## Spec\n\n\
+                    - `Auth.creds wire\n  Store.inn`\n\n\
+                    - `Store`\n\n\
+                    ## Inputs\n\n\
+                    - from t2 — the store api\n  the gate calls\n\n\
+                    ## Outputs\n\n\
+                    - crates/archi/src/plans/records.rs,\n  crates/archi/src/plans/mod.rs\n\n\
+                    ## Stack\n\n\
+                    - axum 0.7, the\n\n  tower layer\n\n  it rides on\n\n\
+                    ## Verifications\n\n\
+                    ### store-encrypted\n\n\
+                    - test — a row written\n  through the gate\n  comes back sealed\n";
+        let task = parse_task("t", "t1", text).unwrap();
+        assert_eq!(task.description, "persist rows\nover two lines");
+        assert_eq!(task.spec_refs, ["Auth.creds wire Store.inn", "Store"]);
+        assert_eq!(task.inputs["t2"], "the store api the gate calls");
+        // The outputs section is opaque strings to the parser: the fold is
+        // what this bullet proves, not the shape of a path.
+        assert_eq!(
+            task.outputs,
+            ["crates/archi/src/plans/records.rs, crates/archi/src/plans/mod.rs"]
+        );
+        assert_eq!(task.stack_details, "axum 0.7, the tower layer it rides on");
+        assert_eq!(
+            task.verifications["store-encrypted"],
+            ["test — a row written through the gate comes back sealed"]
+        );
+
+        // A blank line between bullets changes nothing, and a bullet
+        // refused is refused at the line it opened on.
+        let spaced = text.replace("- `Store`\n", "\n- `Store`\n\n");
+        assert_eq!(parse_task("t", "t1", &spaced).unwrap(), task);
+        let bad = text.replace("- `Auth.creds wire\n", "- Auth.creds wire\n");
+        let err = parse_task("t", "t1", &bad).unwrap_err();
+        assert!(err.contains("line 13"), "{err}");
+        assert!(err.contains("backtick-wrapped"), "{err}");
+    }
+
+    /// The fold changes nothing about the records this repository stands on:
+    /// every one of them loads, and each parses to the value it would parse to
+    /// written one bullet per line, whatever layout its author left. The
+    /// renderers are the parsers' inverse and write that unwrapped form, so a
+    /// record parsed, rendered and parsed again *is* that comparison — for a
+    /// record nobody wrapped it says the reading did not move, and for one
+    /// somebody wrapped it says the wrap carried no meaning. The claim is
+    /// about the values, never about where a line ends: a guard that refused a
+    /// wrapped record would refuse the feature it stands under
+    /// (`archi/requirements/planning/a-record-bullet-may-wrap.md`).
+    #[test]
+    fn every_record_standing_in_this_repository_parses_as_it_did() {
+        let plans = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../archi/plans");
+        let mut read = 0;
+        for plan in fs::read_dir(&plans).unwrap().filter_map(Result::ok) {
+            let name = plan.file_name().to_string_lossy().into_owned();
+            if !plan.path().is_dir() {
+                continue;
+            }
+            for entry in fs::read_dir(plan.path()).unwrap().filter_map(Result::ok) {
+                let file = entry.file_name().to_string_lossy().into_owned();
+                if !file.ends_with(".md") {
+                    continue;
+                }
+                let label = format!("archi/plans/{name}/{file}");
+                let text = fs::read_to_string(entry.path()).unwrap();
+                if let Some(ord) = task_ordinal(&file) {
+                    let id = format!("t{ord}");
+                    let task =
+                        parse_task(&label, &id, &text).unwrap_or_else(|e| panic!("{e}"));
+                    let again = parse_task(&label, &id, &render_task(&task))
+                        .unwrap_or_else(|e| panic!("{e}"));
+                    assert_eq!(again, task, "`{label}` reads two ways");
+                } else if file == format!("{name}.md") {
+                    let charter = parse_charter(&label, &text).unwrap_or_else(|e| panic!("{e}"));
+                    let mut plan = empty_plan(&name);
+                    plan.problem = charter.0.clone();
+                    plan.technology_stack = charter.1.clone();
+                    plan.architecture_summary = charter.2.clone();
+                    plan.stack_mapping = charter.3.clone();
+                    let again = parse_charter(&label, &render_charter(&plan))
+                        .unwrap_or_else(|e| panic!("{e}"));
+                    assert_eq!(again, charter, "`{label}` reads two ways");
+                } else {
+                    // A `scenarios.md` an old plan was written with is read
+                    // by nobody, here as anywhere else.
+                    continue;
+                }
+                read += 1;
+            }
+        }
+        assert!(read > 40, "the records were not read: {read} files");
     }
 
     #[test]
@@ -774,6 +1108,7 @@ mod tests {
         let text = render_task(&task()).replace("node:", "extra: x\nnode:");
         let err = parse_task("t", "t2", &text).unwrap_err();
         assert!(err.contains("unknown frontmatter key `extra`"), "{err}");
+        assert!(err.contains("`facts`"), "{err}");
         let err = parse_task("t", "t1", "---\nowns: []\n---\n\n# t1 — X\n").unwrap_err();
         assert!(err.contains("names no `node`"), "{err}");
         let err = parse_task("t", "t1", "# t1 — X\n").unwrap_err();
@@ -783,9 +1118,11 @@ mod tests {
     #[test]
     fn state_json_refuses_drift() {
         // The latch-less shape an old binary wrote parses — the latches
-        // default unflipped; a flipped cleanup latch parses too.
+        // default unflipped; a flipped cleanup latch parses too. The world
+        // mark defaults with them: a plan from before the world is one.
         let ok = r#"{"state":"draft","closed_waves":0,"version":"v0001","created":"now"}"#;
         assert!(serde_json::from_str::<StateFile>(ok).is_ok());
+        assert!(!serde_json::from_str::<StateFile>(ok).unwrap().minted_after_the_world);
         let latched = r#"{"state":"started","closed_waves":1,"version":"v0001","created":"now","cleanup_displayed":true}"#;
         assert!(serde_json::from_str::<StateFile>(latched).unwrap().cleanup_displayed);
         let unknown = r#"{"state":"draft","closed_waves":0,"version":"v0001","created":"now","extra":1}"#;
@@ -800,6 +1137,10 @@ mod tests {
         let root = temp_dir();
         let plan = mint(&root, "mvp", "v0001".into(), None, "now".into()).unwrap();
         assert_eq!(load(&root, "mvp").unwrap(), plan);
+
+        // The mint stamps the world and writes no story block of its own.
+        assert!(plan.minted_after_the_world);
+        assert!(!plan_dir(&root, "mvp").join("scenarios.md").exists());
 
         let mut task = task();
         task.id = "t1".into();

@@ -1,0 +1,10 @@
+--- original
++++ modified
+@@ -375,6 +375,7 @@
+ DocMint.emit persist(WorldDoc) SourceTree.store in harden_flow
+ DocMint.pin recall(<-CanonicalRender) Archive.serve in harden_flow
+ DocMint.read_links recall(<-LinkEvent) Links.serve_links in harden_flow
++DocMint.read_tree recall(<-PlanFile) SourceTree.serve in harden_flow
+ DocMint.read_tree recall(<-RequirementDoc) SourceTree.serve in harden_flow
+ DocMint.read_tree recall(<-StressDoc) SourceTree.serve in harden_flow
+ DocMint.read_tree recall(<-WorldDoc) SourceTree.serve in harden_flow

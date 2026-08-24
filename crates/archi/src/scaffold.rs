@@ -16,8 +16,11 @@ use std::path::{Path, PathBuf};
 use modeling_lang::source::{find_project_root, manifest_src};
 
 /// The briefing, embedded at build time: skill name → SKILL.md text.
-const SKILLS: [(&str, &str); 7] = [
+const SKILLS: [(&str, &str); 11] = [
     ("archi", include_str!("../../../skills/archi.md")),
+    ("archi-search", include_str!("../../../skills/archi-search.md")),
+    ("archi-explain", include_str!("../../../skills/archi-explain.md")),
+    ("archi-resume", include_str!("../../../skills/archi-resume.md")),
     ("archi-plan", include_str!("../../../skills/archi-plan.md")),
     ("archi-implement", include_str!("../../../skills/archi-implement.md")),
     ("archi-merge", include_str!("../../../skills/archi-merge.md")),
@@ -25,6 +28,7 @@ const SKILLS: [(&str, &str); 7] = [
         "archi-finish-worktree",
         include_str!("../../../skills/archi-finish-worktree.md"),
     ),
+    ("archi-migrate", include_str!("../../../skills/archi-migrate.md")),
     (
         "archi-migrate-fractal",
         include_str!("../../../skills/archi-migrate-fractal.md"),
@@ -50,6 +54,10 @@ pub enum Act {
     Ok,
     /// Present and different — read, reported, left alone.
     Kept,
+    /// Installed under `.claude/skills/` with an `archi-` name this binary
+    /// does not embed — named by `sync-skills`, removed by nobody
+    /// (`one-door-migrates-the-standing-project`).
+    Orphaned,
 }
 
 /// One report line: an act, the artifact's project-relative path, the
@@ -208,10 +216,15 @@ pub fn init(target: &Path) -> Result<Outcome, String> {
 /// project with a newer binary (`the-installed-skill-drifts`): a skill or
 /// CLAUDE.md block that already matches is `ok`, an absent one is `created`,
 /// and any divergent one is `updated` — overwritten with the binary's copy,
-/// unconditionally. It never touches the model, only the briefing, so a
-/// reflexive re-run cannot lose source; init stays create-only
-/// (`a-re-run-clobbers-the-tree` stays answered). Requires the tree to be a
-/// project already; the target is located, not created.
+/// unconditionally. An installed `archi-*` skill this binary does not embed
+/// is reported `orphaned` and left in place: a merge that retires a page must
+/// not leave the installed copy standing as if current, and the folder is
+/// shared with skills the user authored, so only the binary's own `archi-`
+/// namespace is judged and nothing is ever removed
+/// (`one-door-migrates-the-standing-project`). It never touches the model,
+/// only the briefing, so a reflexive re-run cannot lose source; init stays
+/// create-only (`a-re-run-clobbers-the-tree` stays answered). Requires the
+/// tree to be a project already; the target is located, not created.
 pub fn sync_skills(target: &Path) -> Result<Outcome, String> {
     let target = target
         .canonicalize()
@@ -230,9 +243,13 @@ pub fn sync_skills(target: &Path) -> Result<Outcome, String> {
 
     let mut steps = Vec::new();
 
+    // The one folder both walks below share: the install loop writes into it,
+    // the orphan report reads it back.
+    let skills_dir = target.join(".claude/skills");
+
     // The briefing skills: overwrite any that has drifted from the embedded copy.
     for (skill, text) in SKILLS {
-        let path = target.join(".claude/skills").join(skill).join("SKILL.md");
+        let path = skills_dir.join(skill).join("SKILL.md");
         let act = match fs::read_to_string(&path) {
             Err(_) => {
                 write_new(&path, text)?;
@@ -246,6 +263,34 @@ pub fn sync_skills(target: &Path) -> Result<Outcome, String> {
             }
         };
         steps.push(step(act.0, &target, &path, act.1));
+    }
+
+    // The orphan report: an installed `archi-*` skill this binary no longer
+    // embeds would read as current doctrine if the sync stayed silent, so it
+    // is named — and never removed. Only the binary's own `archi-` namespace
+    // is judged: the folder holds skills the user authored beside the
+    // installed briefing, and those are nobody's orphans.
+    if let Ok(entries) = fs::read_dir(&skills_dir) {
+        let mut orphaned: Vec<PathBuf> = entries
+            .flatten()
+            .filter_map(|e| {
+                let name = e.file_name().into_string().ok()?;
+                let page = e.path().join("SKILL.md");
+                (name.starts_with("archi-")
+                    && !SKILLS.iter().any(|(skill, _)| *skill == name)
+                    && page.is_file())
+                .then_some(page)
+            })
+            .collect();
+        orphaned.sort();
+        for page in orphaned {
+            steps.push(step(
+                Act::Orphaned,
+                &target,
+                &page,
+                Some("this binary embeds no such skill".into()),
+            ));
+        }
     }
 
     // The CLAUDE.md block: the fence marks the one region sync may reclaim, so
@@ -346,6 +391,7 @@ fn act_verb(act: Act) -> &'static str {
         Act::Updated => "updated",
         Act::Ok => "ok",
         Act::Kept => "kept",
+        Act::Orphaned => "orphaned",
     }
 }
 

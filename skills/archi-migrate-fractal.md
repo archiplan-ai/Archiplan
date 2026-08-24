@@ -9,6 +9,8 @@ description: Migrate a machine and its projects off the old fractal client — s
 > `updated` or `created`, the text you follow is stale. Read that file
 > again, follow it, and only then continue. `ok` means continue.
 
+> Retrieval — how to find anything here — is the `archi-search` skill.
+
 # Migrate from fractal
 
 The old fractal client and the new Archiplan CLI both install as `archi`.
@@ -67,8 +69,9 @@ old-archi link ls                 # code links, if any
 ## 3. Rebuild in the new format (archi)
 
 Run `archi init` in the same project. It is create-only: it reports
-existing files, and it does not rewrite them. Then translate, and loop
-`archi check` to zero errors:
+existing files, and it does not rewrite them. Mutating commands run
+only inside a bound worktree: `archi worktree mint import`, then `cd`
+there. Then translate, and loop `archi check` to zero errors:
 
 - **The whole graph imports.** Every old node and typed edge lands in
   `.arch` source under `archi/src/`. Old nested scopes become real nested
@@ -124,4 +127,7 @@ model, stressors worth a re-run. Add a pointer to `.fractal/` as the
 frozen reference. Tell the operator that the project now stands at the
 imported version, and that hardening continues with the standard `archi`
 skill: stress, answer, save. Leave `old-archi` and `.fractal/` in place
-until the operator confirms that every project imported.
+until the operator confirms that every project imported. The imported
+project is a standing project now: run the `archi-migrate` skill on it
+for the two in-project passes — the world interview and the journal
+triage.

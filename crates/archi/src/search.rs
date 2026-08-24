@@ -1,6 +1,8 @@
 //! `archi search`: ranked lexical retrieval across every KB object —
 //! model elements with their identity prose, intents, requirements,
-//! stressors, sessions and decisions (`archi/requirements/agent-retrieval/`).
+//! stressors, sessions, decisions and the world facts
+//! (`archi/requirements/agent-retrieval/`,
+//! `archi/requirements/world-facts/search-reaches-the-new-world.md`).
 //!
 //! The scan keeps no persisted derivative of the corpus: every query walks
 //! the live doc tree and the compiled model it was handed, so a text edit
@@ -16,7 +18,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use modeling_lang::{Definition, Model, Statement};
 use serde::Serialize;
@@ -24,6 +26,7 @@ use serde::Serialize;
 use crate::docs;
 use crate::docs::md;
 use crate::docs::schema::{Origin, Outcome};
+use crate::docs::world;
 
 /// The object kinds a card can be. The order is the ranking tie-break.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -40,6 +43,8 @@ pub enum Kind {
     Session,
     /// A decision — the priced record of one trade.
     Decision,
+    /// A world fact — one condition outside the system.
+    World,
 }
 
 impl Kind {
@@ -52,6 +57,7 @@ impl Kind {
             Kind::Stressor => "stressor",
             Kind::Session => "session",
             Kind::Decision => "decision",
+            Kind::World => "world",
         }
     }
 
@@ -64,6 +70,7 @@ impl Kind {
             "stressor" => Kind::Stressor,
             "session" => Kind::Session,
             "decision" => Kind::Decision,
+            "world" => Kind::World,
             _ => return None,
         })
     }
@@ -122,6 +129,12 @@ pub struct Refs {
     /// Session: the closing seal, or `open`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub closed: Option<String>,
+    /// World fact: the model elements it conditions.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub covers: Vec<String>,
+    /// World fact: the facts it holds only while they hold.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub uses: Vec<String>,
 }
 
 /// Field classes and their weights: a hit in a name outweighs the same hit
@@ -280,6 +293,62 @@ fn fill_doc_text(root: &Path, card: &mut Card) -> bool {
     true
 }
 
+/// The world's strict records: one file under `archi/world/facts/` is
+/// one fact, and the corpus reads the layer the checker reads, through the
+/// one function that says where a fact lives — search and `check` can never
+/// disagree about where to look
+/// (`archi/requirements/world-facts/the-world-holds-four-layers.md`). The
+/// three loose layers hold no fact and stay out of the corpus.
+///
+/// A tree with no world is an empty one — the scan neither needs the directory
+/// nor makes it (the-world-arrives-without-noise).
+fn world_files(root: &Path) -> Vec<PathBuf> {
+    docs::sorted_entries(&docs::mint::facts_dir(root))
+        .into_iter()
+        .filter(|p| docs::is_md(p))
+        .collect()
+}
+
+/// One world fact's card: its name, its conditioning paragraph, the
+/// workaround under it.
+/// The `Scenarios` block stays out and so do the header's lists — a step and a
+/// covered element are addressed by `covers`, never by phrase, so the reach is
+/// real and the yield is bounded (search-reaches-the-new-world). The lists ride
+/// the refs, where the next command starts (cards-carry-the-next-hop).
+fn world_card(root: &Path, path: &Path) -> Card {
+    let file = rel(root, path);
+    let slug = path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+    let Some(doc) = fs::read_to_string(path)
+        .ok()
+        .and_then(|text| md::parse(&text).ok())
+    else {
+        return raw_card(root, file, Kind::World, slug);
+    };
+    // The record the checker reads, so retrieval and `check` can never
+    // disagree about what a file holds; its diagnostics are `check`'s to tell.
+    let fact = world::parse(&doc, &file, &slug, root, &mut Vec::new());
+    let mut c = Card::new(Kind::World, slug, Some(file), fact.line);
+    c.push(0, doc.name_line, doc.name.clone());
+    push_block(&mut c, 1, fact.condition.as_ref());
+    push_block(&mut c, 2, fact.workaround.as_ref());
+    c.refs.covers = fact.covers.map(|(v, _)| v).unwrap_or_default();
+    c.refs.uses = fact.uses.map(|(v, _)| v).unwrap_or_default();
+    c
+}
+
+/// A parsed block onto one field, line by line — a world card addresses a
+/// line the way every other card does.
+fn push_block(card: &mut Card, field: usize, block: Option<&world::Block>) {
+    let Some(b) = block else { return };
+    for (i, text) in b.text.lines().enumerate() {
+        card.push(field, b.line + i, text);
+    }
+}
+
 /// A file the schema walk dropped (unreadable, unparseable or misplaced)
 /// still matches by its raw lines: a card with no schema fields
 /// (a-dark-corpus-stays-partial).
@@ -434,6 +503,12 @@ fn corpus(root: &Path, model: Option<&Model>) -> Vec<Card> {
         cards.push(c);
     }
 
+    // The world rides the same scan: one card per fact, out of the same
+    // reader `check` uses (search-reaches-the-new-world).
+    for path in world_files(root) {
+        cards.push(world_card(root, &path));
+    }
+
     // Whatever the schema walk dropped — unreadable, unparseable, misplaced
     // — still matches by raw text.
     let covered: BTreeSet<String> = cards.iter().filter_map(|c| c.file.clone()).collect();
@@ -491,11 +566,19 @@ fn corpus(root: &Path, model: Option<&Model>) -> Vec<Card> {
                         // A port name is the element's addressable interface
                         // (`Sessions.fold` pipes into `query`) — it weighs as
                         // summary; its doc is supporting prose, body weight.
+                        // Beside a node with no definition of its own there
+                        // is no statement for the ports to support: their
+                        // prose is the statement, so it takes the summary
+                        // slot the missing definition left empty. Only the
+                        // empty slot is filled — a node that already speaks
+                        // keeps its ports at body weight, or a node with
+                        // many ports would float on their volume alone.
+                        let port_field = if doc.is_some() { 2 } else { 1 };
                         for p in ports.iter().flatten() {
                             c.push(1, 0, p.clone());
                         }
                         for (p, doc) in port_docs.iter().flatten() {
-                            c.push(2, 0, format!("{p} {doc}"));
+                            c.push(port_field, 0, format!("{p} {doc}"));
                         }
                     }
                     elements.push(c);
@@ -801,6 +884,12 @@ pub(crate) fn render_refs(r: &Refs) -> String {
     if let Some(c) = &r.closed {
         parts.push(format!("closed: {c}"));
     }
+    if !r.covers.is_empty() {
+        parts.push(format!("covers: {}", cap(&r.covers)));
+    }
+    if !r.uses.is_empty() {
+        parts.push(format!("uses: {}", cap(&r.uses)));
+    }
     parts.join(" · ")
 }
 
@@ -875,6 +964,20 @@ mod tests {
             root,
             "archi/stress/auth-hardening/limiter-bypass.md",
             "---\naffects: [RateLimiter]\noutcome: pending\n---\n\n# Limiter bypass\n\nDistributed bots stay under the per-ip threshold.\n\n## Attractor\n\nThe limiter sees no single hot key.\n\n## Resolution\n",
+        );
+    }
+
+    /// One fact of the world, in the layer the strict record lives in
+    /// (`archi/requirements/world-facts/the-world-holds-four-layers.md`): the
+    /// condition, what people do instead, and the scenarios it dictates —
+    /// whose steps the card does not hold. `trackside` stands in the
+    /// workaround block and nowhere else, so a search for it proves the card
+    /// carries that block.
+    fn world_fact(root: &Path) {
+        put(
+            root,
+            "archi/world/facts/trains-lose-the-signal-in-tunnels.md",
+            "---\ncovers: [AuthService]\nsources: []\nuses: [the-carriage-is-metal]\n---\n\n# Trains lose the signal in tunnels\n\nThe carriage keeps no reception for minutes at a time, so a call that must reach\nthe far end fails for a reason nobody aboard can fix.\n\n## What people do instead\n\nRiders load what they need while the train still stands at a trackside\nplatform, and redo the trip's work when they forget.\n\n## Scenarios\n\nFeature: Offline open\n  Scenario: the rider opens the app underground\n    Given the device holds no dugong\n    When the rider opens the app\n    Then the last synced view appears\n",
         );
     }
 
@@ -1006,6 +1109,140 @@ mod tests {
         fs::remove_dir_all(&root).unwrap();
     }
 
+    /// The split the ports rule is about, in one model. Four nodes hold the
+    /// same words, each in a different slot: `Cartographer` in a port and
+    /// nowhere else, `Ledger` in a port beside a definition of its own,
+    /// `Surveyor` in its definition, `Quokka` in its name. `Atlas` and
+    /// `Cellar` hold none of them, so the phrase stays rarer than the corpus
+    /// and its frequency weight stays above zero.
+    const PORTS_MODEL: &str = "def node Cartographer:\n  port survey // charts the quokka runs after dark\ndef node Ledger: // the estate's book of debts\n  port audit // charts the quokka runs after dark\ndef node Surveyor // charts the quokka runs after dark\ndef node Quokka\ndef node Atlas\ndef node Cellar\n";
+
+    fn ports_project() -> PathBuf {
+        let root = temp_project();
+        put(&root, "archi/src/model.arch", PORTS_MODEL);
+        root
+    }
+
+    /// The hit a slug names. A miss is a wrong report, not a wrong
+    /// assertion, so it names what it did find.
+    fn card_of<'a>(r: &'a SearchReport, slug: &str) -> &'a Hit {
+        r.hits
+            .iter()
+            .find(|h| h.slug == slug)
+            .unwrap_or_else(|| panic!("`{slug}` is not in {:?}", slugs_of(r)))
+    }
+
+    fn score_of(r: &SearchReport, slug: &str) -> f64 {
+        card_of(r, slug).score
+    }
+
+    /// Scores ride out rounded to three decimals; a weight ratio holds to
+    /// well inside a hundredth.
+    fn close(a: f64, b: f64) -> bool {
+        (a - b).abs() < 0.01
+    }
+
+    /// The empty slot is filled: a node that carries no definition is
+    /// indexed by its ports' prose where its own prose would have sat, so
+    /// those words earn what the same words earn as a definition — and
+    /// twice what they earn as a port beside a definition.
+    #[test]
+    fn a_definitionless_node_ranks_on_its_ports_prose_at_summary_weight() {
+        let root = ports_project();
+        let r = run(&root, "quokka", &[Kind::Element], 10);
+        let carto = score_of(&r, "Cartographer");
+        let surveyor = score_of(&r, "Surveyor");
+        let ledger = score_of(&r, "Ledger");
+        assert!(
+            close(carto, surveyor),
+            "port prose scores {carto}, the same words as a definition score {surveyor}"
+        );
+        assert!(
+            close(carto, 2.0 * ledger),
+            "port prose scores {carto}, body weight is {ledger}"
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A summary is not a name: the promoted ports lift the node into the
+    /// middle weight class and no further.
+    #[test]
+    fn the_promoted_ports_still_lose_to_a_name_match() {
+        let root = ports_project();
+        let r = run(&root, "quokka", &[Kind::Element], 10);
+        assert_eq!(r.hits[0].slug, "Quokka", "{:?}", slugs_of(&r));
+        let name = score_of(&r, "Quokka");
+        let carto = score_of(&r, "Cartographer");
+        assert!(name > carto, "name {name} does not outrank ports {carto}");
+        assert!(
+            close(2.0 * name, 3.0 * carto),
+            "name {name} against summary {carto} is not three to two"
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Nothing moves for a node that already speaks: its ports stay
+    /// supporting detail, one third of a name and one half of a summary.
+    #[test]
+    fn a_node_with_its_own_definition_keeps_its_ports_at_body_weight() {
+        let root = ports_project();
+        let r = run(&root, "quokka", &[Kind::Element], 10);
+        let ledger = score_of(&r, "Ledger");
+        assert!(
+            close(3.0 * ledger, score_of(&r, "Quokka")),
+            "body {ledger} against a name is not one to three"
+        );
+        assert!(
+            close(2.0 * ledger, score_of(&r, "Surveyor")),
+            "body {ledger} against a summary is not one to two"
+        );
+        let card = card_of(&r, "Ledger");
+        assert_eq!(
+            card.refs.definition.as_deref(),
+            Some("the estate's book of debts"),
+            "the node under test must carry a definition of its own"
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A node with no ports and no definition has one field and answers out
+    /// of it alone, exactly as it did before the ports moved.
+    #[test]
+    fn a_node_with_no_ports_and_no_definition_scores_on_its_name_alone() {
+        let root = ports_project();
+        let r = run(&root, "quokka", &[Kind::Element], 10);
+        let bare = card_of(&r, "Quokka");
+        assert!(
+            close(2.0 * bare.score, 3.0 * score_of(&r, "Surveyor")),
+            "a bare name scores {}, a summary {}",
+            bare.score,
+            score_of(&r, "Surveyor")
+        );
+        assert_eq!(bare.refs.definition, None);
+        assert_eq!(bare.snippet, "", "a bare node carries no prose to show");
+        // And it gains nothing it did not hold: `Atlas` is bare too and the
+        // phrase never reaches it.
+        assert!(!slugs_of(&r).contains(&"Atlas"), "{:?}", slugs_of(&r));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The card of a definitionless node prints its port prose, from
+    /// whichever field now holds it.
+    #[test]
+    fn the_card_of_a_definitionless_node_shows_its_port_prose() {
+        let root = ports_project();
+        let r = run(&root, "quokka", &[Kind::Element], 10);
+        let card = card_of(&r, "Cartographer");
+        assert_eq!(card.refs.definition, None);
+        assert_eq!(card.snippet, "survey charts the quokka runs after dark");
+        assert!(
+            render_human(&r).contains("survey charts the quokka runs after dark"),
+            "{}",
+            render_human(&r)
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
     #[test]
     fn a_dark_corpus_stays_partial() {
         let root = temp_project();
@@ -1124,6 +1361,125 @@ mod tests {
         let r = run(&root, "okapi", &[], 10);
         assert_eq!(slugs_of(&r), ["broken"]);
         assert_eq!(r.hits[0].kind, "decision");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn search_reaches_the_new_world() {
+        let root = temp_project();
+        full_kb(&root);
+        world_fact(&root);
+
+        // A phrase from the fact's name returns the fact, carrying the slug
+        // and the `file:line` every other card carries.
+        let r = run(&root, "tunnels", &[], 10);
+        let hit = r
+            .hits
+            .iter()
+            .find(|h| h.kind == "world")
+            .expect("the world card");
+        assert_eq!(hit.slug, "trains-lose-the-signal-in-tunnels");
+        assert_eq!(
+            hit.file.as_deref(),
+            Some("archi/world/facts/trains-lose-the-signal-in-tunnels.md")
+        );
+        assert!(hit.line.is_some());
+
+        // The narrowing flag holds the new kind like any other: the phrase
+        // spans kinds unfiltered and returns world facts alone once narrowed.
+        assert!(matches!(Kind::parse("world"), Some(Kind::World)));
+        let spanning = run(&root, "trackside limiting", &[], 20);
+        assert!(kinds_of(&spanning).len() > 1, "{:?}", slugs_of(&spanning));
+        let narrowed = run(&root, "trackside limiting", &[Kind::World], 20);
+        assert_eq!(kinds_of(&narrowed), ["world"].into());
+
+        // The envelope carries the kind by its label.
+        let json = serde_json::to_string(&run(&root, "tunnels", &[Kind::World], 10)).unwrap();
+        assert!(json.contains("\"kind\":\"world\""), "{json}");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn the_card_is_the_fact_and_not_its_scenarios() {
+        let root = temp_project();
+        full_kb(&root);
+        world_fact(&root);
+
+        // A phrase living only inside a scenario step reaches nothing: a step
+        // is addressed by `covers`, never by phrase.
+        assert!(run(&root, "dugong", &[], 10).hits.is_empty());
+        // The header is no body either — a fact is found by the words of the
+        // fact, and the way from an element to what conditions it is the
+        // `covers` traversal.
+        let r = run(&root, "AuthService", &[], 10);
+        assert!(
+            !slugs_of(&r).contains(&"trains-lose-the-signal-in-tunnels"),
+            "{:?}",
+            slugs_of(&r)
+        );
+        // The next hop rides the card all the same.
+        let hit = &run(&root, "tunnels", &[Kind::World], 10).hits[0];
+        assert_eq!(hit.refs.covers, ["AuthService"]);
+        assert_eq!(hit.refs.uses, ["the-carriage-is-metal"]);
+
+        // An unparseable fact degrades to raw text, kind intact.
+        put(
+            &root,
+            "archi/world/facts/broken.md",
+            "---\nnever closed\n\n# Broken\n\nA numbat hides in the raw text.\n",
+        );
+        let r = run(&root, "numbat", &[], 10);
+        assert_eq!(slugs_of(&r), ["broken"]);
+        assert_eq!(r.hits[0].kind, "world");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_tree_with_no_world_answers_as_it_did() {
+        let root = temp_project();
+        full_kb(&root);
+        let r = run(&root, "rate limiting", &[], 20);
+        assert!(!kinds_of(&r).contains("world"));
+        assert!(run(&root, "trackside", &[Kind::World], 10).hits.is_empty());
+        // The scan neither needs the directory nor makes it — neither the
+        // world nor the layer inside it.
+        assert!(!root.join("archi/world").exists());
+        assert!(!docs::mint::facts_dir(&root).exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The corpus reads the layer the checker reads: a fact under `facts/`
+    /// is a card, and a file left in the world's root is no fact and no card —
+    /// the folder is what says what a file is
+    /// (`archi/requirements/world-facts/the-world-holds-four-layers.md`,
+    /// `search-reaches-the-new-world`). Two answers to "where does a fact
+    /// live" is a tool that disagrees with itself, so this reads the one
+    /// function the mint and the walk read.
+    #[test]
+    fn the_corpus_reads_the_layer_the_checker_reads() {
+        let root = temp_project();
+        full_kb(&root);
+        world_fact(&root);
+        assert_eq!(
+            world_files(&root),
+            [docs::mint::facts_dir(&root).join("trains-lose-the-signal-in-tunnels.md")]
+        );
+
+        // The three loose layers hold no fact, and neither does the root of
+        // the world: none of them reaches the corpus.
+        for at in [
+            "archi/world/a-loose-file.md",
+            "archi/world/notes/a-rider-said-the-app-froze.md",
+            "archi/world/hypotheses/the-tunnel-is-the-cause.md",
+            "archi/world/resources/a-quokka-transcript.md",
+        ] {
+            put(&root, at, "# A quokka watched\n\nIt said nothing at all.\n");
+        }
+        assert!(run(&root, "quokka", &[], 10).hits.is_empty());
+        assert_eq!(
+            slugs_of(&run(&root, "tunnels", &[Kind::World], 10)),
+            ["trains-lose-the-signal-in-tunnels"]
+        );
         fs::remove_dir_all(&root).unwrap();
     }
 

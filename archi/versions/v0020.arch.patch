@@ -1,0 +1,94 @@
+--- original
++++ modified
+@@ -37,6 +37,7 @@
+   port update // check-update, update: the binary against the release feed's latest
+   port version // save, anchor, remint, list, show, diff (archived or live), current
+   port worktree // mint, ls, drop, merge: the seat lifecycle
++  port world // add, rm: world-fact skeletons minted and retired by verb
+ def node CodeItem // a source item of the code tree, addressed by symbol
+ def node Command // one CLI invocation: verb + flags
+ def node Compiler:
+@@ -78,7 +79,8 @@
+ def node DocsCompiler:
+   port compile_docs // parse + schema + cross-check docs against the model
+   port compile_pin // compiles a reconstructed render through the compiler
+-  port load_docs // pulls requirement and stress markdown from the tree
++  port load_docs // pulls requirement, stress and world markdown from the tree
++  port parse_scenarios // the Scenarios block of a world fact, handed to the grammar
+   port pin_model // reconstructs archived versions for pinned checks
+   port serve_pin // hands pinned models to incidence, links and plans
+ def node Engine:
+@@ -87,6 +89,8 @@
+   port fetch_preset // loads the stdlib into every fresh workspace
+   port slice // hands read statements to the query module
+ def node Findings // advisory observations — surfaced, never blocking
++def node Gherkin: // crates/archi/src/docs/gherkin.rs — the one grammar a scenario block answers to.
++  port parse // a scenario block in, its steps or one located error out
+ def node Incidence:
+   port pin_model // expands affects against each stressor's pinned version
+   port read_sessions // pulls session and stressor docs
+@@ -214,6 +218,7 @@
+   port check // the feed's latest tag against the compiled-in number: up to date, or the drift named by direction
+   port fetch // the platform tarball of latest from the release assets, checksum-verified in a scratch dir
+   port swap // the running binary replaced by rename; equal versions converge, torn or tampered fetches change nothing
++def node WorldDoc // world-fact markdown under archi/world/: one outside condition, the scenarios it dictates, and what would falsify it
+ def view compile_flow // source to model: the compiler pipeline and the engine
+ def view harden_flow // versions, docs, stress and incidence: the harden loop
+ def view read_flow // agents interrogating the model: queries, envelope, nkp
+@@ -263,6 +268,7 @@
+ Data type_of SubgraphResult
+ Data type_of SymbolHashes
+ Data type_of Tokens
++Data type_of WorldDoc
+ Function type_of Addressing
+ Function type_of Compiler
+ Function type_of Compiler.Definitions
+@@ -274,6 +280,7 @@
+ Function type_of DocMint
+ Function type_of DocsCompiler
+ Function type_of Engine
++Function type_of Gherkin
+ Function type_of Incidence
+ Function type_of Members
+ Function type_of Nkp
+@@ -298,6 +305,7 @@
+ Agent.author persist(PlanFile) SourceTree.store in trace_flow
+ Agent.author persist(RequirementDoc) SourceTree.store in harden_flow
+ Agent.author persist(StressDoc) SourceTree.store in harden_flow
++Agent.author persist(WorldDoc) SourceTree.store in harden_flow
+ Agent.drive invoke(->Command, <-Report) Cli.build in compile_flow
+ Agent.drive invoke(->Command, <-Report) Cli.check in compile_flow
+ Agent.drive invoke(->Command, <-Report) Cli.incidence in harden_flow
+@@ -316,6 +324,7 @@
+ Agent.drive invoke(->Command, <-Report) Cli.update in read_flow
+ Agent.drive invoke(->Command, <-Report) Cli.version in harden_flow
+ Agent.drive invoke(->Command, <-Report) Cli.worktree in seat_flow
++Agent.drive invoke(->Command, <-Report) Cli.world in harden_flow
+ Archive.canonicalize render(->ModelGraph, <-CanonicalRender) Renderer.emit_source in harden_flow
+ Archive.locate recall(<-MemberSet) Members.resolve in harden_flow
+ Cli.ask interrogate(->StatementBatch, <-SubgraphResult) Engine.answer in read_flow
+@@ -360,12 +369,16 @@
+ Compiler.load_sources recall(<-ArchSource) SourceTree.serve in compile_flow
+ DocMint.emit persist(RequirementDoc) SourceTree.store in harden_flow
+ DocMint.emit persist(StressDoc) SourceTree.store in harden_flow
++DocMint.emit persist(WorldDoc) SourceTree.store in harden_flow
+ DocMint.pin recall(<-CanonicalRender) Archive.serve in harden_flow
+ DocMint.read_tree recall(<-RequirementDoc) SourceTree.serve in harden_flow
+ DocMint.read_tree recall(<-StressDoc) SourceTree.serve in harden_flow
++DocMint.read_tree recall(<-WorldDoc) SourceTree.serve in harden_flow
+ DocsCompiler.compile_pin compile(->ArchSource, <-StatementBatch) Compiler.compile in harden_flow
+ DocsCompiler.load_docs recall(<-RequirementDoc) SourceTree.serve in harden_flow
+ DocsCompiler.load_docs recall(<-StressDoc) SourceTree.serve in harden_flow
++DocsCompiler.load_docs recall(<-WorldDoc) SourceTree.serve in harden_flow
++DocsCompiler.parse_scenarios consult(->WorldDoc, <-Diagnostics) Gherkin.parse in harden_flow
+ DocsCompiler.pin_model recall(<-CanonicalRender) Archive.serve in harden_flow
+ Engine.fetch_preset seed(<-StatementBatch) Preset.serve in compile_flow
+ Engine.slice consult(->ModelGraph, <-Findings) Query.audit in read_flow
+@@ -397,6 +410,7 @@
+ Scaffold.read_tree recall(<-ArchSource) SourceTree.serve in compile_flow
+ Search.read_docs recall(<-RequirementDoc) SourceTree.serve in read_flow
+ Search.read_docs recall(<-StressDoc) SourceTree.serve in read_flow
++Search.read_docs recall(<-WorldDoc) SourceTree.serve in read_flow
+ Seats.Guard.read_reg recall(<-SeatBinding) Seats.Registry.lookup in seat_flow
+ Seats.Landing.push_members recall(<-SeatBinding) Seats.Registry.lookup in seat_flow
+ Seats.Landing.retire persist(SeatBinding) Seats.Registry.record in seat_flow

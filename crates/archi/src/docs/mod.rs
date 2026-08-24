@@ -1,5 +1,5 @@
-//! Doc sources: intents, requirements, stress sessions, stressors and
-//! decisions (`archi/requirements/spec-docs/`,
+//! Doc sources: intents, requirements, stress sessions, stressors,
+//! decisions and world facts (`archi/requirements/spec-docs/`,
 //! `archi/requirements/spec-docs/an-intent-is-a-problem-statement.md`,
 //! `archi/requirements/spec-docs/a-decision-prices-the-fork.md`) — structured
 //! markdown under `archi/requirements/`, `archi/stress/` and
@@ -14,9 +14,12 @@
 //! *pinned* version of their session, reconstructed from the archive;
 //! `satisfied-by` and decision links validate against the live model.
 
+pub(crate) mod gherkin;
 pub(crate) mod md;
 pub mod mint;
 pub(crate) mod schema;
+pub(crate) mod world;
+pub(crate) mod world_check;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -223,6 +226,11 @@ pub struct DocReport {
     pub diagnostics: Vec<DocDiagnostic>,
     /// Advisory findings.
     pub findings: Vec<DocFinding>,
+    /// The world's own advisory findings and its count line — they
+    /// carry their own kinds, they count the `facts/` layer alone, and a tree
+    /// with no `archi/world/` carries neither
+    /// (`archi/requirements/world-facts/`).
+    pub world: world_check::WorldReport,
 }
 
 /// Everything the doc trees hold, parsed best-effort.
@@ -233,6 +241,7 @@ pub(crate) struct Tree {
     pub(crate) sessions: Vec<Session>,
     pub(crate) stressors: Vec<Stressor>,
     pub(crate) decisions: Vec<Decision>,
+    pub(crate) world: Vec<world_check::WorldFact>,
 }
 
 /// Compile and cross-check the doc sources of a project against its
@@ -247,19 +256,26 @@ pub(crate) fn load(root: &Path, model: &Model) -> (Tree, DocReport) {
     let mut diags = Vec::new();
     let tree = discover(root, &mut diags);
     let findings = cross_check(root, model, &tree, &mut diags);
+    // The world rides the same pass: its two open references resolve here,
+    // against the model and against the other facts, and its reports are
+    // advisory beside the others (`archi/requirements/world-facts/`). It
+    // reads the tree for one more file — the declaration of what is internal
+    // beside the facts — so the root travels with it.
+    let world = world_check::check(root, model, &tree, &mut diags);
     diags.sort_by(|a, b| (a.file.as_str(), a.line).cmp(&(b.file.as_str(), b.line)));
     (
         tree,
         DocReport {
             diagnostics: diags,
             findings,
+            world,
         },
     )
 }
 
 // ---- discovery -------------------------------------------------------------
 
-fn sorted_entries(dir: &Path) -> Vec<PathBuf> {
+pub(crate) fn sorted_entries(dir: &Path) -> Vec<PathBuf> {
     let Ok(rd) = fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -268,7 +284,7 @@ fn sorted_entries(dir: &Path) -> Vec<PathBuf> {
     v
 }
 
-fn is_md(path: &Path) -> bool {
+pub(crate) fn is_md(path: &Path) -> bool {
     path.extension().is_some_and(|e| e == "md")
 }
 
@@ -490,6 +506,19 @@ fn discover(root: &Path, diags: &mut Vec<DocDiagnostic>) -> Tree {
         }
     }
 
+    // The world is four areas, and the folder a file sits in is what
+    // says how the file is read: the strict record under `facts/`, a claim
+    // and an observation under `hypotheses/` and `notes/` with a name and
+    // their prose, raw material under `resources/` that nothing opens
+    // (`archi/requirements/world-facts/the-world-holds-four-layers.md`). Only
+    // the facts reach the tree — the loose layers are read where they stand,
+    // and a `sources` entry resolves against them
+    // (`archi/requirements/world-facts/a-source-is-reachable-and-lives-in-the-world.md`).
+    // The whole world is optional: a tree without `archi/world/` holds no fact
+    // and never grows the folder here
+    // (`archi/requirements/world-facts/the-world-arrives-without-noise.md`).
+    tree.world = world_check::discover(root, diags);
+
     tree
 }
 
@@ -546,6 +575,197 @@ fn walk_requirements(
             tree.requirements.extend(sections);
         }
     }
+}
+
+// ---- the requirement listing -----------------------------------------------
+
+/// One standing requirement as `req ls` serves it
+/// (`archi/requirements/agent-retrieval/one-verb-lists-the-requirements-an-element-carries.md`):
+/// the file-scale record, its state as the schema's own graders decide it,
+/// and the first phrase of its summary.
+pub(crate) struct ReqRow {
+    /// The slug — the reference currency.
+    pub(crate) slug: String,
+    /// The intent folder whose area holds it.
+    pub(crate) intent: String,
+    /// Project-relative path of the file.
+    pub(crate) file: String,
+    /// `satisfied`, `deferred` or `open` — graded by [`schema::ReqFields`]'s
+    /// own readers, in the precedence the cross-check findings use.
+    pub(crate) state: &'static str,
+    /// The `satisfied-by` entries. Empty is a legal state — born before the
+    /// model — and an unsound field is no claim of any entry.
+    pub(crate) satisfied_by: Vec<String>,
+    /// The first phrase of the summary; empty while the summary is still
+    /// the minted hole.
+    pub(crate) summary: String,
+}
+
+/// The standing requirement set and the intent folders over it, one walk.
+pub(crate) struct ReqList {
+    /// The intent folder slugs, in path order — the refusal listing.
+    pub(crate) intents: Vec<String>,
+    /// One row per file-scale requirement, in tree order: intent folder,
+    /// then path within it. Section-scale requirements ride inside their
+    /// file's row, as everywhere.
+    pub(crate) rows: Vec<ReqRow>,
+}
+
+/// Serve the standing requirements for `req ls`: the tree walked by the same
+/// discovery `check` reads, so the listing can never disagree with it about
+/// what a requirement is.
+pub(crate) fn serve_requirements(root: &Path) -> ReqList {
+    let tree = discover_tree(root);
+    let intents: Vec<String> = tree.intents.iter().map(|i| i.slug.clone()).collect();
+    let mut rows = Vec::new();
+    for r in &tree.requirements {
+        let Some(f) = &r.fields else { continue };
+        let state = if f.satisfied() {
+            "satisfied"
+        } else if f.deferred() {
+            "deferred"
+        } else {
+            "open"
+        };
+        let satisfied_by = list_entries(&f.satisfied_by);
+        let intent = r.file.split('/').nth(2).unwrap_or_default().to_string();
+        rows.push(ReqRow {
+            slug: r.slug.clone(),
+            intent,
+            file: r.file.clone(),
+            state,
+            satisfied_by,
+            summary: first_phrase(root, &r.file),
+        });
+    }
+    ReqList { intents, rows }
+}
+
+/// The refusal an unknown `--intent` folder earns: name the folders that
+/// exist, or the capture path when none does. [`mint::req_add`] and
+/// `req ls` both answer with it.
+pub(crate) fn unknown_intent(intent: &str, intents: &[String]) -> String {
+    if intents.is_empty() {
+        "no intent folders exist yet — capture the intent first: \
+         archi/requirements/<intent>/<intent>.md"
+            .to_string()
+    } else {
+        format!(
+            "no intent `{intent}` — existing intents: {}; re-run with --intent <folder>",
+            intents.join(", ")
+        )
+    }
+}
+
+/// The longest phrase a one-line row carries before it is cut.
+const PHRASE_CAP: usize = 72;
+
+/// The first phrase of a doc's summary, for the one-line row: the
+/// hard-wrapped lines joined, cut at the first sentence end, capped at
+/// [`PHRASE_CAP`] chars. A file that cannot be read or parsed, or a summary
+/// still the minted hole, is an empty phrase — the row lists without one.
+fn first_phrase(root: &Path, file: &str) -> String {
+    let Ok(text) = fs::read_to_string(root.join(file)) else {
+        return String::new();
+    };
+    let Ok(doc) = md::parse(&text) else {
+        return String::new();
+    };
+    let joined = doc
+        .summary
+        .iter()
+        .map(|(_, t)| t.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut end = joined.len();
+    for (i, c) in joined.char_indices() {
+        // A sentence ends at its punctuation before a space — a dot inside
+        // `archi.toml` or `main.rs#run_req` ends nothing.
+        if matches!(c, '.' | '!' | '?')
+            && joined[i + c.len_utf8()..]
+                .chars()
+                .next()
+                .is_none_or(char::is_whitespace)
+        {
+            end = i + c.len_utf8();
+            break;
+        }
+    }
+    let phrase = joined[..end].trim();
+    if phrase.chars().count() > PHRASE_CAP {
+        let mut cut: String = phrase.chars().take(PHRASE_CAP - 1).collect();
+        while cut.ends_with(' ') {
+            cut.pop();
+        }
+        cut.push('…');
+        cut
+    } else {
+        phrase.to_string()
+    }
+}
+
+/// A frontmatter list's entries, owned for a row, or none — an unsound
+/// field is no claim of any entry. Both listings read their list fields
+/// through it, as they read their prose through [`first_phrase`].
+fn list_entries(field: &Option<(Vec<String>, usize)>) -> Vec<String> {
+    field.as_ref().map(|(v, _)| v.clone()).unwrap_or_default()
+}
+
+// ---- the decision listing --------------------------------------------------
+
+/// One standing decision as `decision ls` serves it
+/// (`archi/requirements/agent-retrieval/one-verb-lists-the-decisions-on-an-element.md`):
+/// the priced record, its trade and the first phrase of its rationale.
+pub(crate) struct DecisionRow {
+    /// The slug — the reference currency.
+    pub(crate) slug: String,
+    /// Project-relative path of the file.
+    pub(crate) file: String,
+    /// The `links` entries — doc slugs and model elements mixed. Empty is a
+    /// legal state: the record then never matches a filter but lists
+    /// unfiltered. An unsound field is no claim of any entry.
+    pub(crate) links: Vec<String>,
+    /// Axis labels the decision favours; empty is a non-comparative record.
+    pub(crate) prefer: Vec<String>,
+    /// Axis labels it sacrifices; empty as `prefer` is.
+    pub(crate) over: Vec<String>,
+    /// The first phrase of the rationale; empty while the prose is absent.
+    pub(crate) summary: String,
+}
+
+/// The standing decision set and the doc-slug space a `--links` filter
+/// resolves against, one walk.
+pub(crate) struct DecisionList {
+    /// Every doc slug the `links` currency reaches — requirements,
+    /// stressors, world facts and the decisions themselves.
+    pub(crate) doc_slugs: BTreeSet<String>,
+    /// One row per decision file, in tree order.
+    pub(crate) rows: Vec<DecisionRow>,
+}
+
+/// Serve the standing decisions for `decision ls`: the tree walked by the
+/// same discovery `check` reads, so the listing can never disagree with it
+/// about what a decision is.
+pub(crate) fn serve_decisions(root: &Path) -> DecisionList {
+    let tree = discover_tree(root);
+    let mut doc_slugs: BTreeSet<String> = BTreeSet::new();
+    doc_slugs.extend(tree.requirements.iter().map(|r| r.slug.clone()));
+    doc_slugs.extend(tree.stressors.iter().map(|s| s.slug.clone()));
+    doc_slugs.extend(tree.world.iter().map(|f| f.doc.slug.clone()));
+    doc_slugs.extend(tree.decisions.iter().map(|d| d.slug.clone()));
+    let rows = tree
+        .decisions
+        .iter()
+        .map(|d| DecisionRow {
+            slug: d.slug.clone(),
+            file: d.file.clone(),
+            links: list_entries(&d.links),
+            prefer: list_entries(&d.prefer),
+            over: list_entries(&d.over),
+            summary: first_phrase(root, &d.file),
+        })
+        .collect();
+    DecisionList { doc_slugs, rows }
 }
 
 // ---- cross-checks ----------------------------------------------------------

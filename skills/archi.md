@@ -1,6 +1,6 @@
 ---
 name: archi
-description: Drive the archiplan spec workflow — capture intent, derive requirements, model, harden by stress, version. Use when you architect a system with archiplan, greenfield or brownfield. Planning is the archi-plan skill. Execution is the archi-implement skill.
+description: Drive the archiplan spec workflow — capture intent, capture the world facts it rests on, derive requirements, model, harden by stress, version. Use when you architect a system with archiplan, greenfield or brownfield. Planning is the archi-plan skill. Execution is the archi-implement skill.
 ---
 
 > **Skill freshness — the first step.** In an initialized project, run
@@ -25,22 +25,15 @@ verify` is the list of work to do. Lifecycle moves only through commands.
 Run `archi check` after every editing round. Errors block. Findings are
 the work to do.
 
-**Search, do not grep.** `archi search <phrase>` is ranked retrieval over
-every archi object: model elements with their identity prose, intents,
-requirements, stressors and sessions. Each hit carries its addresses
-(file:line, satisfied-by, affects, state), so the next command starts there.
-Grep misses the model, because definitions live in the compiled graph and
-not on disk as prose. Narrow the search with `--kind`. Machine-read it
-with `--json`. Search before you derive a requirement, to see whether a
-claim like it exists. Search before you define an element, to see whether
-the concept is already modeled. Search when a finding names something
-unfamiliar.
+**How to find anything — nodes, claims, conditions, files — is the
+`archi-search` skill.** Read it before you hunt.
 
 **Show, do not tell.** When the user asks you to explain or to visualize
 the design, pipe a query into the visualizer: `archi query <filters> |
 archi viz`. It draws the subgraph as a readable ASCII diagram. It
 collapses detail and deep nesting. It refuses a slice too large to read
-and gives hints to narrow it.
+and gives hints to narrow it. The diagram is the structure half of the
+answer; the why half is the `archi-explain` skill.
 
 **Never invent references.** Requirements name model elements by absolute
 path. Stressors pin versions. Tasks pin nodes. `check` and `plan verify`
@@ -97,6 +90,9 @@ write a freeform question when the answer is a choice.
 IMPORTANT: Keep free text in the spec short.
 
 ## Opening: find your worktree
+
+Picking which standing unit to resume — and which skill continues it —
+is the `archi-resume` page.
 
 One worktree carries one whole unit of work: the spec, then its plan,
 then the code. The unit merges once, at the end. Do these steps at the
@@ -197,7 +193,111 @@ once.
    question does belong here: what is this project willing to be bad at?
    Record the answers as decisions under `archi/decisions/` with `prefer`
    and `over`. They are the first entries of the recorded priorities.
-3. **Derive requirements.** One claim is one file, and the command makes it:
+3. **Capture the world.** The conditions outside the system that make
+   the behavior necessary are records of their own under `archi/world/`.
+   They come before the requirements, because a condition from outside
+   decides which claims are requirements at all. Two folders carry the
+   work, and the folder a file sits in is what that file is:
+
+   - `archi/world/facts/` holds the strict record: the condition, the
+     workaround, its scenarios and the three lists. `check` holds every
+     one of them.
+   - `archi/world/resources/` holds raw material — a transcript, a
+     measurement, a thread. Nothing parses it. It is listed so a source
+     can resolve against it.
+
+   A file under `resources/` needs a name and the prose under it, and
+   nothing more. A `.md` directly under `archi/world/` sits in no layer,
+   and `check` refuses it by name.
+
+   `archi world add "<title>"` mints the skeleton under
+   `archi/world/facts/`. You write the fact in one line, the paragraph
+   saying what condition this is and why the behavior follows,
+   `## What people do instead`, and `## Scenarios`. In that block
+   `### <name>` opens one scenario, and `Given`, `When`, `Then` and
+   `And` open its step lines; those four are the whole vocabulary. The
+   heading text is the scenario's name and its address, so a code-link
+   anchors to it, and the code the link points at says where the
+   scenario runs. A `Feature:` or a `Scenario:` line is refused, because
+   the fact's own title is the feature and the heading is the scenario.
+
+   `## What people do instead` names the workaround and what it costs,
+   and it does two jobs. It is the gate: a condition nobody can name a
+   workaround for is a wish, and it belongs in no file. It is also the
+   falsification test, an observable and not a prediction — watch
+   whether people still do it, and the day they stop, the fact is dead.
+
+   **Write the fact from what the operator already told you.** The task
+   they stated, the problem they described, the intent prose they wrote:
+   the condition and the workaround are usually in there, said in
+   passing, and lifting them costs the operator nothing. Draft the fact
+   from that first and put the draft in front of them. Ask only what the
+   task does not answer, and ask it by options — two or three concrete
+   candidates, never a bare open question. `AskUserQuestion` is the tool.
+
+   **Ask the node question of every node a fact will cover.** The
+   spoken task under-reaches: the condition a whole layer exists for
+   goes unsaid, because to the operator it is obvious. So ask, of each
+   node, **which outside condition stops holding if this node is gone?**
+   Draft the answer first, like the fact itself, and put it through
+   the poll tool (`AskUserQuestion` in Claude Code, the equivalent
+   elsewhere): the drafted condition as one option, another shape of
+   it as a second, and "nothing outside reaches this node" last, which
+   routes to `.worldignore`. An answer that stands is the fact the
+   layer is for. A symptom cannot answer, because the symptom survives
+   the node's removal.
+
+   **Do not ask the workaround question about machinery.** It is
+   answerable only about a condition somebody lives with, so if the
+   subject is a component, a store or a protocol, the question lands as
+   nonsense and the operator is right to be annoyed. That is a signal
+   about the subject, not about the operator: go up until you reach the
+   condition the machinery serves, and ask there. Machinery no condition
+   outside will ever reach is what `.worldignore` is for.
+
+   Write the fact in the world's own words,
+   **without the nouns of the model** — a fact that speaks the model is
+   a requirement in costume, and `check` says so. A fact also names no
+   person and quotes nobody: it says how the world is, as a reader who
+   was not in the room would say it, not that somebody disliked a thing,
+   not what somebody said, and never in their words. Who saw it is
+   `sources`, and their words are a file under
+   `archi/world/resources/`. No check holds this half, so it holds only
+   where the person writing holds it.
+
+   The frontmatter points three ways. `covers` names the model elements
+   the fact conditions, and `uses` names the facts it presumes.
+   `sources` names the material the fact rests on, and every entry is a
+   path from the project root to a file under `archi/world/`. Nothing
+   else resolves: a path into the spec grounds the fact in what the fact
+   explains, and a locator nobody here can open is a claim about
+   evidence and not evidence. Material from outside is carried into
+   `archi/world/resources/` first, or the field stays empty. An empty
+   `sources` is the honest state of a claim nobody has observed, and
+   `check` counts it as ungrounded.
+
+   `archi/world/.worldignore` is the other half of the coverage question.
+   It names the elements no condition outside will ever reach — a lexer,
+   a registry, a canonicalizer — one to a line, as
+   `<element> — why nothing outside reaches it`. `check` resolves every
+   entry against the model, so a rename breaks the line loudly, and an
+   entry with no reason is an error: the reason is a claim a reader can
+   argue with, which is what keeps the file from becoming a place to
+   silence things. Elements classified `Data` are excluded by their type
+   and never belong in it. `version save` refuses while an element is
+   neither covered by a fact nor named here, and those two are the whole
+   of the answer.
+
+   `archi world rm <slug>` retires one, and it refuses while a plan or a
+   code-link stands on it. `archi world ls [--covers <element>]` is the
+   traversal from a node to the conditions that rule it. A project that
+   stands without a world gains one through the `archi-migrate`
+   skill.
+4. **Derive requirements.** Run `archi req ls --satisfies <element>` for
+   the elements the new claim will name, so the neighbouring claims are
+   on screen before the file exists. A claim that contradicts a standing
+   one is caught by reading one cluster, not one hundred files. One
+   claim is one file, and the command makes it:
 
    ```
    archi req add "<title>" --intent <folder> --kind functional|non-functional --origin intent
@@ -214,13 +314,18 @@ once.
    Any other heading in the file opens a subrequirement. Leave
    requirements open: `unsatisfied_requirement` findings are work to do,
    not errors.
-4. **Draft the model.** Read the ontology first with `archi query --top`.
+5. **Draft the model.** Read the ontology first with `archi query --top`.
    The unclassified nodes are the types of the preset, and each one
    carries its definition. Classify every term against them (`Service
    type_of AuthService`) or against types you define. Then write nodes,
    ports and typed edges in `.arch`. The syntax is in "`.arch` in brief"
-   below. As elements land, fill each requirement's `satisfied-by`, its
-   Satisfy prose, and its verification bullets (`- test — …`, `-
+   below. As each node lands, ask once
+   **which outside condition stops holding if this node is gone?** —
+   draft the answer and poll it as in step 3; an answer that stands is
+   the next fact to write, and "nothing outside reaches this node" is
+   the node's `.worldignore` line. As elements land, fill each
+   requirement's `satisfied-by`, its Satisfy prose, and its
+   verification bullets (`- test — …`, `-
    type-level — …`). Run `archi check` until it reports zero errors. A
    passing check closes with the NKP scoring line and the refactoring
    directions. `archi nkp` prints the full landscape report. Read the
@@ -238,8 +343,8 @@ once.
      (K̄ 1–3) is the target: changes propagate without cascading. CHAOTIC
      makes every change ripple, so decompose the hotspots before you
      refactor.
-5. **Save.** `archi version save -m "<why>"` seals the render.
-6. **Stress.** Run an adversarial round against the version you just
+6. **Save.** `archi version save -m "<why>"` seals the render.
+7. **Stress.** Run an adversarial round against the version you just
    saved.
 
    **What the round writes.** The round writes stressors, verdicts,
@@ -416,19 +521,22 @@ once.
    still counts it as a break. `version save` closes the round, and until
    then the report is incomplete.
 
-   Repeat steps 4 to 6 until a round survives. That version is the
+   Repeat steps 5 to 7 until a round survives. That version is the
    hardened spec. After that final `version save`, put one question to
    the user through the poll tool with two options: **commit the spec
    work now** on the worktree's branch, or **leave the tree as it is**.
    Never commit unasked.
-7. **Plan.** Use the `archi-plan` skill. It authors the charter with a
+8. **Plan.** Use the `archi-plan` skill. It authors the charter with a
    user-polled stack and its infrastructure, the tasks per node, the
-   requirement ownership, the named verifications and the scenarios.
+   requirement ownership and the named verifications.
    `plan use` refuses on an unsaved model, so save first. To execute the
    plan, use the `archi-implement` skill.
-8. **Steady state.** Run `archi check` and `archi link verify` in CI. Run
-   `archi link audit` for code that moved with no spec account, spec that
-   no code realizes, and decayed evidence.
+9. **Steady state.** Run `archi check` and `archi link verify` in CI. Run
+   `archi link audit` for code that moved with no spec account, and spec
+   that no code realizes. A journal carried over from a binary that minted
+   links from shared words holds rows nobody ever read: `archi link ls |
+   awk '{print $5}' | sort | uniq -c` counts them under `inferred`, and the
+   `archi-migrate` skill carries the one pass that sorts them.
 
 ## Brownfield
 
@@ -575,6 +683,10 @@ fact, and marks it as anchor-born.
   code motion. Mute the boundary once with `[audit] exclude = ["*.md",
   …]` in `archi.toml`. Capture and the audit share the setting, and links
   into excluded files still verify.
+- The wave gate names lockfiles or generated artifacts. This is not
+  code motion. Widen `[audit] exclude` in `archi.toml` once: the wave
+  gate, capture and the audit share the boundary, and a link into an
+  excluded file still verifies.
 - `plan use` refuses. The model has unsaved changes, so run `version
   save` first.
 - `worktree merge` refuses a stale member baseline, because the worktree
@@ -609,8 +721,17 @@ fact, and marks it as anchor-born.
   Remint and save refuse while markers remain. The order is archive,
   fold, remint.
 - `plan next` is blocked on coverage. This is not an error. It is the
-  loop: confirm or retire the candidates it just created, then run it
-  again.
+  loop: the refusal names the files of the wave that no declaration
+  accounts for, the writer that touched a file posts `archi plan task
+  <id> link add` for it, then run it again. `archi link add` does not
+  answer this gate, because the gate reads the declarations and not the
+  journal.
+- A whole file or crate was renamed, and every link into it went stale
+  at once. `link verify` grades each old anchor *moved* with an exact
+  candidate — the same body at its new path. Run `archi link repin
+  --moved` to accept every exact candidate in one pass. An inexact
+  candidate is a judgement: the pass reports it and leaves it for a
+  per-row `link repin <id> --to`.
 - Verify notes "no longer resolves at Working". The spec advanced. Run
   `plan repin`, then fix the tasks it flags.
 - Never hand-edit lifecycle state (`state`, `closed_waves`, latches), the

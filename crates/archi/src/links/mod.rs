@@ -1,15 +1,22 @@
 //! Code-links: spec ↔ code traceability (`archi/requirements/code-link/`).
 //!
-//! A link ties a **`SpecRef`** — a node path or a typed edge, at a version
-//! slot — to an **anchor** in the code tree: a file, optionally a symbol.
+//! A link ties a **`SpecRef`** — a node path or a typed edge at a version
+//! slot, or a scenario of a world fact — to an **anchor** in the code tree:
+//! a file, optionally a symbol.
 //! It carries two layers with opposite mutability: the immutable **birth
 //! record** (the spans that realized the spec element, content-pinned) and
 //! the **projection** (where that code lives now — anchor plus the
 //! interface/body hash pair), recomputed by `verify` and rewritten only by
 //! an explicit `repin`.
 //!
+//! A link onto a scenario witnesses both sides: the projection carries the
+//! digest of the story too, and `verify` names which side moved
+//! (`archi/requirements/world-facts/a-scenario-link-binds-two-hashes.md`).
+//!
 //! Storage is an append-only journal, `archi/links/journal.jsonl` — events
-//! `add`, `confirm`, `repin`, `retire`; the live link set is its fold. A
+//! `add`, `repin`, `retire`, and the `confirm`, `touch` and `decay` events
+//! older binaries wrote, which the fold still reads; the live link set is its
+//! fold. A
 //! commit sha in a birth record is provenance, never a dependency, exactly
 //! as in the version archive (`archi/requirements/versioning/keyframes-bound-the-archive.md`).
 
@@ -62,21 +69,37 @@ impl LinkKind {
     }
 }
 
-/// What the link may do: asserted links gate, evidence links inform.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+/// What the link may do. There is one standing: a link is a claim, it gates,
+/// and it verifies strictly
+/// (`archi/requirements/code-link/a-link-stands-asserted-or-it-does-not-stand.md`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Standing {
     /// A claim: participates in gates, verifies strictly.
     Asserted,
-    /// Accreted by capture; never fails a verify, retires when decayed.
-    Evidence,
+}
+
+/// The second standing left the tool; the rows it minted stay, because the
+/// journal is append-only truth and no migration rewrites it. A row that
+/// says `evidence` loads as the claim it now is, and it grades, lists and
+/// gates exactly like every other row. What it was born of still reads in
+/// `rule`, which is the record of how it was made.
+impl<'de> Deserialize<'de> for Standing {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Standing, D::Error> {
+        let word = String::deserialize(d)?;
+        match word.as_str() {
+            "asserted" | "evidence" => Ok(Standing::Asserted),
+            other => Err(serde::de::Error::custom(format!(
+                "`{other}` is not a link standing"
+            ))),
+        }
+    }
 }
 
 impl Standing {
     fn describe(self) -> &'static str {
         match self {
             Standing::Asserted => "asserted",
-            Standing::Evidence => "evidence",
         }
     }
 }
@@ -87,7 +110,7 @@ impl Standing {
 pub enum Origin {
     /// Minted by `archi link add` — asserted by construction.
     Authored,
-    /// Minted by task-close capture — lands as evidence.
+    /// Minted by task-close capture, from the declaration a writer wrote.
     Captured {
         /// The task whose delta produced it.
         task: String,
@@ -103,12 +126,64 @@ impl fmt::Display for Origin {
     }
 }
 
-/// A spec element reference: a node path (`AuthService.Storage`) or a typed
+/// Which rule produced a row
+/// (`archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`).
+///
+/// The journal is append-only, so a rule that stops governing does not retire
+/// the rows it made: they are marked, they keep standing and they keep
+/// grading. Marking is the whole answer — a record that can be rewritten when
+/// it becomes inconvenient is not a record.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Rule {
+    /// Matched from terms the ref and the code share — the tool's guess.
+    Inferred,
+    /// Minted from a declaration a writer wrote.
+    Declared,
+    /// Minted by hand through `archi link add`.
+    Authored,
+}
+
+impl Rule {
+    /// The rule a row records when it names none — every row journaled
+    /// before the field existed. The provenance already says it: a row
+    /// `link add` minted is a claim a person made by hand, and a row capture
+    /// minted under the shared-term rule is the tool's guess. Reading it
+    /// from the origin keeps those rows exactly what they were, and no
+    /// migration rewrites append-only truth to say so.
+    fn of(origin: &Origin) -> Rule {
+        match origin {
+            Origin::Authored => Rule::Authored,
+            Origin::Captured { .. } => Rule::Inferred,
+        }
+    }
+
+    fn describe(self) -> &'static str {
+        match self {
+            Rule::Inferred => "inferred",
+            Rule::Declared => "declared",
+            Rule::Authored => "authored",
+        }
+    }
+}
+
+impl fmt::Display for Rule {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.describe())
+    }
+}
+
+/// A spec element reference: a node path (`AuthService.Storage`), a typed
 /// edge in its canonical surface form (`A.p link B.q`), optionally pinned
-/// to a version slot (`@v0003`; absent = Working, the live tree).
+/// to a version slot (`@v0003`; absent = Working, the live tree) — a
+/// scenario of a world fact, `<fact-slug>#<scenario name>`
+/// (`archi/requirements/world-facts/the-scenario-is-the-address-not-the-step.md`)
+/// — or a requirement, `req:<slug>`
+/// (`archi/requirements/code-link/a-requirement-is-addressable-in-the-journal.md`).
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct SpecRef {
-    /// The element: a dot path, or canonical edge text (contains spaces).
+    /// The element: a dot path, canonical edge text (contains spaces), or a
+    /// fact slug and a scenario name joined by `#`.
     #[serde(rename = "ref")]
     pub path: String,
     /// Pinned version slot; `None` is Working.
@@ -116,13 +191,53 @@ pub struct SpecRef {
     pub version: Option<String>,
 }
 
+/// The prefix that addresses a requirement. An addressing scheme that says
+/// what it is can be joined later by another that says what it is, where a
+/// bare slug could not
+/// (`archi/requirements/code-link/a-requirement-is-addressable-in-the-journal.md`).
+pub const REQ: &str = "req:";
+
 impl SpecRef {
-    /// Parse `<element>[@vNNNN]`. Names never contain `@`, so the split is
-    /// unambiguous.
+    /// Parse `<element>[@vNNNN]`, the world form `<fact-slug>#<scenario
+    /// name>`, or the requirement form `req:<slug>`. The prefix is read
+    /// first, before either split: a requirement slug holds no `#` and no
+    /// `@`, so it would fall to the element branch and resolve against no
+    /// element. Names never contain `@`, so the slot split is unambiguous;
+    /// a `#` decides the world form before it, because a scenario name is
+    /// prose that may hold anything and is taken verbatim — a fact stands in
+    /// one slot, what the tree holds now.
     pub fn parse(text: &str) -> Result<SpecRef, String> {
         let text = text.trim();
         if text.is_empty() {
             return Err("the spec ref is empty".into());
+        }
+        if let Some(slug) = text.strip_prefix(REQ) {
+            let slug = slug.trim();
+            if slug.is_empty() {
+                return Err(format!("`{text}` names no requirement — `{REQ}<slug>` addresses one"));
+            }
+            // A requirement slug is stable across versions, by the rule that
+            // already governs plan ownership, so it takes no slot at all.
+            if slug.contains('@') {
+                return Err(format!(
+                    "`{text}`: a requirement carries no version pin — its slug is stable across \
+                     versions, as plan ownership already reads it"
+                ));
+            }
+            return Ok(SpecRef {
+                path: format!("{REQ}{}", normalize_ref(slug)),
+                version: None,
+            });
+        }
+        if let Some((slug, name)) = text.split_once('#') {
+            let (slug, name) = (slug.trim(), normalize_ref(name));
+            if slug.is_empty() || name.is_empty() {
+                return Err(format!("`{text}` is not `<fact-slug>#<scenario name>`"));
+            }
+            return Ok(SpecRef {
+                path: format!("{slug}#{name}"),
+                version: None,
+            });
         }
         match text.rsplit_once('@') {
             None => Ok(SpecRef {
@@ -139,6 +254,23 @@ impl SpecRef {
                 })
             }
         }
+    }
+
+    /// The world form's parts — the fact's slug and the scenario name inside
+    /// it — or `None` for an element ref: element paths hold no `#`. The
+    /// requirement form answers `None` too: its prefix is read first, and
+    /// whatever a slug holds is part of the slug.
+    pub fn scenario(&self) -> Option<(&str, &str)> {
+        if self.requirement().is_some() {
+            return None;
+        }
+        self.path.split_once('#')
+    }
+
+    /// The requirement form's slug, or `None` for every other shape:
+    /// element paths and fact slugs carry no `req:` prefix.
+    pub fn requirement(&self) -> Option<&str> {
+        self.path.strip_prefix(REQ)
     }
 }
 
@@ -259,7 +391,10 @@ pub struct Birth {
     pub spans: Vec<Span>,
 }
 
-/// The projection's hash pair, under a pinned canonicalizer.
+/// The projection's hash pair, under a pinned canonicalizer — and, where the
+/// spec ref names a scenario, the digest of the story the pair was bound to.
+/// The witness of both sides sits in one record, so `repin` binds the pair in
+/// one event (`archi/requirements/world-facts/a-scenario-link-binds-two-hashes.md`).
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Pins {
     /// The canonicalizer that produced the hashes (`rust-tok-v1`, `text-v1`).
@@ -268,10 +403,23 @@ pub struct Pins {
     pub interface: String,
     /// Hash of the whole anchored item's canonical tokens.
     pub body: String,
+    /// The spec side: the fingerprint of the fact's scenarios as the grammar
+    /// parsed them. Absent on every link over an element path — an element
+    /// path has no story to witness — and on every event journaled before the
+    /// pair was witnessed, which replays unchanged. Absence means nothing was
+    /// bound, never that something moved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scenario: Option<String>,
 }
 
 /// One code-link, as journaled and as folded.
+///
+/// Reading goes through [`Row`], because one field of a row written before
+/// this shape existed is read from another: a row that names no producing
+/// rule takes it from its provenance
+/// (`archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`).
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(from = "Row")]
 pub struct Link {
     /// Readable sequence plus a content suffix, `l0042-9f3ab1`. The suffix
     /// hashes the link's content and mint moment, so two branches minting
@@ -285,22 +433,77 @@ pub struct Link {
     pub anchor: Anchor,
     /// Which hash is watched.
     pub kind: LinkKind,
-    /// Asserted or evidence.
+    /// What the row may do. There is one standing, and a row that says the
+    /// retired one loads as this one
+    /// (`archi/requirements/code-link/a-link-stands-asserted-or-it-does-not-stand.md`).
     pub standing: Standing,
     /// Where the link came from.
     pub origin: Origin,
+    /// Which rule produced the row. Every row minted from here on says it;
+    /// a row journaled before the field existed names none, and [`Rule::of`]
+    /// reads it from the origin, so those rows keep saying exactly what they
+    /// always were and no migration runs
+    /// (`archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`).
+    pub rule: Rule,
+    /// The test that proves the pair, where a declaration named one. The
+    /// reader who doubts a claim has one place to go, and it is recorded
+    /// beside the claim rather than beside the writer
+    /// (`archi/requirements/code-link/a-declaration-names-the-test-that-proves-it.md`).
+    /// Absent on every row no declaration minted, and on every row journaled
+    /// before the field existed — absence means nothing was named, never that
+    /// a test was lost.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proves: Option<Anchor>,
     /// The immutable birth record.
     pub birth: Birth,
     /// The projection's hashes.
     pub pins: Pins,
-    /// Tasks whose captures re-encountered this link — evidence confidence
-    /// accrues. Folded from `touch` events, one entry per task.
+    /// Tasks whose captures re-encountered this link. Folded from `touch`
+    /// events, one entry per task.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub touches: Vec<String>,
-    /// Tasks whose captures saw the anchored item change without carrying
-    /// the spec_ref — confidence decays. Folded from `decay` events.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub decays: Vec<String>,
+}
+
+/// A journaled row as it is read: [`Link`]'s shape, with the producing rule
+/// optional. It is the whole of the backward compatibility — a row written
+/// before the field existed names no rule, and the conversion reads one from
+/// the origin rather than defaulting every such row to one word. Nothing
+/// else in the shape moved, so every other field replays exactly as before.
+#[derive(Deserialize)]
+struct Row {
+    id: String,
+    #[serde(rename = "spec")]
+    spec: SpecRef,
+    anchor: Anchor,
+    kind: LinkKind,
+    standing: Standing,
+    origin: Origin,
+    #[serde(default)]
+    rule: Option<Rule>,
+    #[serde(default)]
+    proves: Option<Anchor>,
+    birth: Birth,
+    pins: Pins,
+    #[serde(default)]
+    touches: Vec<String>,
+}
+
+impl From<Row> for Link {
+    fn from(r: Row) -> Link {
+        Link {
+            rule: r.rule.unwrap_or_else(|| Rule::of(&r.origin)),
+            id: r.id,
+            spec: r.spec,
+            anchor: r.anchor,
+            kind: r.kind,
+            standing: r.standing,
+            origin: r.origin,
+            proves: r.proves,
+            birth: r.birth,
+            pins: r.pins,
+            touches: r.touches,
+        }
+    }
 }
 
 // ---- the journal -----------------------------------------------------------
@@ -313,6 +516,8 @@ enum Event {
     Add {
         link: Link,
     },
+    /// Written by an older binary, when a reader raised a guess to a claim.
+    /// Every row is a claim now, so the fold reads it and applies nothing.
     Confirm {
         id: String,
         at: String,
@@ -322,6 +527,11 @@ enum Event {
         at: String,
         anchor: Anchor,
         pins: Pins,
+        /// The spec side, when the repin moved it onto a renamed scenario.
+        /// Absent in an anchor-only repin — and in every event written
+        /// before the world form, which replays unchanged.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        spec: Option<SpecRef>,
     },
     Retire {
         id: String,
@@ -332,6 +542,11 @@ enum Event {
         task: String,
         at: String,
     },
+    /// Written by an older binary, when a wave that rewrote an anchored item
+    /// without carrying its spec_ref eroded a guess. Nothing writes one now,
+    /// and the fold reads it to skip it: the journal is append-only, so the
+    /// events stand and the reader stays
+    /// (`archi/requirements/code-link/a-link-stands-asserted-or-it-does-not-stand.md`).
     Decay {
         id: String,
         task: String,
@@ -342,9 +557,6 @@ enum Event {
 /// The folded journal: live links in add order, plus mint bookkeeping.
 struct Folded {
     live: Vec<Link>,
-    /// Retired links, folded state at retirement — capture's dedup memory:
-    /// a subtracted candidate must stay subtracted across re-runs.
-    retired: Vec<Link>,
     /// Adds ever journaled — the id sequence counts past retirements.
     adds: usize,
     /// Events the fold absorbed instead of applying — identical replayed
@@ -439,19 +651,32 @@ fn fold(events: Vec<Event>) -> Result<Folded, String> {
                 live.push(link);
                 adds += 1;
             }
-            Event::Confirm { id, .. } => match live.iter_mut().find(|l| l.id == id) {
-                Some(l) => l.standing = Standing::Asserted,
-                None if retired.iter().any(|l| l.id == id) => {
-                    absorbed.push(format!("`confirm` on retired `{id}` — absorbed"));
+            // The raise a `confirm` recorded is what every row stands at, so
+            // the event applies nothing. The journal is still read strictly:
+            // an id it never minted is corruption, and one landing on a
+            // tombstone is absorbed exactly as before.
+            Event::Confirm { id, .. } => {
+                if !live.iter().any(|l| l.id == id) {
+                    if retired.iter().any(|l| l.id == id) {
+                        absorbed.push(format!("`confirm` on retired `{id}` — absorbed"));
+                    } else {
+                        return Err(corrupt(&id, "confirm"));
+                    }
                 }
-                None => return Err(corrupt(&id, "confirm")),
-            },
+            }
             Event::Repin {
-                id, anchor, pins, ..
+                id,
+                anchor,
+                pins,
+                spec,
+                ..
             } => match live.iter_mut().find(|l| l.id == id) {
                 Some(l) => {
                     l.anchor = anchor;
                     l.pins = pins;
+                    if let Some(s) = spec {
+                        l.spec = s;
+                    }
                 }
                 None if retired.iter().any(|l| l.id == id) => {
                     absorbed.push(format!("`repin` on retired `{id}` — absorbed"));
@@ -478,22 +703,14 @@ fn fold(events: Vec<Event>) -> Result<Folded, String> {
                 }
                 None => return Err(corrupt(&id, "touch")),
             },
-            Event::Decay { id, task, .. } => match live.iter_mut().find(|l| l.id == id) {
-                Some(l) => {
-                    if !l.decays.contains(&task) {
-                        l.decays.push(task);
-                    }
-                }
-                None if retired.iter().any(|l| l.id == id) => {
-                    absorbed.push(format!("`decay` on retired `{id}` — absorbed"));
-                }
-                None => return Err(corrupt(&id, "decay")),
-            },
+            // The erosion a `decay` recorded scores nothing now. The event is
+            // read and skipped — never an error, whatever id it names — so
+            // every journal an older binary wrote still folds.
+            Event::Decay { .. } => {}
         }
     }
     Ok(Folded {
         live,
-        retired,
         adds,
         absorbed,
     })
@@ -537,12 +754,15 @@ fn now() -> String {
 
 // ---- spec-side resolution --------------------------------------------------
 
-/// Compiled pinned versions, opened lazily: most verifies never touch the
-/// archive.
+/// What a command's spec-side resolution reads more than once, opened
+/// lazily: the compiled pinned versions — most verifies never touch the
+/// archive — and the requirement set, one walk of the doc tree however many
+/// rows address a requirement.
 struct Slots<'a> {
     root: &'a Path,
     archive: Option<Option<Archive>>,
     compiled: BTreeMap<String, Workspace>,
+    requirements: Option<BTreeSet<String>>,
 }
 
 impl<'a> Slots<'a> {
@@ -551,7 +771,24 @@ impl<'a> Slots<'a> {
             root,
             archive: None,
             compiled: BTreeMap::new(),
+            requirements: None,
         }
+    }
+
+    /// Whether the tree holds a requirement of that slug. The set is the doc
+    /// tree's own, read through the discovery pass `plan verify` reads for
+    /// `owns:`, so a link and a plan can never disagree about what a
+    /// requirement is.
+    fn resolves_requirement(&mut self, slug: &str) -> bool {
+        self.requirements
+            .get_or_insert_with(|| {
+                docs::discover_tree(self.root)
+                    .requirements
+                    .into_iter()
+                    .map(|r| r.slug)
+                    .collect()
+            })
+            .contains(slug)
     }
 
     /// Whether the ref resolves in the model of its pinned slot.
@@ -582,6 +819,210 @@ impl<'a> Slots<'a> {
 /// (`archi/requirements/element-addressing/satisfaction-names-the-interface.md`).
 pub(crate) fn resolves_in(model: &Model, spec: &SpecRef) -> bool {
     model.resolve_element(&spec.path).is_some()
+}
+
+/// Whether a ref resolves against what stands now: a world ref against the
+/// facts in the tree, a requirement ref against the requirement set, every
+/// other ref against the live model. A fact is prose a person edits and no
+/// version render holds a copy of it, so the world form knows one slot —
+/// this one; a requirement slug is stable across versions and knows the same.
+fn resolves_now(
+    root: &Path,
+    model: &Model,
+    slots: &mut Slots,
+    spec: &SpecRef,
+) -> Result<bool, String> {
+    if let Some(slug) = spec.requirement() {
+        return Ok(slots.resolves_requirement(slug));
+    }
+    match spec.scenario() {
+        Some((slug, name)) => resolves_scenario(root, slug, name),
+        None => Ok(resolves_in(model, spec)),
+    }
+}
+
+/// Whether a ref resolves at the slot it names: the live one, or the version
+/// it is pinned to. [`mint`] asks it before it writes a row and the
+/// declaration verb asks it before it writes an entry, so neither side can
+/// drift from the other on what a name means.
+pub(crate) fn resolves_at_slot(root: &Path, model: &Model, spec: &SpecRef) -> Result<bool, String> {
+    let mut slots = Slots::new(root);
+    match &spec.version {
+        None => resolves_now(root, model, &mut slots, spec),
+        Some(_) => slots.resolves_pinned(spec),
+    }
+}
+
+/// Why a ref that did not resolve names nothing: a requirement the set does
+/// not hold, a scenario the fact does not carry, or a name no model holds.
+/// The mint and the declaration verb refuse in these same words.
+pub(crate) fn spec_refusal(root: &Path, spec: &SpecRef) -> String {
+    match (spec.requirement(), spec.scenario()) {
+        (Some(slug), _) => requirement_refusal(slug),
+        (None, Some((slug, _))) => scenario_refusal(root, slug, &spec.path),
+        (None, None) => {
+            let slot = spec.version.as_deref().unwrap_or("the live model");
+            format!("`{}` names no element of {slot} (E_MODEL_REF)", spec.path)
+        }
+    }
+}
+
+/// Why a requirement ref resolved to nothing: the slug names no file the
+/// requirement discovery found.
+fn requirement_refusal(slug: &str) -> String {
+    format!(
+        "`{slug}` names no requirement — no file under `archi/requirements/` holds it (E_MODEL_REF)"
+    )
+}
+
+/// Whether a fact holds exactly one scenario of that name. Two scenarios
+/// sharing one name inside one fact is a located error, because the name is
+/// the address and an ambiguous address names nothing
+/// (`archi/requirements/world-facts/the-scenario-is-the-address-not-the-step.md`).
+fn resolves_scenario(root: &Path, slug: &str, name: &str) -> Result<bool, String> {
+    let Some(scenarios) = fact_scenarios(root, slug) else {
+        return Ok(false);
+    };
+    let lines: Vec<usize> = scenarios
+        .iter()
+        .filter(|(n, _)| n == name)
+        .map(|(_, line)| *line)
+        .collect();
+    match lines.as_slice() {
+        [] => Ok(false),
+        [_] => Ok(true),
+        [first, second, ..] => Err(format!(
+            "{}:{second}: two scenarios are named `{name}` — the scenario name is the address, \
+             and one fact holds it once (the first is at line {first})",
+            fact_file(slug)
+        )),
+    }
+}
+
+/// Why a world ref resolved to nothing: the fact, or the name inside it.
+fn scenario_refusal(root: &Path, slug: &str, path: &str) -> String {
+    match fact_scenarios(root, slug) {
+        None => format!(
+            "`{slug}` names no world fact — `{}` is not in the tree (E_MODEL_REF)",
+            fact_file(slug)
+        ),
+        Some(_) => format!(
+            "`{path}` names no scenario of `{}` (E_MODEL_REF)",
+            fact_file(slug)
+        ),
+    }
+}
+
+/// A fact's project-relative file. The folder decides what a file is, and a
+/// fact is what stands under `facts/`
+/// (`archi/requirements/world-facts/the-world-holds-four-layers.md`).
+fn fact_file(slug: &str) -> String {
+    format!("{}facts/{slug}.md", docs::world::WORLD)
+}
+
+/// The scenario names one world fact holds, each with the 1-based file line
+/// it sits on; `None` when the tree holds no such fact. The record is read
+/// through the docs pass — the same reader `check` runs — so a link and a
+/// check can never disagree about what a fact holds.
+fn fact_scenarios(root: &Path, slug: &str) -> Option<Vec<(String, usize)>> {
+    let file = fact_file(slug);
+    let text = fs::read_to_string(root.join(&file)).ok()?;
+    // A record the reader cannot parse holds no addressable scenario; its
+    // shape is `archi check`'s to report, never a link's.
+    Some(
+        docs::md::parse(&text)
+            .ok()
+            .and_then(|doc| docs::world::parse(&doc, &file, slug, root, &mut Vec::new()).scenarios)
+            .map(|block| scenario_names(&block))
+            .unwrap_or_default(),
+    )
+}
+
+/// The `### ` headings of a `Scenarios` block and the names on them. The
+/// smallest reader an address needs: the heading text is the scenario's name,
+/// and the name is the address. What opens a heading is the grammar's own rule
+/// ([`docs::gherkin::heading`]), read from there and not written again, so a
+/// deeper heading opens no scenario here either.
+///
+/// [`docs::gherkin::parse`] reads the same block whole, and it does not
+/// replace this reader: the grammar reports form, and a link resolves an
+/// address. The grammar drops every scenario any refusal touched — a `But`
+/// step, a heading over no step, a `Scenario:` line of the shape this one
+/// replaced — and keeps a name with its inner whitespace as written, so a
+/// normalized ref matches it only after the same collapse. Reading an address
+/// through it would report a doc-grammar error as a lost reference, and would
+/// unresolve a link on a malformed fact that `archi check` already reports.
+/// The digest beside it does read through the grammar ([`fact_digest`]),
+/// because a witness is of the story the grammar accepted, and it collapses
+/// the name the same way to find the scenario a ref names; the two readers
+/// answer two questions, and only `check` gates on form
+/// (`archi/requirements/world-facts/the-grammar-is-a-named-subset.md`,
+/// `archi/requirements/world-facts/the-scenario-is-the-address-not-the-step.md`).
+fn scenario_names(block: &docs::world::Block) -> Vec<(String, usize)> {
+    block
+        .text
+        .lines()
+        .enumerate()
+        .filter_map(|(i, line)| {
+            let name = docs::gherkin::heading(line)?;
+            Some((normalize_ref(name), block.line + i))
+        })
+        .filter(|(name, _)| !name.is_empty())
+        .collect()
+}
+
+/// The fingerprint of one fact's scenarios, as the grammar parsed them —
+/// [`docs::world_check::scenario_digest`], the one function the plan and the
+/// link both read, so a plan and a link can never disagree about whether the
+/// story moved. `scenario` is the grain: the name a ref addresses, or `None`
+/// for the whole block. `None` for the result when no file holds the fact.
+///
+/// The file is read through [`docs::world_check::read_fact`], the reader the
+/// world walks its own folder with, so a link and a check hold one fact one
+/// way. A block the grammar refuses digests as an empty story, and `archi
+/// check` reports that form error where form errors belong.
+fn fact_digest(root: &Path, slug: &str, scenario: Option<&str>) -> Option<String> {
+    let fact = docs::world_check::read_fact(
+        root,
+        &root.join(fact_file(slug)),
+        // The form of a fact is `archi check`'s to report, never a link's.
+        &mut Vec::new(),
+    )?;
+    Some(docs::world_check::scenario_digest(&fact, scenario))
+}
+
+/// The spec side of a link as it stands now: the fingerprint of the one
+/// scenario the ref addresses, nothing for an element path. A link witnesses
+/// the scenario it names, so a sibling in the same fact is another link's
+/// business
+/// (`archi/requirements/world-facts/the-digest-witnesses-one-scenario.md`).
+fn bind_scenario(root: &Path, spec: &SpecRef) -> Option<String> {
+    let (slug, name) = spec.scenario()?;
+    fact_digest(root, slug, Some(name))
+}
+
+/// Whether the scenario side of a witnessed pair parted from what the link
+/// recorded. A link that recorded no digest — every link over an element
+/// path, and every scenario link journaled before the pair was witnessed —
+/// has nothing to compare against, and nothing never moved.
+///
+/// A digest journaled while the grain was the whole block is read at the
+/// grain it was written: if it is the fact's whole story as that story stands
+/// now, nothing moved. Narrowing the grain is not motion, so no link
+/// false-fails on the day it narrows; the first `repin` writes the scenario's
+/// own fingerprint, and the narrow grain rules the link from there
+/// (`archi/requirements/world-facts/the-digest-witnesses-one-scenario.md`).
+fn scenario_moved(root: &Path, link: &Link) -> bool {
+    let Some(recorded) = &link.pins.scenario else {
+        return false;
+    };
+    let Some((slug, _)) = link.spec.scenario() else {
+        return false;
+    };
+    if bind_scenario(root, &link.spec).is_none_or(|now| now == *recorded) {
+        return false;
+    }
+    fact_digest(root, slug, None).is_none_or(|whole| whole != *recorded)
 }
 
 pub(crate) fn normalize_ref(text: &str) -> String {
@@ -717,6 +1158,7 @@ fn resolve_anchor(member_root: &Path, anchor: &Anchor) -> Result<Resolved, Strin
                     canonicalizer: canonical.canonicalizer.to_string(),
                     interface: hash.clone(),
                     body: hash,
+                    scenario: None,
                 },
                 span: Span {
                     file: anchor.qualified_file(),
@@ -758,6 +1200,7 @@ fn resolve_anchor(member_root: &Path, anchor: &Anchor) -> Result<Resolved, Strin
                     canonicalizer: canonical.canonicalizer.to_string(),
                     interface: item.interface.clone(),
                     body: item.body.clone(),
+                    scenario: None,
                 },
                 span: Span {
                     file: anchor.qualified_file(),
@@ -802,22 +1245,56 @@ pub fn add(
     code_text: &str,
     kind: LinkKind,
 ) -> Result<Link, String> {
+    mint(
+        root,
+        model,
+        spec_text,
+        code_text,
+        kind,
+        Rule::Authored,
+        Origin::Authored,
+        None,
+    )
+}
+
+/// Mint one row: resolve the spec side at its slot, resolve and pin the
+/// anchor, journal the add. The producing rule and the provenance are the
+/// caller's — `link add` stamps a hand-authored claim, and the reader of a
+/// writer's declaration stamps `declared` through this same path, so a
+/// declared row is minted exactly as an authored one and differs only in what
+/// it says of itself
+/// (`archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`).
+/// The standing is not the caller's, because there is only one: every row a
+/// mint writes is a claim
+/// (`archi/requirements/code-link/a-link-stands-asserted-or-it-does-not-stand.md`).
+///
+/// `proves` is the test the row carries, already parsed and already resolved
+/// by the caller: whether a named test reaches a symbol is the declaration
+/// reader's refusal to raise, because only that reader knows the line the
+/// name was written on. `link add` names none.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn mint(
+    root: &Path,
+    model: &Model,
+    spec_text: &str,
+    code_text: &str,
+    kind: LinkKind,
+    rule: Rule,
+    origin: Origin,
+    proves: Option<Anchor>,
+) -> Result<Link, String> {
     let spec = SpecRef::parse(spec_text)?;
-    let resolves = match &spec.version {
-        None => resolves_in(model, &spec),
-        Some(_) => Slots::new(root).resolves_pinned(&spec)?,
-    };
-    if !resolves {
-        let slot = spec.version.as_deref().unwrap_or("the live model");
-        return Err(format!(
-            "`{}` names no element of {slot} (E_MODEL_REF)",
-            spec.path
-        ));
+    if !resolves_at_slot(root, model, &spec)? {
+        return Err(spec_refusal(root, &spec));
     }
     let anchor = Anchor::parse(code_text)?;
     let roots = Roots::resolve(root)?;
     let member_root = roots.require(&anchor.repo)?;
     let resolved = resolve_anchor(&member_root, &anchor)?;
+    // The pair is bound at birth: the scenario says what must happen, the
+    // code answers it, and both sides are witnessed together.
+    let mut pins = resolved.pins;
+    pins.scenario = bind_scenario(root, &spec);
     let folded = load(root)?;
     let link = Link {
         id: folded.next_id(&format!("{spec_text}{code_text}")),
@@ -825,61 +1302,54 @@ pub fn add(
         anchor,
         kind,
         standing: Standing::Asserted,
-        origin: Origin::Authored,
+        origin,
+        rule,
+        proves,
         birth: Birth {
             created: now(),
             commit: versions::provenance(root),
             spans: vec![resolved.span],
         },
-        pins: resolved.pins,
+        pins,
         touches: Vec::new(),
-        decays: Vec::new(),
     };
     append(root, &[Event::Add { link: link.clone() }])?;
     Ok(link)
 }
 
-/// `archi link ls`: the live links, optionally filtered.
-pub fn ls(
-    root: &Path,
-    spec: Option<&str>,
-    evidence_only: bool,
-) -> Result<Vec<Link>, String> {
-    let folded = load(root)?;
-    let filter = spec.map(SpecRef::parse).transpose()?;
-    Ok(folded
-        .live
-        .into_iter()
+/// The live rows a spec ref names: the path exactly, and the slot when the
+/// filter pins one. The one place `ls` and a bulk retire agree on what a ref
+/// covers.
+fn on_ref(live: Vec<Link>, filter: Option<&SpecRef>) -> Vec<Link> {
+    live.into_iter()
         .filter(|l| {
-            filter.as_ref().is_none_or(|f| {
+            filter.is_none_or(|f| {
                 l.spec.path == f.path
                     && (f.version.is_none() || l.spec.version == f.version)
             })
         })
-        .filter(|l| !evidence_only || l.standing == Standing::Evidence)
-        .collect())
+        .collect()
 }
 
-/// `archi link confirm`: raise an evidence link to asserted — a decision,
-/// recorded.
-pub fn confirm(root: &Path, id: &str) -> Result<Link, String> {
+/// `archi link ls`: the live links, optionally filtered.
+///
+/// `--spec req:<slug>` is the reverse view — what answers this requirement —
+/// and it answers from the rows a person stood behind: declared and
+/// authored. The inferred rows keep standing and keep grading; they are
+/// simply not evidence that anybody claimed this code answers this
+/// requirement (`archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`).
+///
+/// There is no standing to filter on: every live row is a claim, so the list
+/// is the whole live set under the ref
+/// (`archi/requirements/code-link/a-link-stands-asserted-or-it-does-not-stand.md`).
+pub fn ls(root: &Path, spec: Option<&str>) -> Result<Vec<Link>, String> {
     let folded = load(root)?;
-    let link = folded
-        .get(id)
-        .ok_or_else(|| format!("no live link `{id}`"))?;
-    if link.standing == Standing::Asserted {
-        return Err(format!("`{id}` is already asserted"));
-    }
-    append(
-        root,
-        &[Event::Confirm {
-            id: id.to_string(),
-            at: now(),
-        }],
-    )?;
-    let mut confirmed = link.clone();
-    confirmed.standing = Standing::Asserted;
-    Ok(confirmed)
+    let filter = spec.map(SpecRef::parse).transpose()?;
+    let reverse = filter.as_ref().is_some_and(|f| f.requirement().is_some());
+    Ok(on_ref(folded.live, filter.as_ref())
+        .into_iter()
+        .filter(|l| !reverse || l.rule != Rule::Inferred)
+        .collect())
 }
 
 /// `archi link rm`: retire links by id.
@@ -902,8 +1372,13 @@ pub fn retire(root: &Path, ids: &[String]) -> Result<(), String> {
 }
 
 /// `archi link rm --spec … --yes`: retire every live link on a spec ref.
+/// The selector is the ref and only the ref — a retire never reads the
+/// producing rule, because no verb retires rows in bulk by the rule that
+/// made them (`archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`).
 pub fn retire_spec(root: &Path, spec: &str) -> Result<Vec<String>, String> {
-    let ids: Vec<String> = ls(root, Some(spec), false)?
+    let folded = load(root)?;
+    let filter = SpecRef::parse(spec)?;
+    let ids: Vec<String> = on_ref(folded.live, Some(&filter))
         .into_iter()
         .map(|l| l.id)
         .collect();
@@ -915,7 +1390,9 @@ pub fn retire_spec(root: &Path, spec: &str) -> Result<Vec<String>, String> {
 }
 
 /// `archi link repin`: rewrite the projection — accept drift at the current
-/// anchor, or follow a move to a new one. The birth record is untouched.
+/// anchor, or follow a move to a new one. On a scenario link it binds the
+/// pair again, both sides at once: the operator looked, and what the link
+/// witnesses now is what stands. The birth record is untouched.
 pub fn repin(root: &Path, id: &str, to: Option<&str>) -> Result<Link, String> {
     let folded = load(root)?;
     let link = folded
@@ -928,19 +1405,116 @@ pub fn repin(root: &Path, id: &str, to: Option<&str>) -> Result<Link, String> {
     let roots = Roots::resolve(root)?;
     let member_root = roots.require(&anchor.repo)?;
     let resolved = resolve_anchor(&member_root, &anchor)?;
+    let mut pins = resolved.pins;
+    pins.scenario = bind_scenario(root, &link.spec);
     append(
         root,
         &[Event::Repin {
             id: id.to_string(),
             at: now(),
             anchor: anchor.clone(),
-            pins: resolved.pins.clone(),
+            pins: pins.clone(),
+            spec: None,
         }],
     )?;
     let mut repinned = link.clone();
     repinned.anchor = anchor;
-    repinned.pins = resolved.pins;
+    repinned.pins = pins;
     Ok(repinned)
+}
+
+/// `archi link repin --spec`: move the link onto a renamed scenario. The
+/// code side is untouched — the name moved, the code did not — and so is the
+/// birth record; the scenario side binds to the fact under its new name,
+/// because the name is part of the story the digest witnesses. The spec ref
+/// moves for this one reason: an element rename is located by the version
+/// chain instead, so this repair needs no model to resolve its target
+/// (`archi/requirements/world-facts/the-scenario-is-the-address-not-the-step.md`).
+pub fn repin_spec(root: &Path, id: &str, spec_text: &str) -> Result<Link, String> {
+    let folded = load(root)?;
+    let link = folded
+        .get(id)
+        .ok_or_else(|| format!("no live link `{id}`"))?;
+    let target = SpecRef::parse(spec_text)?;
+    let Some((slug, name)) = target.scenario() else {
+        return Err(format!(
+            "`{}` is not `<fact-slug>#<scenario name>` — `repin --spec` moves a link onto a \
+             renamed scenario; an element rename is located by the version chain",
+            target.path
+        ));
+    };
+    if !resolves_scenario(root, slug, name)? {
+        return Err(scenario_refusal(root, slug, &target.path));
+    }
+    let mut pins = link.pins.clone();
+    pins.scenario = bind_scenario(root, &target);
+    append(
+        root,
+        &[Event::Repin {
+            id: id.to_string(),
+            at: now(),
+            anchor: link.anchor.clone(),
+            pins: pins.clone(),
+            spec: Some(target.clone()),
+        }],
+    )?;
+    let mut repinned = link.clone();
+    repinned.spec = target;
+    repinned.pins = pins;
+    Ok(repinned)
+}
+
+/// The outcome of `archi link repin --moved`: what the pass accepted, and
+/// what it left with a person.
+#[derive(Serialize)]
+pub struct MovedReport {
+    /// Links repinned to their exact candidates, each as `repin --to`
+    /// leaves it, in journal order.
+    pub repinned: Vec<Link>,
+    /// Moved links whose candidate is inexact — reported, never taken. Each
+    /// carries its grading as verify would say it, the repair note addressed
+    /// to its own id.
+    pub reported: Vec<Checked>,
+}
+
+/// `archi link repin --moved`: the bulk consumer of the exact candidates the
+/// grader computes. Every live link is graded exactly as verify grades it,
+/// and where the anchor is gone with an exact-hash candidate elsewhere — the
+/// same body at a new path — the pass repins to that candidate through
+/// [`repin`], the one journal author. Exactness is the licence: a body-hash
+/// match is the same code at a new place, so accepting it in bulk asserts
+/// nothing new; an inexact candidate is a judgement, and judgement stays
+/// per-row with a person. Every other grade — clean, drifted, missing,
+/// unreachable — is untouched, so a second run finds nothing moved and
+/// appends nothing
+/// (`archi/requirements/code-link/an-exact-move-repins-in-one-pass.md`).
+pub fn repin_moved(root: &Path, model: &Model) -> Result<MovedReport, String> {
+    let folded = load(root)?;
+    let roots = Roots::resolve(root)?;
+    let mut slots = Slots::new(root);
+    let mut repinned = Vec::new();
+    let mut reported = Vec::new();
+    for link in folded.live {
+        let mut checked = check_link(root, model, &roots, &mut slots, link)?;
+        match &checked.state {
+            State::Moved { file, symbol, exact: true } => {
+                let to = format!(
+                    "{}{}",
+                    qualify(checked.link.anchor.repo.as_deref(), file),
+                    symbol.as_deref().map(|s| format!("#{s}")).unwrap_or_default(),
+                );
+                repinned.push(repin(root, &checked.link.id, Some(&to))?);
+            }
+            State::Moved { exact: false, .. } => {
+                if let Some(n) = checked.note.take() {
+                    checked.note = Some(n.replace("<id>", &checked.link.id));
+                }
+                reported.push(checked);
+            }
+            _ => {}
+        }
+    }
+    Ok(MovedReport { repinned, reported })
 }
 
 // ---- verify ----------------------------------------------------------------
@@ -968,7 +1542,7 @@ pub enum State {
     Missing,
     /// The anchor's member has no checkout here — a state of its own,
     /// upstream of Missing: the code is not gone, this machine cannot see
-    /// it. No observation, no decay, no prune
+    /// it. An absence is no observation, and nothing is read from it
     /// (`archi/requirements/multi-repo/absence-is-not-drift`).
     Unreachable {
         /// The member with no local root.
@@ -978,6 +1552,16 @@ pub enum State {
     CanonicalizerMismatch,
     /// The spec side moved: the ref no longer resolves at Working.
     SpecDrifted,
+    /// The witnessed pair parted: the scenario the link recorded is not the
+    /// scenario the grammar reads now. A ref that stopped resolving is
+    /// `SpecDrifted` and reads as the rename it is; this one is a story that
+    /// moved under an address that still stands
+    /// (`archi/requirements/world-facts/a-scenario-link-binds-two-hashes.md`).
+    ScenarioDrifted {
+        /// The watched code hash moved under the same verify — both sides
+        /// parted, and the report says both.
+        code: bool,
+    },
 }
 
 impl State {
@@ -990,29 +1574,10 @@ impl State {
             State::Unreachable { .. } => "unreachable",
             State::CanonicalizerMismatch => "canonicalizer-mismatch",
             State::SpecDrifted => "spec-drifted",
+            State::ScenarioDrifted { code: false } => "scenario-drifted",
+            State::ScenarioDrifted { code: true } => "pair-drifted",
         }
     }
-}
-
-/// The floor below which evidence reads as decayed — confirm or retire
-/// (`archi/requirements/code-link/the-audit-inverts-coverage.md`).
-pub const CONFIDENCE_FLOOR: f64 = 0.25;
-
-/// Derived confidence of an evidence link — never stored. Born at 0.5;
-/// each task whose capture re-encountered it accrues, each task that
-/// rewrote the anchored item without carrying the spec_ref erodes, any
-/// projection drift erodes once, and a dead anchor zeroes.
-pub fn confidence(link: &Link, state: &State) -> f64 {
-    if matches!(state, State::Missing) {
-        return 0.0;
-    }
-    // An unreachable member is no observation at all: confidence holds
-    // exactly where the last actual read left it.
-    let unread = matches!(state, State::Unreachable { .. });
-    let drift = if matches!(state, State::Clean) || unread { 0.0 } else { -0.25 };
-    let accrued = 0.15 * link.touches.len() as f64;
-    let eroded = 0.25 * link.decays.len() as f64;
-    (0.5 + accrued - eroded + drift).clamp(0.0, 1.0)
 }
 
 /// One verified link.
@@ -1023,9 +1588,12 @@ pub struct Checked {
     /// Its graded state.
     #[serde(flatten)]
     pub state: State,
-    /// Whether this state fails the verify: asserted links only — evidence
-    /// never fails. `Missing`, `CanonicalizerMismatch` and a Working-slot
-    /// `SpecDrifted` always fail; `Drifted` fails literal links only.
+    /// Whether this state fails the verify. Every live row is a claim, so
+    /// every one of them can fail: `Missing`, `CanonicalizerMismatch`, a
+    /// Working-slot `SpecDrifted` and `ScenarioDrifted` always fail;
+    /// `Drifted` fails literal links only. The spec side knows no
+    /// literal/indirect split: a
+    /// witness is one thing, and half of it moving moves all of it.
     pub failing: bool,
     /// Human context: what moved, what held.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1141,11 +1709,11 @@ fn check_link(
     // Spec side. A pinned ref resolves by construction — the archive is
     // sealed — so a pinned link reports Working drift as a note, not a
     // state; a Working-slot ref that stopped resolving is SpecDrifted.
-    let at_working = resolves_in(model, &link.spec);
+    let at_working = resolves_now(root, model, slots, &link.spec)?;
     if link.spec.version.is_some() && !slots.resolves_pinned(&link.spec)? {
         let state = State::SpecDrifted;
         return Ok(Checked {
-            failing: link.standing == Standing::Asserted,
+            failing: true,
             note: Some(format!(
                 "`{}` is not an element of {} — the journal disagrees with the sealed archive",
                 link.spec.path,
@@ -1158,12 +1726,27 @@ fn check_link(
     if link.spec.version.is_none() && !at_working {
         let state = State::SpecDrifted;
         return Ok(Checked {
-            failing: link.standing == Standing::Asserted,
-            note: Some(
-                "the spec element is gone from the live model; the version chain locates the \
-                 rename or removal"
+            failing: true,
+            // A renamed scenario has no version chain to locate it — the
+            // repair is naming the new name. A retired requirement has none
+            // either: the slug is the identity, and it went.
+            note: Some(match (link.spec.requirement(), link.spec.scenario()) {
+                (Some(slug), _) => format!(
+                    "`{slug}` names no requirement of the tree — the requirement retired or was \
+                     renamed; restore the file, or `link rm {}`",
+                    link.id
+                ),
+                (None, Some((slug, _))) => format!(
+                    "`{}` names no scenario of `{}`; `link repin {} --spec \
+                     <fact-slug>#<scenario name>` moves the link onto the new name",
+                    link.spec.path,
+                    fact_file(slug),
+                    link.id
+                ),
+                (None, None) => "the spec element is gone from the live model; the version chain \
+                                 locates the rename or removal"
                     .to_string(),
-            ),
+            }),
             link,
             state,
         });
@@ -1171,11 +1754,28 @@ fn check_link(
     let working_note = (link.spec.version.is_some() && !at_working)
         .then(|| "spec ref no longer resolves at Working".to_string());
 
+    // The scenario side is read before the code side, and folded in after
+    // it: a pair that parted on both sides names both, and that needs both
+    // answers in hand.
+    let moved = scenario_moved(root, &link);
+    let checked = check_projection(root, roots, link, working_note)?;
+    Ok(witness(checked, moved))
+}
+
+/// Grade the code side of a link: reachability, then the anchor, then the
+/// watched hash. The spec side is the caller's — this is the projection
+/// alone.
+fn check_projection(
+    root: &Path,
+    roots: &Roots,
+    link: Link,
+    working_note: Option<String>,
+) -> Result<Checked, String> {
     // The canonicalizer must be known before its hashes mean anything.
     if !code::knows(&link.pins.canonicalizer) {
         let state = State::CanonicalizerMismatch;
         return Ok(Checked {
-            failing: link.standing == Standing::Asserted,
+            failing: true,
             note: Some(format!(
                 "stored canonicalizer `{}` is unknown to this verifier; rehash with `link repin`",
                 link.pins.canonicalizer
@@ -1222,8 +1822,7 @@ fn check_link(
         Err(_) => {
             let (state, note) = scan_for_candidate(root, &member_root, &link);
             return Ok(Checked {
-                failing: link.standing == Standing::Asserted
-                    && matches!(state, State::Missing),
+                failing: matches!(state, State::Missing),
                 note: note.or(working_note),
                 link,
                 state,
@@ -1234,7 +1833,7 @@ fn check_link(
     if canonical.canonicalizer != link.pins.canonicalizer {
         let state = State::CanonicalizerMismatch;
         return Ok(Checked {
-            failing: link.standing == Standing::Asserted,
+            failing: true,
             note: Some(format!(
                 "`{}` now canonicalizes as `{}`, pinned under `{}`",
                 link.anchor.file, canonical.canonicalizer, link.pins.canonicalizer
@@ -1252,8 +1851,7 @@ fn check_link(
             [] => {
                 let (state, note) = scan_for_candidate(root, &member_root, &link);
                 return Ok(Checked {
-                    failing: link.standing == Standing::Asserted
-                        && matches!(state, State::Missing),
+                    failing: matches!(state, State::Missing),
                     note: note.or(working_note),
                     link,
                     state,
@@ -1264,7 +1862,7 @@ fn check_link(
                 let lines: Vec<String> = many.iter().map(|i| i.start_line.to_string()).collect();
                 let state = State::Missing;
                 return Ok(Checked {
-                    failing: link.standing == Standing::Asserted,
+                    failing: true,
                     note: Some(format!(
                         "`{symbol}` is ambiguous in `{}` (lines {}); repin a qualified symbol",
                         link.anchor.file,
@@ -1293,13 +1891,70 @@ fn check_link(
         working_note
     };
     Ok(Checked {
-        failing: link.standing == Standing::Asserted
-            && link.kind == LinkKind::Literal
-            && state == State::Drifted,
+        failing: link.kind == LinkKind::Literal && state == State::Drifted,
         note,
         link,
         state,
     })
+}
+
+/// Fold the scenario side into a graded projection and name the side that
+/// moved. Only a link carrying a recorded digest reaches past the first
+/// guard, so a link over an element path — and a scenario link journaled
+/// before the pair was witnessed — grades exactly as it graded before
+/// (`archi/requirements/world-facts/a-scenario-link-binds-two-hashes.md`).
+///
+/// A code side already lost, ambiguous or out of reach keeps its own state:
+/// that failure is upstream of a moved witness, and its repair — `repin` —
+/// binds the pair anyway. The note still names the scenario, so nothing the
+/// verify saw goes unsaid.
+fn witness(mut checked: Checked, moved: bool) -> Checked {
+    if checked.link.pins.scenario.is_none() {
+        return checked;
+    }
+    let Some((slug, _)) = checked.link.spec.scenario() else {
+        return checked;
+    };
+    let fact = fact_file(slug);
+    let anchor = checked.link.anchor.to_string();
+    let repair = format!("`link repin {}` binds the pair again", checked.link.id);
+    let (state, message) = match (moved, &checked.state) {
+        (false, State::Drifted) => (
+            None,
+            format!(
+                "the code side moved: `{anchor}` no longer matches the hash this link recorded; \
+                 the scenario side holds — {repair}"
+            ),
+        ),
+        (true, State::Clean) => (
+            Some(State::ScenarioDrifted { code: false }),
+            format!(
+                "the scenario side moved: `{fact}` no longer matches the digest this link \
+                 recorded; the code side holds — {repair}"
+            ),
+        ),
+        (true, State::Drifted) => (
+            Some(State::ScenarioDrifted { code: true }),
+            format!("both sides moved: `{fact}` and `{anchor}` — {repair}"),
+        ),
+        (true, _) => (
+            None,
+            format!(
+                "the scenario side moved: `{fact}` no longer matches the digest this link \
+                 recorded — {repair}"
+            ),
+        ),
+        (false, _) => return checked,
+    };
+    checked.note = Some(match checked.note.take() {
+        Some(n) => format!("{message}; {n}"),
+        None => message,
+    });
+    if let Some(state) = state {
+        checked.failing = true;
+        checked.state = state;
+    }
+    checked
 }
 
 /// The anchor is gone: sweep the anchor's own member tree for a candidate —
@@ -1546,17 +2201,6 @@ pub enum AuditFinding {
         /// The node path.
         path: String,
     },
-    /// An evidence link whose derived confidence fell below the floor.
-    DecayedEvidence {
-        /// The link id.
-        id: String,
-        /// Its spec ref.
-        spec: String,
-        /// Its anchor.
-        anchor: String,
-        /// The derived confidence, below [`CONFIDENCE_FLOOR`].
-        confidence: f64,
-    },
 }
 
 impl fmt::Display for AuditFinding {
@@ -1577,18 +2221,6 @@ impl fmt::Display for AuditFinding {
             AuditFinding::UnlinkedSpecRef { path } => {
                 write!(f, "unlinked spec element: {path} — no asserted code-link")
             }
-            AuditFinding::DecayedEvidence {
-                id,
-                spec,
-                anchor,
-                confidence,
-            } => {
-                write!(
-                    f,
-                    "decayed evidence: {id} ({spec} ← {anchor}) — confidence {confidence:.2} \
-                     is below the floor; confirm or retire"
-                )
-            }
         }
     }
 }
@@ -1604,8 +2236,6 @@ pub struct AuditOptions {
     /// Audit only this member's delta (`home` for the project's own
     /// repository).
     pub repo: Option<String>,
-    /// Retire decayed evidence instead of only reporting it.
-    pub prune: bool,
 }
 
 /// The outcome of `archi link audit`.
@@ -1613,40 +2243,41 @@ pub struct AuditOptions {
 pub struct AuditReport {
     /// Live links.
     pub live: usize,
-    /// Of them, asserted.
+    /// Of them, asserted — which is all of them, and the tally says so
+    /// rather than leaving the reader to assume it
+    /// (`archi/requirements/code-link/a-link-stands-asserted-or-it-does-not-stand.md`).
     pub asserted: usize,
-    /// Of them, evidence.
-    pub evidence: usize,
+    /// Of them, produced by inference from shared terms.
+    pub inferred: usize,
+    /// Of them, produced from a writer's declaration.
+    pub declared: usize,
+    /// Of them, produced by hand.
+    pub authored: usize,
     /// Advisory findings — visible until lifted, never blocking.
     pub findings: Vec<AuditFinding>,
     /// What the audit could not cover, and why.
     pub notes: Vec<String>,
-    /// Evidence links `--prune` retired.
-    pub pruned: Vec<String>,
 }
 
-/// Aggregate hygiene: dark deltas, dark spec, decayed evidence.
+/// Aggregate hygiene: dark deltas and dark spec. The sweep reads and never
+/// writes — there is no row it grades and retires on its own
+/// (`archi/requirements/code-link/a-link-stands-asserted-or-it-does-not-stand.md`).
 pub fn audit(root: &Path, model: &Model, opts: &AuditOptions) -> Result<AuditReport, String> {
     let folded = load(root)?;
     let mut report = AuditReport {
         live: folded.live.len(),
-        asserted: folded
-            .live
-            .iter()
-            .filter(|l| l.standing == Standing::Asserted)
-            .count(),
-        evidence: folded
-            .live
-            .iter()
-            .filter(|l| l.standing == Standing::Evidence)
-            .count(),
+        // One standing, so the two counts are one count. The tally prints
+        // both because the reader is told what stands, not left to assume it.
+        asserted: folded.live.len(),
+        inferred: folded.live.iter().filter(|l| l.rule == Rule::Inferred).count(),
+        declared: folded.live.iter().filter(|l| l.rule == Rule::Declared).count(),
+        authored: folded.live.iter().filter(|l| l.rule == Rule::Authored).count(),
         findings: Vec::new(),
         notes: folded
             .absorbed
             .iter()
             .map(|n| format!("journal: {n}"))
             .collect(),
-        pruned: Vec::new(),
     };
 
     // Dark deltas, per member: every hunk since that member's delta source
@@ -1740,9 +2371,9 @@ pub fn audit(root: &Path, model: &Model, opts: &AuditOptions) -> Result<AuditRep
         }
     }
 
-    // Dark spec: elements of the audited scope with no asserted link and
-    // no live evidence. The scope is `--scope`'s subtree — or, by default,
-    // the active plan's task spec_refs.
+    // Dark spec: elements of the audited scope no live link claims. The
+    // scope is `--scope`'s subtree — or, by default, the active plan's task
+    // spec_refs.
     let dark = |path: &str| {
         !folded
             .live
@@ -1778,30 +2409,6 @@ pub fn audit(root: &Path, model: &Model, opts: &AuditOptions) -> Result<AuditRep
         }
     }
 
-    // Decayed evidence: derived confidence below the floor. An unreachable
-    // member is no observation — its links are neither graded nor pruned.
-    let mut slots = Slots::new(root);
-    let mut decayed = Vec::new();
-    for link in folded.live.iter().filter(|l| l.standing == Standing::Evidence) {
-        let checked = check_link(root, model, &roots, &mut slots, link.clone())?;
-        if matches!(checked.state, State::Unreachable { .. }) {
-            continue;
-        }
-        let confidence = confidence(link, &checked.state);
-        if confidence < CONFIDENCE_FLOOR {
-            decayed.push(link.id.clone());
-            report.findings.push(AuditFinding::DecayedEvidence {
-                id: link.id.clone(),
-                spec: link.spec.to_string(),
-                anchor: link.anchor.to_string(),
-                confidence,
-            });
-        }
-    }
-    if opts.prune && !decayed.is_empty() {
-        retire(root, &decayed)?;
-        report.pruned = decayed;
-    }
     Ok(report)
 }
 
@@ -1951,17 +2558,25 @@ fn unaccounted(
 
 // ---- rendering -------------------------------------------------------------
 
-/// One link as a human line: id, kind/standing, spec ← anchor.
+/// One link as a human line: id, kind/standing, the rule that made it,
+/// spec ← anchor — and the test the row carries, where a declaration named
+/// one. A row that names no test prints exactly as it always did
+/// (`archi/requirements/code-link/a-declaration-names-the-test-that-proves-it.md`).
 pub fn render_link(l: &Link) -> String {
-    format!(
-        "{}  {:8} {:8} {:10} {} ← {}",
+    let line = format!(
+        "{}  {:8} {:8} {:10} {:8} {} ← {}",
         l.id,
         l.kind.describe(),
         l.standing.describe(),
         l.origin.to_string(),
+        l.rule.describe(),
         l.spec,
         l.anchor
-    )
+    );
+    match &l.proves {
+        None => line,
+        Some(test) => format!("{line}  proved by {test}"),
+    }
 }
 
 /// The verify report as human lines: one per link, then the tally.
@@ -1998,11 +2613,31 @@ pub fn render_verify(report: &VerifyReport) -> String {
     out
 }
 
+/// The `repin --moved` pass as human lines: each accepted row in `repin`'s
+/// own words, each inexact candidate reported under its row — and a pass
+/// that found no moved link says so.
+pub fn render_moved(report: &MovedReport) -> String {
+    if report.repinned.is_empty() && report.reported.is_empty() {
+        return "no moved links\n".to_string();
+    }
+    let mut out = String::new();
+    for l in &report.repinned {
+        out.push_str(&format!("repinned {}\n", render_link(l)));
+    }
+    for c in &report.reported {
+        out.push_str(&format!("inexact  {}\n", render_link(&c.link)));
+        if let Some(n) = &c.note {
+            out.push_str(&format!("  {n}\n"));
+        }
+    }
+    out
+}
+
 /// The audit report as human lines.
 pub fn render_audit(report: &AuditReport) -> String {
     let mut out = format!(
-        "links: {} live ({} asserted, {} evidence)\n",
-        report.live, report.asserted, report.evidence
+        "links: {} live ({} asserted; {} declared, {} inferred, {} authored)\n",
+        report.live, report.asserted, report.declared, report.inferred, report.authored
     );
     if report.findings.is_empty() {
         out.push_str("no findings\n");
@@ -2012,9 +2647,6 @@ pub fn render_audit(report: &AuditReport) -> String {
     }
     for n in &report.notes {
         out.push_str(&format!("note: {n}\n"));
-    }
-    for id in &report.pruned {
-        out.push_str(&format!("pruned {id}\n"));
     }
     out
 }
@@ -2048,20 +2680,74 @@ mod tests {
     const AUTH_RS: &str = "pub struct Vault {\n    salted: Vec<u8>,\n}\n\n\
                            impl Vault {\n    pub fn persist(&mut self, hash: &[u8]) {\n        self.salted.extend(hash);\n    }\n}\n";
 
+    /// One world fact, whole: the record the docs pass reads and the
+    /// `Scenarios` block a ref addresses into.
+    const FACT: &str = "\
+---
+covers: []
+sources: []
+uses: []
+---
+
+# Users open the app on a train
+
+The carriage drops the network for minutes at a time, so a call that must reach
+the server fails for a reason the user cannot fix.
+
+## What people do instead
+
+Riders load the page at the platform and redo the trip's work when they
+forget.
+
+## Scenarios
+
+### the app opens with no network
+
+Given the device has no network
+When the user opens the app
+Then the last synced view appears
+";
+
+    /// A second scenario of the same fact — the sibling whose motion a link
+    /// on the first scenario must not feel
+    /// (`archi/requirements/world-facts/the-digest-witnesses-one-scenario.md`).
+    const SIBLING: &str = "
+### the app opens on a slow line
+
+Given the device has one bar of signal
+When the user opens the app
+Then the view arrives late
+";
+
+    const FACT_SLUG: &str = "users-open-the-app-on-a-train";
+    const SCENARIO: &str = "the app opens with no network";
+
+    /// Write the fact into the tree — the live file the resolution reads.
+    fn write_fact(root: &Path, text: &str) {
+        let path = root.join(fact_file(FACT_SLUG));
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
+    }
+
     fn model_of(root: &Path) -> Workspace {
         modeling_lang::source::compile_project(root)
             .unwrap_or_else(|f| panic!("test model failed to compile:\n{}", f.render()))
             .workspace
     }
 
-    fn state_of(root: &Path, ws: &Workspace, id: &str) -> (State, bool) {
-        let report = verify(root, ws.model(), &VerifyOptions::default()).unwrap();
-        let c = report
+    /// One link as the verify graded it — state, gate and note together.
+    fn checked_of(root: &Path, ws: &Workspace, id: &str) -> Checked {
+        verify(root, ws.model(), &VerifyOptions::default())
+            .unwrap()
             .checked
-            .iter()
+            .into_iter()
             .find(|c| c.link.id == id)
-            .unwrap_or_else(|| panic!("no `{id}` in the report"));
-        (c.state.clone(), c.failing)
+            .unwrap_or_else(|| panic!("no `{id}` in the report"))
+    }
+
+    fn state_of(root: &Path, ws: &Workspace, id: &str) -> (State, bool) {
+        let c = checked_of(root, ws, id);
+        (c.state, c.failing)
     }
 
     #[test]
@@ -2124,10 +2810,10 @@ mod tests {
         assert_eq!(state_of(&root, &ws, &ind.id), (State::Drifted, false));
 
         // Repin accepts the drift: the projection rewrites, birth stands.
-        let before = ls(&root, None, false).unwrap()[0].birth.clone();
+        let before = ls(&root, None).unwrap()[0].birth.clone();
         repin(&root, &lit.id, None).unwrap();
         assert_eq!(state_of(&root, &ws, &lit.id), (State::Clean, false));
-        assert_eq!(ls(&root, None, false).unwrap()[0].birth, before);
+        assert_eq!(ls(&root, None).unwrap()[0].birth, before);
 
         fs::remove_dir_all(&root).unwrap();
     }
@@ -2239,182 +2925,49 @@ mod tests {
         fs::remove_dir_all(&root).unwrap();
     }
 
+    /// The fold reads what older binaries wrote and keeps the record exact:
+    /// a `touch` lands once per task, however often the line replays, and a
+    /// `decay` is read and skipped — never an error, whatever id it names.
+    /// The journal is append-only, so the events stand and the reader stays
+    /// (`archi/requirements/code-link/a-link-stands-asserted-or-it-does-not-stand.md`).
     #[test]
-    fn evidence_confirms_decays_and_prunes() {
+    fn the_fold_records_a_touch_once_per_task_and_skips_every_decay() {
         let root = temp_project();
         let ws = model_of(&root);
-        // A captured link, as task-close capture will mint it.
-        let resolved = resolve_anchor(
-            &root,
-            &Anchor::parse("code/auth.rs#Vault::persist").unwrap(),
-        )
-        .unwrap();
-        append(
-            &root,
-            &[Event::Add {
-                link: Link {
-                    id: "l0001".into(),
-                    spec: SpecRef::parse("Vault").unwrap(),
-                    anchor: Anchor::parse("code/auth.rs#Vault::persist").unwrap(),
-                    kind: LinkKind::Indirect,
-                    standing: Standing::Evidence,
-                    origin: Origin::Captured { task: "t1".into() },
-                    birth: Birth {
-                        created: now(),
-                        commit: None,
-                        spans: vec![resolved.span.clone()],
-                    },
-                    pins: resolved.pins.clone(),
-                    touches: Vec::new(),
-                    decays: Vec::new(),
-                },
-            }],
-        )
-        .unwrap();
-
-        // Evidence never fails a verify, even drifted.
-        fs::write(
-            root.join("code/auth.rs"),
-            AUTH_RS.replace("persist(&mut self, hash: &[u8])", "persist(&mut self, h: u8)"),
-        )
-        .unwrap();
-        let (state, failing) = state_of(&root, &ws, "l0001");
-        assert_eq!(state, State::Drifted);
-        assert!(!failing);
-
-        // Confirm records the decision.
-        let confirmed = confirm(&root, "l0001").unwrap();
-        assert_eq!(confirmed.standing, Standing::Asserted);
-        assert!(confirm(&root, "l0001").is_err(), "already asserted");
-
-        // A second evidence link whose anchor dies decays; --prune retires.
-        append(
-            &root,
-            &[Event::Add {
-                link: Link {
-                    id: "l0002".into(),
-                    spec: SpecRef::parse("Auth").unwrap(),
-                    anchor: Anchor::parse("code/auth.rs#Vault::gone").unwrap(),
-                    kind: LinkKind::Indirect,
-                    standing: Standing::Evidence,
-                    origin: Origin::Captured { task: "t1".into() },
-                    birth: Birth {
-                        created: now(),
-                        commit: None,
-                        spans: Vec::new(),
-                    },
-                    pins: resolved.pins,
-                    touches: Vec::new(),
-                    decays: Vec::new(),
-                },
-            }],
-        )
-        .unwrap();
-        let report = audit(
+        let link = add(
             &root,
             ws.model(),
-            &AuditOptions {
-                prune: true,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        assert!(
-            report
-                .findings
-                .iter()
-                .any(|f| matches!(f, AuditFinding::DecayedEvidence { id, .. } if id == "l0002")),
-        );
-        assert_eq!(report.pruned, vec!["l0002".to_string()]);
-        assert!(ls(&root, None, false).unwrap().iter().all(|l| l.id != "l0002"));
-
-        fs::remove_dir_all(&root).unwrap();
-    }
-
-    #[test]
-    fn confidence_accrues_by_touch_and_erodes_by_decay() {
-        let root = temp_project();
-        let ws = model_of(&root);
-        let resolved = resolve_anchor(
-            &root,
-            &Anchor::parse("code/auth.rs#Vault::persist").unwrap(),
-        )
-        .unwrap();
-        append(
-            &root,
-            &[Event::Add {
-                link: Link {
-                    id: "l0001".into(),
-                    spec: SpecRef::parse("Vault").unwrap(),
-                    anchor: Anchor::parse("code/auth.rs#Vault::persist").unwrap(),
-                    kind: LinkKind::Indirect,
-                    standing: Standing::Evidence,
-                    origin: Origin::Captured { task: "t1".into() },
-                    birth: Birth {
-                        created: now(),
-                        commit: None,
-                        spans: vec![resolved.span],
-                    },
-                    pins: resolved.pins,
-                    touches: Vec::new(),
-                    decays: Vec::new(),
-                },
-            }],
+            "Vault",
+            "code/auth.rs#Vault::persist",
+            LinkKind::Indirect,
         )
         .unwrap();
 
-        // Born clean at 0.5 — above the floor, no finding.
-        let live = ls(&root, None, false).unwrap();
-        assert!((confidence(&live[0], &State::Clean) - 0.5).abs() < 1e-9);
-        let report = audit(&root, ws.model(), &AuditOptions::default()).unwrap();
-        assert!(
-            !report
-                .findings
-                .iter()
-                .any(|f| matches!(f, AuditFinding::DecayedEvidence { .. })),
-        );
-
-        // A touch accrues once per task; decays erode harder. The fold
-        // dedups replayed events.
         let at = now();
         let touch = |task: &str| Event::Touch {
-            id: "l0001".into(),
+            id: link.id.clone(),
             task: task.into(),
             at: at.clone(),
         };
-        let decay = |task: &str| Event::Decay {
-            id: "l0001".into(),
-            task: task.into(),
+        let decay = |id: &str| Event::Decay {
+            id: id.into(),
+            task: "t3".into(),
             at: at.clone(),
         };
-        append(&root, &[touch("t2"), touch("t2"), decay("t3"), decay("t4")]).unwrap();
-        let live = ls(&root, None, false).unwrap();
-        assert_eq!(live[0].touches, vec!["t2".to_string()]);
-        assert_eq!(
-            live[0].decays,
-            vec!["t3".to_string(), "t4".to_string()]
-        );
-        // 0.5 + 0.15 − 2·0.25 = 0.15: below the floor — flagged, prunable.
-        assert!((confidence(&live[0], &State::Clean) - 0.15).abs() < 1e-9);
-        let report = audit(
+        // The last decay names an id the journal never minted: the event is
+        // skipped, so the fold has nothing to refuse.
+        append(
             &root,
-            ws.model(),
-            &AuditOptions {
-                prune: true,
-                ..Default::default()
-            },
+            &[touch("t2"), touch("t2"), decay(&link.id), decay("l0404-ffffff")],
         )
         .unwrap();
-        assert!(
-            report.findings.iter().any(|f| matches!(
-                f,
-                AuditFinding::DecayedEvidence { id, confidence, .. }
-                    if id == "l0001" && (confidence - 0.15).abs() < 1e-9
-            )),
-            "{}",
-            render_audit(&report)
-        );
-        assert_eq!(report.pruned, vec!["l0001".to_string()]);
+
+        let live = ls(&root, None).unwrap();
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0].touches, vec!["t2".to_string()]);
+        assert_eq!(live[0].standing, Standing::Asserted);
+        // And it grades as it always did: the decay changed nothing.
+        assert_eq!(state_of(&root, &ws, &link.id), (State::Clean, false));
 
         fs::remove_dir_all(&root).unwrap();
     }
@@ -2445,8 +2998,9 @@ mod tests {
             vec!["Auth.store wire Vault.inn".to_string(), "Vault".to_string()]
         );
 
-        // An asserted link lifts the node; live evidence lifts the edge —
-        // dark means no asserted link *and* no live evidence.
+        // A live link lifts the element it hangs on, whichever verb minted
+        // it: the hand-authored one lifts the node, and the row a past
+        // capture journaled lifts the edge.
         add(
             &root,
             ws.model(),
@@ -2468,8 +3022,10 @@ mod tests {
                     spec: SpecRef::parse("Auth.store wire Vault.inn").unwrap(),
                     anchor: Anchor::parse("code/auth.rs#Vault::persist").unwrap(),
                     kind: LinkKind::Indirect,
-                    standing: Standing::Evidence,
+                    standing: Standing::Asserted,
                     origin: Origin::Captured { task: "t1".into() },
+                    rule: Rule::Inferred,
+                    proves: None,
                     birth: Birth {
                         created: now(),
                         commit: None,
@@ -2477,7 +3033,6 @@ mod tests {
                     },
                     pins: resolved.pins,
                     touches: Vec::new(),
-                    decays: Vec::new(),
                 },
             }],
         )
@@ -2574,7 +3129,7 @@ mod tests {
         add(&root, ws.model(), "Auth", "code/auth.rs", LinkKind::Literal).unwrap();
         retire(&root, &[first.id.clone()]).unwrap();
         assert!(retire(&root, &[first.id.clone()]).is_err(), "already retired");
-        let live = ls(&root, None, false).unwrap();
+        let live = ls(&root, None).unwrap();
         assert_eq!(live.len(), 1);
         // The sequence counts past retirements: never reused, still readable.
         let third = add(&root, ws.model(), "Vault", "code/auth.rs", LinkKind::Indirect).unwrap();
@@ -2705,6 +3260,626 @@ mod tests {
     }
 
     #[test]
+    fn a_scenario_ref_resolves_and_the_digest_decides_it() {
+        let root = temp_project();
+        let ws = model_of(&root);
+        write_fact(&root, FACT);
+
+        // The world form of a spec ref: a fact's slug, then a scenario name
+        // inside it — read out of the tree the docs pass reads, never out of
+        // a pinned render.
+        let l = add(
+            &root,
+            ws.model(),
+            &format!("{FACT_SLUG}#{SCENARIO}"),
+            "code/auth.rs#Vault::persist",
+            LinkKind::Literal,
+        )
+        .expect("a scenario the fact holds resolves");
+        assert_eq!(l.spec.path, format!("{FACT_SLUG}#{SCENARIO}"));
+        assert_eq!(l.spec.version, None, "a fact stands in one slot: now");
+        assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
+
+        // The step text is not the address: rewording one leaves the ref
+        // resolving. The digest decides the link from here — the pair was
+        // witnessed, and a witness that no longer matches is a failure
+        // (archi/requirements/world-facts/a-scenario-link-binds-two-hashes.md).
+        write_fact(
+            &root,
+            &FACT.replace(
+                "Then the last synced view appears",
+                "Then the view synced last is on screen",
+            ),
+        );
+        let c = checked_of(&root, &ws, &l.id);
+        assert_ne!(c.state, State::SpecDrifted, "the address still resolves");
+        assert_eq!(c.state.describe(), "scenario-drifted");
+        assert!(c.failing);
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The pair, side by side: each digest moves alone and both move
+    /// together, and every failure names the side that parted
+    /// (archi/requirements/world-facts/a-scenario-link-binds-two-hashes.md).
+    #[test]
+    fn a_witnessed_pair_names_the_side_that_moved() {
+        let root = temp_project();
+        let ws = model_of(&root);
+        write_fact(&root, FACT);
+        let l = add(
+            &root,
+            ws.model(),
+            &format!("{FACT_SLUG}#{SCENARIO}"),
+            "code/auth.rs#Vault::persist",
+            LinkKind::Literal,
+        )
+        .unwrap();
+        let repair = format!("`link repin {}` binds the pair again", l.id);
+
+        // An unchanged pair: both witnesses hold.
+        assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
+
+        // The scenario side alone: a reworded step.
+        write_fact(
+            &root,
+            &FACT.replace(
+                "Then the last synced view appears",
+                "Then the view synced last is on screen",
+            ),
+        );
+        let c = checked_of(&root, &ws, &l.id);
+        assert_eq!(c.state.describe(), "scenario-drifted");
+        assert!(c.failing);
+        assert_eq!(
+            c.note.as_deref(),
+            Some(
+                format!(
+                    "the scenario side moved: `archi/world/facts/{FACT_SLUG}.md` no longer matches the \
+                     digest this link recorded; the code side holds — {repair}"
+                )
+                .as_str()
+            )
+        );
+
+        // `repin` binds the pair again, and the next verify is clean.
+        repin(&root, &l.id, None).unwrap();
+        assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
+
+        // The code side alone: the anchored item is rewritten.
+        fs::write(
+            root.join("code/auth.rs"),
+            AUTH_RS.replace("self.salted.extend(hash);", "self.salted = hash.to_vec();"),
+        )
+        .unwrap();
+        let c = checked_of(&root, &ws, &l.id);
+        assert_eq!(c.state, State::Drifted);
+        assert!(c.failing);
+        assert_eq!(
+            c.note.as_deref(),
+            Some(
+                format!(
+                    "the code side moved: `code/auth.rs#Vault::persist` no longer matches the \
+                     hash this link recorded; the scenario side holds — {repair}"
+                )
+                .as_str()
+            )
+        );
+
+        // Both sides: the failure names both.
+        write_fact(
+            &root,
+            &FACT.replace(
+                "Then the last synced view appears",
+                "Then the view is on screen",
+            ),
+        );
+        let c = checked_of(&root, &ws, &l.id);
+        assert_eq!(c.state.describe(), "pair-drifted");
+        assert!(c.failing);
+        assert_eq!(
+            c.note.as_deref(),
+            Some(
+                format!(
+                    "both sides moved: `archi/world/facts/{FACT_SLUG}.md` and \
+                     `code/auth.rs#Vault::persist` — {repair}"
+                )
+                .as_str()
+            )
+        );
+
+        // One repin binds both sides; the birth record stands.
+        let before = ls(&root, None).unwrap()[0].birth.clone();
+        repin(&root, &l.id, None).unwrap();
+        assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
+        assert_eq!(ls(&root, None).unwrap()[0].birth, before);
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The digest witnesses the scenario the ref addresses: a sibling
+    /// reworded in the same fact, and a scenario added beside it, move
+    /// nothing this link stands on
+    /// (`archi/requirements/world-facts/the-digest-witnesses-one-scenario.md`).
+    #[test]
+    fn a_sibling_scenario_moves_and_the_link_stays_clean() {
+        let root = temp_project();
+        let ws = model_of(&root);
+        let both = format!("{FACT}{SIBLING}");
+        write_fact(&root, &both);
+        let l = add(
+            &root,
+            ws.model(),
+            &format!("{FACT_SLUG}#{SCENARIO}"),
+            "code/auth.rs#Vault::persist",
+            LinkKind::Literal,
+        )
+        .unwrap();
+        assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
+
+        // The sibling's step is reworded.
+        let reworded = both.replace("Then the view arrives late", "Then the view takes its time");
+        write_fact(&root, &reworded);
+        assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
+
+        // A third scenario joins the fact: the condition was elaborated, and
+        // an elaborated condition must not cost its links anything.
+        write_fact(
+            &root,
+            &format!(
+                "{reworded}\n### the app opens in a tunnel\n\n\
+                 Given the device has no network for minutes\n\
+                 When the user opens the app\nThen the last synced view appears\n"
+            ),
+        );
+        assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The addressed scenario moves and the pair parts: the grade is the
+    /// scenario side, the message names it, and one `repin` binds the narrow
+    /// pair again (`the-digest-witnesses-one-scenario`).
+    #[test]
+    fn a_step_of_the_addressed_scenario_moves_and_the_note_names_the_scenario_side() {
+        let root = temp_project();
+        let ws = model_of(&root);
+        let both = format!("{FACT}{SIBLING}");
+        write_fact(&root, &both);
+        let l = add(
+            &root,
+            ws.model(),
+            &format!("{FACT_SLUG}#{SCENARIO}"),
+            "code/auth.rs#Vault::persist",
+            LinkKind::Literal,
+        )
+        .unwrap();
+
+        write_fact(
+            &root,
+            &both.replace(
+                "Then the last synced view appears",
+                "Then the view synced last is on screen",
+            ),
+        );
+        let c = checked_of(&root, &ws, &l.id);
+        assert_eq!(c.state.describe(), "scenario-drifted");
+        assert!(c.failing);
+        assert_eq!(
+            c.note.as_deref(),
+            Some(
+                format!(
+                    "the scenario side moved: `archi/world/facts/{FACT_SLUG}.md` no longer matches the \
+                     digest this link recorded; the code side holds — `link repin {}` binds the \
+                     pair again",
+                    l.id
+                )
+                .as_str()
+            )
+        );
+
+        repin(&root, &l.id, None).unwrap();
+        assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A renamed address and a moved witness are two failures, and they keep
+    /// reading differently: the name is the address, so a rename unresolves
+    /// the ref and never reaches the digest at all
+    /// (`the-digest-witnesses-one-scenario`).
+    #[test]
+    fn renaming_the_addressed_scenario_is_spec_drift_not_a_moved_digest() {
+        let root = temp_project();
+        let ws = model_of(&root);
+        let both = format!("{FACT}{SIBLING}");
+        write_fact(&root, &both);
+        let l = add(
+            &root,
+            ws.model(),
+            &format!("{FACT_SLUG}#{SCENARIO}"),
+            "code/auth.rs#Vault::persist",
+            LinkKind::Literal,
+        )
+        .unwrap();
+
+        let renamed = "the app opens off the network";
+        write_fact(
+            &root,
+            &both.replace(&format!("### {SCENARIO}"), &format!("### {renamed}")),
+        );
+        let c = checked_of(&root, &ws, &l.id);
+        assert_eq!(c.state, State::SpecDrifted);
+        assert_ne!(c.state.describe(), "scenario-drifted");
+        assert!(c.failing);
+        let note = c.note.unwrap_or_default();
+        assert!(note.contains("names no scenario") && note.contains("--spec"), "{note}");
+
+        // The repair is the one the note names, and the pair binds to the
+        // scenario under its new name.
+        repin_spec(&root, &l.id, &format!("{FACT_SLUG}#{renamed}")).unwrap();
+        assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The links journaled while the digest covered the whole block — six of
+    /// them in this repository — keep the grain they recorded. A recorded
+    /// digest that is the fact's whole story as it stands now is not motion,
+    /// so nothing false-fails on the day the grain narrows; the first `repin`
+    /// binds the link to the scenario it addresses, and the narrow grain
+    /// rules it from there (`the-digest-witnesses-one-scenario`).
+    #[test]
+    fn a_link_recorded_over_the_whole_block_holds_until_a_repin_narrows_it() {
+        let root = temp_project();
+        let ws = model_of(&root);
+        let both = format!("{FACT}{SIBLING}");
+        write_fact(&root, &both);
+        let whole = fact_digest(&root, FACT_SLUG, None).expect("the fact stands in the tree");
+        let anchor = Anchor::parse("code/auth.rs#Vault::persist").unwrap();
+        let resolved = resolve_anchor(&root, &anchor).unwrap();
+        let old = serde_json::json!({
+            "event": "add",
+            "link": {
+                "id": "l0001",
+                "spec": {"ref": format!("{FACT_SLUG}#{SCENARIO}")},
+                "anchor": {"file": "code/auth.rs", "symbol": "Vault::persist"},
+                "kind": "literal",
+                "standing": "asserted",
+                "origin": {"kind": "authored"},
+                "birth": {
+                    "created": now(),
+                    "spans": [{
+                        "file": "code/auth.rs",
+                        "start": resolved.span.start,
+                        "end": resolved.span.end,
+                        "hash": &resolved.span.hash,
+                    }],
+                },
+                "pins": {
+                    "canonicalizer": &resolved.pins.canonicalizer,
+                    "interface": &resolved.pins.interface,
+                    "body": &resolved.pins.body,
+                    "scenario": &whole,
+                },
+            },
+        })
+        .to_string();
+        fs::create_dir_all(root.join("archi").join("links")).unwrap();
+        fs::write(journal_path(&root), format!("{old}\n")).unwrap();
+        assert_eq!(state_of(&root, &ws, "l0001"), (State::Clean, false));
+
+        // Its own grain still rules it: a sibling moving fails it, exactly as
+        // it failed the day it was written. Narrowing costs it nothing and
+        // gains it nothing until somebody looks.
+        let reworded = both.replace("Then the view arrives late", "Then the view takes its time");
+        write_fact(&root, &reworded);
+        assert_eq!(checked_of(&root, &ws, "l0001").state.describe(), "scenario-drifted");
+
+        // The repin binds the scenario the ref addresses, and the sibling
+        // stops reaching the link.
+        repin(&root, "l0001", None).unwrap();
+        write_fact(
+            &root,
+            &reworded.replace("Then the view takes its time", "Then the view is late"),
+        );
+        assert_eq!(state_of(&root, &ws, "l0001"), (State::Clean, false));
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The regression that matters: every link this repository carries names
+    /// an element path, and an element path has no story to witness — the
+    /// journal line and the grade are yesterday's.
+    #[test]
+    fn an_element_link_binds_one_side_and_grades_as_it_did() {
+        let root = temp_project();
+        let ws = model_of(&root);
+        let l = add(
+            &root,
+            ws.model(),
+            "Vault",
+            "code/auth.rs#Vault::persist",
+            LinkKind::Literal,
+        )
+        .unwrap();
+        let journal = fs::read_to_string(journal_path(&root)).unwrap();
+        assert!(!journal.contains("scenario"), "{journal}");
+        assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
+
+        fs::write(
+            root.join("code/auth.rs"),
+            AUTH_RS.replace("self.salted.extend(hash);", "self.salted = hash.to_vec();"),
+        )
+        .unwrap();
+        let c = checked_of(&root, &ws, &l.id);
+        assert_eq!(c.state, State::Drifted);
+        assert!(c.failing);
+        assert_eq!(c.note, None, "an element link has no side to name");
+
+        repin(&root, &l.id, None).unwrap();
+        assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
+        let journal = fs::read_to_string(journal_path(&root)).unwrap();
+        assert!(!journal.contains("scenario"), "{journal}");
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A scenario link journaled before the pair was witnessed carries no
+    /// digest. Absence is not motion: it replays, grades and reads exactly as
+    /// it did, and the first `repin` binds the pair.
+    #[test]
+    fn a_link_with_no_recorded_digest_never_reads_as_moved() {
+        let root = temp_project();
+        let ws = model_of(&root);
+        write_fact(&root, FACT);
+        let anchor = Anchor::parse("code/auth.rs#Vault::persist").unwrap();
+        let resolved = resolve_anchor(&root, &anchor).unwrap();
+        // The line as the journal held it before the pair was witnessed:
+        // written out by hand, with no key for the scenario side at all.
+        let old = serde_json::json!({
+            "event": "add",
+            "link": {
+                "id": "l0001",
+                "spec": {"ref": format!("{FACT_SLUG}#{SCENARIO}")},
+                "anchor": {"file": "code/auth.rs", "symbol": "Vault::persist"},
+                "kind": "literal",
+                "standing": "asserted",
+                "origin": {"kind": "authored"},
+                "birth": {
+                    "created": now(),
+                    "spans": [{
+                        "file": "code/auth.rs",
+                        "start": resolved.span.start,
+                        "end": resolved.span.end,
+                        "hash": &resolved.span.hash,
+                    }],
+                },
+                "pins": {
+                    "canonicalizer": &resolved.pins.canonicalizer,
+                    "interface": &resolved.pins.interface,
+                    "body": &resolved.pins.body,
+                },
+            },
+        })
+        .to_string();
+        fs::create_dir_all(root.join("archi").join("links")).unwrap();
+        fs::write(journal_path(&root), format!("{old}\n")).unwrap();
+        assert_eq!(ls(&root, None).unwrap().len(), 1, "the line replays");
+        assert_eq!(state_of(&root, &ws, "l0001"), (State::Clean, false));
+
+        // The story moves and the link says nothing: it witnessed no story.
+        write_fact(
+            &root,
+            &FACT.replace(
+                "Then the last synced view appears",
+                "Then the view synced last is on screen",
+            ),
+        );
+        assert_eq!(state_of(&root, &ws, "l0001"), (State::Clean, false));
+
+        // The first repin binds the pair; from there the digest decides.
+        repin(&root, "l0001", None).unwrap();
+        write_fact(
+            &root,
+            &FACT.replace(
+                "Then the last synced view appears",
+                "Then the view is on screen",
+            ),
+        );
+        let c = checked_of(&root, &ws, "l0001");
+        assert_eq!(c.state.describe(), "scenario-drifted");
+        assert!(c.failing);
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_renamed_scenario_unresolves_and_repin_moves_the_link() {
+        let root = temp_project();
+        let ws = model_of(&root);
+        write_fact(&root, FACT);
+        let l = add(
+            &root,
+            ws.model(),
+            &format!("{FACT_SLUG}#{SCENARIO}"),
+            "code/auth.rs#Vault::persist",
+            LinkKind::Literal,
+        )
+        .unwrap();
+
+        // The name is the address: renaming the scenario unresolves the link,
+        // and the note names the repair.
+        let renamed = "the app opens off the network";
+        write_fact(
+            &root,
+            &FACT.replace(&format!("### {SCENARIO}"), &format!("### {renamed}")),
+        );
+        let report = verify(&root, ws.model(), &VerifyOptions::default()).unwrap();
+        let checked = report.checked.iter().find(|c| c.link.id == l.id).unwrap();
+        assert_eq!(checked.state, State::SpecDrifted);
+        assert!(checked.failing);
+        assert!(
+            checked.note.as_deref().is_some_and(|n| n.contains("repin")),
+            "{:?}",
+            checked.note
+        );
+
+        // `repin --spec` moves the link onto the new name; birth and the code
+        // side stand — the name moved, the code did not.
+        let before = ls(&root, None).unwrap()[0].clone();
+        let moved = repin_spec(&root, &l.id, &format!("{FACT_SLUG}#{renamed}")).unwrap();
+        assert_eq!(moved.spec.path, format!("{FACT_SLUG}#{renamed}"));
+        assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
+        let after = ls(&root, None).unwrap()[0].clone();
+        assert_eq!(after.birth, before.birth);
+        assert_eq!(after.anchor, before.anchor);
+        // The code half of the witness stands, hash for hash. The scenario
+        // half binds again: the name is part of the story the digest reads,
+        // so a rename moves it and the repair rebinds it.
+        assert_eq!(
+            (
+                &after.pins.canonicalizer,
+                &after.pins.interface,
+                &after.pins.body
+            ),
+            (
+                &before.pins.canonicalizer,
+                &before.pins.interface,
+                &before.pins.body
+            )
+        );
+        assert_ne!(after.pins.scenario, before.pins.scenario);
+
+        // A name the fact does not hold refuses here as it refuses at add,
+        // and an element path is not what this move repairs.
+        let err = repin_spec(&root, &l.id, &format!("{FACT_SLUG}#no such walk")).unwrap_err();
+        assert!(err.contains("E_MODEL_REF"), "{err}");
+        let err = repin_spec(&root, &l.id, "Vault").unwrap_err();
+        assert!(err.contains("<fact-slug>#<scenario name>"), "{err}");
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn an_ambiguous_scenario_is_located_and_an_unheld_one_refuses() {
+        let root = temp_project();
+        let ws = model_of(&root);
+        write_fact(&root, FACT);
+
+        // A fact no file holds, and a name the fact does not hold: both
+        // refuse where every other unresolvable ref refuses.
+        let err = add(
+            &root,
+            ws.model(),
+            &format!("no-such-fact#{SCENARIO}"),
+            "code/auth.rs",
+            LinkKind::Indirect,
+        )
+        .unwrap_err();
+        assert!(err.contains("no world fact") && err.contains("E_MODEL_REF"), "{err}");
+        let err = add(
+            &root,
+            ws.model(),
+            &format!("{FACT_SLUG}#the train stops"),
+            "code/auth.rs",
+            LinkKind::Indirect,
+        )
+        .unwrap_err();
+        assert!(err.contains("E_MODEL_REF"), "{err}");
+
+        // Two scenarios of one name inside one fact: the address is
+        // ambiguous, and the error locates the second one.
+        let twin = format!(
+            "{FACT}\n### {SCENARIO}\n\nGiven the device has no network\n\
+             When the user opens the app\nThen the last synced view appears\n"
+        );
+        write_fact(&root, &twin);
+        let err = add(
+            &root,
+            ws.model(),
+            &format!("{FACT_SLUG}#{SCENARIO}"),
+            "code/auth.rs",
+            LinkKind::Indirect,
+        )
+        .unwrap_err();
+        let second = twin
+            .lines()
+            .enumerate()
+            .filter(|(_, l)| l.trim() == format!("### {SCENARIO}"))
+            .map(|(i, _)| i + 1)
+            .nth(1)
+            .expect("two lines name the scenario");
+        assert!(
+            err.contains(&format!("archi/world/facts/{FACT_SLUG}.md:{second}")),
+            "{err}"
+        );
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The address is a `### ` heading, and the shape this one replaced holds
+    /// no address at all: a `Scenario:` line names a scenario nowhere, and
+    /// the form of such a block is `archi check`'s to report
+    /// (`archi/requirements/world-facts/the-scenario-is-the-address-not-the-step.md`).
+    #[test]
+    fn a_heading_is_the_address_and_a_retired_scenario_line_is_not() {
+        let root = temp_project();
+        let ws = model_of(&root);
+
+        // The retired shape, whole: the name stands on a `Scenario:` line.
+        write_fact(
+            &root,
+            &FACT.replace(
+                &format!("### {SCENARIO}"),
+                &format!("Feature: Offline open\n\n  Scenario: {SCENARIO}"),
+            ),
+        );
+        let err = add(
+            &root,
+            ws.model(),
+            &format!("{FACT_SLUG}#{SCENARIO}"),
+            "code/auth.rs#Vault::persist",
+            LinkKind::Literal,
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("names no scenario") && err.contains("E_MODEL_REF"),
+            "{err}"
+        );
+
+        // A deeper heading opens no scenario either: `### ` is the opener.
+        write_fact(
+            &root,
+            &FACT.replace(&format!("### {SCENARIO}"), &format!("#### {SCENARIO}")),
+        );
+        assert!(
+            add(
+                &root,
+                ws.model(),
+                &format!("{FACT_SLUG}#{SCENARIO}"),
+                "code/auth.rs#Vault::persist",
+                LinkKind::Literal,
+            )
+            .is_err()
+        );
+
+        // The heading is the address, and the pair it binds verifies clean.
+        write_fact(&root, FACT);
+        let l = add(
+            &root,
+            ws.model(),
+            &format!("{FACT_SLUG}#{SCENARIO}"),
+            "code/auth.rs#Vault::persist",
+            LinkKind::Literal,
+        )
+        .expect("the heading names the scenario");
+        assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn exclusion_patterns_scope_bare_everywhere_and_qualified_to_one_member() {
         let patterns = vec!["*.md".to_string(), "backend//vendor/".to_string()];
         // Bare patterns hold in every member.
@@ -2717,5 +3892,344 @@ mod tests {
         assert!(!excluded_in(None, "vendor/dep.rs", &patterns));
         // The member prefix never leaks into the path test.
         assert!(!excluded_in(Some("backend"), "src/vendor.rs", &patterns));
+    }
+
+    // ---- a requirement as an address ---------------------------------------
+
+    const REQ_SLUG: &str = "the-vault-salts-what-it-stores";
+    const REQ_INTENT: &str = "storage";
+
+    /// One requirement where the discovery walks for it: an intent folder
+    /// anchored by its own file, and the requirement beside it. The slug is
+    /// the file stem, exactly as `plan verify` reads it for `owns:`.
+    fn write_requirement(root: &Path, slug: &str) {
+        let dir = root.join("archi/requirements").join(REQ_INTENT);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join(format!("{REQ_INTENT}.md")),
+            "# Storage\n\nWhat the vault keeps and how.\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.join(format!("{slug}.md")),
+            "---\nkind: functional\nsatisfied-by: [Vault]\ndeferred:\n---\n\n\
+             # The vault salts what it stores\n\nEvery stored byte is salted first.\n",
+        )
+        .unwrap();
+    }
+
+    fn req_ref(slug: &str) -> String {
+        format!("req:{slug}")
+    }
+
+    /// The column `ls` prints the producing rule in.
+    fn rule_word(l: &Link) -> String {
+        render_link(l)
+            .split_whitespace()
+            .nth(4)
+            .expect("the rendered row has a rule column")
+            .to_string()
+    }
+
+    /// The third shape resolves against the requirement set, and the two
+    /// standing shapes are untouched — a bare slug still falls to the element
+    /// branch and is refused in today's words
+    /// (`archi/requirements/code-link/a-requirement-is-addressable-in-the-journal.md`).
+    #[test]
+    fn a_requirement_is_an_address_and_the_element_branch_is_untouched() {
+        let root = temp_project();
+        write_requirement(&root, REQ_SLUG);
+        let ws = model_of(&root);
+
+        let l = add(
+            &root,
+            ws.model(),
+            &req_ref(REQ_SLUG),
+            "code/auth.rs#Vault::persist",
+            LinkKind::Indirect,
+        )
+        .expect("the requirement set holds the slug");
+        assert_eq!(l.spec.to_string(), req_ref(REQ_SLUG));
+        assert_eq!(l.spec.requirement(), Some(REQ_SLUG));
+        assert_eq!(l.spec.scenario(), None, "a requirement is not a scenario");
+        assert_eq!(state_of(&root, &ws, &l.id), (State::Clean, false));
+
+        // A `req:` naming no requirement is refused, and the refusal names
+        // the slug it could not find.
+        let err = add(
+            &root,
+            ws.model(),
+            "req:no-such-claim",
+            "code/auth.rs#Vault::persist",
+            LinkKind::Indirect,
+        )
+        .unwrap_err();
+        assert!(err.contains("no-such-claim"), "{err}");
+        assert!(err.contains("names no requirement"), "{err}");
+
+        // A bare slug holds no prefix: it is an element ref, and its refusal
+        // is today's, byte for byte.
+        let err = add(
+            &root,
+            ws.model(),
+            REQ_SLUG,
+            "code/auth.rs#Vault::persist",
+            LinkKind::Indirect,
+        )
+        .unwrap_err();
+        assert_eq!(
+            err,
+            format!("`{REQ_SLUG}` names no element of the live model (E_MODEL_REF)")
+        );
+
+        // A requirement slug is stable across versions, so it takes no slot.
+        let err = SpecRef::parse(&format!("req:{REQ_SLUG}@v0025")).unwrap_err();
+        assert!(err.contains("carries no version pin"), "{err}");
+        assert!(err.contains(REQ_SLUG), "{err}");
+        // The element shape keeps its `@` handling.
+        assert_eq!(
+            SpecRef::parse("Vault@v0025").unwrap().version.as_deref(),
+            Some("v0025")
+        );
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The code side moving fails a `req:` link exactly as it fails an
+    /// element link, and `repin` binds it again
+    /// (`archi/requirements/code-link/a-requirement-is-addressable-in-the-journal.md`).
+    #[test]
+    fn a_requirement_link_fails_and_repins_as_an_element_link_does() {
+        let root = temp_project();
+        write_requirement(&root, REQ_SLUG);
+        let ws = model_of(&root);
+        let req = add(
+            &root,
+            ws.model(),
+            &req_ref(REQ_SLUG),
+            "code/auth.rs#Vault::persist",
+            LinkKind::Literal,
+        )
+        .unwrap();
+        let elem = add(
+            &root,
+            ws.model(),
+            "Vault",
+            "code/auth.rs#Vault::persist",
+            LinkKind::Literal,
+        )
+        .unwrap();
+
+        // The code moves out from under both rows at once, under a name the
+        // candidate scan cannot follow.
+        fs::write(
+            root.join("code/vault.rs"),
+            AUTH_RS.replace("persist", "store"),
+        )
+        .unwrap();
+        fs::write(root.join("code/auth.rs"), "pub fn unrelated() {}\n").unwrap();
+        let graded = state_of(&root, &ws, &req.id);
+        assert_eq!(graded, state_of(&root, &ws, &elem.id), "one grader, one answer");
+        assert_eq!(
+            graded,
+            (State::Missing, true),
+            "the requirement link fails like the element one"
+        );
+
+        repin(&root, &req.id, Some("code/vault.rs#Vault::store")).unwrap();
+        assert_eq!(state_of(&root, &ws, &req.id), (State::Clean, false));
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Retiring the requirement makes the link unresolvable — a state of its
+    /// own, upstream of the code side being gone
+    /// (`archi/requirements/code-link/a-requirement-is-addressable-in-the-journal.md`).
+    #[test]
+    fn a_retired_requirement_unresolves_and_that_is_not_missing() {
+        let root = temp_project();
+        write_requirement(&root, REQ_SLUG);
+        let ws = model_of(&root);
+        let req = add(
+            &root,
+            ws.model(),
+            &req_ref(REQ_SLUG),
+            "code/auth.rs#Vault::persist",
+            LinkKind::Literal,
+        )
+        .unwrap();
+        let elem = add(
+            &root,
+            ws.model(),
+            "Vault",
+            "code/auth.rs#Vault::persist",
+            LinkKind::Literal,
+        )
+        .unwrap();
+
+        fs::remove_file(
+            root.join("archi/requirements")
+                .join(REQ_INTENT)
+                .join(format!("{REQ_SLUG}.md")),
+        )
+        .unwrap();
+        let (state, failing) = state_of(&root, &ws, &req.id);
+        assert_eq!(state, State::SpecDrifted);
+        assert!(failing);
+        assert_ne!(state, State::Missing, "unresolvable is not missing");
+
+        // The code side leaving is the other state, and it still reads as it
+        // always did.
+        fs::remove_file(root.join("code/auth.rs")).unwrap();
+        assert_eq!(state_of(&root, &ws, &elem.id), (State::Missing, true));
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Every row says which rule produced it, a row written before the field
+    /// existed takes it from its origin with no migration, and the reverse
+    /// view answers from declared and authored rows alone
+    /// (`archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`).
+    #[test]
+    fn a_row_says_which_rule_made_it_and_an_unstamped_row_takes_it_from_its_origin() {
+        let root = temp_project();
+        write_requirement(&root, REQ_SLUG);
+        let ws = model_of(&root);
+
+        // By hand.
+        let hand = add(
+            &root,
+            ws.model(),
+            &req_ref(REQ_SLUG),
+            "code/auth.rs#Vault::persist",
+            LinkKind::Indirect,
+        )
+        .unwrap();
+        assert_eq!(hand.rule, Rule::Authored);
+        assert_eq!(rule_word(&hand), "authored");
+
+        // From a declaration: the same mint, stamped with the rule that
+        // produced it — the path capture reads a declaration through.
+        let declared = mint(
+            &root,
+            ws.model(),
+            &req_ref(REQ_SLUG),
+            "code/auth.rs#Vault",
+            LinkKind::Indirect,
+            Rule::Declared,
+            Origin::Captured { task: "t9".into() },
+            None,
+        )
+        .unwrap();
+        assert_eq!(declared.rule, Rule::Declared);
+        assert_eq!(rule_word(&declared), "declared");
+
+        // A row journaled before the field existed carries no rule, and it
+        // takes one from its origin — nothing was migrated. What capture
+        // minted under the shared-term rule is the tool's guess; what `link
+        // add` minted is a claim a person made by hand, and it stays one.
+        let old = r#"{"event":"add","link":{"id":"__ID__","spec":{"ref":"__REQ__"},"anchor":{"file":"code/auth.rs","symbol":"Vault::persist"},"kind":"indirect","standing":"__STANDING__","origin":__ORIGIN__,"birth":{"created":"2020-01-01T00:00:00Z","spans":[]},"pins":{"canonicalizer":"rust-tok-v1","interface":"sha256:a","body":"sha256:b"}}}"#;
+        let path = journal_path(&root);
+        let mut text = fs::read_to_string(&path).unwrap();
+        for (id, standing, origin) in [
+            ("l0900-aaaaaa", "evidence", r#"{"kind":"captured","task":"t1"}"#),
+            ("l0901-bbbbbb", "asserted", r#"{"kind":"authored"}"#),
+        ] {
+            text.push_str(
+                &old.replace("__ID__", id)
+                    .replace("__REQ__", &req_ref(REQ_SLUG))
+                    .replace("__STANDING__", standing)
+                    .replace("__ORIGIN__", origin),
+            );
+            text.push('\n');
+        }
+        fs::write(&path, text).unwrap();
+
+        let rows = ls(&root, None).unwrap();
+        let row = |id: &str| {
+            rows.iter()
+                .find(|l| l.id == id)
+                .unwrap_or_else(|| panic!("the replayed row `{id}` folds"))
+        };
+        assert_eq!(row("l0900-aaaaaa").rule, Rule::Inferred);
+        assert_eq!(rule_word(row("l0900-aaaaaa")), "inferred");
+        assert_eq!(row("l0901-bbbbbb").rule, Rule::Authored);
+        assert_eq!(rule_word(row("l0901-bbbbbb")), "authored");
+
+        // The reverse view: what a person stood behind, and not the guesses.
+        // A row `link add` minted before the field existed is still what a
+        // person stood behind, so it answers here too.
+        let view: Vec<&str> = ls(&root, Some(&req_ref(REQ_SLUG)))
+            .unwrap()
+            .iter()
+            .map(|l| l.id.as_str())
+            .map(|id| {
+                if id == hand.id {
+                    "hand"
+                } else if id == declared.id {
+                    "declared"
+                } else if id == "l0901-bbbbbb" {
+                    "old hand"
+                } else {
+                    "guess"
+                }
+            })
+            .collect();
+        assert_eq!(
+            view,
+            vec!["hand", "declared", "old hand"],
+            "the inferred row is the only one left out"
+        );
+
+        // An element ref is not the reverse view: it lists what it always did.
+        let all = ls(&root, Some("Vault")).unwrap();
+        assert!(all.is_empty(), "no row hangs on `Vault` here");
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The audit carries the word on the one line that names rows: the tally
+    /// it opens with. No finding names a row anymore — the one that did left
+    /// with the second standing
+    /// (`archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`).
+    #[test]
+    fn the_audit_carries_the_producing_rule() {
+        let root = temp_project();
+        write_requirement(&root, REQ_SLUG);
+        let ws = model_of(&root);
+        add(
+            &root,
+            ws.model(),
+            &req_ref(REQ_SLUG),
+            "code/auth.rs#Vault::persist",
+            LinkKind::Indirect,
+        )
+        .unwrap();
+        mint(
+            &root,
+            ws.model(),
+            &req_ref(REQ_SLUG),
+            "code/auth.rs#Vault",
+            LinkKind::Indirect,
+            Rule::Declared,
+            Origin::Captured { task: "t9".into() },
+            None,
+        )
+        .unwrap();
+
+        let report = audit(&root, ws.model(), &AuditOptions::default()).unwrap();
+        assert_eq!(report.declared, 1);
+        assert_eq!(report.authored, 1);
+        assert_eq!(report.inferred, 0);
+        let head = render_audit(&report)
+            .lines()
+            .next()
+            .expect("the audit opens with its tally")
+            .to_string();
+        for word in ["declared", "inferred", "authored"] {
+            assert!(head.contains(word), "{head}");
+        }
+
+        fs::remove_dir_all(&root).unwrap();
     }
 }

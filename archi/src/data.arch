@@ -13,6 +13,7 @@ def node Findings        // advisory observations — surfaced, never blocking
 def node CanonicalRender // canonical(project): the render that versions hash and archive
 def node RequirementDoc  // intent + requirement markdown under archi/requirements/
 def node StressDoc       // session + stressor markdown under archi/stress/
+def node WorldDoc        // world-fact markdown under archi/world/: one outside condition, the scenarios it dictates, and what would falsify it
 def node PlanFile        // the plan folder's records: charter, task files, scenarios — minted by verbs, prose edited in place
 def node PlanState       // state.json beside the records — the plan's lifecycle alone: state, closed waves, the pinned version and its hash
 def node LinkEvent       // one append-only journal event: add, confirm, repin, retire…
@@ -43,6 +44,7 @@ Data type_of Findings
 Data type_of CanonicalRender
 Data type_of RequirementDoc
 Data type_of StressDoc
+Data type_of WorldDoc
 Data type_of PlanFile
 Data type_of PlanState
 Data type_of LinkEvent

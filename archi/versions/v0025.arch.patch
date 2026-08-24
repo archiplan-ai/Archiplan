@@ -1,0 +1,18 @@
+--- original
++++ modified
+@@ -160,6 +160,7 @@
+   port serve // the named creation batch, loaded before user statements
+ def node Query:
+   port audit // model-completeness findings
++  port read_world // the facts covering the elements a slice names
+   port subgraph // composed filters to a node-link slice
+ def node Renderer:
+   port emit_source // the model as canonical source: the archived form
+@@ -413,6 +414,7 @@
+ Planner.store_plan persist(ItemHashIndex) SourceTree.store in trace_flow
+ Planner.store_plan persist(PlanFile) SourceTree.store in trace_flow
+ Planner.store_plan persist(PlanState) SourceTree.store in trace_flow
++Query.read_world recall(<-WorldDoc) DocsCompiler.serve_world in read_flow
+ Scaffold.emit persist(AgentBrief) SourceTree.store in compile_flow
+ Scaffold.emit persist(ArchSource) SourceTree.store in compile_flow
+ Scaffold.read_tree recall(<-AgentBrief) SourceTree.serve in compile_flow

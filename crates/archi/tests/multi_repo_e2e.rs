@@ -1,6 +1,6 @@
 //! End to end through the real binary: code in member repositories, spec in
 //! its own — refs qualified `member//file#symbol`, absence graded
-//! Unreachable and never decayed, baselines per member, the audit worded per
+//! Unreachable and never journaled, baselines per member, the audit worded per
 //! member, and the memberless project untouched
 //! (`archi/requirements/multi-repo/`).
 
@@ -104,16 +104,21 @@ fn qualified_refs_run_the_whole_link_loop_across_members() {
     .unwrap();
     // Drifted fails only asserted literal links
     // (archi/requirements/code-link/verify-grades-every-claim.md): the indirect drift is
-    // reported, qualified, and exits 0.
+    // reported, qualified, and exits 0. The row carries both sides — the
+    // claim by name and the file that moved under it — so nobody has to
+    // notice the gap by hand
+    // (`archi/world/facts/a-design-written-apart-from-the-code-falls-behind-it.md`,
+    // "The code moves and nobody updates the writing").
     let (success, verify, _) = run(&spec, &["link", "verify"]);
     assert!(success, "{verify}");
     assert!(verify.contains("drifted"), "{verify}");
     assert!(verify.contains("backend//src/lib.rs#serve_gate"), "{verify}");
+    assert!(verify.contains("Gate ← backend//src/lib.rs#serve_gate"), "{verify}");
     assert!(verify.contains("the declared shape moved"), "{verify}");
 }
 
 #[test]
-fn absence_is_reported_never_decayed_and_fails_only_in_scope() {
+fn absence_is_reported_never_retired_and_fails_only_in_scope() {
     let ws = scratch("absence");
     let spec = ws.join("spec");
     let backend = ws.join("backend");
@@ -131,13 +136,12 @@ fn absence_is_reported_never_decayed_and_fails_only_in_scope() {
     assert!(out.contains("unreachable"), "{out}");
     assert!(out.contains("archi repo map backend"), "{out}");
 
-    // No decay observation is journaled by looking at nothing; audit
-    // neither grades nor prunes what it cannot see.
+    // Nothing is journaled by looking at nothing; audit neither grades nor
+    // retires what it cannot see.
     let journal = fs::read_to_string(spec.join("archi/links/journal.jsonl")).unwrap();
     assert!(!journal.contains("\"decay\""), "{journal}");
-    let (_, audit, _) = run(&spec, &["link", "audit", "--prune"]);
+    let (_, audit, _) = run(&spec, &["link", "audit"]);
     assert!(audit.contains("unreachable"), "{audit}");
-    assert!(!audit.contains("pruned"), "{audit}");
     let after = fs::read_to_string(spec.join("archi/links/journal.jsonl")).unwrap();
     assert!(!after.contains("\"retire\""), "{after}");
 

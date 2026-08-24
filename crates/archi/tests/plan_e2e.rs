@@ -45,6 +45,9 @@ fn temp_project() -> PathBuf {
     )
     .unwrap();
     fs::write(dir.join("code/auth.rs"), "pub fn login() -> bool { true }\n").unwrap();
+    // The tests a declaration names. They stand before any wave opens, so
+    // they sit in every wave-open index and are never a change of their own.
+    fs::write(dir.join("code/tests.rs"), TESTS_RS).unwrap();
     put_requirement(&dir, "store-encrypted", "Store encrypted", "Store");
     put_requirement(&dir, "service-hardening", "Service hardening", "Service");
     util::worktree(&dir)
@@ -144,6 +147,96 @@ const T1_STORE_CURATED: &str =
      ## Inputs\n\n## Outputs\n\n- code/store.rs\n\n## Stack\n\n## Verifications\n\n\
      ### store-encrypted\n\n- test — proves store-encrypted\n";
 
+/// One world fact under `archi/world/facts/`, in the shape `world add` mints
+/// and a person fills: the three lists, the conditioning paragraph, the
+/// workaround and a `Scenarios` block (`archi/requirements/world-facts/`).
+fn put_fact(root: &Path, slug: &str, title: &str, covers: &str, scenarios: &[&str]) {
+    let with_steps: Vec<(&str, &[&str])> = scenarios.iter().map(|s| (*s, STEPS)).collect();
+    put_fact_with_steps(root, slug, title, covers, &with_steps);
+}
+
+/// The three steps every scenario carries unless the test spells its own out.
+const STEPS: &[&str] = &[
+    "Given the carriage leaves the platform",
+    "When the rider opens the door",
+    "Then the door holds",
+];
+
+/// The same fixture with the steps spelled out, so a test can reword one
+/// step and watch the witness part — `put_fact`'s block with its Gherkin
+/// under the test's control. A scenario is a `### ` heading and its steps:
+/// the fact's own title is the feature, so the block names none
+/// (`archi/requirements/world-facts/the-grammar-is-a-named-subset.md`).
+fn put_fact_with_steps(
+    root: &Path,
+    slug: &str,
+    title: &str,
+    covers: &str,
+    scenarios: &[(&str, &[&str])],
+) {
+    let mut block = String::new();
+    for (name, steps) in scenarios {
+        block.push_str(&format!("### {name}\n\n"));
+        for step in *steps {
+            block.push_str(&format!("{step}\n"));
+        }
+        block.push('\n');
+    }
+    util::Fact {
+        covers,
+        sources: "https://example.org/thread/42",
+        uses: "",
+        condition: "The carriage drops the network for minutes at a time.",
+        workaround: "Riders load the page at the platform and redo what the drop takes.",
+        scenarios: &block,
+    }
+    .write(root, slug, title);
+}
+
+/// This family's declaration of what no fact of it reaches: the shared one
+/// ([`util::declare_internal`]). A test here writes the one fact that covers
+/// the node its task sits on, and the gate on `version save` asks about the
+/// whole model; the nodes left over go through this.
+fn declare_internal(root: &Path, nodes: &[&str]) {
+    util::declare_internal(root, nodes);
+}
+
+/// This family's shim: the shared one ([`util::shim`]) under this family's
+/// own scratch name.
+fn shim(root: &Path) -> PathBuf {
+    util::shim(root, "archi-plan-e2e")
+}
+
+/// Run one line through `sh`, exactly as it was printed ([`util::shell`]).
+fn shell(bin: &Path, line: &str) -> (Option<i32>, String, String) {
+    util::shell(bin, line)
+}
+
+/// The one `archi link add` line a transcript printed, trimmed of the
+/// bullet the caller marked it with.
+fn printed_link_add(out: &str) -> String {
+    let lines: Vec<&str> = out
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("archi link add"))
+        .collect();
+    assert_eq!(lines.len(), 1, "one command, for the one unanchored scenario: {out}");
+    lines[0].to_string()
+}
+
+/// Curate a minted task file the way a person does: own one requirement,
+/// author its proof, name the file the task writes — and leave the
+/// machine-written frontmatter exactly as the mint left it, carried facts
+/// and all.
+fn curate(root: &Path, rel: &str, owns: &str, output: &str) {
+    let path = root.join(rel);
+    let text = fs::read_to_string(&path)
+        .unwrap()
+        .replace("owns: []", &format!("owns: [{owns}]"))
+        .replace("## Outputs\n", &format!("## Outputs\n\n- {output}\n"));
+    fs::write(&path, format!("{text}\n### {owns}\n\n- test — proves {owns}\n")).unwrap();
+}
+
 /// The `captured lNNNN …` ids of a `plan next` transcript.
 fn captured_ids(stdout: &str) -> Vec<String> {
     stdout
@@ -159,8 +252,9 @@ fn the_record_folder_authors_by_editing_files() {
     let root = temp_project();
     ok(&root, &["version", "save", "-m", "first"]);
 
-    // `use` mints the folder: charter and scenarios skeletons, lifecycle
-    // in state.json — no plan.json is ever born again.
+    // `use` mints the folder: the charter skeleton and the lifecycle in
+    // state.json — no plan.json is ever born again, and no `scenarios.md`:
+    // the plan authors no stories, it collects them from the world.
     let out = ok(&root, &["plan", "use", "mvp"]);
     assert!(out.contains("created plan `mvp` @ v0001"), "{out}");
     let dir = root.join("archi/plans/mvp");
@@ -168,7 +262,7 @@ fn the_record_folder_authors_by_editing_files() {
         fs::read_to_string(dir.join("mvp.md")).unwrap(),
         "# mvp\n\n## Stack\n\n## Architecture\n"
     );
-    assert_eq!(fs::read_to_string(dir.join("scenarios.md")).unwrap(), "# Scenarios\n");
+    assert!(!dir.join("scenarios.md").exists());
     assert_eq!(state_json(&root, "mvp")["state"], "draft");
     assert!(!dir.join("plan.json").exists());
 
@@ -211,11 +305,6 @@ fn the_record_folder_authors_by_editing_files() {
          - `Store` realizes Rust\n\
          - `Auth` realizes Rust\n\
          - `Gate` realizes Rust\n",
-    );
-    write_record(
-        &root,
-        "archi/plans/mvp/scenarios.md",
-        "# Scenarios\n\n- a user stores a row\n",
     );
     write_record(
         &root,
@@ -281,7 +370,9 @@ fn the_record_folder_authors_by_editing_files() {
     assert!(show.contains("stack: Rust — user choice"), "{show}");
     assert!(show.contains("summary: Store — keeps the rows"), "{show}");
     assert!(show.contains("mapping: Rust realizes Gate"), "{show}");
-    assert!(ok(&root, &["plan", "scenarios", "list"]).contains("1. a user stores a row"));
+    // The plan's own block is retired: no fact covers its nodes, so the
+    // collected set is empty and the listing says so.
+    assert!(ok(&root, &["plan", "scenarios", "list"]).contains("no scenarios"));
     let brief = ok(&root, &["plan", "task", "show", "t1"]);
     assert!(brief.contains("t1 Store — persist rows"), "{brief}");
     assert!(brief.contains("sqlite via rusqlite"), "{brief}");
@@ -297,6 +388,13 @@ fn the_record_folder_authors_by_editing_files() {
     assert!(out.contains("wave 1 in flight: t1"), "{out}");
     assert!(ok(&root, &["plan", "status"]).contains("(started)"));
     assert_eq!(state_json(&root, "mvp")["state"], "started");
+    // While the portion runs, what it must satisfy is still readable with
+    // it: the brief names the obligation and the proof, not only in draft
+    // (`archi/world/facts/an-assistant-handed-the-whole-of-a-job-does-part-of-it.md`,
+    // "What a portion was for is readable while the portion runs").
+    let brief = ok(&root, &["plan", "task", "show", "t1"]);
+    assert!(brief.contains("store-encrypted (owned"), "{brief}");
+    assert!(brief.contains("verify: test — rows encrypted at rest"), "{brief}");
     let (_, err) = fails(&root, &["plan", "task", "add", "Gate"]);
     assert!(err.contains("tasks are cut in draft"), "{err}");
     let (_, err) = fails(&root, &["plan", "task", "rm", "t2"]);
@@ -346,10 +444,20 @@ fn batch_runs_the_mint_verbs_and_stops_at_the_first_failure() {
 #[test]
 fn the_plan_loop_produces_the_links_its_gate_demands() {
     let root = temp_project();
+    put_fact(
+        &root,
+        "riders-lose-the-signal",
+        "Riders lose the signal",
+        "Auth",
+        &["a user logs in end to end"],
+    );
 
     // A plan pins a hardened spec: refuses before the first save.
     let (_, err) = fails(&root, &["plan", "use", "mvp"]);
     assert!(err.contains("version save"), "{err}");
+    // The fact reaches `Auth` and `Store` behind it; `Gate` is the node it never
+    // touches, and the save's gate takes the declaration as its second exit.
+    declare_internal(&root, &["Gate"]);
     ok(&root, &["version", "save", "-m", "first"]);
     let out = ok(&root, &["plan", "use", "mvp"]);
     assert!(out.contains("created plan `mvp` @ v0001"), "{out}");
@@ -361,12 +469,7 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     ok(&root, &["plan", "task", "add", "Auth"]);
 
     // Authoring is a text edit of the record files: outputs scope
-    // capture, inputs shape waves, a scenario rides the envelope.
-    write_record(
-        &root,
-        "archi/plans/mvp/scenarios.md",
-        "# Scenarios\n\n- a user logs in end to end\n",
-    );
+    // capture, inputs shape waves. The stories are the world's.
     write_record(
         &root,
         "archi/plans/mvp/t1-store.md",
@@ -406,68 +509,170 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
          ### service-hardening\n\n- test — proves service-hardening\n",
     );
 
+    // The tests the declarations name, in the tree before the wave opens so
+    // they are never a change of their own.
+    fs::write(
+        root.join("code/store_test.rs"),
+        "pub fn a_row_is_persisted() {\n    assert!(true);\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("code/auth_test.rs"),
+        "pub fn a_login_without_a_name_is_refused() {\n    assert!(true);\n}\n",
+    )
+    .unwrap();
     let out = ok(&root, &["plan", "start"]);
     assert!(out.contains("wave 1 in flight: t1"), "{out}");
     let out = ok(&root, &["plan", "current-wave"]);
     assert!(out.contains("t1 Store — persist rows"), "{out}");
+    // Only the portion in flight is described. t2 is cut and waiting, and
+    // the wave in flight says nothing about it
+    // (`archi/world/facts/an-assistant-handed-the-whole-of-a-job-does-part-of-it.md`,
+    // "Work arrives in portions and the next does not open early").
+    assert!(!out.contains("t2"), "the next portion is not described yet: {out}");
 
-    // Close wave 1: the edit under t1's output becomes candidates, and
-    // the gate blocks until they are asserted — the step that demands
-    // links is the step that produces them.
+    // Close wave 1: the edit under t1's output moves a symbol t1 claims, and
+    // the wave refuses while nothing declares it. Nothing was captured — the
+    // diff proves a symbol moved, it never proves what that symbol answers.
     fs::write(
         root.join("code/store.rs"),
         "pub struct Store;\nimpl Store {\n    pub fn put(&mut self, n: u8) { let _ = n; }\n}\n",
     )
     .unwrap();
     let (stdout, stderr) = fails(&root, &["plan", "next"]);
-    assert!(stderr.contains("coverage of the refs this delta presses is incomplete"), "{stderr}");
-    let ids = captured_ids(&stdout);
-    assert_eq!(ids.len(), 2, "{stdout}");
+    assert!(stderr.contains("names nothing"), "{stderr}");
+    assert!(captured_ids(&stdout).is_empty(), "{stdout}");
+    assert!(stdout.contains("w01.t1.declares.toml"), "{stdout}");
 
-    // A manual re-run is idempotent, and `--json` carries the full
-    // product: what was pressed, what was suppressed.
+    // A manual re-run is idempotent, and `--json` carries the mint whole.
     let out = ok(&root, &["link", "capture", "--task", "t1"]);
     assert!(!out.contains("captured "), "{out}");
     let json: Value =
         serde_json::from_str(&ok(&root, &["link", "capture", "--task", "t1", "--json"])).unwrap();
-    assert_eq!(json["pressed"]["t1"].as_array().unwrap().len(), 2, "{json}");
-    assert!(json["suppressed"].as_array().unwrap().is_empty(), "{json}");
+    assert!(json["minted"].as_array().unwrap().is_empty(), "{json}");
 
-    // Review and assert, then re-run the gate.
-    for id in &ids {
-        ok(&root, &["link", "confirm", id]);
-    }
+    // A second file moves beside the first, and no entry accounts for it: the
+    // delta is what the gate demands, so the wave stays open and the refusal
+    // names that file. The repair it prints is the declaration verb — a hand
+    // `link add` writes the journal, and the gate does not read the journal
+    // (`archi/requirements/planning/the-gate-refusal-names-the-repair-that-stands.md`).
+    fs::write(root.join("code/orphan.rs"), ORPHAN_RS).unwrap();
+    declares(
+        &root,
+        1,
+        "t1",
+        &[[
+            "code/store.rs#Store::put",
+            "Store",
+            "code/store_test.rs#a_row_is_persisted",
+        ]],
+    );
+    let (stdout, stderr) = fails(&root, &["plan", "next"]);
+    assert_eq!(captured_ids(&stdout).len(), 1, "{stdout}");
+    // Flattened, so a hard wrap in the source string cannot hide a phrase.
+    let flat = util::flat(&stderr);
+    assert!(flat.contains("code/orphan.rs"), "names the file: {stderr}");
+    assert!(
+        flat.contains("archi plan task <id> link add --symbol"),
+        "names the repair: {stderr}"
+    );
+    assert!(!flat.contains("link ls --evidence"), "no candidate list to review: {stderr}");
+    assert!(!flat.contains("link confirm"), "nothing captured to raise: {stderr}");
+    // `archi link add` appears here only in the sentence that denies it, and
+    // that is exactly why matching a command name proves nothing: read what
+    // the refusal tells the reader to run
+    // (`archi/requirements/planning/the-gate-refusal-names-the-repair-that-stands.md`).
+    let denial = stderr
+        .lines()
+        .find(|l| l.contains("archi link add"))
+        .expect("the refusal says which neighbouring verb does not answer it");
+    assert!(denial.contains("does not answer this gate"), "{denial}");
+    assert!(
+        !denial.contains("plan task"),
+        "the repair and its denial are two statements, not one line: {denial}"
+    );
+    // The repair as printed is the repair that works. The entry may name a
+    // file no `## Outputs` claims — the writer that touched it accounts for
+    // it.
+    ok(&root, &[
+        "plan", "task", "t1", "link", "add",
+        "--symbol", "code/orphan.rs#stray",
+        "--answers", "Store",
+        "--proved-by", "code/store_test.rs#a_row_is_persisted",
+    ]);
+    // The spec side is nobody's gate now: the incoming edge no link covers
+    // rides as advice, and the hand still authors it when the traceability is
+    // wanted.
     let out = ok(&root, &["plan", "next"]);
+    assert!(
+        out.contains("archi link add \"Auth.creds wire Store.inn\" <file#symbol> --kind indirect"),
+        "the uncovered edge is advice: {out}"
+    );
+    assert_eq!(captured_ids(&out).len(), 1, "the orphan's pair mints: {out}");
     assert!(out.contains("wave 1 closed — in flight: t2"), "{out}");
+    ok(&root, &[
+        "link", "add", "Auth.creds wire Store.inn", "code/store.rs#Store::put",
+        "--kind", "indirect",
+    ]);
+    let declared = ok(&root, &["link", "ls", "--spec", "Store"]);
+    assert!(declared.contains("asserted"), "{declared}");
+    assert!(declared.contains("declared"), "{declared}");
+    assert!(
+        declared.contains("proved by code/store_test.rs#a_row_is_persisted"),
+        "{declared}"
+    );
 
-    // Wave 2's delta shares no term with any of t2's refs: nothing is
-    // pressed, so nothing gates — the last wave closes into the cleanup
-    // wave, the no-signal product suppressed and the untouched surface
-    // suggested as a checklist instead of a jam. The cleanup block
-    // prints once and latches in state.json; the scenarios wait.
-    fs::write(
-        root.join("code/auth.rs"),
-        "pub fn login(u: &str) -> bool { !u.is_empty() }\n",
-    )
-    .unwrap();
+    // Wave 2's declaration names the one file its delta moved, so the last
+    // wave closes into the cleanup wave with no ref demanded and the
+    // untouched surface suggested as a checklist instead of a jam. The
+    // cleanup block prints once and latches in state.json; the scenarios
+    // wait.
+    fs::write(root.join("code/auth.rs"), AUTH_MOVED).unwrap();
+    declares(
+        &root,
+        2,
+        "t2",
+        &[[
+            "code/auth.rs#login",
+            "req:service-hardening",
+            "code/auth_test.rs#a_login_without_a_name_is_refused",
+        ]],
+    );
     let out = ok(&root, &["plan", "next"]);
-    assert!(!out.contains("captured "), "{out}");
-    assert!(out.contains("suppressed 3 no-signal pair(s)"), "{out}");
+    assert_eq!(captured_ids(&out).len(), 1, "the declaration mints its pair: {out}");
+    assert!(!out.contains("no-signal pair"), "no term is compared: {out}");
     assert!(out.contains("hand-author"), "{out}");
     assert!(out.contains("archi link add \"Auth\" <file#symbol> --kind indirect"), "{out}");
     assert_eq!(out.matches("the cleanup wave").count(), 1, "{out}");
     assert!(!out.contains("a user logs in end to end"), "{out}");
     assert_eq!(state_json(&root, "mvp")["cleanup_displayed"], true);
 
-    // The next call brings the scenarios block exactly as before the
-    // cleanup stage existed.
+    // The next call brings the block, collected from the world: the fact
+    // covering t2's node dictates the story this plan closes on.
     let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("all waves closed — scenarios:"), "{out}");
-    assert!(out.contains("a user logs in end to end"), "{out}");
+    assert!(
+        out.contains("riders-lose-the-signal#a user logs in end to end"),
+        "{out}"
+    );
     assert!(!out.contains("the cleanup wave"), "printed once: {out}");
 
-    // One more next closes the plan — in state.json; the content files
+    // The latch proves the block is attached to code: anchor the scenario,
+    // then one more next closes the plan — in state.json; the content files
     // never moved, and no plan.json ever appeared.
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains("no link"), "{err}");
+    ok(
+        &root,
+        &[
+            "link",
+            "add",
+            "riders-lose-the-signal#a user logs in end to end",
+            "code/auth.rs",
+            "--kind",
+            "indirect",
+        ],
+    );
     let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("DONE"), "{out}");
     assert_eq!(state_json(&root, "mvp")["state"], "completed");
@@ -480,8 +685,8 @@ fn the_plan_loop_produces_the_links_its_gate_demands() {
     ok(&root, &["link", "add", "Gate.out wire Auth.inn", "code/auth.rs#login", "--kind", "indirect"]);
     ok(&root, &["link", "add", "Service type_of Auth", "code/auth.rs", "--kind", "indirect"]);
 
-    // Nothing in the plan's scope is dark now, and the journal holds the
-    // captures with their confirms folded in.
+    // Nothing in the plan's scope is dark now, and the journal holds what the
+    // wave captured beside what the hand authored.
     let out = ok(&root, &["link", "audit"]);
     assert!(!out.contains("unlinked spec element"), "{out}");
     let out = ok(&root, &["link", "ls"]);
@@ -543,6 +748,7 @@ fn a_legacy_plan_json_reads_forever_and_its_lifecycle_verbs_advance_it() {
     // a record folder.
     let out = ok(&root, &["plan", "start"]);
     assert!(out.contains("wave 1 in flight: t1"), "{out}");
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
     let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("the cleanup wave"), "{out}");
     let out = ok(&root, &["plan", "next"]);
@@ -597,16 +803,16 @@ fn a_legacy_state_json_never_regresses_into_the_cleanup_stage() {
     assert_eq!(state_json(&root, "mvp")["state"], "completed");
 
     // Waves closed but the scenarios never displayed: the cleanup stage
-    // appears, latches, then the scenarios, then done.
+    // appears, latches, then the close. The plan is one from before the
+    // world — no fact covers its node, so it closes with no block, and the
+    // `scenarios.md` it was written with is read by nobody.
     write_record(&root, "archi/plans/mvp/state.json", &legacy_state(""));
     let out = ok(&root, &["plan", "next"]);
     assert_eq!(out.matches("the cleanup wave").count(), 1, "{out}");
     assert_eq!(state_json(&root, "mvp")["cleanup_displayed"], true);
     let out = ok(&root, &["plan", "next"]);
-    assert!(out.contains("all waves closed — scenarios:"), "{out}");
-    assert!(out.contains("a row survives a restart"), "{out}");
-    let out = ok(&root, &["plan", "next"]);
     assert!(out.contains("DONE"), "{out}");
+    assert!(!out.contains("a row survives a restart"), "{out}");
 
     // Reset clears the cleanup latch like the others: unflipped latches
     // drop out of state.json entirely.
@@ -721,4 +927,1741 @@ fn a_named_show_answers_from_an_unbound_checkout() {
 
     fs::remove_dir_all(&wt).unwrap();
     fs::remove_dir_all(&primary).unwrap();
+}
+
+/// A task carries the world facts covering its node — the slug and a
+/// fingerprint, never the story — and every read re-resolves them:
+/// `plan task show` lists them beside the requirements, `plan verify` names
+/// what moved, `plan repin` adopts the new picture
+/// (`archi/requirements/world-facts/a-task-carries-the-facts-that-cover-its-node.md`).
+#[test]
+fn a_task_carries_the_facts_that_cover_its_node() {
+    let root = temp_project();
+    put_fact(
+        &root,
+        "riders-lose-the-signal",
+        "Riders lose the signal",
+        "Store",
+        &["the app opens with no network"],
+    );
+    // The fact covers `Store` alone — by design, so the second task carries no
+    // fact — so the two nodes above it are declared for the save's gate.
+    declare_internal(&root, &["Gate", "Auth"]);
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
+    ok(&root, &["plan", "task", "add", "Auth", "--desc", "guard the door"]);
+
+    // The covered node's task carries the slug and the fingerprint; the
+    // uncovered node's task carries none, and neither holds a story.
+    let t1 = fs::read_to_string(root.join("archi/plans/mvp/t1-store.md")).unwrap();
+    assert!(t1.contains("facts: [riders-lose-the-signal@"), "{t1}");
+    assert!(
+        !t1.contains("the app opens with no network"),
+        "the record holds slugs, never scenario text: {t1}"
+    );
+    let t2 = fs::read_to_string(root.join("archi/plans/mvp/t2-auth.md")).unwrap();
+    assert!(!t2.contains("facts:"), "{t2}");
+
+    curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
+    curate(&root, "archi/plans/mvp/t2-auth.md", "service-hardening", "code/auth.rs");
+
+    // The brief a sub-agent reads names the fact beside the requirements.
+    let brief = ok(&root, &["plan", "task", "show", "t1"]);
+    assert!(
+        brief.contains("fact: riders-lose-the-signal — the app opens with no network"),
+        "{brief}"
+    );
+    assert!(!ok(&root, &["plan", "task", "show", "t2"]).contains("fact:"));
+
+    // A fact retired since the pin is drift, reported on demand — never an
+    // error, because the plan may finish against the picture it planned for.
+    fs::remove_file(root.join("archi/world/facts/riders-lose-the-signal.md")).unwrap();
+    let out = ok(&root, &["plan", "verify"]);
+    assert!(
+        out.contains("drift: world fact `riders-lose-the-signal` retired"),
+        "{out}"
+    );
+    assert!(out.contains("t1"), "{out}");
+
+    // A fact that began covering the node after the pin is drift too.
+    put_fact(
+        &root,
+        "tunnels-run-long",
+        "Tunnels run long",
+        "Store",
+        &["the tunnel ends"],
+    );
+    let out = ok(&root, &["plan", "verify"]);
+    assert!(out.contains("`tunnels-run-long` now covers"), "{out}");
+
+    // `plan repin` re-resolves the covering facts against the new version:
+    // the record carries what covers the node now, and the drift is gone.
+    fs::write(root.join("archi/src/extra.arch"), "def node Ledger\n").unwrap();
+    // The new node arrives unreached like the other two.
+    declare_internal(&root, &["Gate", "Auth", "Ledger"]);
+    ok(&root, &["version", "save", "-m", "second"]);
+    ok(&root, &["plan", "repin"]);
+    let t1 = fs::read_to_string(root.join("archi/plans/mvp/t1-store.md")).unwrap();
+    assert!(t1.contains("facts: [tunnels-run-long@"), "{t1}");
+    assert!(!t1.contains("riders-lose-the-signal"), "{t1}");
+    let out = ok(&root, &["plan", "verify"]);
+    assert!(!out.contains("drift:"), "{out}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The close collects the block from the world as it stands: one entry per
+/// fact covering a node the plan holds a task for, the mark of what lies
+/// outside beside it, and the drift above it
+/// (`archi/requirements/world-facts/the-plan-closes-on-the-world-s-scenarios.md`,
+/// `archi/requirements/world-facts/the-block-marks-what-lies-outside-the-plan.md`,
+/// `archi/requirements/world-facts/the-close-re-reads-the-world-and-says-what-moved.md`).
+#[test]
+fn the_close_collects_the_world_and_marks_what_lies_outside() {
+    let root = temp_project();
+    fs::write(root.join("archi/src/extra.arch"), "def node Ledger\n").unwrap();
+    // One fact over both of the plan's nodes, and one reaching past the
+    // plan into nodes it never builds.
+    put_fact(
+        &root,
+        "riders-lose-the-signal",
+        "Riders lose the signal",
+        "Store, Auth",
+        &["the app opens with no network"],
+    );
+    put_fact(
+        &root,
+        "tunnels-run-long",
+        "Tunnels run long",
+        "Store, Gate, Ledger",
+        &["the tunnel ends"],
+    );
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
+    ok(&root, &["plan", "task", "add", "Auth", "--desc", "guard the door"]);
+    curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
+    curate(&root, "archi/plans/mvp/t2-auth.md", "service-hardening", "code/auth.rs");
+
+    ok(&root, &["plan", "start"]);
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
+    declares(&root, 1, "t2", &[AUTH_ENTRY]);
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("the cleanup wave"), "{out}");
+
+    // The world moves under the plan between the pin and the close: the
+    // fingerprint the tasks carried no longer matches.
+    put_fact(
+        &root,
+        "riders-lose-the-signal",
+        "Riders lose the signal",
+        "Store, Auth",
+        &["the app opens with no network at all"],
+    );
+
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("all waves closed — scenarios:"), "{out}");
+    assert_eq!(
+        out.matches("riders-lose-the-signal#the app opens with no network at all — unanchored")
+            .count(),
+        1,
+        "a fact covering two of the plan's nodes prints once: {out}"
+    );
+    assert!(out.contains("tunnels-run-long#the tunnel ends — unanchored"), "{out}");
+    // The mark names the node paths the plan never built, and a fact whose
+    // covered nodes the plan all holds prints clean.
+    assert!(
+        out.contains("tunnels-run-long also covers Gate, Ledger — outside this plan"),
+        "{out}"
+    );
+    assert!(!out.contains("riders-lose-the-signal also covers"), "{out}");
+    // The drift rides above the block, naming what moved since authoring.
+    assert!(
+        out.contains("drift: world fact `riders-lose-the-signal` moved"),
+        "{out}"
+    );
+
+    // The read surface serves the same set the close collected.
+    let show = ok(&root, &["plan", "show"]);
+    assert!(
+        show.contains("scenario: riders-lose-the-signal#the app opens with no network at all"),
+        "{show}"
+    );
+    assert!(show.contains("scenario: tunnels-run-long#the tunnel ends"), "{show}");
+    // And so does the listing: the same block, numbered, in slug order —
+    // each scenario whole, with its state and the line that anchors it.
+    let listed = ok(&root, &["plan", "scenarios", "list"]);
+    assert!(!listed.contains("no scenarios"), "{listed}");
+    assert_eq!(
+        listed,
+        "1. riders-lose-the-signal#the app opens with no network at all — unanchored\n    \
+         Given the carriage leaves the platform\n    \
+         When the rider opens the door\n    \
+         Then the door holds\n    \
+         archi link add 'riders-lose-the-signal#the app opens with no network at all' \
+         <file#symbol> --kind indirect\n\
+         2. tunnels-run-long#the tunnel ends — unanchored\n    \
+         Given the carriage leaves the platform\n    \
+         When the rider opens the door\n    \
+         Then the door holds\n    \
+         archi link add 'tunnels-run-long#the tunnel ends' <file#symbol> --kind indirect\n\
+         3. tunnels-run-long also covers Gate, Ledger — outside this plan\n"
+    );
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The final latch proves the block is attached to code: a scenario with no
+/// link refuses it by name, an anchored block latches, and `plan reset`
+/// clears the latch after a refusal
+/// (`archi/requirements/world-facts/the-close-gates-on-anchored-scenarios.md`).
+#[test]
+fn the_close_gates_on_anchored_scenarios() {
+    let root = temp_project();
+    put_fact(
+        &root,
+        "riders-lose-the-signal",
+        "Riders lose the signal",
+        "Store",
+        &["the app opens with no network"],
+    );
+    // The fact covers `Store`; the nodes above it are the save's gate, not this
+    // test's subject.
+    declare_internal(&root, &["Gate", "Auth"]);
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
+    curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
+    ok(&root, &["plan", "start"]);
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
+    ok(&root, &["plan", "next"]);
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("riders-lose-the-signal#the app opens with no network"), "{out}");
+
+    // Unanchored: the latch refuses, names the scenario, and the plan
+    // stays open — the refusal exits like the plan's other gates.
+    let refused = Command::new(env!("CARGO_BIN_EXE_archi"))
+        .args(["plan", "next", "--project", root.to_str().unwrap()])
+        .output()
+        .expect("archi runs");
+    assert_eq!(refused.status.code(), Some(1));
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains("no link"), "{err}");
+    assert!(
+        err.contains("riders-lose-the-signal#the app opens with no network"),
+        "{err}"
+    );
+    assert_eq!(state_json(&root, "mvp")["state"], "started");
+    assert!(state_json(&root, "mvp").get("scenarios_closed").is_none());
+
+    // Reset clears the latch after the refusal, as it always did.
+    ok(&root, &["plan", "reset"]);
+    let state = state_json(&root, "mvp");
+    assert_eq!(state["state"], "draft");
+    assert!(state.get("scenarios_displayed").is_none(), "{state}");
+
+    // Anchor the scenario and run the ceremony again: the block latches.
+    ok(
+        &root,
+        &[
+            "link",
+            "add",
+            "riders-lose-the-signal#the app opens with no network",
+            "code/store.rs",
+            "--kind",
+            "indirect",
+        ],
+    );
+    ok(&root, &["plan", "start"]);
+    // The reset took the waves folder with it, declarations and all: the
+    // second run of the ceremony writes the formality again.
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
+    ok(&root, &["plan", "next"]);
+    ok(&root, &["plan", "next"]);
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("DONE"), "{out}");
+    assert_eq!(state_json(&root, "mvp")["state"], "completed");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// On a tree that holds a world, a plan minted after it cannot close on
+/// nothing: the empty block refuses the final latch and names the reason, and
+/// one fact covering a node the plan holds a task for closes the same plan
+/// (`archi/requirements/world-facts/a-plan-s-own-scenarios-block-retires.md`).
+#[test]
+fn a_post_world_plan_on_a_tree_with_a_world_refuses_until_a_fact_covers_a_node() {
+    let root = temp_project();
+    // The tree opted into the world — one fact stands, over a node this plan
+    // holds no task for. There is a world to be behind on.
+    put_fact(
+        &root,
+        "tunnels-run-long",
+        "Tunnels run long",
+        "Auth",
+        &["the tunnel ends"],
+    );
+    // The fact reaches `Auth` and `Store`; `Gate` is declared for the save.
+    declare_internal(&root, &["Gate"]);
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+
+    // The mint writes no `scenarios.md`; a block a person leaves in the
+    // folder is read by nobody and deleted by nothing.
+    assert!(!root.join("archi/plans/mvp/scenarios.md").exists());
+    write_record(
+        &root,
+        "archi/plans/mvp/scenarios.md",
+        "# Scenarios\n\n- a user logs in end to end\n",
+    );
+    ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
+    curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
+    ok(&root, &["plan", "start"]);
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
+    ok(&root, &["plan", "next"]);
+
+    // No fact covers the node the plan holds a task for, and that node owes
+    // a condition — it is no payload and nobody declared it internal — so the
+    // close refuses and names the node, not the plan
+    // (`the-empty-block-asks-only-where-a-condition-is-owed`).
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains("no world fact covers `Store`"), "{err}");
+    assert!(!err.contains("mvp"), "{err}");
+    assert_eq!(state_json(&root, "mvp")["state"], "started");
+
+    // The same plan closes once one covering fact stands — and the plan's
+    // own block never prints.
+    put_fact(
+        &root,
+        "riders-lose-the-signal",
+        "Riders lose the signal",
+        "Store",
+        &["the app opens with no network"],
+    );
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("riders-lose-the-signal#the app opens with no network"), "{out}");
+    assert!(!out.contains("a user logs in end to end"), "{out}");
+    ok(
+        &root,
+        &[
+            "link",
+            "add",
+            "riders-lose-the-signal#the app opens with no network",
+            "code/store.rs",
+            "--kind",
+            "indirect",
+        ],
+    );
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("DONE"), "{out}");
+
+    // The old block is on disk exactly as the person left it, and no
+    // finding names it.
+    assert_eq!(
+        fs::read_to_string(root.join("archi/plans/mvp/scenarios.md")).unwrap(),
+        "# Scenarios\n\n- a user logs in end to end\n"
+    );
+    let (_, out, _) = run(&root, &["check"]);
+    assert!(!out.contains("scenarios.md"), "{out}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// A tree that holds no world fact at all has not opted into the world, and a
+/// plan on it is not behind on one: the refusal needs a world to refuse
+/// against, so the empty block closes exactly as a pre-world plan's does
+/// (`archi/requirements/world-facts/a-plan-s-own-scenarios-block-retires.md`,
+/// `archi/requirements/world-facts/the-world-arrives-without-noise.md`).
+#[test]
+fn a_post_world_plan_on_a_tree_with_no_world_closes_without_a_refusal() {
+    let root = temp_project();
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+
+    // The plan carries the mark of the world; the tree carries no world —
+    // `archi/world/` was never created, and no verb creates it here.
+    assert_eq!(state_json(&root, "mvp")["minted_after_the_world"], true);
+    assert!(!root.join("archi/world").exists());
+
+    ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
+    curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
+    ok(&root, &["plan", "start"]);
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("the cleanup wave"), "{out}");
+
+    // Nothing to be behind on: the close asks the world nothing and latches.
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("DONE"), "{out}");
+    assert!(!out.contains("no world fact covers"), "{out}");
+    assert_eq!(state_json(&root, "mvp")["state"], "completed");
+    assert!(!root.join("archi/world").exists());
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// A plan whose every task node is carried data owes no condition: `Data`
+/// leaves the coverage question by type, and the empty block that follows
+/// says nothing — the advice it used to give was to write a condition about
+/// a payload
+/// (`archi/requirements/planning/the-empty-block-asks-only-where-a-condition-is-owed.md`).
+#[test]
+fn an_empty_block_over_a_data_node_closes_without_a_refusal() {
+    let root = temp_project();
+    let model = fs::read_to_string(root.join("archi/src/model.arch")).unwrap();
+    fs::write(
+        root.join("archi/src/model.arch"),
+        format!("{model}Data type_of Store\n"),
+    )
+    .unwrap();
+    // The tree holds a world, over a node this plan holds no task for.
+    put_fact(&root, "tunnels-run-long", "Tunnels run long", "Auth", &["the tunnel ends"]);
+    declare_internal(&root, &["Gate"]);
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
+    curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
+    ok(&root, &["plan", "start"]);
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
+    ok(&root, &["plan", "next"]);
+
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("DONE"), "{out}");
+    assert!(!out.contains("no world fact covers"), "{out}");
+    assert_eq!(state_json(&root, "mvp")["state"], "completed");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The same for a task node a person declared internal: `.worldignore` is
+/// the other half of the exclusion `version save` already reads, and the two
+/// gates read it the one way
+/// (`archi/requirements/planning/the-empty-block-asks-only-where-a-condition-is-owed.md`).
+#[test]
+fn an_empty_block_over_a_declared_internal_node_closes_without_a_refusal() {
+    let root = temp_project();
+    put_fact(&root, "tunnels-run-long", "Tunnels run long", "Auth", &["the tunnel ends"]);
+    declare_internal(&root, &["Gate", "Store"]);
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
+    curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
+    ok(&root, &["plan", "start"]);
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
+    ok(&root, &["plan", "next"]);
+
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("DONE"), "{out}");
+    assert!(!out.contains("no world fact covers"), "{out}");
+    assert_eq!(state_json(&root, "mvp")["state"], "completed");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The workaround the fold retires: the planning skill told the author not
+/// to wrap a bullet, because the parser read one line at a time. The rule
+/// goes with the defect
+/// (`archi/requirements/planning/a-record-bullet-may-wrap.md`).
+#[test]
+fn the_planning_skill_no_longer_forbids_a_wrapped_bullet() {
+    // The prose is hard-wrapped: a sentence is read over its line breaks.
+    let flat = util::flat(util::SKILL_PLAN);
+    assert!(!flat.contains("one bullet on one line"), "{flat}");
+    assert!(!flat.contains("bullets do not wrap"), "{flat}");
+    assert!(!flat.contains("continuation line carries no"), "{flat}");
+}
+
+/// The closing step hands back the work it already did: every collected
+/// scenario whole — its name and every step — with the state of its link
+/// beside it. A scenario nothing anchors carries a ready `archi link add`;
+/// one something anchors names the file and symbol it reaches and asks for
+/// the re-read, and names the side that moved once the digests disagree
+/// (`archi/requirements/world-facts/the-closing-step-hands-back-the-work.md`).
+#[test]
+fn the_closing_step_prints_the_gherkin_the_state_and_the_command() {
+    let root = temp_project();
+    put_fact_with_steps(
+        &root,
+        "riders-lose-the-signal",
+        "Riders lose the signal",
+        "Store",
+        &[(
+            "the app opens with no network",
+            &[
+                "Given the rider boards",
+                "When the app opens",
+                "Then the rows are there",
+            ],
+        )],
+    );
+    put_fact_with_steps(
+        &root,
+        "tunnels-run-long",
+        "Tunnels run long",
+        "Auth",
+        &[(
+            "the tunnel ends",
+            &["Given the train is under the hill", "Then the session holds"],
+        )],
+    );
+    // The two facts reach `Auth` and `Store`; `Gate` is declared for the save.
+    declare_internal(&root, &["Gate"]);
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
+    ok(&root, &["plan", "task", "add", "Auth", "--desc", "guard the door"]);
+    curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
+    curate(&root, "archi/plans/mvp/t2-auth.md", "service-hardening", "code/auth.rs");
+
+    // One of the two is anchored before the close, at a symbol inside a
+    // file; the other is not.
+    ok(
+        &root,
+        &[
+            "link",
+            "add",
+            "riders-lose-the-signal#the app opens with no network",
+            "code/store.rs#Store::put",
+            "--kind",
+            "indirect",
+        ],
+    );
+    ok(&root, &["plan", "start"]);
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
+    declares(&root, 1, "t2", &[AUTH_ENTRY]);
+    ok(&root, &["plan", "next"]);
+    let out = ok(&root, &["plan", "next"]);
+
+    // The Gherkin whole: every step of both, under the address that names
+    // them. The fact's own title is the feature, so no line says it again.
+    assert!(out.contains("    Given the rider boards"), "{out}");
+    assert!(out.contains("    When the app opens"), "{out}");
+    assert!(out.contains("    Then the rows are there"), "{out}");
+    assert!(out.contains("    Given the train is under the hill"), "{out}");
+    assert!(out.contains("    Then the session holds"), "{out}");
+    assert!(!out.contains("Feature:"), "{out}");
+
+    // The anchored one names the file and the symbol it reaches, and asks
+    // for the re-read: a link says the pair has not moved, never that the
+    // two still say the same thing.
+    assert!(
+        out.contains(
+            "riders-lose-the-signal#the app opens with no network — \
+             anchored at code/store.rs#Store::put"
+        ),
+        "{out}"
+    );
+    assert!(
+        out.contains("    read this scenario and that code against each other"),
+        "{out}"
+    );
+    // The unanchored one carries the line that anchors it, ref quoted for a
+    // shell, the code side left to the operator — and no ask, because there
+    // is nothing yet to read it against.
+    assert!(out.contains("tunnels-run-long#the tunnel ends — unanchored"), "{out}");
+    assert_eq!(
+        printed_link_add(&out),
+        "archi link add 'tunnels-run-long#the tunnel ends' <file#symbol> --kind indirect"
+    );
+
+    // A step reworded under an anchored scenario parts the witness: the
+    // anchor stays beside the side that moved, and the ask stays with it —
+    // the listing answers the same way.
+    put_fact_with_steps(
+        &root,
+        "riders-lose-the-signal",
+        "Riders lose the signal",
+        "Store",
+        &[(
+            "the app opens with no network",
+            &[
+                "Given the rider boards the carriage",
+                "When the app opens",
+                "Then the rows are there",
+            ],
+        )],
+    );
+    let listed = ok(&root, &["plan", "scenarios", "list"]);
+    assert!(
+        listed.contains(
+            "riders-lose-the-signal#the app opens with no network — \
+             anchored at code/store.rs#Store::put, drifted: the scenario side moved"
+        ),
+        "{listed}"
+    );
+    assert!(listed.contains("    Given the rider boards the carriage"), "{listed}");
+    assert!(
+        listed.contains("    read this scenario and that code against each other"),
+        "{listed}"
+    );
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The printed line is the product: a real `sh` reads it as written and the
+/// scenario is anchored — the quoting is what makes the render worth more
+/// than the name it replaced
+/// (`archi/requirements/world-facts/the-closing-step-hands-back-the-work.md`).
+#[test]
+fn the_printed_link_add_line_anchors_the_scenario_through_a_real_shell() {
+    let root = temp_project();
+    // A name with a space and an apostrophe: the two things a hand-quoted
+    // ref gets wrong.
+    let name = "the rider's app opens with no network";
+    put_fact_with_steps(
+        &root,
+        "riders-lose-the-signal",
+        "Riders lose the signal",
+        "Store",
+        &[(name, &["Given the rider boards", "Then the rows are there"])],
+    );
+    // The fact covers `Store`; the nodes above it are declared for the save.
+    declare_internal(&root, &["Gate", "Auth"]);
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
+    curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
+    ok(&root, &["plan", "start"]);
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
+    ok(&root, &["plan", "next"]);
+    let out = ok(&root, &["plan", "next"]);
+
+    let line = printed_link_add(&out);
+    assert!(
+        line.contains("'riders-lose-the-signal#the rider'\\''s app opens with no network'"),
+        "the apostrophe closes the quote and is escaped: {line}"
+    );
+
+    // The operator supplies only the code side; everything else runs as
+    // printed, through a shell that has never heard of this scenario.
+    let command = line.replace("<file#symbol>", "code/store.rs");
+    let bin = shim(&root);
+    let (code, stdout, stderr) = shell(&bin, &command);
+    assert_eq!(code, Some(0), "`{command}`:\n{stdout}\n{stderr}");
+
+    // The latch is satisfied by what the shell did: the plan closes and the
+    // scenario is named nowhere.
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("DONE"), "{out}");
+    assert!(!out.contains(name), "{out}");
+    assert_eq!(state_json(&root, "mvp")["state"], "completed");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// `plan verify` answers with the same three states on demand, while a wave
+/// is still open — the operator never has to reach the closing step to see
+/// where the block stands
+/// (`archi/requirements/world-facts/the-closing-step-hands-back-the-work.md`).
+#[test]
+fn plan_verify_prints_the_scenario_states_while_a_wave_is_still_open() {
+    let root = temp_project();
+    put_fact_with_steps(
+        &root,
+        "riders-lose-the-signal",
+        "Riders lose the signal",
+        "Store",
+        &[
+            ("the app opens with no network", &["Given the rider boards"]),
+            ("the rider signs in", &["Given the rider boards"]),
+            ("the tunnel ends", &["Given the rider boards"]),
+        ],
+    );
+    // The fact covers `Store`; the nodes above it are declared for the save.
+    declare_internal(&root, &["Gate", "Auth"]);
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
+    curate(&root, "archi/plans/mvp/t1-store.md", "store-encrypted", "code/store.rs");
+
+    // One clean, one whose code moved under it, one nothing reaches.
+    ok(
+        &root,
+        &[
+            "link",
+            "add",
+            "riders-lose-the-signal#the rider signs in",
+            "code/auth.rs#login",
+            "--kind",
+            "indirect",
+        ],
+    );
+    ok(
+        &root,
+        &[
+            "link",
+            "add",
+            "riders-lose-the-signal#the tunnel ends",
+            "code/store.rs#Store::put",
+            "--kind",
+            "indirect",
+        ],
+    );
+    ok(&root, &["plan", "start"]);
+    fs::write(
+        root.join("code/store.rs"),
+        "pub struct Store;\nimpl Store {\n    pub fn put(&mut self, n: u8) { let _ = n; }\n}\n",
+    )
+    .unwrap();
+
+    // Wave 1 is in flight — nothing closed, nothing latched.
+    assert!(ok(&root, &["plan", "current-wave"]).contains("wave 1 in flight"));
+    let out = ok(&root, &["plan", "verify"]);
+    assert!(
+        out.contains("scenario: riders-lose-the-signal#the app opens with no network — unanchored"),
+        "{out}"
+    );
+    assert!(
+        out.contains(
+            "scenario: riders-lose-the-signal#the rider signs in — \
+             anchored at code/auth.rs#login"
+        ),
+        "{out}"
+    );
+    assert!(
+        out.contains(
+            "scenario: riders-lose-the-signal#the tunnel ends — \
+             anchored at code/store.rs#Store::put, drifted: the code side moved"
+        ),
+        "{out}"
+    );
+    assert!(
+        out.contains("    read this scenario and that code against each other"),
+        "{out}"
+    );
+    assert!(out.contains("    Given the rider boards"), "{out}");
+    assert_eq!(
+        printed_link_add(&out),
+        "archi link add 'riders-lose-the-signal#the app opens with no network' \
+         <file#symbol> --kind indirect"
+    );
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// A plan from before the world carries no mark, closes with no block, and
+/// keeps the `scenarios.md` it was written with — history is left exactly
+/// as it is (`archi/decisions/the-old-plans-are-left-alone.md`).
+#[test]
+fn a_pre_world_plan_closes_with_no_block_and_keeps_its_old_one() {
+    let root = temp_project();
+    put_fact(
+        &root,
+        "riders-lose-the-signal",
+        "Riders lose the signal",
+        "Auth",
+        &["the app opens with no network"],
+    );
+    // The fact reaches `Auth` and `Store`; `Gate` is declared for the save.
+    declare_internal(&root, &["Gate"]);
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "old"]);
+    ok(&root, &["plan", "task", "add", "Store", "--desc", "persist rows"]);
+    curate(&root, "archi/plans/old/t1-store.md", "store-encrypted", "code/store.rs");
+    write_record(
+        &root,
+        "archi/plans/old/scenarios.md",
+        "# Scenarios\n\n- a row survives a restart\n",
+    );
+
+    // The lifecycle file an older binary wrote: waves closed, no mark of
+    // the world on it — the plan is what it was written as.
+    let created = state_json(&root, "old")["created"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    write_record(
+        &root,
+        "archi/plans/old/state.json",
+        &format!(
+            "{{\n  \"state\": \"started\",\n  \"closed_waves\": 1,\n  \
+             \"version\": \"v0001\",\n  \"created\": \"{created}\"\n}}\n"
+        ),
+    );
+
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("the cleanup wave"), "{out}");
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("DONE"), "{out}");
+    assert!(!out.contains("a row survives a restart"), "{out}");
+    assert_eq!(state_json(&root, "old")["state"], "completed");
+    assert_eq!(
+        fs::read_to_string(root.join("archi/plans/old/scenarios.md")).unwrap(),
+        "# Scenarios\n\n- a row survives a restart\n"
+    );
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+// ---- the declaration gates ---------------------------------------------------
+//
+// A wave does not close while a task in flight declared nothing, or while a
+// declared claim the wave moved still stands on the code as it was
+// (`archi/requirements/planning/an-undeclared-change-refuses-the-wave.md`,
+// `archi/requirements/code-link/a-drifted-declaration-refuses-the-wave-that-moved-it.md`).
+
+/// The tests the declarations below name. The file is written before the
+/// plan starts, so it sits in every wave-open index and is never a change of
+/// its own.
+const TESTS_RS: &str = "pub fn a_row_is_persisted() {\n    assert!(true);\n}\n\n\
+                        pub fn a_login_without_a_name_is_refused() {\n    assert!(true);\n}\n";
+
+/// The proof a declaration over `code/store.rs` names.
+const PROOF: &str = "code/tests.rs#a_row_is_persisted";
+
+/// The proof a declaration over `code/auth.rs` names.
+const AUTH_PROOF: &str = "code/tests.rs#a_login_without_a_name_is_refused";
+
+/// `code/store.rs` as wave 1 leaves it: two symbols, both moved.
+const STORE_TWO: &str = "pub struct Store;\nimpl Store {\n    \
+                         pub fn put(&mut self, n: u8) { let _ = n; }\n    \
+                         pub fn get(&self) -> u8 { 0 }\n}\n";
+
+/// The same two symbols with both shapes moved again.
+const STORE_TWO_MOVED: &str = "pub struct Store;\nimpl Store {\n    \
+                               pub fn put(&mut self, n: u16) -> bool { let _ = n; true }\n    \
+                               pub fn get(&self, k: u8) -> u16 { let _ = k; 0 }\n}\n";
+
+/// The same two symbols with one shape moved and the other left standing.
+const STORE_PUT_MOVED: &str = "pub struct Store;\nimpl Store {\n    \
+                               pub fn put(&mut self, n: u16) -> bool { let _ = n; true }\n    \
+                               pub fn get(&self) -> u8 { 0 }\n}\n";
+
+/// A file no task's `## Outputs` names, written after the wave opened: the
+/// delta holds it like any other file, and some declaration must name it.
+const ORPHAN_RS: &str = "pub fn stray() -> u8 { 7 }\n";
+
+/// `code/auth.rs` as a wave leaves it: the one symbol moved.
+const AUTH_MOVED: &str = "pub fn login(u: &str) -> bool { !u.is_empty() }\n";
+
+/// The project-relative path of one task's declaration file in a wave of
+/// plan `mvp`.
+fn declares_rel(wave: usize, task: &str) -> String {
+    format!("archi/plans/mvp/waves/w{wave:02}.{task}.declares.toml")
+}
+
+/// The t1 Store record the tests below drive. Its `Spec` names the node
+/// alone — [`T1_STORE_CURATED`] carries the incoming edge beside it — so a
+/// test that wants an uncovered ref in the advice takes the curated one, and
+/// a test that wants none takes this.
+const T1_STORE_GATED: &str =
+    "---\nnode: Store\nowns: [store-encrypted]\n---\n\n# t1 — Store\n\npersist rows\n\n\
+     ## Spec\n\n- `Store`\n\n## Inputs\n\n## Outputs\n\n- code/store.rs\n\n## Stack\n\n\
+     ## Verifications\n\n### store-encrypted\n\n- test — proves store-encrypted\n";
+
+/// The t2 Auth record beside it. `inputs` and `outputs` are the blocks under
+/// `## Inputs` and `## Outputs`, which is the whole of what varies: the input
+/// puts t2 in a wave behind t1 and no input puts it beside t1, and one test
+/// has t2 claim the file t1 wrote.
+fn t2_auth(inputs: &str, outputs: &str) -> String {
+    format!(
+        "---\nnode: Auth\nowns: [service-hardening]\n---\n\n# t2 — Auth\n\nguard the door\n\n\
+         ## Spec\n\n- `Auth`\n- `Service type_of Auth`\n\n## Inputs\n\n{inputs}\
+         ## Outputs\n\n{outputs}\n## Stack\n\n## Verifications\n\n\
+         ### service-hardening\n\n- test — proves service-hardening\n"
+    )
+}
+
+/// The t2 Auth record that waits on t1: it opens in the wave behind it.
+fn t2_auth_gated(outputs: &str) -> String {
+    t2_auth("- from t1 — the store api\n\n", outputs)
+}
+
+/// The one declaration a `Store` task writes when its own work is not the
+/// subject of the test: one pair, which is all the gate asks for.
+const STORE_ENTRY: [&str; 3] = ["code/store.rs#Store::put", "Store", PROOF];
+
+/// The same for an `Auth` task.
+const AUTH_ENTRY: [&str; 3] = ["code/auth.rs#login", "Auth", AUTH_PROOF];
+
+/// The entry that accounts for [`ORPHAN_RS`] — a file no task's `## Outputs`
+/// names, so whichever writer touched it declares it.
+const ORPHAN_ENTRY: [&str; 3] = ["code/orphan.rs#stray", "Store", PROOF];
+
+/// Write one task's declaration file, as its sub-agent does before it
+/// returns: one `[[declares]]` table per pair it accounts for. An empty
+/// list writes the file that names nothing, which the wave refuses.
+fn declares(root: &Path, wave: usize, task: &str, entries: &[[&str; 3]]) {
+    let mut text = String::new();
+    for [symbol, answers, proved_by] in entries {
+        text.push_str(&format!(
+            "[[declares]]\nsymbol = \"{symbol}\"\nanswers = \"{answers}\"\n\
+             proved_by = \"{proved_by}\"\n\n"
+        ));
+    }
+    if entries.is_empty() {
+        text.push_str("declares = []\n");
+    }
+    let path = root.join(declares_rel(wave, task));
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, text).unwrap();
+}
+
+/// The id of the one live link whose row holds `row`.
+fn link_id(root: &Path, row: &str) -> String {
+    let rows = ok(root, &["link", "ls"]);
+    let hits: Vec<&str> = rows.lines().filter(|l| l.contains(row)).collect();
+    assert_eq!(hits.len(), 1, "one row holds `{row}`:\n{rows}");
+    hits[0]
+        .split_whitespace()
+        .next()
+        .expect("a row starts with its id")
+        .to_string()
+}
+
+/// Age one journaled row into the shape a row written before the rule field
+/// existed carries: no rule at all, which reads back as `inferred` from its
+/// captured origin — the shape the standing rows of a real tree carry
+/// (`archi/requirements/code-link/the-journal-says-which-rule-made-a-row.md`).
+fn unstamp_rule(root: &Path, id: &str) {
+    let path = root.join("archi/links/journal.jsonl");
+    let text = fs::read_to_string(&path).unwrap();
+    let aged: Vec<String> = text
+        .lines()
+        .map(|l| {
+            if l.contains(id) {
+                l.replace(",\"rule\":\"declared\"", "")
+            } else {
+                l.to_string()
+            }
+        })
+        .collect();
+    fs::write(&path, format!("{}\n", aged.join("\n"))).unwrap();
+}
+
+/// The declaration gate is the file and nothing else. A task in flight
+/// accounts for its work by writing one; a file that names nothing accounts
+/// for nothing and refuses the same way. What the file holds is the writer's
+/// to decide — one entry per file closes the wave, whatever else moved inside
+/// those files
+/// (`archi/requirements/planning/an-undeclared-change-refuses-the-wave.md`).
+#[test]
+fn a_wave_refuses_until_every_task_in_flight_has_declared() {
+    let root = temp_project();
+    gated_wave(&root, T1_STORE_GATED);
+
+    // Two symbols move under t1's one output.
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+
+    // The file the open wrote parses and declares nothing: that accounts for
+    // nothing, and the refusal names the task, the path and the command that
+    // follows.
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains("names nothing"), "{err}");
+    assert!(err.contains("t1"), "names the task: {err}");
+    assert!(err.contains(&declares_rel(1, "t1")), "names the path: {err}");
+    assert!(err.contains("re-run `archi plan next`"), "names the next command: {err}");
+
+    // A file that parses and declares nothing the writer's own way — the empty
+    // list — refuses exactly the same.
+    declares(&root, 1, "t1", &[]);
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains("names nothing"), "{err}");
+    assert!(err.contains(&declares_rel(1, "t1")), "names the path: {err}");
+
+    // One entry closes the wave, whatever else moved inside the file it
+    // names: two symbols moved under t1's output and the file names one.
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("wave 1 closed — in flight: t2"), "{out}");
+
+    // The same gate on the next wave, on the file that wave's open wrote, and
+    // the same one line answers it.
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains("names nothing"), "{err}");
+    assert!(err.contains(&declares_rel(2, "t2")), "{err}");
+    declares(&root, 2, "t2", &[AUTH_ENTRY]);
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("the cleanup wave"), "{out}");
+
+    // Past the last wave no task is in flight, so no file is owed: the
+    // cleanup step and the close run with none on disk.
+    assert!(!root.join(declares_rel(3, "t1")).exists());
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("DONE"), "{out}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+// ---- the delta's files against the declarations ------------------------------
+//
+// `plan next` takes the files the wave's delta touched and asks the
+// declarations of the tasks in flight, read as one set, to name every one of
+// them (`archi/requirements/code-link/the-file-in-the-delta-is-the-unit-the-gate-demands.md`).
+
+/// The one-task wave: the given t1 record over `code/store.rs` with t2 behind
+/// it, so wave 1 holds one writer. The t1 record is what varies —
+/// [`T1_STORE_GATED`] names the node alone, [`T1_STORE_CURATED`] carries the
+/// incoming edge beside it.
+fn gated_wave(root: &Path, t1: &str) {
+    ok(root, &["version", "save", "-m", "first"]);
+    ok(root, &["plan", "use", "mvp"]);
+    ok(root, &["plan", "task", "add", "Store"]);
+    ok(root, &["plan", "task", "add", "Auth"]);
+    write_record(root, "archi/plans/mvp/t1-store.md", t1);
+    write_record(
+        root,
+        "archi/plans/mvp/t2-auth.md",
+        &t2_auth_gated("- code/auth.rs\n"),
+    );
+    ok(root, &["plan", "start"]);
+}
+
+/// The two-task wave with each writer's own file moved and declared: t1 over
+/// `code/store.rs` and t2 over `code/auth.rs`, in flight together over one
+/// tree ([`started_two_task_plan`]). A test that wants a file nobody
+/// accounted for writes it beside this.
+fn two_writers_declared() -> PathBuf {
+    let root = started_two_task_plan();
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+    fs::write(root.join("code/auth.rs"), AUTH_MOVED).unwrap();
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
+    declares(&root, 1, "t2", &[AUTH_ENTRY]);
+    root
+}
+
+/// A file the delta holds and no declaration names holds the wave open, and
+/// the refusal names that file. The repair it prints is the declaration verb
+/// — the gate reads the declaration files, never the journal — and the entry
+/// that names the file closes the wave
+/// (`archi/requirements/code-link/the-file-in-the-delta-is-the-unit-the-gate-demands.md`).
+#[test]
+fn a_file_no_declaration_names_refuses_the_wave_and_the_refusal_names_it() {
+    let root = temp_project();
+    gated_wave(&root, T1_STORE_GATED);
+
+    // Two files move under one writer; the declaration names one of them.
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+    fs::write(root.join("code/orphan.rs"), ORPHAN_RS).unwrap();
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
+
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains("code/orphan.rs"), "names the file: {err}");
+    assert!(
+        !err.contains("code/store.rs"),
+        "a named file is not asked for again: {err}"
+    );
+    // The repair is the verb that writes a declaration, and the refusal says
+    // that the journal is not what this gate reads.
+    assert!(err.contains("archi plan task"), "names the repair: {err}");
+    assert!(err.contains("link add --symbol"), "names the repair: {err}");
+    assert!(
+        err.contains("`archi link add`"),
+        "says which repair does not answer it: {err}"
+    );
+    assert!(err.contains("re-run `archi plan next`"), "names the next command: {err}");
+
+    // The entry that names the file closes the wave.
+    declares(&root, 1, "t1", &[STORE_ENTRY, ORPHAN_ENTRY]);
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("wave 1 closed — in flight: t2"), "{out}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// A refusal that can be answered two ways names both: beside the
+/// declaration verb stands the boundary — a changed file that is not code
+/// leaves the scans through `[audit] exclude` in `archi.toml` — and the
+/// sentence names the manifest key, because the reader stuck on a lockfile
+/// or a generated artifact cannot be expected to know a key the message
+/// never names. The check exercises what the refusal tells the reader to
+/// run, not which words appear in it: the boundary widens once, the
+/// artifact leaves the gate, and a link into the excluded file still
+/// verifies
+/// (`archi/requirements/planning/the-gate-refusal-names-the-repair-that-stands.md`).
+#[test]
+fn the_refusal_names_the_boundary_repair_and_widening_it_releases_the_artifact() {
+    let root = temp_project();
+    gated_wave(&root, T1_STORE_GATED);
+
+    // The writer's own file moves and is declared; a generated artifact
+    // lands beside it — in the delta like any file, and not code.
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+    fs::write(root.join("Cargo.lock"), "# generated: not code\n").unwrap();
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
+
+    let (_, err) = fails(&root, &["plan", "next"]);
+    let flat = util::flat(&err);
+    assert!(flat.contains("Cargo.lock"), "names the artifact: {err}");
+    assert!(
+        flat.contains("leaves the scans through `[audit] exclude` in `archi.toml`"),
+        "names the boundary repair and its manifest key: {err}"
+    );
+    // The boundary is its own statement — a second repair, not part of the
+    // sentence that denies a neighbouring verb and not fused with the first.
+    let boundary = err
+        .lines()
+        .find(|l| l.contains("[audit] exclude"))
+        .expect("the boundary repair stands on its own line");
+    assert!(!boundary.contains("does not answer"), "a repair, not a denial: {boundary}");
+    assert!(!boundary.contains("plan task"), "two repairs, two statements: {boundary}");
+
+    // The repair as printed is the repair that works: widen the boundary
+    // once, the artifact leaves the scans, and the wave closes on the entry
+    // already posted — no declaration owed for a file that is not code.
+    fs::write(
+        root.join("archi.toml"),
+        "[project]\nname = \"t\"\npreset = \"default\"\n\n[audit]\nexclude = [\"Cargo.lock\"]\n",
+    )
+    .unwrap();
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("wave 1 closed — in flight: t2"), "{out}");
+
+    // Exclusion governs what the scans volunteer, not what links may claim:
+    // a link into the excluded file still verifies.
+    ok(&root, &["link", "add", "Store", "Cargo.lock", "--kind", "indirect"]);
+    let report = ok(&root, &["link", "verify", "--spec", "Store"]);
+    assert!(
+        report.contains("Cargo.lock"),
+        "the link into the excluded file is graded: {report}"
+    );
+    assert!(report.contains("0 failing"), "{report}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The refusal names the file and no task. The tasks of a wave share one
+/// tree, so nothing in the delta says who touched what — with two writers in
+/// flight the gate still names only what moved
+/// (`archi/requirements/code-link/the-file-in-the-delta-is-the-unit-the-gate-demands.md`).
+#[test]
+fn the_refusal_names_the_file_and_no_task() {
+    // Each writer accounts for its own file; a third file moves beside them.
+    let root = two_writers_declared();
+    fs::write(root.join("code/orphan.rs"), ORPHAN_RS).unwrap();
+
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains("code/orphan.rs"), "names the file: {err}");
+    assert!(!err.contains("t1"), "names no task: {err}");
+    assert!(!err.contains("t2"), "names no task: {err}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// An entry may name any file its writer touched, inside its task's
+/// `## Outputs` or not: the declarations of a wave are read as one set, so
+/// the entry that accounts for a file no task claims satisfies the gate for
+/// it (`archi/requirements/code-link/the-file-in-the-delta-is-the-unit-the-gate-demands.md`).
+#[test]
+fn a_declaration_names_a_file_outside_its_task_s_outputs() {
+    let root = two_writers_declared();
+    fs::write(root.join("code/orphan.rs"), ORPHAN_RS).unwrap();
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains("code/orphan.rs"), "{err}");
+
+    // `code/orphan.rs` stands in no task's `## Outputs`. The writer that
+    // touched it names it, and the gate takes the entry.
+    declares(
+        &root,
+        1,
+        "t2",
+        &[AUTH_ENTRY, ["code/orphan.rs#stray", "Auth", AUTH_PROOF]],
+    );
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("the cleanup wave"), "{out}");
+    assert!(out.contains("← code/orphan.rs#stray"), "the entry mints its pair: {out}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// One file named by two entries against two different elements satisfies the
+/// gate once: the unit is the file, and a file serving two nodes is two
+/// entries and one demand met
+/// (`archi/requirements/code-link/the-file-in-the-delta-is-the-unit-the-gate-demands.md`).
+#[test]
+fn one_file_named_by_two_entries_satisfies_the_gate_once() {
+    let root = temp_project();
+    gated_wave(&root, T1_STORE_CURATED);
+
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+    declares(
+        &root,
+        1,
+        "t1",
+        &[
+            ["code/store.rs#Store::put", "Store", PROOF],
+            ["code/store.rs#Store::put", "req:store-encrypted", PROOF],
+        ],
+    );
+
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("wave 1 closed — in flight: t2"), "{out}");
+    assert_eq!(captured_ids(&out).len(), 2, "both entries mint: {out}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// A wave whose declarations name every file in the delta closes, and no spec
+/// ref is demanded of it. The refs no link covers ride as advice on the
+/// passing step — advice is not a demand
+/// (`archi/requirements/code-link/the-file-in-the-delta-is-the-unit-the-gate-demands.md`).
+#[test]
+fn a_declared_delta_closes_the_wave_with_no_spec_ref_demanded() {
+    let root = temp_project();
+    // t1 carries an incoming edge no link covers: the old gate demanded it.
+    gated_wave(&root, T1_STORE_CURATED);
+
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
+
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("wave 1 closed — in flight: t2"), "{out}");
+    assert!(!out.contains("coverage of the refs"), "no ref is demanded: {out}");
+    // The uncovered edge is advice on a step that passed.
+    assert!(out.contains("hand-author when the traceability is wanted"), "{out}");
+    assert!(
+        out.contains("archi link add \"Auth.creds wire Store.inn\""),
+        "{out}"
+    );
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// No term is compared anywhere, so `plan next` counts no no-signal pair and
+/// reports no leftover: a changed file is declared or it holds the wave open
+/// (`archi/requirements/code-link/the-file-in-the-delta-is-the-unit-the-gate-demands.md`).
+#[test]
+fn plan_next_prints_no_no_signal_pair_count() {
+    let root = two_writers_declared();
+
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("the cleanup wave"), "{out}");
+    assert!(!out.contains("no-signal pair"), "{out}");
+    assert!(!out.contains("suppressed"), "{out}");
+    assert!(!out.contains("leftover"), "{out}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+// ---- the plan cleans up after itself ------------------------------------------
+//
+// The wave's working files are input, not record: the index is diffed once
+// and the declarations are consumed once, so a wave that closes takes them
+// with it, and a completed plan's folder holds records and nothing else
+// (`archi/requirements/planning/the-plan-cleans-up-after-itself.md`).
+
+/// A successful wave close deletes the files it consumed — the closed wave's
+/// index and declaration file — and the next wave's files stand untouched
+/// where its open put them
+/// (`archi/requirements/planning/the-plan-cleans-up-after-itself.md`).
+#[test]
+fn a_successful_close_deletes_the_consumed_files_and_spares_the_next_wave_s() {
+    let root = temp_project();
+    gated_wave(&root, T1_STORE_GATED);
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+    declares(&root, 1, "t1", &[STORE_ENTRY]);
+
+    let waves = root.join("archi/plans/mvp/waves");
+    assert!(waves.join("w01.index.json").exists());
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("wave 1 closed — in flight: t2"), "{out}");
+
+    // Wave 1's files went with its close; wave 2's stand.
+    assert!(!waves.join("w01.index.json").exists(), "the diffed index is consumed");
+    assert!(!root.join(declares_rel(1, "t1")).exists(), "the declaration is consumed");
+    assert!(waves.join("w02.index.json").exists(), "the open wave's index stands");
+    assert!(root.join(declares_rel(2, "t2")).exists(), "the open wave's file stands");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// A blocked close deletes nothing: the index and the declaration files are
+/// what the retry reads, so they stand through the refusal — and the entry
+/// that answers it lands in the same file and the retry closes on it
+/// (`archi/requirements/planning/the-plan-cleans-up-after-itself.md`).
+#[test]
+fn a_blocked_close_deletes_nothing_and_the_retry_closes_on_the_same_files() {
+    // Each writer accounts for its own file; a third moves beside them and
+    // no declaration names it, so the coverage gate blocks the close.
+    let root = two_writers_declared();
+    fs::write(root.join("code/orphan.rs"), ORPHAN_RS).unwrap();
+
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains("code/orphan.rs"), "{err}");
+    let waves = root.join("archi/plans/mvp/waves");
+    assert!(waves.join("w01.index.json").exists(), "the blocked close keeps the index");
+    assert!(root.join(declares_rel(1, "t1")).exists(), "and every declaration file");
+    assert!(root.join(declares_rel(1, "t2")).exists(), "and every declaration file");
+
+    // The entry that accounts for the file lands in the same file the
+    // refusal left standing, and the retry closes on it.
+    declares(
+        &root,
+        1,
+        "t2",
+        &[AUTH_ENTRY, ["code/orphan.rs#stray", "Auth", AUTH_PROOF]],
+    );
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("the cleanup wave"), "{out}");
+    assert!(out.contains("← code/orphan.rs#stray"), "the retried file minted: {out}");
+    assert!(!waves.join("w01.index.json").exists(), "the successful retry consumed it");
+    assert!(!root.join(declares_rel(1, "t1")).exists());
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// At DONE the plan folder holds no `waves/` at all: the completion removes
+/// the directory whole, so a file a pre-cleanup binary's close left behind
+/// goes with it, and the completed folder is records and nothing else
+/// (`archi/requirements/planning/the-plan-cleans-up-after-itself.md`).
+#[test]
+fn at_done_the_plan_folder_holds_no_waves_at_all() {
+    let root = two_writers_declared();
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("the cleanup wave"), "{out}");
+
+    // A leftover of an older binary's close: the completion takes the
+    // directory whole, not the files it knows by name.
+    let waves = root.join("archi/plans/mvp/waves");
+    fs::create_dir_all(&waves).unwrap();
+    fs::write(waves.join("w00.index.json"), "{}\n").unwrap();
+
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("DONE"), "{out}");
+    assert!(!waves.exists(), "a completed plan holds records and nothing else");
+    assert!(root.join("archi/plans/mvp/state.json").exists(), "the record stays");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// `plan reset` still clears `waves/` whole: the rewind takes the working
+/// files with the rest of the wave's state, exactly as it always did
+/// (`archi/requirements/planning/the-plan-cleans-up-after-itself.md`).
+#[test]
+fn plan_reset_still_clears_waves_whole() {
+    let root = started_two_task_plan();
+    let waves = root.join("archi/plans/mvp/waves");
+    assert!(waves.join("w01.index.json").exists());
+    assert!(root.join(declares_rel(1, "t1")).exists());
+
+    ok(&root, &["plan", "reset"]);
+    assert!(!waves.exists(), "the rewind takes the folder whole");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// A declared pair the wave moves out from under refuses that wave, and the
+/// refusal names the link, the symbol and both exits. The rows nobody
+/// declared — inferred and hand-authored — drift beside it and say nothing
+/// (`archi/requirements/code-link/a-drifted-declaration-refuses-the-wave-that-moved-it.md`).
+#[test]
+fn a_wave_that_moves_a_declared_symbol_refuses_until_the_pair_is_repinned() {
+    let root = temp_project();
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Store"]);
+    ok(&root, &["plan", "task", "add", "Auth"]);
+    ok(&root, &["plan", "task", "add", "Gate"]);
+    write_record(&root, "archi/plans/mvp/t1-store.md", T1_STORE_GATED);
+    write_record(
+        &root,
+        "archi/plans/mvp/t2-auth.md",
+        &t2_auth_gated("- code/auth.rs\n"),
+    );
+    write_record(
+        &root,
+        "archi/plans/mvp/t3-gate.md",
+        "---\nnode: Gate\nowns: []\n---\n\n# t3 — Gate\n\nopen the door\n\n\
+         ## Spec\n\n- `Gate`\n\n## Inputs\n\n- from t2 — the guard\n\n\
+         ## Outputs\n\n- code/gate.rs\n- code/store.rs\n\n## Stack\n\n## Verifications\n",
+    );
+    ok(&root, &["plan", "start"]);
+
+    // Wave 1: two symbols move and t1 declares both.
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+    declares(
+        &root,
+        1,
+        "t1",
+        &[
+            ["code/store.rs#Store::put", "Store", PROOF],
+            ["code/store.rs#Store::get", "Store", PROOF],
+        ],
+    );
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("wave 1 closed — in flight: t2"), "{out}");
+    let declared = link_id(&root, "Store ← code/store.rs#Store::put");
+    let aged = link_id(&root, "Store ← code/store.rs#Store::get");
+    unstamp_rule(&root, &aged);
+
+    // Wave 2 moves nothing in `code/store.rs`: the declared pair stands and
+    // the wave closes.
+    fs::write(root.join("code/auth.rs"), AUTH_MOVED).unwrap();
+    declares(&root, 2, "t2", &[["code/auth.rs#login", "Auth", AUTH_PROOF]]);
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("wave 2 closed — in flight: t3"), "{out}");
+
+    // A hand-authored row on the same symbol, to drift beside the declared one.
+    ok(&root, &["link", "add", "Gate", "code/store.rs#Store::put", "--kind", "indirect"]);
+    let authored = link_id(&root, "Gate ← code/store.rs#Store::put");
+
+    // Wave 3 moves both symbols. t3 declares them again — the same claim,
+    // so nothing new is minted — and the declared pair it moved refuses.
+    fs::write(root.join("code/store.rs"), STORE_TWO_MOVED).unwrap();
+    declares(
+        &root,
+        3,
+        "t3",
+        &[
+            ["code/store.rs#Store::put", "Store", PROOF],
+            ["code/store.rs#Store::get", "Store", PROOF],
+        ],
+    );
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains(&declared), "names the link: {err}");
+    assert!(err.contains("code/store.rs#Store::put"), "names the symbol: {err}");
+    assert!(
+        err.contains(&format!("archi link repin {declared}")),
+        "the first exit: {err}"
+    );
+    assert!(
+        err.contains(&format!("archi link rm {declared}")),
+        "the second exit: {err}"
+    );
+    assert!(!err.contains(&aged), "an inferred row that drifts says nothing: {err}");
+    assert!(
+        !err.contains(&authored),
+        "a hand-authored row that drifts says nothing: {err}"
+    );
+
+    // Repinning accepts the drift, and the wave closes.
+    ok(&root, &["link", "repin", &declared]);
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("the cleanup wave"), "{out}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The second exit the drift refusal names: the claim no longer holds, so the
+/// stale pair is retired and this wave's declaration mints it again against
+/// the code as it stands now. The file is the claim, so the pair returns —
+/// which is what the refusal says it will do
+/// (`archi/requirements/code-link/a-drifted-declaration-refuses-the-wave-that-moved-it.md`).
+#[test]
+fn the_second_exit_retires_the_stale_pair_and_the_declaration_mints_it_anew() {
+    let root = temp_project();
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Store"]);
+    ok(&root, &["plan", "task", "add", "Auth"]);
+    write_record(&root, "archi/plans/mvp/t1-store.md", T1_STORE_GATED);
+    write_record(
+        &root,
+        "archi/plans/mvp/t2-auth.md",
+        &t2_auth_gated("- code/auth.rs\n- code/store.rs\n"),
+    );
+    ok(&root, &["plan", "start"]);
+
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+    declares(
+        &root,
+        1,
+        "t1",
+        &[
+            ["code/store.rs#Store::put", "Store", PROOF],
+            ["code/store.rs#Store::get", "Store", PROOF],
+        ],
+    );
+    ok(&root, &["plan", "next"]);
+    let declared = link_id(&root, "Store ← code/store.rs#Store::put");
+
+    // Wave 2 moves the symbol t1 declared, and t2 claims the file it sits in.
+    fs::write(root.join("code/store.rs"), STORE_PUT_MOVED).unwrap();
+    declares(&root, 2, "t2", &[["code/store.rs#Store::put", "Store", PROOF]]);
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains(&format!("archi link rm {declared}")), "{err}");
+
+    // The claim did not hold: retire it, and the file that declares the
+    // symbol mints the pair again — this time under the task that moved it.
+    ok(&root, &["link", "rm", &declared]);
+    let out = ok(&root, &["plan", "next"]);
+    assert!(out.contains("the cleanup wave"), "{out}");
+    let rows = ok(&root, &["link", "ls"]);
+    let put: Vec<&str> = rows
+        .lines()
+        .filter(|l| l.contains("← code/store.rs#Store::put"))
+        .collect();
+    assert_eq!(put.len(), 1, "the retired pair came back once:\n{rows}");
+    assert!(put[0].contains("captured(t2)") && put[0].contains("declared"), "{rows}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+// The declaration file is opened by the wave and filled by a verb: nobody
+// types it, so the format is not a surface a writer can get wrong
+// (`archi/requirements/planning/the-wave-opens-a-declaration-file-for-every-task.md`,
+// `archi/requirements/code-link/a-verb-writes-the-declaration.md`).
+
+/// Mint the plan with t1 and t2, and nothing coming in to t2: the two open
+/// together, so one wave puts two tasks in flight and the open owes a file to
+/// each. Left in draft — [`started_two_task_plan`] starts it.
+fn two_task_plan() -> PathBuf {
+    let root = temp_project();
+    ok(&root, &["version", "save", "-m", "first"]);
+    ok(&root, &["plan", "use", "mvp"]);
+    ok(&root, &["plan", "task", "add", "Store"]);
+    ok(&root, &["plan", "task", "add", "Auth"]);
+    write_record(&root, "archi/plans/mvp/t1-store.md", T1_STORE_GATED);
+    write_record(&root, "archi/plans/mvp/t2-auth.md", &t2_auth("", "- code/auth.rs\n"));
+    root
+}
+
+/// The same plan started: t1 and t2 both in wave 1.
+fn started_two_task_plan() -> PathBuf {
+    let root = two_task_plan();
+    let out = ok(&root, &["plan", "start"]);
+    assert!(out.contains("wave 1 in flight: t1, t2"), "{out}");
+    root
+}
+
+/// The `[[declares]]` tables one file holds — the entries, blind to the
+/// comments the template carries.
+fn entries(root: &Path, wave: usize, task: &str) -> usize {
+    fs::read_to_string(root.join(declares_rel(wave, task)))
+        .unwrap()
+        .matches("\n[[declares]]")
+        .count()
+}
+
+/// One `plan task <id> link add` invocation.
+fn declare_verb<'a>(task: &'a str, symbol: &'a str, answers: &'a str, proof: &'a str) -> Vec<&'a str> {
+    vec![
+        "plan", "task", task, "link", "add",
+        "--symbol", symbol,
+        "--answers", answers,
+        "--proved-by", proof,
+    ]
+}
+
+/// Opening a wave writes one empty declaration file per task it puts in
+/// flight, beside the index it already writes: the shape as comments and no
+/// entry, so the close meets a file that declares nothing instead of an
+/// absent one. `plan reset` clears them with the rest of the wave's state
+/// (`archi/requirements/planning/the-wave-opens-a-declaration-file-for-every-task.md`).
+#[test]
+fn the_wave_open_writes_an_empty_declaration_file_for_every_task_in_flight() {
+    let root = started_two_task_plan();
+
+    // One file per task in flight, beside the index the open already writes.
+    let waves = root.join("archi/plans/mvp/waves");
+    assert!(waves.join("w01.index.json").exists());
+    for task in ["t1", "t2"] {
+        let text = fs::read_to_string(root.join(declares_rel(1, task))).unwrap();
+        // The shape is in the file, and every line of it is a comment: the
+        // file declares nothing.
+        assert!(text.contains("[[declares]]"), "{task}: {text}");
+        assert!(text.contains("symbol") && text.contains("answers"), "{task}: {text}");
+        assert!(text.contains("proved_by"), "{task}: {text}");
+        assert!(
+            text.lines().all(|l| l.trim().is_empty() || l.starts_with('#')),
+            "{task} declares nothing: {text}"
+        );
+        // And it names the verb that fills it.
+        assert!(
+            text.contains(&format!("archi plan task {task} link add")),
+            "{task}: {text}"
+        );
+        assert_eq!(entries(&root, 1, task), 0, "{task}: {text}");
+    }
+
+    // The close meets a file that declares nothing — one refusal, not two.
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+    let (_, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains("names nothing"), "{err}");
+    assert!(!err.contains("is absent"), "the file is there: {err}");
+    assert!(err.contains(&declares_rel(1, "t1")), "{err}");
+    assert!(err.contains(&declares_rel(1, "t2")), "{err}");
+
+    // `plan reset` takes the files with the rest of the wave's state.
+    ok(&root, &["plan", "reset"]);
+    assert!(!root.join(declares_rel(1, "t1")).exists());
+    assert!(!root.join(declares_rel(1, "t2")).exists());
+    assert!(!waves.exists());
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// A wave opened before the open wrote the files has none of them, and the
+/// absent file still refuses the close and still says it is absent — the arm
+/// stays for exactly that wave
+/// (`archi/requirements/planning/the-wave-opens-a-declaration-file-for-every-task.md`).
+#[test]
+fn a_wave_whose_files_were_never_written_still_refuses_the_absent_one() {
+    let root = started_two_task_plan();
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+
+    // The wave as an older binary left it: no file for t1.
+    fs::remove_file(root.join(declares_rel(1, "t1"))).unwrap();
+    let (stdout, err) = fails(&root, &["plan", "next"]);
+    assert!(err.contains("is absent"), "{err}");
+    assert!(err.contains(&declares_rel(1, "t1")), "{err}");
+    assert!(err.contains("re-run `archi plan next`"), "{err}");
+    assert!(stdout.contains("is absent"), "capture says so too: {stdout}");
+    // The file beside it is there and declares nothing: both refusals, each
+    // saying which situation it is.
+    assert!(err.contains("names nothing"), "{err}");
+    assert!(err.contains(&declares_rel(1, "t2")), "{err}");
+
+    // The verb writes the absent file rather than demanding one first.
+    ok(&root, &declare_verb("t1", "code/store.rs#Store::put", "Store", PROOF));
+    assert_eq!(entries(&root, 1, "t1"), 1);
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The verb appends one entry to the task's file, and the wave closes on it:
+/// the writer never types TOML, so TOML cannot be malformed
+/// (`archi/requirements/code-link/a-verb-writes-the-declaration.md`).
+#[test]
+fn the_verb_appends_one_entry_and_the_wave_closes_on_it() {
+    let root = started_two_task_plan();
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+    fs::write(root.join("code/auth.rs"), AUTH_MOVED).unwrap();
+
+    let out = ok(&root, &declare_verb("t1", "code/store.rs#Store::put", "Store", PROOF));
+    assert!(out.contains("code/store.rs#Store::put"), "{out}");
+    assert!(out.contains(&declares_rel(1, "t1")), "names the file: {out}");
+    assert_eq!(entries(&root, 1, "t1"), 1);
+
+    // The requirement form resolves the same way.
+    ok(&root, &declare_verb("t2", "code/auth.rs#login", "req:service-hardening", AUTH_PROOF));
+    assert_eq!(entries(&root, 1, "t2"), 1);
+
+    let out = ok(&root, &["plan", "next"]);
+    assert_eq!(captured_ids(&out).len(), 2, "each entry minted its pair: {out}");
+    assert!(out.contains("the cleanup wave"), "{out}");
+    let rows = ok(&root, &["link", "ls"]);
+    assert!(rows.contains("proved by code/tests.rs#a_row_is_persisted"), "{rows}");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The verb resolves all three names before it writes, and a name that
+/// resolves to nothing refuses — saying which of the three failed and what it
+/// looked for — with nothing appended
+/// (`archi/requirements/code-link/a-verb-writes-the-declaration.md`).
+#[test]
+fn the_verb_refuses_a_name_that_resolves_to_nothing_and_writes_nothing() {
+    let root = started_two_task_plan();
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+    let before = fs::read_to_string(root.join(declares_rel(1, "t1"))).unwrap();
+
+    // The symbol: the tree holds no such item.
+    let (_, err) = fails(
+        &root,
+        &declare_verb("t1", "code/store.rs#Store::wipe", "Store", PROOF),
+    );
+    assert!(err.contains("--symbol"), "names which of the three: {err}");
+    assert!(err.contains("Store::wipe"), "names what it looked for: {err}");
+    assert!(!err.contains("--answers") && !err.contains("--proved-by"), "{err}");
+
+    // The test: the same, on the third argument.
+    let (_, err) = fails(
+        &root,
+        &declare_verb("t1", "code/store.rs#Store::put", "Store", "code/tests.rs#no_such_test"),
+    );
+    assert!(err.contains("--proved-by"), "names which of the three: {err}");
+    assert!(err.contains("no_such_test"), "names what it looked for: {err}");
+
+    // The ref: neither an element nor a requirement.
+    let (_, err) = fails(
+        &root,
+        &declare_verb("t1", "code/store.rs#Store::put", "Nope", PROOF),
+    );
+    assert!(err.contains("--answers"), "names which of the three: {err}");
+    assert!(err.contains("Nope"), "names what it looked for: {err}");
+    let (_, err) = fails(
+        &root,
+        &declare_verb("t1", "code/store.rs#Store::put", "req:no-such-req", PROOF),
+    );
+    assert!(err.contains("--answers"), "{err}");
+    assert!(err.contains("no-such-req"), "{err}");
+
+    // Every argument is required.
+    let (_, err) = fails(
+        &root,
+        &["plan", "task", "t1", "link", "add", "--symbol", "code/store.rs#Store::put"],
+    );
+    assert!(err.contains("--answers") && err.contains("--proved-by"), "{err}");
+
+    // Nothing was written by any of them.
+    assert_eq!(
+        fs::read_to_string(root.join(declares_rel(1, "t1"))).unwrap(),
+        before
+    );
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// A repeated identical entry is the same claim, not a second one: it appends
+/// no copy, says the entry stands and exits 0, so a batch does not stop on it
+/// (`archi/requirements/code-link/a-verb-writes-the-declaration.md`).
+#[test]
+fn a_repeated_entry_stands_and_appends_no_second_copy() {
+    let root = started_two_task_plan();
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+
+    ok(&root, &declare_verb("t1", "code/store.rs#Store::put", "Store", PROOF));
+    let out = ok(&root, &declare_verb("t1", "code/store.rs#Store::put", "Store", PROOF));
+    assert!(out.contains("stands"), "{out}");
+    assert_eq!(entries(&root, 1, "t1"), 1);
+
+    // A second entry over the same symbol that differs in one name is another
+    // claim, and it lands.
+    ok(&root, &declare_verb("t1", "code/store.rs#Store::get", "Store", PROOF));
+    assert_eq!(entries(&root, 1, "t1"), 2);
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// Several entries land in one `archi batch -`, which fails at the first
+/// refusal and leaves the entries before it in place
+/// (`archi/requirements/code-link/a-verb-writes-the-declaration.md`).
+#[test]
+fn several_entries_land_in_one_batch_and_a_refusal_leaves_the_earlier_ones() {
+    let root = started_two_task_plan();
+    fs::write(root.join("code/store.rs"), STORE_TWO).unwrap();
+
+    let script = format!(
+        "# t1 accounts for what it moved\n\
+         plan task t1 link add --symbol \"code/store.rs#Store::put\" --answers \"Store\" --proved-by \"{PROOF}\"\n\
+         plan task t1 link add --symbol \"code/store.rs#Store::get\" --answers \"Store\" --proved-by \"{PROOF}\"\n\
+         plan task t1 link add --symbol \"code/store.rs#Store::wipe\" --answers \"Store\" --proved-by \"{PROOF}\"\n\
+         plan task t1 link add --symbol \"code/store.rs#Store\" --answers \"Store\" --proved-by \"{PROOF}\"\n"
+    );
+    let (success, out, err) = run_stdin(&root, &["batch"], &script);
+    assert!(!success, "{out}");
+    assert!(err.contains("batch stopped at line 4"), "{err}");
+    assert!(err.contains("--symbol"), "{err}");
+    assert_eq!(entries(&root, 1, "t1"), 2, "the lines before it stand");
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The verb refuses outside a started wave, naming the lifecycle step that
+/// opens one: there is no file to append to until a wave opens it
+/// (`archi/requirements/code-link/a-verb-writes-the-declaration.md`).
+#[test]
+fn the_verb_refuses_outside_a_started_wave_and_names_the_step_that_opens_one() {
+    let root = two_task_plan();
+
+    // Draft: no wave, no file.
+    let (_, err) = fails(
+        &root,
+        &declare_verb("t1", "code/store.rs#Store::put", "Store", PROOF),
+    );
+    assert!(err.contains("archi plan start"), "names the step: {err}");
+    assert!(!root.join(declares_rel(1, "t1")).exists());
+
+    // Started: a task the wave does not hold has no file of this wave either.
+    ok(&root, &["plan", "start"]);
+    let (_, err) = fails(
+        &root,
+        &declare_verb("t9", "code/store.rs#Store::put", "Store", PROOF),
+    );
+    assert!(err.contains("t9"), "{err}");
+    assert!(err.contains("in flight"), "{err}");
+
+    fs::remove_dir_all(&root).unwrap();
 }

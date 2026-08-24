@@ -30,6 +30,7 @@ use modeling_lang::{Definition, ElementKind, Model, Statement, Workspace};
 use serde::{Deserialize, Serialize};
 
 use crate::docs;
+use crate::docs::world_check::{self, World, WorldFact};
 use crate::links;
 use crate::versions;
 
@@ -92,6 +93,38 @@ pub struct StackMapping {
     pub node: String,
 }
 
+/// One world fact a task carries: the slug that names it and a fingerprint
+/// of the scenarios it dictated when the task was authored. The story
+/// itself stays in the world — the plan keeps no copy, so a fact that moves
+/// is reported, never restated
+/// (`archi/requirements/world-facts/the-close-re-reads-the-world-and-says-what-moved.md`).
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CoveringFact {
+    /// The fact's slug.
+    pub fact: String,
+    /// Six hex digits over its scenarios, as they stood at author time.
+    pub digest: String,
+}
+
+impl CoveringFact {
+    /// `<slug>@<digest>` — the one form the record writes and reads.
+    pub(crate) fn render(&self) -> String {
+        format!("{}@{}", self.fact, self.digest)
+    }
+
+    pub(crate) fn parse(text: &str) -> Result<CoveringFact, String> {
+        let (fact, digest) = text
+            .split_once('@')
+            .filter(|(f, d)| !f.trim().is_empty() && !d.trim().is_empty())
+            .ok_or_else(|| format!("`{text}` is not `<fact-slug>@<digest>`"))?;
+        Ok(CoveringFact {
+            fact: fact.trim().to_string(),
+            digest: digest.trim().to_string(),
+        })
+    }
+}
+
 /// One task: pinned to one node of one scope at the plan's version.
 /// `spec_refs` are seeded on create; everything else is authored by
 /// editing `plan.json`.
@@ -114,6 +147,12 @@ pub struct Task {
     /// element without all of them answering for its requirements.
     #[serde(default)]
     pub owns: Vec<String>,
+    /// The world facts whose `covers` reaches this task's node, resolved at
+    /// author time and re-resolved on every read. Carried, never curated: a
+    /// condition on the node's behavior is not the task's to waive
+    /// (`archi/requirements/world-facts/a-task-carries-the-facts-that-cover-its-node.md`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub facts: Vec<CoveringFact>,
     /// Concrete tech detail for this task.
     #[serde(default)]
     pub stack_details: String,
@@ -164,7 +203,10 @@ pub struct Plan {
     /// Which concrete tech realizes which summary node.
     #[serde(default)]
     pub stack_mapping: Vec<StackMapping>,
-    /// Free-text user stories, displayed as the final `plan next` step.
+    /// The free-text stories a legacy `plan.json` was written with. Read by
+    /// no verb: the closing block is collected from the world now, and
+    /// what a plan wrote before it is left exactly as it is
+    /// (`archi/decisions/the-stories-move-out-of-the-plan.md`).
     #[serde(default)]
     pub scenarios: Vec<String>,
     /// The cleanup block was printed after the last wave closed — the
@@ -180,6 +222,13 @@ pub struct Plan {
     /// The scenario step was acknowledged; the plan completed through it.
     #[serde(default)]
     pub scenarios_closed: bool,
+    /// The plan was minted after the world landed — stamped once by
+    /// the mint, moved by nothing. A plan from before it carries no such
+    /// field and closes on an empty block exactly as it always did; a plan
+    /// minted after it does not
+    /// (`archi/requirements/world-facts/a-plan-s-own-scenarios-block-retires.md`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub minted_after_the_world: bool,
     /// The task graph.
     #[serde(default)]
     pub tasks: Vec<Task>,
@@ -377,6 +426,9 @@ pub fn use_plan(root: &Path, model: &Model, name: &str) -> Result<Used, String> 
 /// `archi plan repin`: move the active plan's pin to the version the live
 /// model is at — the sanctioned fix when the spec advances mid-plan. The
 /// next `plan verify` flags every task whose obligations no longer hold.
+/// The covering facts re-resolve with the pin: adopting the new picture is
+/// the deliberate move the drift report asks for, and the `facts` line is
+/// the machine's, so it moves and nothing else in the file does.
 pub fn repin(root: &Path, model: &Model) -> Result<(Plan, String), String> {
     let mut plan = load_active(root)?;
     let to = pinnable_version(root, model)?;
@@ -385,6 +437,17 @@ pub fn repin(root: &Path, model: &Model) -> Result<(Plan, String), String> {
     }
     let from = std::mem::replace(&mut plan.version, to);
     plan.version_hash = pin_hash(root, &plan.version);
+    if records::is_record(root, &plan.name) {
+        let (tree, _) = docs::load(root, model);
+        let world = world_check::serve_world(&tree);
+        for t in &mut plan.tasks {
+            let facts = covering_facts(&world, &t.node);
+            if facts != t.facts {
+                records::write_facts(root, &plan.name, &t.id, &facts)?;
+                t.facts = facts;
+            }
+        }
+    }
     save_state(root, &plan)?;
     Ok((plan, from))
 }
@@ -465,12 +528,17 @@ pub fn task_add(root: &Path, node: &str, description: Option<&str>) -> Result<Ta
             plan.version
         ));
     }
+    // The covering facts resolve here, at author time: the condition and
+    // the Gherkin land in front of whoever writes the code.
+    let (tree, _) = docs::load(root, model);
+    let facts = covering_facts(&world_check::serve_world(&tree), node);
     let skeleton = |id: String| Task {
         id,
         node: node.to_string(),
         description: description.unwrap_or_default().to_string(),
         spec_refs: seed_spec_refs(model, node),
         owns: Vec::new(),
+        facts: facts.clone(),
         stack_details: String::new(),
         inputs: BTreeMap::new(),
         outputs: Vec::new(),
@@ -595,6 +663,405 @@ fn seed_spec_refs(model: &Model, node: &str) -> Vec<String> {
     refs
 }
 
+// ---- the world: covering facts, the closing block, its drift ------------------
+
+/// The scenario names one fact dictates, in source order.
+fn scenario_names(fact: &WorldFact) -> Vec<String> {
+    fact.scenarios
+        .iter()
+        .flat_map(|b| b.scenarios.iter().map(|s| s.name.clone()))
+        .collect()
+}
+
+/// The scenarios one fact dictates, whole — the name and every step, as the
+/// grammar read them.
+fn block_scenarios(fact: &WorldFact) -> Vec<BlockScenario> {
+    fact.scenarios
+        .iter()
+        .flat_map(|b| b.scenarios.iter())
+        .map(|s| BlockScenario {
+            name: s.name.clone(),
+            steps: s
+                .steps
+                .iter()
+                .map(|st| format!("{} {}", st.keyword, st.text))
+                .collect(),
+        })
+        .collect()
+}
+
+/// The facts covering one node, in slug order, each with its fingerprint —
+/// the one question the planner asks of the world, at author time and on
+/// every read after. The fingerprint is the world's own
+/// ([`world_check::scenario_digest`]), so the drift this plan reports and the
+/// grade a link carries can never disagree about what moved. The plan names
+/// no scenario: it covers a node with a whole fact, so any scenario of that
+/// fact moving is drift the plan must report
+/// (`archi/requirements/world-facts/the-digest-witnesses-one-scenario.md`).
+fn covering_facts(world: &World, node: &str) -> Vec<CoveringFact> {
+    world.covering(node)
+        .into_iter()
+        .map(|f| CoveringFact {
+            fact: f.doc.slug.clone(),
+            digest: world_check::scenario_digest(f, None),
+        })
+        .collect()
+}
+
+/// One scenario of the closing block, whole: the address and the story
+/// under it. The closing step hands back the Gherkin, not the name, so the
+/// block carries the steps it read
+/// (`archi/requirements/world-facts/the-closing-step-hands-back-the-work.md`).
+#[derive(Clone, PartialEq, Eq, Debug, Serialize)]
+pub struct BlockScenario {
+    /// The scenario's name — the address inside the fact.
+    pub name: String,
+    /// Its steps as written, keyword and text, in source order.
+    pub steps: Vec<String>,
+}
+
+/// One fact of the closing block: what it dictates, and what of its reach
+/// this plan never built.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize)]
+pub struct BlockFact {
+    /// The fact's slug.
+    pub fact: String,
+    /// Its scenarios, in source order.
+    pub scenarios: Vec<BlockScenario>,
+    /// The nodes it covers that this plan holds no task for — empty when
+    /// the plan holds them all
+    /// (`archi/requirements/world-facts/the-block-marks-what-lies-outside-the-plan.md`).
+    pub outside: Vec<String>,
+}
+
+/// The closing block: every fact covering any node the plan holds a task
+/// for, once, in slug order. Collected from the tree as it stands, never
+/// stored — the plan pins a version and the world is not in that pin
+/// (`archi/requirements/world-facts/the-plan-closes-on-the-world-s-scenarios.md`).
+fn collect_block(tree: &docs::Tree, plan: &Plan) -> Vec<BlockFact> {
+    let world = world_check::serve_world(tree);
+    let nodes: BTreeSet<&str> = plan.tasks.iter().map(|t| t.node.as_str()).collect();
+    let mut out: BTreeMap<&str, BlockFact> = BTreeMap::new();
+    for node in &nodes {
+        for f in world.covering(node) {
+            // A fact covering two of the plan's nodes joins the block once.
+            out.entry(f.doc.slug.as_str()).or_insert_with(|| BlockFact {
+                fact: f.doc.slug.clone(),
+                scenarios: block_scenarios(f),
+                outside: f
+                    .doc
+                    .covers
+                    .iter()
+                    .flat_map(|(v, _)| v)
+                    .filter(|e| !nodes.contains(e.as_str()))
+                    .cloned()
+                    .collect(),
+            });
+        }
+    }
+    out.into_values().collect()
+}
+
+/// The block as printable lines: one per scenario, and one mark per fact
+/// that reaches past the plan. The authoring read surface's summary — the
+/// closing step renders the same block whole ([`render_graded`]).
+fn render_block(block: &[BlockFact]) -> Vec<String> {
+    let mut out = Vec::new();
+    for f in block {
+        for s in &f.scenarios {
+            out.push(format!("{}#{}", f.fact, s.name));
+        }
+        if !f.outside.is_empty() {
+            out.push(outside_mark(f));
+        }
+    }
+    out
+}
+
+/// What a fact rules that this plan never built.
+fn outside_mark(f: &BlockFact) -> String {
+    format!(
+        "{} also covers {} — outside this plan",
+        f.fact,
+        f.outside.join(", ")
+    )
+}
+
+// ---- the closing render: the steps, the state, the line under them -----------
+
+/// One collected scenario as the closing step hands it back: its steps
+/// whole, the state of the link that reaches it, and one closing line — the
+/// command that anchors it while nothing does, the ask for a re-read once
+/// something does
+/// (`archi/requirements/world-facts/the-closing-step-hands-back-the-work.md`).
+#[derive(Clone, PartialEq, Eq, Debug, Serialize)]
+pub struct ScenarioState {
+    /// The spec ref a link anchors: `<fact-slug>#<scenario name>`.
+    pub spec: String,
+    /// Its steps as written, in source order.
+    pub steps: Vec<String>,
+    /// The state in one clause: `unanchored`, or `anchored at <file#symbol>`
+    /// with the side that moved after it while the digests disagree.
+    pub state: String,
+    /// The `archi link add` line, ready for a shell; `None` once a link
+    /// reaches the scenario — the one thing that tells the two states apart.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+}
+
+/// What an anchored scenario is handed back with. A green link says the pair
+/// has not moved since it was bound, and no more than that: whether the story
+/// and the code still say the same thing is a reading, and only a person
+/// makes it.
+const RE_READ: &str = "read this scenario and that code against each other and repair whichever \
+                       is wrong — a link proves the pair has not moved, not that it is right";
+
+impl ScenarioState {
+    /// The record as it prints: the head line the caller marks, then the
+    /// steps and the closing line indented under it. Exactly one line
+    /// closes it, because [`grade_block`] mints the command for a scenario
+    /// nothing anchors and for no other.
+    fn render(&self) -> String {
+        let mut out = format!("{} — {}", self.spec, self.state);
+        for s in &self.steps {
+            out.push_str(&format!("\n    {s}"));
+        }
+        out.push_str(&format!(
+            "\n    {}",
+            self.command.as_deref().unwrap_or(RE_READ)
+        ));
+        out
+    }
+}
+
+/// The state of one anchored link in one clause: where it reaches, and what
+/// moved under it. The grade is the link world's own, and it already separates
+/// the two sides of a witnessed pair
+/// (`archi/requirements/world-facts/a-scenario-link-binds-two-hashes.md`).
+fn anchoring(link: &links::Link, state: &links::State) -> String {
+    // The address is the whole point of the clause: the operator reads that
+    // file and that symbol against the steps printed under it.
+    let at = format!("anchored at {}", link.anchor);
+    match state {
+        links::State::Clean => at,
+        // The story moved under an address that still stands, or the
+        // address itself stopped resolving: either way the spec side is
+        // the one that moved.
+        links::State::ScenarioDrifted { code: false } | links::State::SpecDrifted => {
+            format!("{at}, drifted: the scenario side moved")
+        }
+        links::State::ScenarioDrifted { code: true } => {
+            format!("{at}, drifted: both sides moved")
+        }
+        // Absence is not drift: the member holding the code is not on this
+        // machine, so nothing about it was read
+        // (`archi/requirements/multi-repo/absence-is-not-drift`).
+        links::State::Unreachable { member } => {
+            format!("{at}, unread: member `{member}` has no checkout here")
+        }
+        _ => format!("{at}, drifted: the code side moved"),
+    }
+}
+
+/// The line that anchors one scenario, ready for a shell: the ref carries a
+/// scenario name and its spaces, so it is quoted here and not by hand, and
+/// the operator supplies only the code side. Single quotes are literal in
+/// POSIX shells, so a name carrying an apostrophe closes the quote, escapes
+/// it and opens again — the form the world mint's refusal already prints.
+fn link_add(spec: &str) -> String {
+    format!(
+        "archi link add '{}' <file#symbol> --kind indirect",
+        spec.replace('\'', "'\\''")
+    )
+}
+
+/// Whether one link anchors what it names: a live row in the Working slot.
+/// Every live row is a claim, so standing decides nothing here; a link pinned
+/// to a version is history, and history does not anchor. Both gates read this
+/// one predicate, so the coverage gate and the closing block can never
+/// disagree about what an anchor is.
+fn anchors(link: &links::Link) -> bool {
+    link.spec.version.is_none()
+}
+
+/// Every collected scenario with the state of its link — the one read the
+/// closing step, the final latch and `plan verify` all answer from. The
+/// grade comes from [`links::verify`] over the folded link set the gate
+/// already consults: a second reader here could only disagree with it.
+fn grade_block(
+    root: &Path,
+    model: &Model,
+    block: &[BlockFact],
+) -> Result<Vec<ScenarioState>, String> {
+    let mut out = Vec::new();
+    for f in block {
+        for s in &f.scenarios {
+            let spec = format!("{}#{}", f.fact, links::normalize_ref(&s.name));
+            let report = links::verify(
+                root,
+                model,
+                &links::VerifyOptions {
+                    spec: Some(spec.clone()),
+                    ..Default::default()
+                },
+            )?;
+            // The gate's own predicate: an asserted link at Working anchors
+            // a scenario, and nothing else does.
+            let anchored: Vec<&links::Checked> =
+                report.checked.iter().filter(|c| anchors(&c.link)).collect();
+            // The news is what moved: where two links reach one scenario,
+            // the one that is not clean is the one worth printing.
+            let graded = anchored
+                .iter()
+                .find(|c| c.state != links::State::Clean)
+                .or_else(|| anchored.first());
+            let (state, command) = match graded {
+                None => ("unanchored".to_string(), Some(link_add(&spec))),
+                Some(c) => (anchoring(&c.link, &c.state), None),
+            };
+            out.push(ScenarioState {
+                spec,
+                steps: s.steps.clone(),
+                state,
+                command,
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// The graded block as printable records, and one mark per fact that
+/// reaches past the plan. Both walks are one walk: [`grade_block`] grades
+/// the block in the order this prints it.
+fn render_graded(block: &[BlockFact], graded: &[ScenarioState]) -> Vec<String> {
+    let mut states = graded.iter();
+    let mut out = Vec::new();
+    for f in block {
+        for _ in &f.scenarios {
+            let Some(s) = states.next() else { break };
+            out.push(s.render());
+        }
+        if !f.outside.is_empty() {
+            out.push(outside_mark(f));
+        }
+    }
+    out
+}
+
+/// What moved in the world since the tasks were authored: a fact retired, a
+/// fact that dropped the node, a fact whose scenarios changed, a fact that
+/// began covering a node no task carried it for. Advisory — the operator
+/// chooses `plan repin` or fixes the fact
+/// (`archi/requirements/world-facts/the-close-re-reads-the-world-and-says-what-moved.md`).
+fn world_drift(tree: &docs::Tree, plan: &Plan) -> Vec<String> {
+    let world = world_check::serve_world(tree);
+    let standing: BTreeSet<&str> = tree.world.iter().map(|f| f.doc.slug.as_str()).collect();
+    // (kind, fact) → the tasks it moved under, in plan order.
+    let mut rows: BTreeMap<(u8, String), Vec<&str>> = BTreeMap::new();
+    for t in &plan.tasks {
+        let live = covering_facts(&world, &t.node);
+        for carried in &t.facts {
+            let kind = match live.iter().find(|c| c.fact == carried.fact) {
+                Some(c) if c.digest == carried.digest => continue,
+                Some(_) => 2,
+                None if standing.contains(carried.fact.as_str()) => 1,
+                None => 0,
+            };
+            rows.entry((kind, carried.fact.clone())).or_default().push(&t.id);
+        }
+        for c in &live {
+            if !t.facts.iter().any(|carried| carried.fact == c.fact) {
+                rows.entry((3, c.fact.clone())).or_default().push(&t.id);
+            }
+        }
+    }
+    rows.into_iter()
+        .map(|((kind, fact), tasks)| {
+            let tasks = tasks.join(", ");
+            let what = match kind {
+                0 => format!("world fact `{fact}` retired since {tasks} carried it"),
+                1 => format!("world fact `{fact}` no longer covers the node of {tasks}"),
+                2 => format!(
+                    "world fact `{fact}` moved: its scenarios changed since {tasks} carried it"
+                ),
+                _ => format!("world fact `{fact}` now covers the node of {tasks}, which never carried it"),
+            };
+            format!("{what} — `plan repin` re-resolves the covering facts")
+        })
+        .collect()
+}
+
+/// The block's own gate: every collected scenario carries an asserted link
+/// to code. Archi runs nothing — it proves the edge exists, reading the
+/// same graded set the closing step printed. The refusal is the ordered
+/// continuation the rest of the tool speaks: one runnable line per scenario
+/// nothing reaches
+/// (`archi/requirements/world-facts/the-close-gates-on-anchored-scenarios.md`,
+/// `archi/requirements/world-facts/the-refusal-is-an-ordered-continuation.md`).
+fn gate_anchored(graded: &[ScenarioState]) -> Result<(), String> {
+    let lines: Vec<String> = graded
+        .iter()
+        .filter_map(|s| s.command.as_ref())
+        .map(|c| format!("  {c}"))
+        .collect();
+    if lines.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "the closing block is not anchored — no link reaches:\n{}\n\
+         archi runs nothing: it proves the edge a runner executes exists. Run the lines \
+         above with the code side filled in, then re-run `archi plan next`",
+        lines.join("\n")
+    ))
+}
+
+/// Whether this tree opted into the world at all: one standing world fact is
+/// the opt-in. It reads the folder [`docs::Tree`] reads, through the very
+/// same walk, so the two answers cannot disagree — and it is asked only on
+/// the empty-block path, where the tree is about to be judged for holding
+/// nothing (`archi/requirements/world-facts/the-world-arrives-without-noise.md`).
+fn tree_holds_a_world(root: &Path) -> bool {
+    !world_check::discover(root, &mut Vec::new()).is_empty()
+}
+
+/// The nodes of a plan that still owe a condition: its task nodes, less what
+/// the coverage question does not apply to — what the model classifies as
+/// `Data` and what `archi/world/.worldignore` declares internal. The
+/// exclusion is the one `version save` already refuses under
+/// ([`world_check::outside_the_question`]), read here so one rule serves both
+/// gates: a payload can never take a fact, and the close that asked for one
+/// asked for the opposite of the design
+/// (`archi/requirements/planning/the-empty-block-asks-only-where-a-condition-is-owed.md`).
+///
+/// What a `.worldignore` line gets wrong is `check`'s to report and is
+/// dropped here, exactly as the save drops it: this gate says one thing.
+fn owing_nodes(root: &Path, model: &Model, plan: &Plan) -> Vec<String> {
+    let outside = world_check::outside_the_question(root, model, &mut Vec::new());
+    let owing: BTreeSet<&str> = plan
+        .tasks
+        .iter()
+        .map(|t| t.node.as_str())
+        .filter(|n| !outside.contains(*n))
+        .collect();
+    owing.into_iter().map(str::to_string).collect()
+}
+
+/// The refusal a plan minted after the world meets when nothing in the world
+/// conditions what it built and a node it built on owes a condition. It names
+/// those nodes: the plan is not where the author acts, the node is
+/// (`archi/requirements/world-facts/a-plan-s-own-scenarios-block-retires.md`,
+/// `archi/requirements/planning/the-empty-block-asks-only-where-a-condition-is-owed.md`).
+fn empty_block(owing: &[String]) -> String {
+    let nodes: Vec<String> = owing.iter().map(|n| format!("`{n}`")).collect();
+    format!(
+        "no world fact covers {}: the closing block is empty, and a plan minted after the \
+         world does not close on a node that owes a condition — record the condition under \
+         one of them (`archi world add \"<title>\"`, then `covers:`), or `archi plan close` \
+         to close it by hand",
+        nodes.join(", ")
+    )
+}
+
 // ---- the derived view: reverse lookup and waves ------------------------------
 
 /// One requirement the reverse lookup matched to a task. Identity is the
@@ -620,6 +1087,9 @@ pub struct MatchedReq {
 pub struct Derived {
     /// Task id → matched requirements.
     pub matched: BTreeMap<String, Vec<MatchedReq>>,
+    /// Task id → one line per covering fact the task carries: the slug and
+    /// what it dictates now, or the state it moved into.
+    pub facts: BTreeMap<String, Vec<String>>,
     /// Topological layers of the inputs DAG: wave k holds the tasks whose
     /// inputs all close earlier. Empty when the structure is broken.
     pub waves: Vec<Vec<String>>,
@@ -762,16 +1232,30 @@ pub struct PlanReport {
     pub errors: Vec<String>,
     /// Advisory: spec drift at Working, a stale pin, doc-layer problems.
     pub notes: Vec<String>,
+    /// The closing block as the world stands now — collected, never stored.
+    pub block: Vec<BlockFact>,
+    /// The same block with the state of every scenario's link, graded on
+    /// demand: `plan verify` asks for it, and the reads that only need
+    /// structure never pay for the grade
+    /// (`archi/requirements/world-facts/the-closing-step-hands-back-the-work.md`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub scenarios: Vec<ScenarioState>,
+    /// What moved in the world since the tasks were authored.
+    pub drift: Vec<String>,
     /// The derived view.
     #[serde(flatten)]
     pub derived: Derived,
 }
 
 /// `archi plan verify`: structural invariants against the pinned version,
-/// drift notes against the live model.
+/// drift notes against the live model — and the closing block graded, so
+/// the three states answer on demand while a wave is still open
+/// (`archi/requirements/world-facts/the-closing-step-hands-back-the-work.md`).
 pub fn verify(root: &Path, model: &Model) -> Result<PlanReport, String> {
     let plan = load_active(root)?;
-    verify_plan(root, model, &plan)
+    let mut report = verify_plan(root, model, &plan)?;
+    report.scenarios = grade_block(root, model, &report.block)?;
+    Ok(report)
 }
 
 /// `archi plan show`: the active plan and its derived view — the authoring
@@ -929,6 +1413,36 @@ pub(crate) fn verify_plan(root: &Path, live: &Model, plan: &Plan) -> Result<Plan
             doc_report.diagnostics.len()
         ));
     }
+    // The world, keyed by what it covers: the block the plan closes on, the
+    // drift under it, and what each task carries.
+    let block = collect_block(&tree, plan);
+    let drift = world_drift(&tree, plan);
+    let world = world_check::serve_world(&tree);
+    let standing: BTreeSet<&str> = tree.world.iter().map(|f| f.doc.slug.as_str()).collect();
+    let mut facts = BTreeMap::new();
+    for t in &plan.tasks {
+        let live = world.covering(&t.node);
+        let lines: Vec<String> = t
+            .facts
+            .iter()
+            .map(|c| match live.iter().find(|f| f.doc.slug == c.fact) {
+                Some(f) => {
+                    let names = scenario_names(f);
+                    if names.is_empty() {
+                        c.fact.clone()
+                    } else {
+                        format!("{} — {}", c.fact, names.join("; "))
+                    }
+                }
+                None if standing.contains(c.fact.as_str()) => {
+                    format!("{} — no longer covers this node", c.fact)
+                }
+                None => format!("{} — retired", c.fact),
+            })
+            .collect();
+        facts.insert(t.id.clone(), lines);
+    }
+
     let endpoints = edge_endpoints(pinned);
     let mut matched = BTreeMap::new();
     for t in &plan.tasks {
@@ -1016,7 +1530,15 @@ pub(crate) fn verify_plan(root: &Path, live: &Model, plan: &Plan) -> Result<Plan
         state: plan.state,
         errors,
         notes,
-        derived: Derived { matched, waves },
+        block,
+        // The grade is the caller's ask: `plan verify` fills it.
+        scenarios: Vec::new(),
+        drift,
+        derived: Derived {
+            matched,
+            facts,
+            waves,
+        },
     })
 }
 
@@ -1033,35 +1555,174 @@ fn gate_structure(report: &PlanReport) -> Result<(), String> {
 }
 
 
-/// Asserted code-link coverage, scoped to the delta: a ref gates only when
-/// the closing capture pressed it — some claimed changed item of its task
-/// carries the ref's terms. Unpressed refs never block; the uncovered ones
-/// come back as suggested `link add` lines, since hand-authoring is the
-/// expected move for surface the delta did not touch. Evidence never
-/// gates, and an asserted link satisfies its ref however it was born.
+/// The declaration gates: the file a task in flight owes, then the claims the
+/// wave moved out from under. Each leaves the wave open exactly as the
+/// coverage gate does, and each names what is wrong, the file to edit and the
+/// command that follows
+/// (`archi/requirements/planning/an-undeclared-change-refuses-the-wave.md`,
+/// `archi/requirements/code-link/a-drifted-declaration-refuses-the-wave-that-moved-it.md`,
+/// `archi/requirements/planning/the-declaration-refusal-repairs-without-guessing.md`).
+///
+/// The gate is the file and nothing else. It was drawn wider once — every
+/// symbol of the wave's delta had to be named — and the reach is what killed
+/// it: a test answers no part of the spec and a fixture constant answers
+/// nothing at all, so the wider rule asked for a field that does not exist for
+/// most of what a wave moves. What the file holds is the writer's to decide.
+fn gate_declarations(
+    root: &Path,
+    model: &Model,
+    capture: &links::capture::CaptureOutcome,
+) -> Result<(), String> {
+    if !capture.absent.is_empty() || !capture.empty.is_empty() {
+        let mut msg =
+            String::from("the wave cannot close while a task in flight has declared nothing:");
+        // Two situations, not two rules: the wave open writes the file, so an
+        // absent one means a wave opened before it did. Both say which, and
+        // both take the same verb
+        // (`archi/requirements/planning/the-wave-opens-a-declaration-file-for-every-task.md`).
+        for (task, path) in &capture.absent {
+            msg.push_str(&format!(
+                "\n  {task} — `{path}` is absent: this wave opened before the open wrote it"
+            ));
+        }
+        for (task, path) in &capture.empty {
+            msg.push_str(&format!("\n  {task} — `{path}` names nothing"));
+        }
+        msg.push_str(
+            "\neach task in flight accounts for what it changed, what that code answers and the \
+             test that proves it — one entry per claim, appended by the verb:\n",
+        );
+        for (task, _) in capture.absent.iter().chain(&capture.empty) {
+            msg.push_str(&format!("  {}\n", links::capture::declare_command(task)));
+        }
+        msg.push_str(&links::capture::entry_shape_block());
+        msg.push_str(
+            "what the file holds is the writer's to decide: one entry closes the wave. Then \
+             re-run `archi plan next`",
+        );
+        return Err(msg);
+    }
+
+    gate_declared_drift(root, model, &capture.moved)
+}
+
+/// A declared pair whose code side moved refuses the wave that moved it: the
+/// declaration is consumed once and the link is what survives, so a wave that
+/// rewrites the symbol for an unrelated reason leaves a written claim the code
+/// has left behind. The scope is the delta — the wave that moved it — and the
+/// rule is the row's own: inferred and hand-authored rows grade exactly as
+/// they did, so drift stays advisory everywhere it already was
+/// (`archi/requirements/code-link/a-drifted-declaration-refuses-the-wave-that-moved-it.md`).
+fn gate_declared_drift(
+    root: &Path,
+    model: &Model,
+    moved: &BTreeSet<String>,
+) -> Result<(), String> {
+    let candidates: Vec<links::Link> = links::ls(root, None)?
+        .into_iter()
+        .filter(|l| l.rule == links::Rule::Declared && l.spec.version.is_none())
+        .filter(|l| moved.contains(&l.anchor.qualified_file()))
+        .collect();
+    if candidates.is_empty() {
+        return Ok(());
+    }
+    // The grade comes from the one grader, asked per ref: the whole journal
+    // is not this gate's business, and the rows it is are few.
+    let ids: BTreeSet<&str> = candidates.iter().map(|l| l.id.as_str()).collect();
+    let refs: BTreeSet<&str> = candidates.iter().map(|l| l.spec.path.as_str()).collect();
+    let mut drifted = Vec::new();
+    for spec in refs {
+        let report = links::verify(
+            root,
+            model,
+            &links::VerifyOptions {
+                spec: Some(spec.to_string()),
+                ..Default::default()
+            },
+        )?;
+        for c in report.checked {
+            if ids.contains(c.link.id.as_str()) && c.state == links::State::Drifted {
+                drifted.push(c);
+            }
+        }
+    }
+    if drifted.is_empty() {
+        return Ok(());
+    }
+    let mut msg = String::from("this wave moved code a declared pair still claims:");
+    for c in &drifted {
+        msg.push_str(&format!(
+            "\n  {} `{}` ← {}\n    \
+             `archi link repin {}` — the code still answers what it answered\n    \
+             `archi link rm {}` — it does not; this wave's declaration file names the symbol, \
+             so the next capture mints the pair the file states now",
+            c.link.id, c.link.spec, c.link.anchor, c.link.id, c.link.id
+        ));
+    }
+    msg.push_str("\nthen re-run `archi plan next`");
+    Err(msg)
+}
+
+/// The wave gate: the files the delta touched against the declarations of the
+/// tasks in flight, read as one set. A file no entry names holds the wave
+/// open, and the refusal names that file. It names no task — the tasks of a
+/// wave share one tree, so nothing in the delta says who touched what — and
+/// an entry may name any file its writer touched, inside its task's
+/// `## Outputs` or not.
+///
+/// No spec ref is demanded and no term is compared. The gate asked for refs
+/// once, and it chose them by comparing the words of a changed file against
+/// the words of a model name: it demanded `WorldDoc` of a change to
+/// `world_check.rs` on the shared word `world`. What that gate tried to prove
+/// is the spec side, and the spec side has an honest reader already — the
+/// audit's `unlinked_spec_ref` finding, which reports a model element no code
+/// answers and never blocks. The refs no link covers come back from here as
+/// advice on a step that passed
+/// (`archi/requirements/code-link/the-file-in-the-delta-is-the-unit-the-gate-demands.md`).
 fn gate_coverage(
     root: &Path,
     in_flight: &[&Task],
-    pressed: &BTreeMap<String, BTreeSet<String>>,
+    moved: &BTreeSet<String>,
+    declared: &BTreeSet<String>,
 ) -> Result<Vec<String>, String> {
-    let live = links::ls(root, None, false)?;
-    let covered = |r: &str| {
-        live.iter().any(|l| {
-            l.standing == links::Standing::Asserted
-                && l.spec.version.is_none()
-                && l.spec.path == r
-        })
-    };
-    let mut gaps = Vec::new();
+    let undeclared: Vec<&String> = moved.difference(declared).collect();
+    if !undeclared.is_empty() {
+        let mut msg = String::from(
+            "this wave moved code no declaration accounts for. The tasks of a wave share one \
+             tree, so these files are named and no task is:",
+        );
+        for file in undeclared {
+            msg.push_str(&format!("\n  {file}"));
+        }
+        msg.push_str(&format!(
+            "\nthe writer that touched a file accounts for it — an entry may name any file its \
+             writer touched, in its task's `## Outputs` or not:\n  {}\n",
+            links::capture::declare_command(links::capture::TASK_HINT)
+        ));
+        msg.push_str(&links::capture::entry_shape_block());
+        // The second repair, for the reader stuck on a lockfile or a
+        // generated artifact: the boundary, named with its manifest key —
+        // a key that reader cannot be expected to know unnamed
+        // (`archi/requirements/planning/the-gate-refusal-names-the-repair-that-stands.md`).
+        msg.push_str(
+            "a changed file that is not code leaves the scans through `[audit] exclude` in \
+             `archi.toml` — the boundary the audit and capture already share — and links into \
+             excluded files still verify.\n",
+        );
+        msg.push_str(
+            "`archi link add` does not answer this gate: the gate reads the declaration files, \
+             not the journal. Then re-run `archi plan next`",
+        );
+        return Err(msg);
+    }
+    // The advice: every ref of the wave no link covers, in the one form that
+    // authors it. A link satisfies its ref however it was born.
+    let live = links::ls(root, None)?;
+    let covered = |r: &str| live.iter().any(|l| anchors(l) && l.spec.path == r);
     let mut suggested = Vec::new();
     for t in in_flight {
         for r in &t.spec_refs {
-            if covered(r) {
-                continue;
-            }
-            if pressed.get(&t.id).is_some_and(|p| p.contains(r)) {
-                gaps.push(format!("{}: `{r}`", t.id));
-            } else {
+            if !covered(r) {
                 suggested.push(format!(
                     "archi link add \"{r}\" <file#symbol> --kind indirect  # {}",
                     t.id
@@ -1069,23 +1730,7 @@ fn gate_coverage(
             }
         }
     }
-    if gaps.is_empty() {
-        return Ok(suggested);
-    }
-    let mut msg = format!(
-        "asserted code-link coverage of the refs this delta presses is incomplete:\n  {}\n\
-         review the captured candidates (`archi link ls --evidence`), assert the load-bearing \
-         ones (`archi link confirm <id>`), then re-run `archi plan next`",
-        gaps.join("\n  ")
-    );
-    if !suggested.is_empty() {
-        msg.push_str(&format!(
-            "\nrefs the delta does not press are not demanded — hand-author them when the \
-             traceability is wanted:\n  {}",
-            suggested.join("\n  ")
-        ));
-    }
-    Err(msg)
+    Ok(suggested)
 }
 
 /// `archi plan start`: gate on structure and verifications, open wave 1.
@@ -1104,6 +1749,7 @@ pub fn start(root: &Path, model: &Model) -> Result<(Plan, Vec<String>), String> 
     let report = verify_plan(root, model, &plan)?;
     gate_structure(&report)?;
     links::capture::write_index(root, &plan.name, 1)?;
+    links::capture::open_declarations(root, &plan.name, 1, &report.derived.waves[0])?;
     plan.state = PlanState::Started;
     plan.closed_waves = 0;
     save_state(root, &plan)?;
@@ -1125,7 +1771,9 @@ pub enum Step {
     /// unit's whole delta before the scenarios. Printed once; the next
     /// `plan next` brings the scenarios.
     Cleanup,
-    /// All waves closed and swept: the scenarios block.
+    /// All waves closed and swept: the closing block, collected from the
+    /// world — the drift lines first, then one line per scenario and
+    /// the mark of what each fact reaches outside the plan.
     Scenarios(Vec<String>),
     /// The plan completed.
     Done,
@@ -1138,8 +1786,8 @@ pub struct NextOutcome {
     pub capture: Option<links::capture::CaptureOutcome>,
     /// The step.
     pub step: Step,
-    /// Suggested `link add` lines for uncovered refs the closing delta did
-    /// not press — the voluntary checklist; empty when the gate blocked
+    /// Suggested `link add` lines for the spec refs of the wave's tasks that
+    /// no link covers — the voluntary checklist; empty when the gate blocked
     /// (the message carries it) or nothing was left to suggest.
     pub checklist: Vec<String>,
 }
@@ -1147,7 +1795,8 @@ pub struct NextOutcome {
 /// `archi plan next`: capture the closing wave's deltas into candidate
 /// links, then advance under the structural and coverage gates — the step
 /// that demands links is the step that produces them, and it is
-/// re-runnable: review (`link confirm`), then run it again.
+/// re-runnable: hand-author the link it names (`link add`), then run it
+/// again.
 pub fn next(root: &Path, model: &Model) -> Result<NextOutcome, String> {
     let mut plan = load_active(root)?;
     match plan.state {
@@ -1185,14 +1834,35 @@ pub fn next(root: &Path, model: &Model) -> Result<NextOutcome, String> {
                     checklist: Vec::new(),
                 });
             }
-            // The sweep ran: the scenarios block, exactly as before —
-            // or straight to done when none are recorded.
-            let step = if plan.scenarios.is_empty() {
+            // The sweep ran: the block the world dictates over the plan's
+            // nodes, the drift above it — or straight to done when no fact
+            // covers anything the plan built. A plan from before the world may
+            // do that, and so may any plan on a tree that holds no fact at
+            // all: the refusal needs a world to refuse against, and a project
+            // that has not opted in is not behind on one. Nor does a plan
+            // whose every task node stands outside the coverage question:
+            // there was never a condition to record.
+            let step = if report.block.is_empty() {
+                if plan.minted_after_the_world && tree_holds_a_world(root) {
+                    let owing = owing_nodes(root, model, &plan);
+                    if !owing.is_empty() {
+                        return Err(empty_block(&owing));
+                    }
+                }
                 plan.state = PlanState::Completed;
+                // The waves are all closed and their files consumed: the
+                // completion takes the empty `waves/` whole, and any file an
+                // older binary's closes left behind goes with the directory
+                // (`archi/requirements/planning/the-plan-cleans-up-after-itself.md`).
+                remove_waves(root, &plan.name)?;
                 Step::Done
             } else {
                 plan.scenarios_displayed = true;
-                Step::Scenarios(plan.scenarios.clone())
+                let graded = grade_block(root, model, &report.block)?;
+                let mut lines: Vec<String> =
+                    report.drift.iter().map(|d| format!("drift: {d}")).collect();
+                lines.extend(render_graded(&report.block, &graded));
+                Step::Scenarios(lines)
             };
             save_state(root, &plan)?;
             return Ok(NextOutcome {
@@ -1202,8 +1872,13 @@ pub fn next(root: &Path, model: &Model) -> Result<NextOutcome, String> {
             });
         }
         if !plan.scenarios_closed {
+            // The latch has teeth: it claims the block is attached to code.
+            gate_anchored(&grade_block(root, model, &report.block)?)?;
             plan.scenarios_closed = true;
             plan.state = PlanState::Completed;
+            // The step that prints DONE removes the empty `waves/` on this
+            // path too (`archi/requirements/planning/the-plan-cleans-up-after-itself.md`).
+            remove_waves(root, &plan.name)?;
             save_state(root, &plan)?;
             return Ok(NextOutcome {
                 capture: None,
@@ -1221,8 +1896,15 @@ pub fn next(root: &Path, model: &Model) -> Result<NextOutcome, String> {
         .iter()
         .filter(|t| waves[wave - 1].contains(&t.id))
         .collect();
-    let capture = links::capture::capture_wave(root, &plan.name, wave, &in_flight, None)?;
-    let checklist = match gate_coverage(root, &in_flight, &capture.pressed) {
+    let capture = links::capture::capture_wave(root, model, &plan.name, wave, &in_flight, None)?;
+    if let Err(why) = gate_declarations(root, model, &capture) {
+        return Ok(NextOutcome {
+            capture: Some(capture),
+            step: Step::Blocked(why),
+            checklist: Vec::new(),
+        });
+    }
+    let checklist = match gate_coverage(root, &in_flight, &capture.moved, &capture.declared) {
         Ok(suggested) => suggested,
         Err(gaps) => {
             return Ok(NextOutcome {
@@ -1236,6 +1918,7 @@ pub fn next(root: &Path, model: &Model) -> Result<NextOutcome, String> {
     plan.closed_waves = wave;
     let step = if plan.closed_waves < waves.len() {
         links::capture::write_index(root, &plan.name, wave + 1)?;
+        links::capture::open_declarations(root, &plan.name, wave + 1, &waves[wave])?;
         Step::Wave {
             closed: wave,
             next_tasks: waves[wave].clone(),
@@ -1249,6 +1932,12 @@ pub fn next(root: &Path, model: &Model) -> Result<NextOutcome, String> {
         Step::Cleanup
     };
     save_state(root, &plan)?;
+    // The close consumed the wave's working files — the index it diffed and
+    // the declarations it minted from — so it deletes them: only here, after
+    // every gate has passed and the close is recorded. A blocked close
+    // returned above and kept the files, because they are what the retry
+    // reads (`archi/requirements/planning/the-plan-cleans-up-after-itself.md`).
+    links::capture::remove_wave_files(root, &plan.name, wave, &waves[wave - 1])?;
     Ok(NextOutcome {
         capture: Some(capture),
         step,
@@ -1298,6 +1987,19 @@ pub fn close(root: &Path) -> Result<Plan, String> {
     Ok(plan)
 }
 
+/// Remove a plan's `waves/` directory whole; one already gone is no error.
+/// The completion and `plan reset` both come through here: the directory is
+/// the unit, so working files a pre-cleanup binary's closes left behind go
+/// with it (`archi/requirements/planning/the-plan-cleans-up-after-itself.md`).
+fn remove_waves(root: &Path, name: &str) -> Result<(), String> {
+    let waves_dir = plan_dir(root, name).join("waves");
+    if waves_dir.exists() {
+        fs::remove_dir_all(&waves_dir)
+            .map_err(|e| format!("cannot remove `{}`: {e}", waves_dir.display()))?;
+    }
+    Ok(())
+}
+
 /// `archi plan reset`: back to draft — waves rewound, latches unlatched,
 /// wave indexes removed. Journaled links stay: the journal is append-only.
 pub fn reset(root: &Path) -> Result<Plan, String> {
@@ -1307,11 +2009,7 @@ pub fn reset(root: &Path) -> Result<Plan, String> {
     plan.cleanup_displayed = false;
     plan.scenarios_displayed = false;
     plan.scenarios_closed = false;
-    let waves_dir = plan_dir(root, &plan.name).join("waves");
-    if waves_dir.exists() {
-        fs::remove_dir_all(&waves_dir)
-            .map_err(|e| format!("cannot remove `{}`: {e}", waves_dir.display()))?;
-    }
+    remove_waves(root, &plan.name)?;
     save_state(root, &plan)?;
     Ok(plan)
 }
@@ -1331,6 +2029,14 @@ pub fn render_report(report: &PlanReport) -> String {
     }
     for n in &report.notes {
         out.push_str(&format!("note: {n}\n"));
+    }
+    for d in &report.drift {
+        out.push_str(&format!("drift: {d}\n"));
+    }
+    // The closing block, whole: the same records the closing step prints,
+    // on demand and mid-wave.
+    for s in render_graded(&report.block, &report.scenarios) {
+        out.push_str(&format!("scenario: {s}\n"));
     }
     let reqs: usize = report.derived.matched.values().map(Vec::len).sum();
     out.push_str(&format!(
@@ -1401,7 +2107,7 @@ pub fn render_show(plan: &Plan, report: &PlanReport) -> String {
             }
         }
     }
-    for s in &plan.scenarios {
+    for s in render_block(&report.block) {
         out.push_str(&format!("scenario: {s}\n"));
     }
     for e in &report.errors {
@@ -1410,7 +2116,20 @@ pub fn render_show(plan: &Plan, report: &PlanReport) -> String {
     for n in &report.notes {
         out.push_str(&format!("note: {n}\n"));
     }
+    for d in &report.drift {
+        out.push_str(&format!("drift: {d}\n"));
+    }
     out
+}
+
+/// `archi plan scenarios list`: the closing block as it stands — the same
+/// set the close collects, read from the same world at the same moment
+/// (`archi/requirements/world-facts/the-plan-closes-on-the-world-s-scenarios.md`).
+pub fn scenarios_list(root: &Path, model: &Model) -> Result<Vec<String>, String> {
+    let plan = load_active(root)?;
+    let report = verify_plan(root, model, &plan)?;
+    let graded = grade_block(root, model, &report.block)?;
+    Ok(render_graded(&report.block, &graded))
 }
 
 /// The standalone brief `archi plan task show` renders: everything a
@@ -1430,6 +2149,11 @@ pub fn render_task_show(plan: &Plan, report: &PlanReport, id: &str) -> Result<St
     }
     for o in &t.outputs {
         out.push_str(&format!("output: {o}\n"));
+    }
+    // The conditions on the node, beside the requirements it owns: carried,
+    // not curated, so the implementer reads them where the code is written.
+    for f in report.derived.facts.get(id).into_iter().flatten() {
+        out.push_str(&format!("fact: {f}\n"));
     }
     for m in report.derived.matched.get(id).into_iter().flatten() {
         let owned = if m.owned { "owned" } else { "unowned" };
@@ -1556,10 +2280,54 @@ mod tests {
             records::render_charter(plan),
         )
         .unwrap();
-        fs::write(dir.join("scenarios.md"), records::render_scenarios(&plan.scenarios)).unwrap();
         for t in &plan.tasks {
             fs::write(dir.join(records::task_file_name(t)), records::render_task(t)).unwrap();
         }
+    }
+
+    /// The material every fact here rests on: a note of the world, named the
+    /// way a `sources` entry names one — a path from the project root into a
+    /// loose layer of the world
+    /// (`archi/requirements/world-facts/a-source-is-reachable-and-lives-in-the-world.md`).
+    const NOTE: &str = "archi/world/notes/the-guard-walked-the-platform.md";
+
+    /// One world fact under `archi/world/facts/`, the layer of the strict
+    /// record (`archi/requirements/world-facts/the-world-holds-four-layers.md`):
+    /// the three lists, the conditioning paragraph, the workaround and a
+    /// `Scenarios` block. A scenario is a `### ` heading and its steps — the
+    /// fact's own title is the feature, so the block names none
+    /// (`archi/requirements/world-facts/the-grammar-is-a-named-subset.md`).
+    /// The note it rests on arrives with it, so a fact written here is
+    /// grounded wherever the test puts it.
+    fn put_fact(root: &Path, slug: &str, title: &str, covers: &str, scenarios: &[&str]) {
+        let mut block = String::new();
+        for s in scenarios {
+            block.push_str(&format!(
+                "### {s}\n\nGiven the carriage leaves the platform\n\
+                 When the rider opens the door\nThen the door holds\n\n"
+            ));
+        }
+        put_note(root);
+        put(
+            root,
+            &format!("archi/world/facts/{slug}.md"),
+            &format!(
+                "---\ncovers: [{covers}]\nsources: [{NOTE}]\nuses: []\n\
+                 ---\n\n# {title}\n\nThe carriage drops the network for minutes at a time.\n\n\
+                 ## What people do instead\n\nRiders load the page at the platform.\n\n\
+                 ## Scenarios\n\n{block}"
+            ),
+        );
+    }
+
+    /// The note [`NOTE`] names: a name and the prose under it, which is the
+    /// whole schema of a loose layer.
+    fn put_note(root: &Path) {
+        put(
+            root,
+            NOTE,
+            "# The guard walked the platform\n\nHe timed the tunnel once at four minutes.\n",
+        );
     }
 
     /// Author the curation whole: descriptions, own every matched
@@ -1599,13 +2367,15 @@ mod tests {
         ));
         assert_eq!(active_name(&root).unwrap().as_deref(), Some("mvp"));
 
-        // The mint is the record folder: charter and scenarios skeletons
-        // plus state.json — no plan.json is ever born again.
+        // The mint is the record folder: the charter skeleton plus
+        // state.json — no plan.json is ever born again, and no
+        // `scenarios.md`: the plan authors no stories.
         let dir = plan_dir(&root, "mvp");
         assert!(dir.join("mvp.md").exists());
-        assert!(dir.join("scenarios.md").exists());
+        assert!(!dir.join("scenarios.md").exists());
         assert!(dir.join("state.json").exists());
         assert!(!dir.join("plan.json").exists());
+        assert!(active(&root).minted_after_the_world);
 
         // Both forms at once refuse loudly, naming the choice.
         fs::write(dir.join("plan.json"), "{}").unwrap();
@@ -1805,14 +2575,27 @@ mod tests {
             "pub struct Store;\nimpl Store {\n    pub fn put(&mut self) {}\n}\n",
         );
         put(&root, "code/auth.rs", "pub fn login() -> bool { true }\n");
+        // The test a declaration names. It is in the tree before the wave
+        // opens, so it is never a change of its own.
+        put(
+            &root,
+            "code/store_test.rs",
+            "pub fn a_row_is_persisted() {\n    assert!(true);\n}\n",
+        );
+        put_fact(
+            &root,
+            "riders-lose-the-signal",
+            "Riders lose the signal",
+            "Auth",
+            &["a user logs in end to end"],
+        );
         use_plan(&root, ws.model(), "mvp").unwrap();
         task_add(&root, "Store", None).unwrap();
         task_add(&root, "Auth", None).unwrap();
 
-        // Author the plan by rewriting its files: outputs, an input edge
-        // t1 → t2, a scenario.
+        // Author the plan by rewriting its files: outputs and an input edge
+        // t1 → t2. The stories are the world's — the plan carries none.
         let mut plan = active(&root);
-        plan.scenarios.push("a user logs in end to end".into());
         plan.tasks[0].outputs.push("code/store.rs".into());
         plan.tasks[1].outputs.push("code/auth.rs".into());
         plan.tasks[1].inputs.insert("t1".into(), "the store api".into());
@@ -1830,8 +2613,9 @@ mod tests {
         assert!(plan_dir(&root, "mvp").join("waves/w01.index.json").exists());
         assert!(start(&root, ws.model()).is_err(), "already started");
 
-        // Closing wave 1: the claimed delta becomes candidates — 2 refs ×
-        // 1 changed symbol — and the coverage gate blocks until asserted.
+        // Closing wave 1: t1's output moves and the file the open wrote for
+        // it declares nothing, so the wave refuses. Nothing was minted — the
+        // delta proves a symbol changed, never what it answers.
         put(
             &root,
             "code/store.rs",
@@ -1843,20 +2627,38 @@ mod tests {
         };
         assert!(why.contains("t1"), "{why}");
         let capture = outcome.capture.expect("capture ran");
-        assert_eq!(
-            capture.minted.len(),
-            2,
+        assert!(
+            capture.minted.is_empty(),
             "{}",
             links::capture::render_capture(&capture)
         );
 
-        // The loop the spec promises: confirm, re-run — idempotent capture,
-        // gate passes, wave 2 opens.
-        for l in &capture.minted {
-            links::confirm(&root, &l.id).unwrap();
-        }
+        // The loop the spec promises: the writer declares what its symbol
+        // answers and the test that proves it, and the declaration mints the
+        // pair asserted. The ref that is an edge is not a declaration's to
+        // name — an edge is a caller — so it is hand-authored.
+        put(
+            &root,
+            "archi/plans/mvp/waves/w01.t1.declares.toml",
+            "[[declares]]\n\
+             symbol = \"code/store.rs#Store::put\"\n\
+             answers = \"Store\"\n\
+             proved_by = \"code/store_test.rs#a_row_is_persisted\"\n",
+        );
+        links::add(
+            &root,
+            ws.model(),
+            "Auth.creds wire Store.inn",
+            "code/store.rs#Store::put",
+            links::LinkKind::Indirect,
+        )
+        .unwrap();
         let outcome = next(&root, ws.model()).unwrap();
-        assert!(outcome.capture.as_ref().is_some_and(|c| c.minted.is_empty()));
+        let declared = outcome.capture.as_ref().expect("capture ran");
+        assert_eq!(declared.minted.len(), 1, "{:?}", declared.minted);
+        assert_eq!(declared.minted[0].spec.path, "Store");
+        assert_eq!(declared.minted[0].standing, links::Standing::Asserted);
+        assert_eq!(declared.minted[0].rule, links::Rule::Declared);
         let Step::Wave { closed, next_tasks } = &outcome.step else {
             panic!("the gate should pass now");
         };
@@ -1864,17 +2666,26 @@ mod tests {
         let (_, in_flight) = current_wave(&root, ws.model()).unwrap();
         assert!(matches!(in_flight, InFlight::Wave(2, ids) if ids == vec!["t2".to_string()]));
 
-        // Wave 2's delta shares no term with any of t2's refs: nothing is
-        // pressed, so nothing gates — the wave closes into the cleanup
-        // stage, the no-signal product suppressed and the uncovered
-        // surface suggested for hand-authoring. A pre-asserted ref is
-        // silent in the checklist: covered is covered, however the link
-        // was born.
+        // Wave 2's declaration names the one file its delta moved, so the
+        // wave closes into the cleanup stage with no ref demanded, and the
+        // uncovered surface rides as advice. A pre-asserted ref is silent in
+        // that advice: covered is covered, however the link was born.
         links::add(&root, ws.model(), "Auth", "code/auth.rs", links::LinkKind::Indirect).unwrap();
         put(
             &root,
             "code/auth.rs",
             "pub fn login(u: &str) -> bool { !u.is_empty() }\n",
+        );
+        // t2 claims the file the delta moved, so t2 declares it. Its claim is
+        // over the file whole — the pair the hand-authored link already holds
+        // — so the declaration covers the symbol inside it and mints nothing.
+        put(
+            &root,
+            "archi/plans/mvp/waves/w02.t2.declares.toml",
+            "[[declares]]\n\
+             symbol = \"code/auth.rs\"\n\
+             answers = \"Auth\"\n\
+             proved_by = \"code/store_test.rs#a_row_is_persisted\"\n",
         );
         let outcome = next(&root, ws.model()).unwrap();
         let capture = outcome.capture.expect("capture ran");
@@ -1883,11 +2694,10 @@ mod tests {
             "{}",
             links::capture::render_capture(&capture)
         );
-        assert_eq!(capture.suppressed.len(), 4, "every pair lacks signal");
-        assert!(capture.pressed.is_empty(), "{:?}", capture.pressed);
+        assert_eq!(capture.declared, capture.moved, "the delta is accounted for");
         assert!(
             matches!(outcome.step, Step::Cleanup),
-            "the unpressed wave closes to the cleanup wave"
+            "the declared wave closes to the cleanup wave"
         );
         assert!(active(&root).cleanup_displayed);
         assert!(!active(&root).scenarios_displayed);
@@ -1907,43 +2717,151 @@ mod tests {
         );
         assert!(outcome.checklist.iter().any(|s| s.contains("Auth peer Audit")));
 
-        // The next call brings the scenarios — the block exactly as
-        // before the cleanup stage existed.
+        // The next call brings the block — the same ceremony as before,
+        // over the scenarios the world dictates on t2's node. `plan
+        // scenarios list` reads the very same set.
         let outcome = next(&root, ws.model()).unwrap();
-        let Step::Scenarios(scenarios) = &outcome.step else {
+        let Step::Scenarios(lines) = &outcome.step else {
             panic!("after the cleanup wave comes the scenario step");
         };
-        assert_eq!(scenarios, &vec!["a user logs in end to end".to_string()]);
+        // The record is the scenario whole: its state, its steps, and the
+        // line that anchors it while nothing does.
+        assert_eq!(
+            lines,
+            &vec![
+                "riders-lose-the-signal#a user logs in end to end — unanchored\n    \
+                 Given the carriage leaves the platform\n    \
+                 When the rider opens the door\n    \
+                 Then the door holds\n    \
+                 archi link add 'riders-lose-the-signal#a user logs in end to end' \
+                 <file#symbol> --kind indirect"
+                    .to_string()
+            ]
+        );
+        assert_eq!(&scenarios_list(&root, ws.model()).unwrap(), lines);
         assert!(active(&root).scenarios_displayed);
 
-        // One more next completes; a completed plan refuses.
+        // The latch gates on the block being attached to code: unanchored
+        // it refuses by name, anchored it completes. A completed plan
+        // refuses.
+        let err = next(&root, ws.model()).err().unwrap();
+        assert!(err.contains("not anchored"), "{err}");
+        assert!(
+            err.contains("riders-lose-the-signal#a user logs in end to end"),
+            "{err}"
+        );
+        links::add(
+            &root,
+            ws.model(),
+            "riders-lose-the-signal#a user logs in end to end",
+            "code/auth.rs",
+            links::LinkKind::Indirect,
+        )
+        .unwrap();
         let outcome = next(&root, ws.model()).unwrap();
         assert!(matches!(outcome.step, Step::Done));
         assert_eq!(active(&root).state, PlanState::Completed);
         assert!(next(&root, ws.model()).is_err());
 
-        // Reset rewinds whole; without scenarios the waves sail through on
-        // the standing asserted links, the cleanup wave still gates, and
-        // the plan closes directly past it.
+        // Reset rewinds whole; the waves sail through on the standing
+        // asserted links and the cleanup wave still gates. The world stands —
+        // one fact, over a node this plan holds no task for — so no world
+        // fact covers what the plan built, and a plan minted after the world
+        // does not close on nothing.
         let plan = reset(&root).unwrap();
         assert_eq!((plan.state, plan.closed_waves), (PlanState::Draft, 0));
         assert!(!plan.cleanup_displayed && !plan.scenarios_displayed && !plan.scenarios_closed);
         assert!(!plan_dir(&root, "mvp").join("waves").exists());
-        let mut plan = active(&root);
-        plan.scenarios.clear();
-        store_authored(&root, &plan);
+        fs::remove_file(root.join("archi/world/facts/riders-lose-the-signal.md")).unwrap();
+        put_fact(
+            &root,
+            "tunnels-run-long",
+            "Tunnels run long",
+            "Gate",
+            &["the tunnel ends"],
+        );
         start(&root, ws.model()).unwrap();
+        // The reset took the waves folder with it, declarations and all, so
+        // each wave asks for its file again. Both name a pair the journal
+        // already holds, so the replay mints nothing.
+        put(
+            &root,
+            "archi/plans/mvp/waves/w01.t1.declares.toml",
+            "[[declares]]\n\
+             symbol = \"code/store.rs#Store::put\"\n\
+             answers = \"Store\"\n\
+             proved_by = \"code/store_test.rs#a_row_is_persisted\"\n",
+        );
         let outcome = next(&root, ws.model()).unwrap();
         assert!(matches!(outcome.step, Step::Wave { closed: 1, .. }));
+        put(
+            &root,
+            "archi/plans/mvp/waves/w02.t2.declares.toml",
+            "[[declares]]\n\
+             symbol = \"code/auth.rs\"\n\
+             answers = \"Auth\"\n\
+             proved_by = \"code/store_test.rs#a_row_is_persisted\"\n",
+        );
         let outcome = next(&root, ws.model()).unwrap();
         assert!(matches!(outcome.step, Step::Cleanup));
-        let outcome = next(&root, ws.model()).unwrap();
-        assert!(matches!(outcome.step, Step::Done));
-        assert_eq!(active(&root).state, PlanState::Completed);
+        let err = next(&root, ws.model()).err().unwrap();
+        // The refusal names the nodes that owe a condition, not the plan
+        // (`the-empty-block-asks-only-where-a-condition-is-owed`).
+        assert!(err.contains("no world fact covers `Auth`, `Store`"), "{err}");
+        assert!(!err.contains("mvp"), "{err}");
+        assert_eq!(active(&root).state, PlanState::Started);
 
         fs::remove_dir_all(&root).unwrap();
     }
 
+    /// The plan's drift and the link's grade read one function: the
+    /// fingerprint a task carries is the world's own digest over the same
+    /// block, down to the byte — so "the scenario changed" can never mean two
+    /// things (`archi/requirements/world-facts/a-plan-s-own-scenarios-block-retires.md`).
+    #[test]
+    fn the_carried_fingerprint_is_the_world_s_own_digest() {
+        let root = temp_project();
+        put_note(&root);
+        put(
+            &root,
+            "archi/world/facts/riders-lose-the-signal.md",
+            &format!(
+                "---\ncovers: [Gate]\nsources: [{NOTE}]\nuses: []\n---\n\n\
+             # Riders lose the signal\n\n\
+             The carriage drops the network for minutes at a time.\n\n\
+             ## What people do instead\n\nRiders load the page at the platform.\n\n\
+             ## Scenarios\n\n\
+             ### the app opens with no network\n\n\
+             Given the device has no network\nWhen the user opens the app\n\
+             Then the last synced view appears\n"
+            ),
+        );
+        let ws = compiled(&root);
+        let (tree, _) = docs::load(&root, ws.model());
+        let carried = covering_facts(&world_check::serve_world(&tree), "Gate");
+        assert_eq!(carried.len(), 1, "{carried:?}");
+        assert_eq!(
+            carried[0].digest,
+            world_check::scenario_digest(&tree.world[0], None)
+        );
+        // The value the links pin for this block: one function, one string.
+        // It moved with the shape — the block used to open on `Feature:
+        // Offline open` and the digest hashed that line first, so `5b5815`
+        // is the reading of an input that no longer exists. This is the same
+        // block the world's own test pins
+        // (`world_check::tests::the_scenario_digest_reads_the_parsed_block`),
+        // and the two agree to the byte, which is the claim.
+        assert_eq!(carried[0].digest, "fc6e9d");
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The gate presses the delta — every file it moved is named by some
+    /// entry of the wave, or the wave stays open — and the refs no link
+    /// covers ride the passing step as advice. No ref is demanded and no
+    /// term is compared
+    /// (`archi/requirements/code-link/the-file-in-the-delta-is-the-unit-the-gate-demands.md`,
+    /// `archi/requirements/planning/waves-close-on-captured-coverage.md`).
     #[test]
     fn the_gate_presses_the_delta_and_suggests_the_rest() {
         let root = temp_project();
@@ -1951,6 +2869,13 @@ mod tests {
         save_version(&root);
         put_requirements(&root);
         put(&root, "code/auth.rs", "pub fn login() -> bool { true }\n");
+        put_fact(
+            &root,
+            "riders-lose-the-signal",
+            "Riders lose the signal",
+            "Auth",
+            &["a user logs in"],
+        );
         use_plan(&root, ws.model(), "mvp").unwrap();
         task_add(&root, "Auth", None).unwrap();
 
@@ -1958,36 +2883,94 @@ mod tests {
         plan.tasks[0].outputs.push("code/auth.rs".into());
         store_authored(&root, &plan);
         curate_all(&root, ws.model());
+        // The test a declaration names, in the tree before the wave opens so
+        // it is never a change of its own.
+        put(
+            &root,
+            "code/auth_test.rs",
+            "pub fn a_login_without_a_name_is_refused() {\n    assert!(true);\n}\n",
+        );
         start(&root, ws.model()).unwrap();
 
-        // The delta names the incoming wire's ports but never the node:
-        // exactly one ref is pressed and gates; the rest arrive inside the
-        // blocked message as suggestions, not gaps.
+        // Two files move: the one the task was cut for, and one no task's
+        // `## Outputs` names.
         put(
             &root,
             "code/auth.rs",
             "pub fn login() -> bool { true }\npub fn inn_wire_probe() -> bool { true }\n",
         );
+        put(&root, "code/stray.rs", "pub fn stray() -> u8 { 7 }\n");
+
+        // t1 is in flight and the file the open wrote for it declares
+        // nothing, so the wave refuses before it ever reaches the delta gate.
         let outcome = next(&root, ws.model()).unwrap();
         let Step::Blocked(why) = &outcome.step else {
-            panic!("the pressed ref gates");
+            panic!("the empty declaration file gates");
         };
-        assert!(why.contains("coverage of the refs this delta presses"), "{why}");
-        assert!(why.contains("t1: `Gate.out wire Auth.inn`"), "{why}");
-        assert!(!why.contains("t1: `Auth`"), "unpressed refs never gap: {why}");
-        assert!(why.contains("hand-author"), "{why}");
-        assert!(why.contains("archi link add \"Auth\""), "{why}");
-        let capture = outcome.capture.expect("capture ran");
-        let minted: Vec<&str> = capture.minted.iter().map(|l| l.spec.path.as_str()).collect();
-        assert_eq!(minted, vec!["Gate.out wire Auth.inn"], "{minted:?}");
-        assert_eq!(capture.suppressed.len(), 3, "{:?}", capture.suppressed);
+        assert!(why.contains("names nothing"), "{why}");
+        assert!(why.contains("archi plan task t1 link add"), "{why}");
 
-        // Confirm the pressed candidate: the wave closes into the cleanup
-        // wave and the same suggestions ride the passing step as the
-        // voluntary checklist; one more next completes (no scenarios).
-        links::confirm(&root, &capture.minted[0].id).unwrap();
+        // The writer declares one of the two files against the requirement
+        // behind the node. The other file is still unaccounted for, and the
+        // gate names it — the file, and no task.
+        put(
+            &root,
+            "archi/plans/mvp/waves/w01.t1.declares.toml",
+            "[[declares]]\n\
+             symbol = \"code/auth.rs#inn_wire_probe\"\n\
+             answers = \"req:service-hardening\"\n\
+             proved_by = \"code/auth_test.rs#a_login_without_a_name_is_refused\"\n",
+        );
+        let outcome = next(&root, ws.model()).unwrap();
+        let Step::Blocked(why) = &outcome.step else {
+            panic!("the undeclared file gates");
+        };
+        assert!(why.contains("code/stray.rs"), "names the file: {why}");
+        assert!(!why.contains("code/auth.rs"), "a named file is not asked again: {why}");
+        assert!(!why.contains("t1"), "names no task: {why}");
+        assert!(
+            why.contains("archi plan task <id> link add --symbol"),
+            "names the repair: {why}"
+        );
+        let capture = outcome.capture.expect("capture ran");
+        assert_eq!(capture.minted.len(), 1, "{:?}", capture.minted);
+        assert_eq!(capture.minted[0].spec.path, "req:service-hardening");
+
+        // The entry that accounts for the second file closes the wave — and
+        // the edge no link covers was never demanded of it. The uncovered
+        // refs ride the passing step as advice; one more next completes (no
+        // scenarios). A ref an earlier hand covered is silent there: covered
+        // is covered, however the link was born.
+        links::add(
+            &root,
+            ws.model(),
+            "Gate.out wire Auth.inn",
+            "code/auth.rs#inn_wire_probe",
+            links::LinkKind::Indirect,
+        )
+        .unwrap();
+        put(
+            &root,
+            "archi/plans/mvp/waves/w01.t1.declares.toml",
+            "[[declares]]\n\
+             symbol = \"code/auth.rs#inn_wire_probe\"\n\
+             answers = \"req:service-hardening\"\n\
+             proved_by = \"code/auth_test.rs#a_login_without_a_name_is_refused\"\n\n\
+             [[declares]]\n\
+             symbol = \"code/stray.rs#stray\"\n\
+             answers = \"req:service-hardening\"\n\
+             proved_by = \"code/auth_test.rs#a_login_without_a_name_is_refused\"\n",
+        );
         let outcome = next(&root, ws.model()).unwrap();
         assert!(matches!(outcome.step, Step::Cleanup));
+        assert!(
+            !outcome
+                .checklist
+                .iter()
+                .any(|s| s.contains("Gate.out wire Auth.inn")),
+            "the covered ref is silent: {:?}",
+            outcome.checklist
+        );
         assert_eq!(outcome.checklist.len(), 3, "{:?}", outcome.checklist);
         assert!(
             outcome
@@ -1997,6 +2980,16 @@ mod tests {
             "{:?}",
             outcome.checklist
         );
+        let outcome = next(&root, ws.model()).unwrap();
+        assert!(matches!(outcome.step, Step::Scenarios(_)));
+        links::add(
+            &root,
+            ws.model(),
+            "riders-lose-the-signal#a user logs in",
+            "code/auth.rs",
+            links::LinkKind::Indirect,
+        )
+        .unwrap();
         let outcome = next(&root, ws.model()).unwrap();
         assert!(matches!(outcome.step, Step::Done));
 
@@ -2207,12 +3200,15 @@ mod tests {
             cleanup_displayed: false,
             scenarios_displayed: false,
             scenarios_closed: false,
+            // No mark of the world: the old form is a plan from before it.
+            minted_after_the_world: false,
             tasks: vec![Task {
                 id: "t1".into(),
                 node: "Store".into(),
                 description: "persist rows".into(),
                 spec_refs: vec!["Store".into(), "Auth.creds wire Store.inn".into()],
                 owns: vec!["service-hardening".into(), "store-encrypted".into()],
+                facts: Vec::new(),
                 stack_details: String::new(),
                 inputs: BTreeMap::new(),
                 outputs: vec!["code/store.rs".into()],
@@ -2251,10 +3247,21 @@ mod tests {
         store_plan(&root, &legacy).unwrap();
 
         // Lifecycle still moves the old form: start, next through the
-        // cleanup wave to done, reset.
+        // cleanup wave to done, reset. The test a declaration names stands
+        // before the wave opens, so it is never a change of its own.
+        put(&root, "code/store_test.rs", "pub fn a_row_is_persisted() {\n    assert!(true);\n}\n");
         let (started, wave1) = start(&root, ws.model()).unwrap();
         assert_eq!(started.state, PlanState::Started);
         assert_eq!(wave1, vec!["t1".to_string()]);
+        // The wave asks that the task in flight account for its work.
+        put(
+            &root,
+            "archi/plans/old/waves/w01.t1.declares.toml",
+            "[[declares]]\n\
+             symbol = \"code/store.rs#Store::put\"\n\
+             answers = \"Store\"\n\
+             proved_by = \"code/store_test.rs#a_row_is_persisted\"\n",
+        );
         let outcome = next(&root, ws.model()).unwrap();
         assert!(matches!(outcome.step, Step::Cleanup));
         let outcome = next(&root, ws.model()).unwrap();

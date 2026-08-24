@@ -27,6 +27,7 @@ Agent.drive invoke Cli.version in harden_flow
 Agent.drive invoke Cli.session in harden_flow
 Agent.drive invoke Cli.req in harden_flow
 Agent.drive invoke Cli.stress in harden_flow
+Agent.drive invoke Cli.world in harden_flow
 Agent.drive invoke Cli.incidence in harden_flow
 Agent.drive invoke Cli.link in trace_flow
 Agent.drive invoke Cli.repo in trace_flow
@@ -38,5 +39,6 @@ Agent.drive invoke Cli.update in read_flow
 Agent.author persist(ArchSource) SourceTree.store in compile_flow
 Agent.author persist(RequirementDoc) SourceTree.store in harden_flow
 Agent.author persist(StressDoc) SourceTree.store in harden_flow
+Agent.author persist(WorldDoc) SourceTree.store in harden_flow
 Agent.author persist(PlanFile) SourceTree.store in trace_flow
 Agent.author persist(CodeItem) SourceTree.store in trace_flow

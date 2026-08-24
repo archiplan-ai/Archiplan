@@ -408,8 +408,10 @@ pub fn verify_at(root: &Path) -> Vec<String> {
 
 /// Save the compiled model as a new version. Refuses when the canonical
 /// render hashes equal to the latest version — versions mint only on
-/// semantic change.
+/// semantic change — and refuses, before anything else, a model the world
+/// does not condition whole ([`world_gate`]).
 pub fn save(root: &Path, model: &Model, note: &str) -> Result<Saved, String> {
+    world_gate(root, model)?;
     let mut archive = Archive::open_or_empty(root)?;
     let canonical = model.render_source();
     let model_hash = hash(&canonical);
@@ -488,6 +490,39 @@ pub fn save(root: &Path, model: &Model, note: &str) -> Result<Saved, String> {
         bytes: content.len(),
         baseline_notes,
     })
+}
+
+/// The world's gate on the save: a tree that holds at least one world fact
+/// and still carries an element no fact reaches mints nothing
+/// (`archi/requirements/world-facts/the-save-refuses-an-unconditioned-element.md`).
+///
+/// `check` reports the same set as an advisory finding, and advisory is what
+/// makes it travel: the version saves, the plan is authored against it, and
+/// the gap surfaces at the closing block, where the fix is spec work and the
+/// operator walks back through the plan to the spec stage. The gate stops the
+/// walk at the one moment the answer is cheap — the person who drew the
+/// element is still there.
+///
+/// The refusal names every element and both exits, because a gate with one
+/// exit is a wall: half of any model is machinery no condition outside will
+/// ever reach, and `archi/world/.worldignore` is where that is said with a
+/// reason a reader can argue with. A tree with no fact passes untouched.
+fn world_gate(root: &Path, model: &Model) -> Result<(), String> {
+    let unreached = crate::docs::world_check::unreached_at(root, model);
+    if unreached.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "no world fact reaches {} — a version the plan projects carries no unconditioned \
+         element: cover each with a fact (`archi world add \"<condition>\"`, then name it in \
+         `covers`), or declare it internal in `archi/world/.worldignore` (`<element> — why \
+         nothing outside reaches it`)",
+        unreached
+            .iter()
+            .map(|e| format!("`{e}`"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ))
 }
 
 /// Each mapped member's baseline at save: recorded when its tree is clean,

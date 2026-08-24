@@ -526,7 +526,7 @@ pub fn off_list(entries: &[String]) -> Vec<String> {
 }
 
 /// The name derives to the filename, and a summary paragraph follows it.
-fn name_checks(doc: &MdDoc, file: &str, stem: &str, what: &str, diags: &mut Vec<DocDiagnostic>) {
+pub(super) fn name_checks(doc: &MdDoc, file: &str, stem: &str, what: &str, diags: &mut Vec<DocDiagnostic>) {
     let derived = slugify(&doc.name);
     if derived != stem {
         diags.push(DocDiagnostic::new(
@@ -550,7 +550,7 @@ fn name_checks(doc: &MdDoc, file: &str, stem: &str, what: &str, diags: &mut Vec<
 }
 
 /// The frontmatter block, checked for unknown fields; `None` when absent.
-fn frontmatter<'a>(
+pub(super) fn frontmatter<'a>(
     doc: &'a MdDoc,
     file: &str,
     allowed: &[&str],
@@ -639,7 +639,7 @@ fn optional_scalar(
 }
 
 /// A list field; an empty scalar reads as the explicit empty list.
-fn list(
+pub(super) fn list(
     fm: Option<&[Field]>,
     key: &str,
     file: &str,

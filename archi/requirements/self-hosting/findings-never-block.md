@@ -7,9 +7,9 @@ deferred:
 
 # Findings never block
 
-Errors reject; findings advise. Open requirements, pending stressors, unwired ports, decayed
-evidence — the states a healthy workflow passes through — are surfaced on every check and never
-fail it. The save that closes a stress round produces open requirements; blocking on them would
+Errors reject; findings advise. Open requirements, pending stressors, unwired ports, code the
+delta left unaccounted — the states a healthy workflow passes through — are surfaced on every
+check and never fail it. The save that closes a stress round produces open requirements; blocking on them would
 block the workflow on its own output.
 
 ## System Context

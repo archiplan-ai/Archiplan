@@ -21,21 +21,26 @@
 //!   show <id> | diff <a|live> <b|live> | current
 //!             [--project <dir>]
 //! archi link add <spec[@ver]> <file[#symbol]> --kind literal|indirect
-//! archi link ls [--spec <ref>] [--evidence] [--json]
+//! archi link ls [--spec <ref>] [--json]
 //! archi link verify [--spec <ref>] [--since <rev>] [--json]
-//! archi link confirm <id> | rm <id>... | rm --spec <ref> --yes
-//! archi link repin <id> [--to <file[#symbol]>]
+//! archi link rm <id>... | rm --spec <ref> --yes
+//! archi link repin <id> [--to <file[#symbol]>] [--spec <fact-slug>#<scenario name>] |
+//!   repin --moved [--json]
 //! archi link capture --task <TASK> [--json]
-//! archi link audit [--scope <path>] [--since <rev>] [--prune] [--json]
+//! archi link audit [--scope <path>] [--since <rev>] [--json]
 //! archi plan use <name> | repin | show [<name>] [--json] | verify [--json]
 //! archi plan task add <node> [--desc <text>] | rm <id>
+//! archi plan task <id> link add --symbol <a> --answers <ref> --proved-by <a>
 //! archi plan start | next | current-wave | close | reset
 //! archi read  [<request.json> | -] [--at <id>]
 //! archi query [--scope <path>]... [--type <path>]... [--kind <k>]... [--view <v>]...
 //!             [--carrier <path>]... [--edge-type <name>]... [--top] [--at <id>]
 //! archi viz   [<graph.json> | -] [--depth <n>] [--max-nodes <n>] [--details]
-//! archi search <phrase>... [--kind element|intent|requirement|stressor|session|decision]...
+//! archi search <phrase>... [--kind element|intent|requirement|stressor|session|decision|world]...
 //!             [--limit <n>] [--json]
+//! archi req   add <title> … | rm <slug> | ls [--satisfies <element>] [--intent <folder>] [--json]
+//! archi world add <title> | rm <slug> | ls [--covers <element>] [--json]
+//! archi decision ls [--links <name>] [--json]
 //! archi --help | --version
 //! ```
 //!
@@ -70,8 +75,9 @@ use std::process::ExitCode;
 use modeling_lang::source::{Compiled, compile_project, find_project_root};
 use modeling_lang::{
     ExcludePattern, Finding, IncidenceConfig, Model, Neutrality, NkpConfig, NkpCorridor, NkpReport,
-    NkpScope, Severity, Statement, Workspace,
+    NkpScope, Outcome, Severity, Statement, Workspace,
 };
+use serde::Serialize;
 use serde_json::{Value, json};
 
 const USAGE: &str = "usage:
@@ -99,16 +105,22 @@ const USAGE: &str = "usage:
   archi session fold <loser> --into <winner> -m <note> [--project <dir>]
   archi req add <title> --intent <folder> --kind functional|non-functional --origin 'intent|stressor(<slug>)' [--deferred <reason>] [--project <dir>]
   archi req rm <slug> [--project <dir>]
+  archi req ls [--satisfies <element>] [--intent <folder>] [--json] [--project <dir>]
+  archi world add <title> [--project <dir>]
+  archi world rm <slug> [--project <dir>]
+  archi world ls [--covers <element>] [--json] [--project <dir>]
+  archi decision ls [--links <name>] [--json] [--project <dir>]
   archi stress open <title> [--project <dir>]
   archi stress add <title> --affects <A,B,...> [--project <dir>]
   archi stress rm <slug> [--project <dir>]
   archi link add <spec[@ver]> <file[#symbol]> --kind literal|indirect [--project <dir>]
-  archi link ls [--spec <ref>] [--evidence] [--json] [--project <dir>]
+  archi link ls [--spec <ref>] [--json] [--project <dir>]
   archi link verify [--spec <ref>] [--since [<member>=]<rev>] [--repo <member>] [--json] [--project <dir>]
-  archi link confirm <id> | rm <id>... | rm --spec <ref> --yes [--project <dir>]
-  archi link repin <id> [--to <file[#symbol]>] [--project <dir>]
+  archi link rm <id>... | rm --spec <ref> --yes [--project <dir>]
+  archi link repin <id> [--to <file[#symbol]>] [--spec <fact-slug>#<scenario name>] |
+              repin --moved [--json] [--project <dir>]
   archi link capture --task <TASK> [--json] [--project <dir>]
-  archi link audit [--scope <path>] [--since [<member>=]<rev>] [--repo <member>] [--prune] [--json] [--project <dir>]
+  archi link audit [--scope <path>] [--since [<member>=]<rev>] [--repo <member>] [--json] [--project <dir>]
   archi repo ls [--json] [--project <dir>]
   archi repo map <member> <dir> [--project <dir>]
   archi batch [-] [--project <dir>]   # commands from stdin, one per line, fail-fast
@@ -121,13 +133,15 @@ const USAGE: &str = "usage:
   archi plan use <name> | repin | show [<name>] [--json] | verify [--json] | list | status [--project <dir>]
   archi plan task add <node> [--desc <text>] | rm <id> | show <id> [--project <dir>]
   archi plan task req suggest <id> | req-list <id> [--project <dir>]
+  archi plan task <id> link add --symbol <file#symbol> --answers <node, port or req:slug>
+              --proved-by <test file#test fn> [--project <dir>]
   archi plan scenarios list [--project <dir>]
   archi plan start | next | current-wave | close | reset [--project <dir>]
   archi read [<request.json> | -] [--at <id>] [--project <dir>]
   archi query [--scope <path>]... [--type <path>]... [--kind <k>]... [--view <v>]...
               [--carrier <path>]... [--edge-type <name>]... [--top] [--at <id>] [--project <dir>]
   archi viz   [<graph.json> | -] [--depth <n>] [--max-nodes <n>] [--details]
-  archi search <phrase>... [--kind element|intent|requirement|stressor|session|decision]...
+  archi search <phrase>... [--kind element|intent|requirement|stressor|session|decision|world]...
               [--limit <n>] [--json] [--project <dir>]
   archi tradeoffs [show] | set <favor,…> <spend,…> | auto <concern=high|low>... | clear
               [--project <dir>]
@@ -185,10 +199,12 @@ struct Args {
     scopes: Vec<String>,
     carriers: Vec<String>,
     edge_types: Vec<String>,
-    evidence: bool,
+    covers: Option<String>,
+    satisfies: Option<String>,
+    links: Option<String>,
     yes: bool,
-    prune: bool,
     details: bool,
+    moved: bool,
     max_nodes: Option<usize>,
     repos: Option<String>,
     base: Vec<String>,
@@ -196,6 +212,12 @@ struct Args {
     plan_flag: Option<String>,
     status_flag: Option<String>,
     no_fetch: bool,
+    // The three names one declaration entry carries — `plan task <id> link
+    // add` takes all three and refuses without any of them
+    // (`archi/requirements/code-link/a-verb-writes-the-declaration.md`).
+    symbol: Option<String>,
+    answers: Option<String>,
+    proved_by: Option<String>,
     positional: Vec<String>,
 }
 
@@ -256,9 +278,11 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         scopes: Vec::new(),
         carriers: Vec::new(),
         edge_types: Vec::new(),
-        evidence: false,
+        covers: None,
+        satisfies: None,
+        links: None,
         yes: false,
-        prune: false,
+        moved: false,
         details: false,
         max_nodes: None,
         repos: None,
@@ -267,6 +291,9 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         plan_flag: None,
         status_flag: None,
         no_fetch: false,
+        symbol: None,
+        answers: None,
+        proved_by: None,
         positional: Vec::new(),
     };
     let mut it = argv.iter().peekable();
@@ -310,19 +337,21 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--type" => args.types.push(value(&mut it, "--type")?),
             "--view" => args.views.push(value(&mut it, "--view")?),
             "--carrier" => args.carriers.push(value(&mut it, "--carrier")?),
+            "--covers" => args.covers = Some(value(&mut it, "--covers")?),
+            "--satisfies" => args.satisfies = Some(value(&mut it, "--satisfies")?),
+            "--links" => args.links = Some(value(&mut it, "--links")?),
             "--edge-type" => args.edge_types.push(value(&mut it, "--edge-type")?),
             "--exclude" => args.exclude.push(value(&mut it, "--exclude")?),
             "--only" => args.only.push(value(&mut it, "--only")?),
             "--neutrality" => args.neutrality = Some(value(&mut it, "--neutrality")?),
             "--session" => args.session = Some(value(&mut it, "--session")?),
             "--since" => args.since = Some(value(&mut it, "--since")?),
-            "--evidence" => args.evidence = true,
             "--yes" => args.yes = true,
+            "--moved" => args.moved = true,
             "--intent" => args.intent = Some(value(&mut it, "--intent")?),
             "--origin" => args.origin = Some(value(&mut it, "--origin")?),
             "--deferred" => args.deferred = Some(value(&mut it, "--deferred")?),
             "--affects" => args.affects = Some(value(&mut it, "--affects")?),
-            "--prune" => args.prune = true,
             "--details" => args.details = true,
             "--max-nodes" => args.max_nodes = Some(int(value(&mut it, "--max-nodes")?, "--max-nodes")?),
             "--spec" => args.spec = Some(value(&mut it, "--spec")?),
@@ -340,6 +369,9 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--into" => args.into = Some(value(&mut it, "--into")?),
             "--keep" => args.keep = Some(value(&mut it, "--keep")?),
             "--task" => args.task = Some(value(&mut it, "--task")?),
+            "--symbol" => args.symbol = Some(value(&mut it, "--symbol")?),
+            "--answers" => args.answers = Some(value(&mut it, "--answers")?),
+            "--proved-by" => args.proved_by = Some(value(&mut it, "--proved-by")?),
             "--repo" => args.repo = Some(value(&mut it, "--repo")?),
             "--desc" => args.desc = Some(value(&mut it, "--desc")?),
             // `link` reads the singular `--kind literal|indirect`; the
@@ -373,6 +405,8 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
                     | "session"
                     | "req"
                     | "stress"
+                    | "world"
+                    | "decision"
                     | "search"
                     | "init"
                     | "repo"
@@ -525,6 +559,14 @@ fn run_check(args: &Args) -> ExitCode {
             addressing::of_doc_finding(f).stamp(&mut v);
             v
         }));
+        // The world's own advisory lines ride the same list, carrying their
+        // own kinds (archi/requirements/world-facts/).
+        all.extend(
+            doc.world
+                .findings
+                .iter()
+                .map(|f| serde_json::to_value(f).expect("serializes")),
+        );
         all.extend(plan_findings.iter().map(|f| {
             let mut v = serde_json::to_value(f).expect("serializes");
             addressing::of_plan_finding(f).stamp(&mut v);
@@ -549,6 +591,12 @@ fn run_check(args: &Args) -> ExitCode {
             envelope["status"] = json!("error");
             envelope["docs"] = serde_json::to_value(&doc.diagnostics).expect("serializes");
         }
+        // The world in two numbers; a tree with no `archi/world/` carries no
+        // count and the key is not born
+        // (archi/requirements/world-facts/the-check-counts-the-world.md).
+        if let Some(count) = &doc.world.count {
+            envelope["world"] = serde_json::to_value(count).expect("serializes");
+        }
         if let Some(report) = &nkp {
             // The report minus its N×N matrix and implementation notes —
             // the scoring and directions; `archi nkp` has the rest.
@@ -565,6 +613,7 @@ fn run_check(args: &Args) -> ExitCode {
     } else {
         if findings.is_empty()
             && doc.findings.is_empty()
+            && doc.world.findings.is_empty()
             && plan_findings.is_empty()
             && member_findings.is_empty()
         {
@@ -576,6 +625,9 @@ fn run_check(args: &Args) -> ExitCode {
             for f in &doc.findings {
                 println!("{f}  [{}]", addressing::of_doc_finding(f).id);
             }
+            for f in &doc.world.findings {
+                println!("{f}");
+            }
             for f in &plan_findings {
                 println!("{f}  [{}]", addressing::of_plan_finding(f).id);
             }
@@ -585,6 +637,11 @@ fn run_check(args: &Args) -> ExitCode {
         }
         if let Some(report) = &nkp {
             print!("{}", render_nkp_summary(report));
+        }
+        // The world closes on its count, beside the landscape read; a tree
+        // with no world closes on neither.
+        if let Some(count) = &doc.world.count {
+            println!("{count}");
         }
         for e in &archive_errors {
             eprintln!("archi/versions: E_ARCHIVE: {e}");
@@ -1573,7 +1630,7 @@ fn run_link(args: &Args) -> ExitCode {
                 Err(e) => fail(e),
             }
         }
-        (Some("ls"), []) => match links::ls(&root, args.spec.as_deref(), args.evidence) {
+        (Some("ls"), []) => match links::ls(&root, args.spec.as_deref()) {
             Ok(live) => {
                 if args.json {
                     println!(
@@ -1620,13 +1677,6 @@ fn run_link(args: &Args) -> ExitCode {
                 Err(e) => fail(e),
             }
         }
-        (Some("confirm"), [id]) => match links::confirm(&root, id) {
-            Ok(l) => {
-                println!("asserted {}", links::render_link(&l));
-                ExitCode::SUCCESS
-            }
-            Err(e) => fail(e),
-        },
         (Some("rm"), []) if args.spec.is_some() => {
             if !args.yes {
                 return usage_err("`link rm --spec <ref>` retires in bulk: confirm with --yes");
@@ -1646,13 +1696,50 @@ fn run_link(args: &Args) -> ExitCode {
             }
             Err(e) => fail(e),
         },
-        (Some("repin"), [id]) => match links::repin(&root, id, args.to.as_deref()) {
-            Ok(l) => {
-                println!("repinned {}", links::render_link(&l));
-                ExitCode::SUCCESS
+        // The sweep: grade the live set the way verify does and accept every
+        // exact candidate at once; the model rides along for the spec side,
+        // as it does on verify.
+        (Some("repin"), []) if args.moved => {
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            match links::repin_moved(&root, ws.model()) {
+                Ok(report) => {
+                    if args.json {
+                        println!(
+                            "{}",
+                            pretty(serde_json::to_value(&report).expect("serializes"))
+                        );
+                    } else {
+                        print!("{}", links::render_moved(&report));
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
             }
-            Err(e) => fail(e),
-        },
+        }
+        (Some("repin"), [_]) if args.moved => usage_err(
+            "`repin <id>` moves one row by a person's judgement; `repin --moved` accepts the \
+             exact candidates in bulk — the two forms are separate: give an id or --moved, \
+             not both",
+        ),
+        // Two repins, one verb: `--to` moves the anchor, `--spec` moves the
+        // spec ref the link hangs on — a scenario that was renamed, or a
+        // link re-aimed at another fact's scenario.
+        (Some("repin"), [id]) => {
+            let done = match args.spec.as_deref() {
+                Some(spec) => links::repin_spec(&root, id, spec),
+                None => links::repin(&root, id, args.to.as_deref()),
+            };
+            match done {
+                Ok(l) => {
+                    println!("repinned {}", links::render_link(&l));
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
         (Some("capture"), []) => {
             let Some(task) = args.task.as_deref() else {
                 return usage_err("`link capture` re-runs a task capture: --task <TASK>");
@@ -1685,7 +1772,6 @@ fn run_link(args: &Args) -> ExitCode {
                 since: args.since.clone(),
                 scope: args.scope.clone(),
                 repo: args.repo.clone(),
-                prune: args.prune,
             };
             match links::audit(&root, ws.model(), &opts) {
                 Ok(report) => {
@@ -1703,9 +1789,10 @@ fn run_link(args: &Args) -> ExitCode {
             }
         }
         _ => usage_err(
-            "`link` takes: add <spec> <file[#symbol]> --kind <k> | ls | verify | confirm <id> | \
-             rm <id>... | rm --spec <ref> --yes | repin <id> [--to <ref>] | capture --task <t> | \
-             audit",
+            "`link` takes: add <spec> <file[#symbol]> --kind <k> | ls | verify | \
+             rm <id>... | rm --spec <ref> --yes | \
+             repin <id> [--to <ref>] [--spec <fact-slug>#<scenario name>] | \
+             repin --moved | capture --task <t> | audit",
         ),
     }
 }
@@ -1777,9 +1864,17 @@ fn run_read(args: &Args) -> ExitCode {
         Err(code) => return code,
     };
     let response = ws.handle(&request);
+    // The batch answered; now what conditions the answer. The facts ride the
+    // envelope, beside the results — never inside a node
+    // (`archi/requirements/world-facts/the-read-envelope-carries-the-conditions.md`).
+    let world = covering_facts(&root, response.results.as_deref().unwrap_or_default());
     println!(
         "{}",
-        serde_json::to_string_pretty(&response).expect("serializes")
+        serde_json::to_string_pretty(&WithWorld {
+            answer: &response,
+            world,
+        })
+        .expect("serializes")
     );
     match &response.error {
         None => ExitCode::SUCCESS,
@@ -1831,11 +1926,107 @@ fn run_query(args: &Args) -> ExitCode {
         return ExitCode::from(1);
     }
     let results = response.results.expect("an ok response carries results");
+    // One statement, one slice: the facts conditioning it ride the slice
+    // itself, which is what this spelling prints.
+    let world = covering_facts(&root, &results);
     println!(
         "{}",
-        serde_json::to_string_pretty(&results[0]).expect("serializes")
+        serde_json::to_string_pretty(&WithWorld {
+            answer: &results[0],
+            world,
+        })
+        .expect("serializes")
     );
     ExitCode::SUCCESS
+}
+
+/// An answer with the world attached: the value the engine composed, and
+/// beside it — never inside it — the facts that condition what it names. An
+/// empty world writes no key at all, so a tree without one answers byte for
+/// byte as it did before the world existed.
+#[derive(Serialize)]
+struct WithWorld<'a, T: Serialize> {
+    #[serde(flatten)]
+    answer: &'a T,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    world: Vec<Value>,
+}
+
+/// The facts covering the elements a composed slice names, each once, in
+/// slug order (`archi/requirements/world-facts/the-read-envelope-carries-the-conditions.md`).
+/// The usual reader of this surface is an agent that did not know to ask, so
+/// the conditions arrive with the slice instead of waiting behind
+/// `archi world ls --covers` (`archi/decisions/the-world-is-reached-by-traversal.md`).
+///
+/// Only the world is read: the one question asked of it — which facts
+/// condition this element — needs no other doc primitive, and a tree with no
+/// `archi/world/` folder walks nothing. The facts are read live, as
+/// `world ls` reads them, and a malformed one is skipped here and reported
+/// by `check`, which is the command that diagnoses.
+fn covering_facts(root: &Path, results: &[Outcome]) -> Vec<Value> {
+    let named = slice_elements(results);
+    if named.is_empty() {
+        return Vec::new();
+    }
+    let tree = docs::Tree {
+        world: docs::world_check::discover(root, &mut Vec::new()),
+        ..docs::Tree::default()
+    };
+    let world = docs::world_check::serve_world(&tree);
+    let mut by_slug: std::collections::BTreeMap<&str, &docs::world_check::WorldFact> =
+        std::collections::BTreeMap::new();
+    // A fact covering two elements of one slice lands on its slug twice and
+    // rides once.
+    for element in &named {
+        for fact in world.covering(element) {
+            by_slug.insert(fact.doc.slug.as_str(), fact);
+        }
+    }
+    by_slug.values().map(|f| covering_fact(f)).collect()
+}
+
+/// Every element a composed slice names: the nodes of each graph result, and
+/// the ports they carry there. A port is an element a fact may cover, and a
+/// slice that draws one names it.
+fn slice_elements(results: &[Outcome]) -> std::collections::BTreeSet<String> {
+    let mut out = std::collections::BTreeSet::new();
+    for result in results {
+        if let Outcome::Graph { nodes, .. } = result {
+            for node in nodes {
+                for port in &node.ports {
+                    out.insert(format!("{}.{}", node.id, port.name));
+                }
+                out.insert(node.id.clone());
+            }
+        }
+    }
+    out
+}
+
+/// One covering fact as the read surface carries it: where it is written,
+/// what it conditions, the conditioning statement, and the scenarios it
+/// dictates, each step as its author wrote it.
+fn covering_fact(fact: &docs::world_check::WorldFact) -> Value {
+    let scenarios: Vec<Value> = fact
+        .scenarios
+        .iter()
+        .flat_map(|block| &block.scenarios)
+        .map(|s| {
+            let steps: Vec<String> = s
+                .steps
+                .iter()
+                .map(|step| format!("{} {}", step.keyword, step.text))
+                .collect();
+            json!({ "name": s.name, "steps": steps })
+        })
+        .collect();
+    json!({
+        "slug": fact.doc.slug,
+        "path": fact.doc.file,
+        "covers": world_list(&fact.doc.covers),
+        "condition": fact.doc.condition.as_ref().map_or("", |b| b.text.as_str()).trim(),
+        "scenarios": scenarios,
+    })
 }
 
 /// `archi viz`: draw a piped subgraph query as an ASCII diagram
@@ -1913,7 +2104,8 @@ fn run_search(args: &Args) -> ExitCode {
             Some(kind) => kinds.push(kind),
             None => {
                 return usage_err(&format!(
-                    "--kind is element, intent, requirement, stressor, session or decision; got `{k}`"
+                    "--kind is element, intent, requirement, stressor, session, decision or \
+                     world; got `{k}`"
                 ));
             }
         }
@@ -1937,13 +2129,32 @@ fn run_search(args: &Args) -> ExitCode {
         &kinds,
         limit,
     );
+    // An empty answer over the world names the other retrieval path: a world
+    // fact is written without the nouns of the model, so a phrase about the
+    // architecture is the wrong door — the `covers` traversal is the right
+    // one (archi/decisions/the-world-is-reached-by-traversal.md,
+    // archi/requirements/world-facts/each-retrieval-path-names-the-other.md).
+    let note = (report.hits.is_empty() && kinds.contains(&search::Kind::World)).then_some(
+        "a world fact is reached from the element it conditions: \
+         `archi world ls --covers <element>`",
+    );
     if args.json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&report).expect("serializes")
-        );
+        // The note is a field of the envelope, never inside the hits; with
+        // no note the report prints exactly as it always did.
+        let text = match note {
+            Some(n) => {
+                let mut v = serde_json::to_value(&report).expect("serializes");
+                v["note"] = json!(n);
+                serde_json::to_string_pretty(&v)
+            }
+            None => serde_json::to_string_pretty(&report),
+        };
+        println!("{}", text.expect("serializes"));
     } else {
         print!("{}", search::render_human(&report));
+        if let Some(n) = note {
+            println!("{n}");
+        }
     }
     ExitCode::SUCCESS
 }
@@ -2095,6 +2306,37 @@ fn run_plan(args: &Args) -> ExitCode {
                 Err(e) => fail(e),
             }
         }
+        // The declaration verb: one entry appended to the in-flight task's
+        // file, all three names resolved first. Nobody types TOML, so TOML
+        // cannot be malformed
+        // (`archi/requirements/code-link/a-verb-writes-the-declaration.md`).
+        (Some("task"), [id, link, add]) if link == "link" && add == "add" => {
+            let (Some(symbol), Some(answers), Some(proved_by)) = (
+                args.symbol.as_deref(),
+                args.answers.as_deref(),
+                args.proved_by.as_deref(),
+            ) else {
+                return usage_err(
+                    "`plan task <id> link add` takes all three: --symbol <file#symbol> \
+                     --answers <node, port or req:slug> --proved-by <test file#test fn>",
+                );
+            };
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            match links::capture::declare(&root, ws.model(), id, symbol, answers, proved_by) {
+                Ok(links::capture::Declaration::Appended(path)) => {
+                    println!("declared in {path}: {symbol} answers {answers}, proved by {proved_by}");
+                    ExitCode::SUCCESS
+                }
+                Ok(links::capture::Declaration::Stands(path)) => {
+                    println!("the entry stands in {path} — nothing appended");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e),
+            }
+        }
         (Some("verify"), []) => {
             let ws = match live_model() {
                 Ok(ws) => ws,
@@ -2172,8 +2414,8 @@ fn run_plan(args: &Args) -> ExitCode {
                     }
                     if !outcome.checklist.is_empty() {
                         println!(
-                            "uncovered refs this delta does not press — hand-author when the \
-                             traceability is wanted:"
+                            "spec refs of this wave's tasks that no link covers — hand-author \
+                             when the traceability is wanted:"
                         );
                         for line in &outcome.checklist {
                             println!("  {line}");
@@ -2248,18 +2490,26 @@ fn run_plan(args: &Args) -> ExitCode {
                 Err(e) => fail(e),
             }
         }
-        (Some("scenarios"), [list]) if list == "list" => match plans::load_active(&root) {
-            Ok(p) => {
-                if p.scenarios.is_empty() {
-                    println!("no scenarios");
+        (Some("scenarios"), [list]) if list == "list" => {
+            // The block the close collects, not a stored list: a plan
+            // authors no scenarios of its own.
+            let ws = match live_model() {
+                Ok(ws) => ws,
+                Err(code) => return code,
+            };
+            match plans::scenarios_list(&root, ws.model()) {
+                Ok(lines) => {
+                    if lines.is_empty() {
+                        println!("no scenarios");
+                    }
+                    for (i, line) in lines.iter().enumerate() {
+                        println!("{}. {line}", i + 1);
+                    }
+                    ExitCode::SUCCESS
                 }
-                for (i, s) in p.scenarios.iter().enumerate() {
-                    println!("{}. {s}", i + 1);
-                }
-                ExitCode::SUCCESS
+                Err(e) => fail(e),
             }
-            Err(e) => fail(e),
-        },
+        }
         (Some("list"), []) => match plans::all_plans(&root) {
             Ok(all) => {
                 if all.is_empty() {
@@ -2302,7 +2552,8 @@ fn run_plan(args: &Args) -> ExitCode {
         },
         _ => usage_err(
             "`plan` takes: use <name> | repin | show | verify | list | status | scenarios list | \
-             task add|rm|show|req suggest|req-list | start | next | current-wave | close | reset",
+             task add|rm|show|req suggest|req-list|<id> link add | start | next | current-wave | \
+             close | reset",
         ),
     }
 }
@@ -2354,9 +2605,11 @@ fn run_self_update(args: &Args) -> ExitCode {
 }
 
 
-/// `archi req add|rm` — requirement skeletons come from a command: every
+/// `archi req add|rm|ls` — requirement skeletons come from a command: every
 /// machine field an explicit parameter, the text slots left for the
-/// author, removal pre-flighted against owning plans.
+/// author, removal pre-flighted against owning plans. `add` and `rm` mutate,
+/// so they meet the seat rule at the router; `ls` reads the standing set and
+/// answers anywhere.
 fn run_req(args: &Args) -> ExitCode {
     let fail = |e: String| -> ExitCode {
         eprintln!("archi: {e}");
@@ -2400,11 +2653,102 @@ fn run_req(args: &Args) -> ExitCode {
             }
             Err(e) => fail(e),
         },
+        (Some("ls"), []) => run_req_ls(args, &root),
         _ => usage_err(
             "usage: archi req add <title> --intent <folder> --kind functional|non-functional \
-             --origin 'intent|stressor(<slug>)' [--deferred <reason>] | rm <slug>",
+             --origin 'intent|stressor(<slug>)' [--deferred <reason>] | rm <slug> | \
+             ls [--satisfies <element>] [--intent <folder>] [--json]",
         ),
     }
+}
+
+/// `archi req ls` — the read over the standing requirements: one row per
+/// file-scale requirement — slug, state, `satisfied-by`, the first phrase of
+/// its summary — narrowed by `--satisfies <element>` to the requirements
+/// naming that element and by `--intent <folder>` to one area
+/// (`archi/requirements/agent-retrieval/one-verb-lists-the-requirements-an-element-carries.md`).
+/// The listing reads the live tree and resolves `--satisfies` against the
+/// live model, as `world ls --covers` does.
+fn run_req_ls(args: &Args, root: &Path) -> ExitCode {
+    let ws = match compile_or_report(root, args.json) {
+        Ok(c) => c.workspace,
+        Err(code) => return code,
+    };
+    let model = ws.model();
+    // A filter the model cannot answer is a refusal, never an empty list:
+    // the two look the same and mean opposite things.
+    if let Some(element) = args.satisfies.as_deref()
+        && model.resolve_element(element).is_none()
+    {
+        eprintln!(
+            "archi: `--satisfies {element}` names no element of the current model — \
+             `archi search {element} --kind element` finds its path, `archi req ls` \
+             lists every requirement"
+        );
+        return ExitCode::from(1);
+    }
+    let list = docs::serve_requirements(root);
+    // An unknown folder lists the folders, as `req add` already does.
+    if let Some(intent) = args.intent.as_deref()
+        && !list.intents.iter().any(|i| i == intent)
+    {
+        eprintln!("archi: {}", docs::unknown_intent(intent, &list.intents));
+        return ExitCode::from(1);
+    }
+    let rows: Vec<&docs::ReqRow> = list
+        .rows
+        .iter()
+        .filter(|r| {
+            args.satisfies
+                .as_deref()
+                .is_none_or(|e| r.satisfied_by.iter().any(|s| s == e))
+        })
+        .filter(|r| args.intent.as_deref().is_none_or(|i| r.intent == i))
+        .collect();
+    if args.json {
+        let items: Vec<Value> = rows
+            .iter()
+            .map(|r| {
+                json!({
+                    "slug": r.slug,
+                    "path": r.file,
+                    "intent": r.intent,
+                    "state": r.state,
+                    "satisfied_by": r.satisfied_by,
+                    "summary": r.summary,
+                })
+            })
+            .collect();
+        let mut envelope = json!({ "status": "ok", "requirements": items });
+        if let Some(element) = args.satisfies.as_deref() {
+            envelope["satisfies"] = json!(element);
+        }
+        if let Some(intent) = args.intent.as_deref() {
+            envelope["intent"] = json!(intent);
+        }
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&envelope).expect("serializes")
+        );
+    } else {
+        for r in &rows {
+            println!("{}", render_req_row(r));
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+/// One requirement as the sweep reads it: slug, state, the `satisfied-by`
+/// list in its frontmatter surface — `[]` is emptiness, visible — and the
+/// first phrase of the summary. The brackets are load-bearing: an edge entry
+/// carries spaces, so they mark where the list ends and the phrase begins.
+fn render_req_row(r: &docs::ReqRow) -> String {
+    let mut out = format!("{}  {}  [{}]", r.slug, r.state, r.satisfied_by.join(", "));
+    if !r.summary.is_empty() {
+        out.push_str("  ");
+        out.push_str(&r.summary);
+    }
+    out
 }
 
 /// `archi stress open|add|rm` — the round's records come from commands: the
@@ -2476,6 +2820,256 @@ fn run_stress(args: &Args) -> ExitCode {
             "usage: archi stress open <title> | add <title> --affects <A,B,...> | rm <slug>",
         ),
     }
+}
+
+/// `archi world add|rm|ls` — the world's verb, beside `req` and `stress`.
+/// `add` and `rm` mint and retire the record, so they meet the seat rule at
+/// the router like every other mutation and refuse with its exit code;
+/// `ls` reads and answers anywhere
+/// (`archi/requirements/world-facts/the-world-verb-refuses-like-the-others.md`).
+fn run_world(args: &Args) -> ExitCode {
+    let fail = |e: String| -> ExitCode {
+        eprintln!("archi: {e}");
+        ExitCode::from(1)
+    };
+    let root = match locate_project(args) {
+        Ok(r) => r,
+        Err(e) => return usage_err(&e),
+    };
+    match (
+        args.positional.first().map(String::as_str),
+        args.positional.get(1..).unwrap_or_default(),
+    ) {
+        (Some("add"), [title]) => match docs::mint::world_add(&root, title) {
+            Ok(path) => {
+                println!(
+                    "minted {} — write the condition, what people do instead and its \
+                     scenarios; `archi check` holds the empty slots",
+                    path.strip_prefix(&root).unwrap_or(&path).display()
+                );
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e),
+        },
+        (Some("rm"), [slug]) => match docs::mint::world_rm(&root, slug) {
+            Ok(path) => {
+                println!("removed {}", path.strip_prefix(&root).unwrap_or(&path).display());
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e),
+        },
+        (Some("ls"), []) => run_world_ls(args, &root),
+        _ => usage_err(
+            "usage: archi world add <title> | rm <slug> | ls [--covers <element>] [--json]",
+        ),
+    }
+}
+
+/// `archi world ls` — the traversal the world is reached by: one block per
+/// standing fact, narrowed by `--covers <element>` to the facts that
+/// condition one node (`archi/decisions/the-world-is-reached-by-traversal.md`,
+/// `archi/requirements/world-facts/one-verb-walks-the-bridge.md`). The
+/// listing reads the live tree and resolves nothing against a pin.
+fn run_world_ls(args: &Args, root: &Path) -> ExitCode {
+    let ws = match compile_or_report(root, args.json) {
+        Ok(c) => c.workspace,
+        Err(code) => return code,
+    };
+    let model = ws.model();
+    // A filter the model cannot answer is a refusal, never an empty list:
+    // the two look the same and mean opposite things.
+    if let Some(element) = args.covers.as_deref()
+        && model.resolve_element(element).is_none()
+    {
+        eprintln!(
+            "archi: `--covers {element}` names no element of the current model — \
+             `archi search {element} --kind element` finds its path, `archi world ls` \
+             lists every fact"
+        );
+        return ExitCode::from(1);
+    }
+    let (tree, _) = docs::load(root, model);
+    let world = docs::world_check::serve_world(&tree);
+    let facts: Vec<&docs::world_check::WorldFact> = match args.covers.as_deref() {
+        Some(element) => world.covering(element),
+        None => tree.world.iter().collect(),
+    };
+    // The other retrieval path, named exactly when this one came back empty
+    // (archi/requirements/world-facts/each-retrieval-path-names-the-other.md).
+    let note = args.covers.as_deref().filter(|_| facts.is_empty()).map(|e| {
+        format!(
+            "no fact covers `{e}` — a fact is also found by its own words: \
+             `archi search <phrase> --kind world`"
+        )
+    });
+    if args.json {
+        let items: Vec<Value> = facts
+            .iter()
+            .map(|f| {
+                json!({
+                    "slug": f.doc.slug,
+                    "path": f.doc.file,
+                    "covers": world_list(&f.doc.covers),
+                    "sources": world_list(&f.doc.sources),
+                    "uses": world_list(&f.doc.uses),
+                })
+            })
+            .collect();
+        let mut envelope = json!({ "status": "ok", "facts": items });
+        if let Some(element) = args.covers.as_deref() {
+            envelope["covers"] = json!(element);
+        }
+        // The note rides the envelope, never a fact.
+        if let Some(n) = &note {
+            envelope["note"] = json!(n);
+        }
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&envelope).expect("serializes")
+        );
+    } else {
+        for f in &facts {
+            print!("{}", render_world_fact(&f.doc));
+        }
+        if let Some(n) = &note {
+            println!("{n}");
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+/// One fact, as a person reads it: the address line, what it conditions,
+/// whether it rests on recorded material, and what it rests on among the
+/// other facts.
+fn render_world_fact(doc: &docs::world::WorldDoc) -> String {
+    let list = |v: &[String]| -> String {
+        if v.is_empty() {
+            "none".to_string()
+        } else {
+            v.join(", ")
+        }
+    };
+    let sources = world_list(&doc.sources);
+    let mut out = format!("{}  {}\n", doc.slug, doc.file);
+    out.push_str(&format!("    covers: {}\n", list(world_list(&doc.covers))));
+    out.push_str(&match sources.len() {
+        0 => "    sources: none — ungrounded\n".to_string(),
+        n => format!("    sources: {n}\n"),
+    });
+    let uses = world_list(&doc.uses);
+    if !uses.is_empty() {
+        out.push_str(&format!("    uses: {}\n", list(uses)));
+    }
+    out
+}
+
+/// A frontmatter list the reader carried, or nothing — an unsound field is
+/// no claim of any entry.
+fn world_list(field: &Option<(Vec<String>, usize)>) -> &[String] {
+    field.as_ref().map_or(&[], |(v, _)| v.as_slice())
+}
+
+/// `archi decision ls` — the read over the standing decisions, beside `req`
+/// and `world`. The verb only lists: a decision is written by hand, so the
+/// whole arm reads and answers anywhere
+/// (`archi/requirements/agent-retrieval/one-verb-lists-the-decisions-on-an-element.md`).
+fn run_decision(args: &Args) -> ExitCode {
+    let root = match locate_project(args) {
+        Ok(r) => r,
+        Err(e) => return usage_err(&e),
+    };
+    match (
+        args.positional.first().map(String::as_str),
+        args.positional.get(1..).unwrap_or_default(),
+    ) {
+        (Some("ls"), []) => run_decision_ls(args, &root),
+        _ => usage_err("usage: archi decision ls [--links <name>] [--json]"),
+    }
+}
+
+/// `archi decision ls` — one row per standing decision: slug, the
+/// `prefer -> over` trade, the first phrase of the rationale — narrowed by
+/// `--links <name>` to the decisions whose `links` field names it
+/// (`archi/requirements/agent-retrieval/one-verb-lists-the-decisions-on-an-element.md`).
+/// The `links` field speaks both reference currencies at once, so the filter
+/// resolves against the live model first, then the doc slugs — requirements,
+/// stressors, world facts and the decisions themselves.
+fn run_decision_ls(args: &Args, root: &Path) -> ExitCode {
+    let ws = match compile_or_report(root, args.json) {
+        Ok(c) => c.workspace,
+        Err(code) => return code,
+    };
+    let model = ws.model();
+    let list = docs::serve_decisions(root);
+    // A filter neither currency resolves is a refusal, never an empty list:
+    // the two look the same and mean opposite things.
+    if let Some(name) = args.links.as_deref()
+        && model.resolve_element(name).is_none()
+        && !list.doc_slugs.contains(name)
+    {
+        eprintln!(
+            "archi: `--links {name}` names no element of the current model and no doc \
+             slug — `archi search {name}` finds its address, `archi decision ls` \
+             lists every decision"
+        );
+        return ExitCode::from(1);
+    }
+    let rows: Vec<&docs::DecisionRow> = list
+        .rows
+        .iter()
+        .filter(|r| {
+            args.links
+                .as_deref()
+                .is_none_or(|n| r.links.iter().any(|l| l == n))
+        })
+        .collect();
+    if args.json {
+        let items: Vec<Value> = rows
+            .iter()
+            .map(|r| {
+                json!({
+                    "slug": r.slug,
+                    "path": r.file,
+                    "links": r.links,
+                    "prefer": r.prefer,
+                    "over": r.over,
+                    "summary": r.summary,
+                })
+            })
+            .collect();
+        let mut envelope = json!({ "status": "ok", "decisions": items });
+        if let Some(name) = args.links.as_deref() {
+            envelope["links"] = json!(name);
+        }
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&envelope).expect("serializes")
+        );
+    } else {
+        for r in &rows {
+            println!("{}", render_decision_row(r));
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+/// One decision as the sweep reads it: slug, the trade with both sides in
+/// their frontmatter surface — `[]` is emptiness, visible — and the first
+/// phrase of the rationale. The brackets are load-bearing, as in `req ls`:
+/// an off-list axis label may carry spaces, so they mark where each side
+/// ends.
+fn render_decision_row(r: &docs::DecisionRow) -> String {
+    let mut out = format!(
+        "{}  [{}] -> [{}]",
+        r.slug,
+        r.prefer.join(", "),
+        r.over.join(", ")
+    );
+    if !r.summary.is_empty() {
+        out.push_str("  ");
+        out.push_str(&r.summary);
+    }
+    out
 }
 
 /// `archi sync-skills` — sync an initialized tree's briefing to this binary's
@@ -2949,20 +3543,24 @@ fn guarded_route(args: &Args) -> Option<PlanHint<'_>> {
     match args.command.as_str() {
         "version" if matches!(sub(0), Some("save" | "remint" | "anchor")) => Some(PlanHint::None),
         "session" if sub(0) == Some("fold") => Some(PlanHint::None),
-        "link" if matches!(sub(0), Some("add" | "confirm" | "rm" | "repin" | "capture")) => {
+        "link" if matches!(sub(0), Some("add" | "rm" | "repin" | "capture")) => {
             Some(PlanHint::None)
         }
-        // The audit reads — until `--prune` lets it retire journal entries.
-        "link" if sub(0) == Some("audit") && args.prune => Some(PlanHint::None),
         "repo" if sub(0) == Some("map") => Some(PlanHint::None),
         "req" if matches!(sub(0), Some("add" | "rm")) => Some(PlanHint::None),
         "stress" if matches!(sub(0), Some("open" | "add" | "rm")) => Some(PlanHint::None),
+        // Of `world`, the mint and the retirement mutate; `ls` reads.
+        "world" if matches!(sub(0), Some("add" | "rm")) => Some(PlanHint::None),
         "plan" => match sub(0) {
             Some("use") => Some(args.positional.get(1).map_or(PlanHint::None, |n| PlanHint::Named(n))),
             Some("repin" | "start" | "next" | "close" | "reset") => Some(PlanHint::Active),
-            // Of `task`, only the mints mutate; content edits are file
-            // edits, outside any command. Everything else under plan reads.
+            // Of `task`, the mints mutate, and so does the declaration verb —
+            // it writes the wave's own state. Prose edits are file edits,
+            // outside any command. Everything else under plan reads.
             Some("task") if matches!(sub(1), Some("add" | "rm")) => Some(PlanHint::Active),
+            Some("task") if matches!((sub(2), sub(3)), (Some("link"), Some("add"))) => {
+                Some(PlanHint::Active)
+            }
             _ => None,
         },
         _ => None,
@@ -3036,6 +3634,8 @@ fn main() -> ExitCode {
         "session" => run_session(&args),
         "req" => run_req(&args),
         "stress" => run_stress(&args),
+        "world" => run_world(&args),
+        "decision" => run_decision(&args),
         "link" => run_link(&args),
         "repo" => run_repo(&args),
         "worktree" => run_worktree(&args),

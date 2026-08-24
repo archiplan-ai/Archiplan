@@ -57,6 +57,7 @@ def node Preset:
 def node Query:
   port subgraph     // composed filters to a node-link slice
   port audit        // model-completeness findings
+  port read_world   // the facts covering the elements a slice names
 
 def node Renderer:
   port emit_source  // the model as canonical source: the archived form

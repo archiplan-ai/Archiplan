@@ -2,7 +2,7 @@
 
 How to run the archi loop when code lives in repositories of its own and the spec repository
 holds only the model, requirements, stress rounds, plans and the link journal. The loop's
-rhythm — save, plan, implement, `plan next`, confirm, commit, anchor — is unchanged from the
+rhythm — save, plan, implement, `plan next`, commit, anchor — is unchanged from the
 single-repo shape; what changes is where commands find code (**members**) and how many commits
 land at the end (one per touched repository).
 
@@ -50,8 +50,8 @@ web      unreachable (../web) — archi repo map web <dir>  -  baseline -
 ```
 
 Unreachable is a reported state, not an error — a half checkout is the normal state of a
-multi-repo team. Every scan narrows to what it can see and says so; nothing decays, nothing is
-pruned, nothing fails for a checkout that is merely elsewhere.
+multi-repo team. Every scan narrows to what it can see and says so; nothing is graded, nothing
+is written, nothing fails for a checkout that is merely elsewhere.
 
 ## The round
 
@@ -104,15 +104,19 @@ diffs.
 archi plan next
 ```
 
-Capture rescans the recorded set, and the candidates come back qualified:
+Capture reads each in-flight task's declaration file and mints what it names, qualified by
+member:
 
 ```
-captured l0102-a5efbf  indirect evidence captured(t3) Gateway.Valve ← backend//src/api/valve.rs#Valve::admit
+captured l0102-a5efbf  indirect asserted captured(t3) declared Gateway.Valve ← backend//src/api/valve.rs#Valve::admit  proved by backend//tests/valve.rs#admit_refuses_a_closed_port
 ```
 
-Review as ever — `link ls --evidence`, `link confirm` the load-bearing, `link rm` the
-drive-bys, re-run `plan next`. The coverage gate, signal test and wave discipline are all
-unchanged; the member qualifier is identity, never signal.
+The declaration is the task agent's own last act, one
+`archi plan task <id> link add --symbol --answers --proved-by` per symbol it defends. A
+member-qualified path works in every one of the three names. A ref the delta presses that
+no link covers holds the wave open, and the refusal prints the `archi link add` line that
+closes it. The coverage gate and the wave discipline are unchanged; the member qualifier is
+identity, never signal.
 
 **6. Land it — one commit per touched repository.**
 
@@ -174,21 +178,22 @@ switch in a member is just "the tree changed" — what that costs depends entire
 
 **Between rounds — reversible.** `repo ls` shows clean at the new HEAD, which is true.
 `link verify` grades whatever is checked out, so symbols the other branch lacks grade Drifted
-or Missing (asserted links fail the gate; evidence only reports) — nothing is written, and
-switching back recovers every grade. `link audit` reads the whole inter-branch diff as
-unaccounted delta: noisy, read-only. But archi cannot tell "wrong branch" from "code deleted"
-— a reachable member is an observation, unlike an absent one — so a wall of drift you didn't
-write means *check the branch first*. And never `--prune` it: a Missing anchor zeroes
-confidence, so `link audit --prune` on the wrong branch retires evidence for real.
+or Missing (Missing fails the gate; drift fails a literal link and only reports an indirect
+one) — nothing is written, and switching back recovers every grade. `link audit` reads the
+whole inter-branch diff as unaccounted delta: noisy, read-only. But archi cannot tell "wrong
+branch" from "code deleted" — a reachable member is an observation, unlike an absent one — so
+a wall of drift you didn't write means *check the branch first*. Both surfaces only read: no
+verb here touches the journal, so the wrong branch costs you a scare, never a row.
 
 **Mid-wave — the trap.** `plan start` snapshotted the member's tree; `plan next` diffs the
 tree it finds. Switch the branch between the two and every symbol the branches disagree on
-reads as changed this wave: what matches a task's `outputs` mints as that task's evidence,
-and capture writes decay on existing evidence anchored at those items in claimed files. The
-journal is append-only — switching back does not unwrite it. Switch back *before* `plan next`
-and nothing happened; after it, `link rm` the drive-by mints and `link confirm` what decay
-dragged below the floor (confirmation promotes evidence to asserted, out of the confidence
-regime entirely).
+reads as changed this wave: leftovers for every file no task claims, and refs pressed that no
+task touched, holding the wave open until a link covers them. Capture mints only what each
+task's declaration file names, so the branch by itself writes no row — but a task agent that
+declares against the tree it finds names symbols it never wrote, and those mint as asserted
+links. The journal is append-only — switching back does not unwrite them. Switch back
+*before* `plan next` and nothing happened; after it, `link rm` the rows the wrong tree
+declared. That is the whole repair: no score eroded and no sweep to run.
 
 **At save and anchor.** The baseline records the member's HEAD, whichever branch holds it —
 a member parked on a feature branch gets its baseline there, and every later audit measures
@@ -202,8 +207,8 @@ birth fact and is never rewritten, so the recovery for a baseline on the wrong b
 | situation | behavior |
 |---|---|
 | `link verify`, member unmapped | links grade **Unreachable**, exit 0 — reported, never Missing |
-| evidence links into an absent member | **no decay events** — absence is not an observation |
-| `link audit --prune`, member unmapped | its links are neither graded nor pruned |
+| any link into an absent member | **nothing is journaled** — absence is not an observation |
+| `link audit`, member unmapped | its delta is unaudited on this machine, and the note says so |
 | `link verify --repo backend`, backend unmapped | **exit 1** — you asked for it, it must be there |
 | journal names a member the manifest lost | Unreachable, note names the recovery: restore the `[[repo]]` row |
 
@@ -257,11 +262,11 @@ itself never touches the network — the `url` is for the clone script.
   Do it before implementing, or the audit's window opens late (and says so).
 - capture notes *mapped after this wave opened* → the member joins at the next wave open; its
   delta this wave is unattributed — keep it out of the wave's outputs or reopen.
-- a member's branch switched mid-wave → the inter-branch diff reads as the wave's delta: false
-  mints, real decay. Switch back before `plan next`; after it, `link rm` the mints and
-  `link confirm` the decayed.
-- verify's wall of *unreachable* on a laptop with one checkout → correct and calm: exit 0, no
-  decay. Scope with `--repo` to the member you actually have.
+- a member's branch switched mid-wave → the inter-branch diff reads as the wave's delta: a wall
+  of leftovers, and refs pressed that no task touched. Switch back before `plan next`; after
+  it, `link rm` the rows the wrong tree declared.
+- verify's wall of *unreachable* on a laptop with one checkout → correct and calm: exit 0,
+  nothing written. Scope with `--repo` to the member you actually have.
 - a member renamed in the manifest → every old ref grades Unreachable with the
   *restore its `[[repo]]` row* note; put the old name back (rename migration is deferred, on
   record).

@@ -1,0 +1,26 @@
+--- original
++++ modified
+@@ -84,6 +84,7 @@
+   port parse_scenarios // the Scenarios block of a world fact, handed to the grammar
+   port pin_model // reconstructs archived versions for pinned checks
+   port serve_pin // hands pinned models to incidence, links and plans
++  port serve_world // hands the loaded world facts to the plan, keyed by what they cover
+ def node Engine:
+   port answer // the read envelope: read statements in, results out
+   port execute // applies a batch atomically: applied, noop, or rejected
+@@ -150,6 +151,7 @@
+   port author // use, task add: pins a version, seeds spec_refs
+   port coverage // reads the folded links for the asserted-coverage gate
+   port load_plan // re-reads and re-validates plan.json on every verb
++  port load_world // the facts covering a task's node, and the block the close prints
+   port pin_model // the hardened version the plan projects
+   port run_capture // fires the wave capture at each close
+   port store_plan // plan.json and wave indexes land in the tree
+@@ -401,6 +403,7 @@
+ Planner.coverage recall(<-LinkEvent) Links.serve_links in trace_flow
+ Planner.load_plan recall(<-PlanFile) SourceTree.serve in trace_flow
+ Planner.load_plan recall(<-PlanState) SourceTree.serve in trace_flow
++Planner.load_world recall(<-WorldDoc) DocsCompiler.serve_world in trace_flow
+ Planner.pin_model recall(<-ModelGraph) DocsCompiler.serve_pin in trace_flow
+ Planner.run_capture consult(->ItemHashIndex, <-LinkEvent) Links.capture in trace_flow
+ Planner.store_plan persist(ItemHashIndex) SourceTree.store in trace_flow

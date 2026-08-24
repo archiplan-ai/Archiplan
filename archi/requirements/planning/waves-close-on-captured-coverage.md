@@ -10,11 +10,11 @@ deferred:
 Opening a wave records the tree state its deltas are diffed against — a canonical
 item-hash index, file to symbol to body hash, symbol-granular and git-free, so squashes
 and shallow clones cannot break attribution. `plan next` closes the wave in one motion:
-capture first — each closing task's delta minted into candidate links the closing agent
-reviews (`capture-at-the-join`) — then two gates, structural verify and asserted coverage
-of the spec_refs the delta pressed (`gates-press-the-delta` owns the pressed subset and
-the suggestion checklist). `plan next` is re-runnable: a blocked gate is reviewed,
-confirmed and retried, never forced. `plan current-wave` prints the tasks in flight;
+capture first — what the tasks' declaration files name, minted asserted
+(`capture-at-the-join`) — then two gates, structural verify and the delta's files against
+those same declarations (`the-file-in-the-delta-is-the-unit-the-gate-demands` owns the
+demand). `plan next` is re-runnable: a blocked gate is repaired and retried, never forced.
+`plan current-wave` prints the tasks in flight;
 `plan close` and `plan reset` are the manual overrides.
 
 ## System Context
